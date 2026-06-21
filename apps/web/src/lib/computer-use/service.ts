@@ -2797,33 +2797,44 @@ function findLatestStoredKernelProfileName(
         name: string;
       }
     | null = null;
-  let latestCreatedAtMs = Number.NEGATIVE_INFINITY;
+  let latestUsedAtMs = Number.NEGATIVE_INFINITY;
 
   for (const run of input.runs) {
     const profileName = run.kernelProfileName.trim();
     const legacyProfileKey = allowedProfileNames.get(profileName);
-    if (legacyProfileKey === undefined || !hasKernelProfileSelectionEvidence(run)) {
+    const usedAt = readKernelProfileUsedAt(run);
+    if (legacyProfileKey === undefined || !usedAt) {
       continue;
     }
-    const createdAtMs = run.createdAt.getTime();
-    if (createdAtMs >= latestCreatedAtMs) {
+    const usedAtMs = usedAt.getTime();
+    if (usedAtMs >= latestUsedAtMs) {
       latestProfile = {
         legacyProfileKey,
         name: profileName,
       };
-      latestCreatedAtMs = createdAtMs;
+      latestUsedAtMs = usedAtMs;
     }
   }
 
   return latestProfile;
 }
 
-function hasKernelProfileSelectionEvidence(run: ComputerRunRecord): boolean {
-  return run.status === "completed" ||
+function readKernelProfileUsedAt(run: ComputerRunRecord): Date | null {
+  if (run.browserAttachedAt) {
+    return run.completedAt ?? run.updatedAt;
+  }
+  if (run.status === "completed") {
+    return run.completedAt ?? run.updatedAt;
+  }
+  if (
     run.kernelSessionId !== null ||
     run.kernelLiveViewUrlEncrypted !== null ||
     run.pausedAt !== null ||
-    run.pendingHandoffId !== null;
+    run.pendingHandoffId !== null
+  ) {
+    return run.updatedAt;
+  }
+  return null;
 }
 
 function isActiveComputerRun(run: ComputerRunRecord, now: Date): boolean {
@@ -2839,6 +2850,11 @@ function compareActiveComputerRunsForReuse(
   left: ComputerRunRecord,
   right: ComputerRunRecord,
 ): number {
+  const usabilityDelta =
+    activeComputerRunUsabilityRank(left) - activeComputerRunUsabilityRank(right);
+  if (usabilityDelta !== 0) {
+    return usabilityDelta;
+  }
   const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
   if (updatedAtDelta !== 0) {
     return updatedAtDelta;
@@ -2848,6 +2864,19 @@ function compareActiveComputerRunsForReuse(
     return createdAtDelta;
   }
   return left.id.localeCompare(right.id);
+}
+
+function activeComputerRunUsabilityRank(run: ComputerRunRecord): number {
+  if (
+    (run.status === "running" || run.status === "awaiting_user") &&
+    run.kernelSessionId
+  ) {
+    return 0;
+  }
+  if (run.status === "running" || run.status === "awaiting_user") {
+    return 1;
+  }
+  return 2;
 }
 
 function buildLegacyKernelProfileName(input: {

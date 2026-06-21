@@ -42,6 +42,7 @@ const TERMINAL_COMPUTER_RUN_STATUSES = [
 export interface ComputerRunRecord {
   awaitingMessage: string | null;
   awaitingReason: HostedComputerAwaitingReason | null;
+  browserAttachedAt: Date | null;
   checkpointContext: ComputerRunCheckpointContext | null;
   completedAt: Date | null;
   createdAt: Date;
@@ -419,6 +420,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       await lockMemberComputerUseAvailable(tx, input.memberId);
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
+          browserAttachedAt: input.now,
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelSessionId: input.kernelSessionId,
         },
@@ -830,6 +832,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       });
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
+          browserAttachedAt: input.now,
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelSessionId: input.kernelSessionId,
         },
@@ -1199,6 +1202,7 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
   return {
     awaitingMessage: run.awaitingMessage,
     awaitingReason: readAwaitingReason(run.awaitingReason),
+    browserAttachedAt: run.browserAttachedAt,
     checkpointContext: readRunCheckpointContext(run.metadataJson),
     completedAt: run.completedAt,
     createdAt: run.createdAt,
