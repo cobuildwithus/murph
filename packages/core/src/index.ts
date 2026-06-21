@@ -189,6 +189,7 @@ export {
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
+  pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
   resolveHostedCanonicalWritePayloadFilePath,
@@ -208,6 +209,8 @@ export type {
   HostedCanonicalWriteReceipt,
   HostedCanonicalWriteReceiptAction,
   HostedCanonicalWriteReceiptContentRef,
+  PruneTerminalWriteOperationRecordsInput,
+  PruneTerminalWriteOperationRecordsResult,
   RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
 export {
