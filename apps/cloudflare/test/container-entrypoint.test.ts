@@ -89,6 +89,7 @@ import {
 } from "../src/container-entrypoint.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
@@ -1007,7 +1008,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -1033,13 +1034,13 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       signal: expect.any(AbortSignal),
     });
   });
@@ -1109,7 +1110,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(response.json).toMatchObject({
         liveModelTurn: {
-          model: "gpt-5.5",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         },
         ok: true,
       });

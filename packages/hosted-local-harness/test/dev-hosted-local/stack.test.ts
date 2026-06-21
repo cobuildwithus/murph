@@ -188,6 +188,12 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
       ],
       slug: "gpt-5.5",
     },
+    {
+      display_name: "GPT-5.4-Mini",
+      priority: 4,
+      service_tiers: [],
+      slug: "gpt-5.4-mini",
+    },
   ],
 });
 const defaultSpawnSyncImplementation = (
@@ -2326,6 +2332,15 @@ describe("hosted local dev stack", () => {
           ]),
           slug: "gpt-5.5",
         },
+        {
+          display_name: "GPT-5.4-Mini",
+          slug: "gpt-5.4-mini",
+        },
+        {
+          display_name: "GPT-5.4-Nano",
+          service_tiers: [],
+          slug: "gpt-5.4-nano",
+        },
       ],
     });
     expect(spawnSync).toHaveBeenCalledWith(
@@ -2346,6 +2361,10 @@ describe("hosted local dev stack", () => {
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.5.",
       stdout: JSON.stringify({ models: [] }),
+    },
+    {
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
+      stdout: JSON.stringify({ models: [{ slug: "gpt-5.5" }] }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",

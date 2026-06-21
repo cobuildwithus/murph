@@ -66,6 +66,9 @@ import type {
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -128,7 +131,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
 } = {}): Record<string, unknown> {
   return {
     input: "anything Codex emits",
-    model: input.model ?? "gpt-5.5",
+    model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     stream: true,
   };
 }
@@ -1356,7 +1359,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1402,7 +1405,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1437,7 +1440,7 @@ describe("hostedRunnerIntercept", () => {
       vi.stubGlobal("fetch", fetchMock);
       const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
         active: true,
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       }));
       const env = createInterceptEnv({
         OPENAI_API_KEY: "openai-worker-secret",
@@ -1469,7 +1472,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",

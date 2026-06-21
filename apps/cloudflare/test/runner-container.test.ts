@@ -34,6 +34,9 @@ import {
 import {
   buildHostedRunnerContainerCaEnv,
 } from "../src/runner-container-ca-env.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
@@ -1625,13 +1628,13 @@ describe("RunnerContainer", () => {
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
-          model: "gpt-5.5",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: "gpt-5.5",
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1654,14 +1657,14 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     });
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
       egressGrantConsumed: true,
-      model: "gpt-5.5",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stdoutBytes: 2_048,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
@@ -1711,7 +1714,7 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             liveModelTurn: {
               durationMs: 1_234,
-              model: "gpt-5.5",
+              model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -1732,7 +1735,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 
@@ -1811,7 +1814,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 
@@ -1831,7 +1834,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 

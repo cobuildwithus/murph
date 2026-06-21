@@ -30,6 +30,9 @@ import {
   resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
 import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
+import {
   HostedUserRunner,
 } from "../src/user-runner.ts";
 import type {
@@ -553,7 +556,7 @@ describe("cloudflare worker routes", () => {
         model: string;
       };
     }) => {
-      if (input.liveModelTurn?.model !== "gpt-5.5") {
+      if (input.liveModelTurn?.model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
         throw new Error("Expected the live model turn smoke input.");
       }
 
@@ -561,7 +564,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.5",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
           stdoutBytes: 2_048,
         },
         ok: true,
@@ -603,7 +606,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(smokeHealth).toHaveBeenCalledWith({
       liveModelTurn: {
-        model: "gpt-5.5",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -612,7 +615,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.5",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
           stdoutBytes: 2_048,
         },
       },
