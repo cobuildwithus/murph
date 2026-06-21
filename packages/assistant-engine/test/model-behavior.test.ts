@@ -153,6 +153,32 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
+  it('uses the hosted computer step guidance without forced final-action handoff', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
+    )
+    expect(prompt).toContain(
+      'Use `murph.computer_act` to run one bounded browser action against the current Kernel page',
+    )
+    expect(prompt).toContain(
+      'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
+    )
+    expect(prompt).toContain(
+      'Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed',
+    )
+    expect(prompt).not.toContain(
+      'Use `murph.computer_act` only for URL navigation.',
+    )
+    expect(prompt).not.toContain(
+      'Before placing an order, booking an appointment, authorizing payment',
+    )
+    expect(prompt).not.toContain(
+      'reason="final_confirmation"` and `handoffPurpose="manual_browser_help"',
+    )
+  })
+
   it('guides automation continuity policy by task size', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 

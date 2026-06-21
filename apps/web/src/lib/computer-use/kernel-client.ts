@@ -18,7 +18,6 @@ export interface ComputerKernelClient {
     browserName: string;
     profileName: string;
     saveChanges: boolean;
-    startUrl?: string | null;
     timeoutSeconds: number;
   }): Promise<KernelBrowserHandle>;
   deleteBrowserByIdOrName(idOrName: string): Promise<void>;
@@ -61,7 +60,6 @@ export class KernelComputerClient implements ComputerKernelClient {
     browserName: string;
     profileName: string;
     saveChanges: boolean;
-    startUrl?: string | null;
     timeoutSeconds: number;
   }): Promise<KernelBrowserHandle> {
     const browser = await this.kernel.browsers.create({
@@ -71,7 +69,6 @@ export class KernelComputerClient implements ComputerKernelClient {
         name: input.profileName,
         save_changes: input.saveChanges,
       },
-      ...(input.startUrl ? { start_url: input.startUrl } : {}),
       stealth: true,
       timeout_seconds: input.timeoutSeconds,
     });

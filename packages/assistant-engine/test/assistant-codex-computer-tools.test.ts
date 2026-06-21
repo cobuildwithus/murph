@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+} from "@murphai/hosted-execution/computer-use";
+import {
   executeMurphDynamicToolRequest,
+  MURPH_COMPUTER_ACT_TOOL,
   MURPH_DYNAMIC_TOOLS,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
@@ -11,7 +15,7 @@ import type {
 } from "../src/assistant/turn-progress.ts";
 
 describe("murph computer dynamic tools", () => {
-  it("advertises final confirmation through the generic pause primitive only", () => {
+  it("advertises single-action act and generic pause primitives", () => {
     const computerTools = MURPH_DYNAMIC_TOOLS.filter((tool) =>
       tool.name.startsWith("computer_")
     );
@@ -31,6 +35,22 @@ describe("murph computer dynamic tools", () => {
     const pauseTool = computerTools.find((tool) =>
       tool.name === "computer_pause_for_user"
     );
+    const actTool = computerTools.find((tool) =>
+      tool.name === "computer_act"
+    );
+    const actToolSchema = JSON.stringify(actTool?.inputSchema);
+    expect(actToolSchema).toContain("\"action\"");
+    expect(actToolSchema).not.toContain("steps");
+    expect(actToolSchema).not.toContain("\"code\"");
+    expect(actToolSchema).toContain('"const":"goto"');
+    expect(actToolSchema).not.toContain('"const":"css"');
+    expect(actToolSchema).not.toContain('"selector"');
+    expect(actToolSchema).toContain('"type":"integer"');
+    expect(actToolSchema).toContain('"minimum":1000');
+    expect(actToolSchema).toContain(
+      `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
+    );
+    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     const startTool = computerTools.find((tool) =>
       tool.name === "computer_start_run"
@@ -206,17 +226,19 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("sanitizes observe output before returning it to Codex", async () => {
+  it("returns observed browser text without content redaction", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         runId: "run_123",
         status: "running",
-        title: "Checkout",
+        title: "API key: visible-title-canary",
         url: "https://shop.example.test/checkout?token=secret#frag",
         visibleText: [
           "Contact shopper@example.test",
-          "Cookie: session=secret",
-          "Reference 4111 1111 1111 1111",
+          "Cookie: session=visible-cookie-canary",
+          "API key: visible-api-key-canary",
+          "Verification code: 123456",
+          "Loose secret prefix visible-loose-canary",
           "Ready to submit",
         ].join("\n"),
       })
@@ -237,15 +259,17 @@ describe("murph computer dynamic tools", () => {
     const text = result.rpcResult.contentItems[0]!.text;
     expect(text).toContain("https://shop.example.test/checkout");
     expect(text).toContain("Ready to submit");
-    expect(text).toContain("[redacted-email]");
-    expect(text).toContain("[redacted-sensitive-line]");
-    expect(text).toContain("[redacted-number]");
-    expect(text).not.toContain("token=secret");
-    expect(text).not.toContain("shopper@example.test");
-    expect(text).not.toContain("4111");
+    expect(text).toContain("shopper@example.test");
+    expect(text).toContain("Cookie: session=visible-cookie-canary");
+    expect(text).toContain("API key: visible-api-key-canary");
+    expect(text).toContain("Verification code: 123456");
+    expect(text).toContain("Loose secret prefix visible-loose-canary");
+    expect(text).toContain("visible-title-canary");
+    expect(text).toContain("token=secret");
+    expect(text).toContain("#frag");
   });
 
-  it("does not return raw navigation results to Codex", async () => {
+  it("runs a browser action and returns the current action URL", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -254,18 +278,20 @@ describe("murph computer dynamic tools", () => {
         "http://web-control.worker/api/internal/computer/runs/run_123/act",
       );
       expect(JSON.parse(String(init?.body))).toEqual({
-        action: "goto",
+        action: "click",
+        locator: {
+          by: "role",
+          exact: false,
+          name: "Add to cart",
+          role: "button",
+        },
         timeoutMs: 1000,
-        url: "https://shop.example.test/checkout",
       });
 
       return jsonResponse({
-        result: {
-          cookie: "session=secret",
-          liveViewUrl: "https://kernel.example.test/live/raw-token",
-        },
         title: "Checkout",
         url: "https://shop.example.test/order?secret=raw",
+        visibleText: "Cart updated https://shop.example.test/order?session_id=opaque#step",
       });
     });
 
@@ -276,24 +302,28 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          action: "goto",
+          action: "click",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Add to cart",
+            role: "button",
+          },
           runId: "run_123",
           timeoutMs: 1000,
-          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
-      resultType: "object",
+    const payload = JSON.parse(result.rpcResult.contentItems[0]!.text);
+    expect(payload).toEqual({
       title: "Checkout",
-      url: "https://shop.example.test/order",
+      url: "https://shop.example.test/order?secret=raw",
     });
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("session=secret");
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
   });
 
   it("sends finish-run compatibility fields only to the finish endpoint", async () => {
@@ -339,7 +369,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("does not parse model-facing click actions for this release", () => {
+  it("does not parse old structured click actions", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "click",
@@ -356,13 +386,37 @@ describe("murph computer dynamic tools", () => {
     expect(request.kind).toBe("invalid-computer-arguments");
   });
 
-  it("does not parse model-facing non-web navigation URLs", () => {
+  it("rejects action timeout values outside the shared runtime contract", () => {
+    for (const timeoutMs of [999, 1000.5]) {
+      const request = readMurphDynamicToolRequest(dynamicToolCall({
+        argumentsValue: {
+          action: "click",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Add to cart",
+            role: "button",
+          },
+          runId: "run_123",
+          timeoutMs,
+        },
+        tool: "computer_act",
+      }));
+
+      if (!request) {
+        throw new Error("Expected a parsed dynamic tool request.");
+      }
+      expect(request.kind).toBe("invalid-computer-arguments");
+    }
+  });
+
+  it("parses goto actions for rollout compatibility", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "goto",
         runId: "run_123",
         timeoutMs: 1000,
-        url: "javascript:alert(1)",
+        url: "https://shop.example.test/checkout",
       },
       tool: "computer_act",
     }));
@@ -370,7 +424,15 @@ describe("murph computer dynamic tools", () => {
     if (!request) {
       throw new Error("Expected a parsed dynamic tool request.");
     }
-    expect(request.kind).toBe("invalid-computer-arguments");
+    expect(request).toEqual({
+      args: {
+        action: "goto",
+        runId: "run_123",
+        timeoutMs: 1000,
+        url: "https://shop.example.test/checkout",
+      },
+      kind: "computer-act",
+    });
   });
 
   it("does not parse the removed eval tool", () => {
@@ -390,7 +452,7 @@ describe("murph computer dynamic tools", () => {
     });
   });
 
-  it("treats computer navigation transport failures as unknown outcome", async () => {
+  it("treats computer action transport failures as unknown outcome", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> => {
       throw new Error("network timeout");
     });
@@ -413,15 +475,18 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step",
     );
   });
 
-  it("treats server-side browser execution failures as unknown outcome", async () => {
+  it.each([
+    "HOSTED_COMPUTER_EVAL_FAILED",
+    "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+  ])("treats server-side browser execution failures as unknown outcome: %s", async (code) => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         error: {
-          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          code,
           message: "Computer browser evaluation failed.",
         },
       }, 502)
@@ -445,7 +510,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step",
     );
   });
 
@@ -675,7 +740,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step; computer run was canceled",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; computer run was canceled",
     );
     expect(progressDelivery.send).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
