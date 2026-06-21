@@ -938,8 +938,19 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
   return input.effect.deliveryPhase === "foreground_current_turn"
+    && !isHostedAssistantReactionOnlyEffect(input.effect)
     && input.outcome.deliveryStatus !== "sent"
     && input.outcome.retryable === true;
+}
+
+function isHostedAssistantReactionOnlyEffect(
+  effect: HostedAssistantDeliveryEffect,
+): boolean {
+  return effect.payload.channel === "telegram"
+    && effect.payload.message.length === 0
+    && effect.payload.media.length === 0
+    && effect.payload.replyToMessageId !== null
+    && effect.payload.transportIdempotent === true;
 }
 
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {

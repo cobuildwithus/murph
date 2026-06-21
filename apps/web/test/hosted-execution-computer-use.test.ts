@@ -2177,6 +2177,90 @@ describe("ComputerUseService", () => {
     expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
   });
 
+  it("shares one timeout budget across sensitive input preflight and action", async () => {
+    let nowMs = Date.parse("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResults: [
+        {
+          sensitive: false,
+        },
+        {
+          title: "Checkout",
+          url: "https://shop.example.test/cart",
+          visibleText: "Added",
+        },
+      ],
+      onExecutePlaywright(_executeInput, callIndex) {
+        if (callIndex === 0) {
+          nowMs += 14_000;
+        }
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => new Date(nowMs),
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: new Date(nowMs) }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "fill",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Email",
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      value: "shopper@example.test",
+    })).resolves.toMatchObject({
+      title: "Checkout",
+      url: "https://shop.example.test/cart",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(2);
+    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18_000);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("timeout: 15000");
+    expect(kernel.executePlaywrightInputs[1]?.timeoutMs).toBe(4_000);
+    expect(kernel.executePlaywrightInputs[1]?.code ?? "").toContain("timeout: 1000");
+  });
+
+  it("allows zero-duration wait actions while reserving the result margin", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Checkout",
+        url: "https://shop.example.test/cart",
+        visibleText: "Ready",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "wait",
+      memberId: "member_123",
+      ms: 0,
+      runId: "hcr_run123",
+    })).resolves.toMatchObject({
+      title: "Checkout",
+      url: "https://shop.example.test/cart",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(3_000);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "await page.waitForTimeout(0);",
+    );
+  });
+
   it("rejects sensitive fill targets before serializing the input value to Kernel source", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
@@ -5416,7 +5500,12 @@ const fakeKernel = createFakeKernel();
 function createFakeKernel(input: {
   createBrowserResults?: Array<"fail" | "ok">;
   deleteBrowserResults?: Array<"fail" | "ok">;
+  executeResults?: unknown[];
   executeResult?: unknown;
+  onExecutePlaywright?: (
+    input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
+    callIndex: number,
+  ) => void;
 } = {}): ComputerKernelClient & {
   createdBrowserInputs: Parameters<ComputerKernelClient["createBrowser"]>[0][];
   createdSessionIds: string[];
@@ -5428,6 +5517,7 @@ function createFakeKernel(input: {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
   const deleteBrowserResults = [...(input.deleteBrowserResults ?? [])];
+  const executeResults = [...(input.executeResults ?? [])];
   return {
     createdBrowserInputs: [],
     createdSessionIds: [],
@@ -5460,10 +5550,12 @@ function createFakeKernel(input: {
     },
     async ensureProfile() {},
     async executePlaywright(executeInput) {
+      const callIndex = this.executePlaywrightCalls;
       this.executePlaywrightCalls += 1;
       this.executePlaywrightInputs.push(executeInput);
+      input.onExecutePlaywright?.(executeInput, callIndex);
       return {
-        result: input.executeResult ?? {
+        result: executeResults.shift() ?? input.executeResult ?? {
           title: "Page",
           url: "https://example.test",
           visibleText: "Page text",

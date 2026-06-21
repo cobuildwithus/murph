@@ -396,15 +396,23 @@ export class ComputerUseService {
       await this.requirePublicNavigationUrl(input.url);
     }
     const kernel = this.requireKernel();
+    const actionDeadline = createComputerActDeadline(input, this.now);
+    const sessionId = requireKernelSessionId(run);
     await requireNonSensitiveComputerInputTarget({
       action: input,
+      deadline: actionDeadline,
       kernel,
-      sessionId: requireKernelSessionId(run),
+      sessionId,
     });
+    const actionKernelTimeoutMs = readComputerActRemainingTimeoutMs(actionDeadline);
+    const actionForExecution = limitComputerActRequestTimeout(
+      input,
+      readComputerActExecutionTimeoutMs(input, actionKernelTimeoutMs),
+    );
     const result = await kernel.executePlaywright({
-      code: buildComputerActCode(input),
-      sessionId: requireKernelSessionId(run),
-      timeoutMs: computerActExecutionTimeoutMs(input),
+      code: buildComputerActCode(actionForExecution),
+      sessionId,
+      timeoutMs: actionKernelTimeoutMs,
     });
     const state = readRequiredBrowserActionStateResult(result.result);
     await this.store.updateRunBrowserState({
@@ -2057,6 +2065,7 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
 
 async function requireNonSensitiveComputerInputTarget(input: {
   action: HostedComputerActRequest;
+  deadline: ComputerActDeadline;
   kernel: ComputerKernelClient;
   sessionId: string;
 }): Promise<void> {
@@ -2068,10 +2077,15 @@ async function requireNonSensitiveComputerInputTarget(input: {
     return;
   }
 
+  const requestTimeoutMs = readComputerActRemainingTimeoutMs(input.deadline);
+  const locatorTimeoutMs = Math.min(
+    input.action.timeoutMs,
+    readComputerActActionTimeoutMs(requestTimeoutMs),
+  );
   const result = await input.kernel.executePlaywright({
-    code: buildComputerSensitiveInputProbeCode(input.action.locator, input.action.timeoutMs),
+    code: buildComputerSensitiveInputProbeCode(input.action.locator, locatorTimeoutMs),
     sessionId: input.sessionId,
-    timeoutMs: input.action.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
+    timeoutMs: requestTimeoutMs,
   });
   const preflight = readComputerSensitiveInputPreflightResult(result.result);
   if (!preflight.sensitive) {
@@ -2083,6 +2097,87 @@ async function requireNonSensitiveComputerInputTarget(input: {
     httpStatus: 400,
     message: "Computer input targets a sensitive field. Pause for user handoff instead.",
   });
+}
+
+type ComputerActDeadline = {
+  deadlineMs: number;
+  nowMs: () => number;
+};
+
+function createComputerActDeadline(
+  input: HostedComputerActRequest,
+  now: () => Date,
+): ComputerActDeadline {
+  return {
+    deadlineMs: now().getTime() + computerActExecutionTimeoutMs(input),
+    nowMs: () => now().getTime(),
+  };
+}
+
+function readComputerActRemainingTimeoutMs(deadline: ComputerActDeadline): number {
+  const remainingMs = Math.floor(deadline.deadlineMs - deadline.nowMs());
+  if (remainingMs <= 0) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
+      httpStatus: 504,
+      message: "Computer action timed out before it could complete.",
+      retryable: true,
+    });
+  }
+
+  return remainingMs;
+}
+
+function readComputerActActionTimeoutMs(kernelTimeoutMs: number): number {
+  const actionTimeoutMs = kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS;
+  if (actionTimeoutMs <= 0) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
+      httpStatus: 504,
+      message: "Computer action timed out before it could complete.",
+      retryable: true,
+    });
+  }
+
+  return actionTimeoutMs;
+}
+
+function readComputerActExecutionTimeoutMs(
+  input: HostedComputerActRequest,
+  kernelTimeoutMs: number,
+): number {
+  if (input.action === "wait") {
+    return Math.max(0, kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS);
+  }
+
+  return readComputerActActionTimeoutMs(kernelTimeoutMs);
+}
+
+function limitComputerActRequestTimeout(
+  input: HostedComputerActRequest,
+  timeoutMs: number,
+): HostedComputerActRequest {
+  switch (input.action) {
+    case "wait":
+      return {
+        ...input,
+        ms: Math.min(input.ms, timeoutMs),
+      };
+    case "goto":
+    case "click":
+    case "fill":
+    case "type":
+    case "select":
+    case "check":
+    case "uncheck":
+    case "press":
+    case "scroll":
+    case "waitFor":
+      return {
+        ...input,
+        timeoutMs: Math.min(input.timeoutMs, timeoutMs),
+      };
+  }
 }
 
 function computerActExecutionTimeoutMs(input: HostedComputerActRequest): number {
