@@ -3535,6 +3535,7 @@ Light walk and early bedtime.
 }
 
 interface MetricObservationEventInput {
+  dataOrigin?: Record<string, unknown>;
   dayKey?: string | null;
   deleted?: boolean;
   endAt?: string;
@@ -3543,6 +3544,8 @@ interface MetricObservationEventInput {
   metric: string;
   observationGrain?: string;
   occurredAt: string;
+  qualifiers?: Record<string, string | number | boolean>;
+  rawRefs?: string[];
   recordedAt?: string;
   source: "device" | "manual";
   title: string;
@@ -4482,12 +4485,10 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 10 -> 11 bump would keep every
-      // constant-relative assertion green while legacy v10 stores, which lack
-      // either generic observation metric points or rebuilt wearable public
-      // conflict evidence depending on their source branch, were treated as
-      // current instead of being rebuilt.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 11);
+      // Pin the literal version: a revert of the 11 -> 12 bump would keep every
+      // constant-relative assertion green while legacy v11 stores still carried
+      // full metric point JSON payloads.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 12);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4501,6 +4502,95 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     } finally {
       database.close();
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("rebuildQueryProjection stores compact metric point payloads for rich provider observations", async () => {
+  const vaultRoot = await createMetricObservationVault(
+    Array.from({ length: 24 }, (_, index) => ({
+      dataOrigin: {
+        exportBatch: `provider-export-batch-${index}`,
+        marker: "provider-data-origin-marker-should-not-repeat-in-query-projection",
+        nested: {
+          payload: "provider-nested-origin-payload-".repeat(8),
+        },
+      },
+      externalRef: {
+        facet: "caffeine",
+        marker: "provider-external-ref-marker-should-not-repeat-in-query-projection",
+        resourceId: `provider-resource-${String(index).padStart(2, "0")}`,
+        resourceType: "daily_readiness",
+        system: "fixture-provider",
+      },
+      id: `evt_metric_observation_rich_provider_${String(index).padStart(2, "0")}`,
+      metric: "caffeine",
+      observationGrain: "summary",
+      occurredAt: `2026-04-${String((index % 8) + 1).padStart(2, "0")}T07:00:00Z`,
+      qualifiers: { summary: true },
+      rawRefs: [
+        `raw/provider/rich-payload-${String(index).padStart(2, "0")}.json`,
+        "raw-provider-marker-should-not-repeat-in-query-projection",
+      ],
+      source: "device",
+      title: "Fixture provider caffeine",
+      unit: "mg",
+      value: 45 + index,
+    })),
+  );
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      const stats = database
+        .prepare(`
+          SELECT
+            AVG(LENGTH(metric_point_json)) AS averageBytes,
+            MAX(LENGTH(metric_point_json)) AS maxBytes,
+            COUNT(*) AS rowCount
+          FROM query_metric_points
+          WHERE metric_key = 'caffeine'
+        `)
+        .get() as { averageBytes: number; maxBytes: number; rowCount: number };
+      const joinedPayload = (database
+        .prepare(`
+          SELECT GROUP_CONCAT(metric_point_json, '\n') AS payload
+          FROM query_metric_points
+          WHERE metric_key = 'caffeine'
+        `)
+        .get() as { payload: string }).payload;
+
+      assert.equal(stats.rowCount, 24);
+      assert.ok(
+        stats.averageBytes < 360,
+        `expected compact metric point payloads, got ${stats.averageBytes} average bytes`,
+      );
+      assert.ok(stats.maxBytes < 420, `expected compact max payload, got ${stats.maxBytes} bytes`);
+      assert.doesNotMatch(
+        joinedPayload,
+        /provider-data-origin-marker|provider-external-ref-marker|raw-provider-marker/u,
+      );
+    } finally {
+      database.close();
+    }
+
+    const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey: "caffeine" });
+
+    assert.equal(points.length, 24);
+    assert.equal(points[0]?.context.observationGrain, "summary");
+    assert.equal(points[0]?.source.kind, "observation");
+    assert.equal(points[0]?.source.recordId.startsWith("evt_metric_observation_rich_provider_"), true);
+    assert.equal(points[0]?.provenance.dataOrigin, null);
+    assert.equal(points[0]?.provenance.externalRef, null);
+    assert.deepEqual(points[0]?.provenance.rawRefs, []);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -5070,7 +5160,7 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
   }
 });
 
-test("listMetricPointsRuntime rebuilds previous-version projections before serving observation metrics", async () => {
+test("listMetricPointsRuntime rebuilds v11 full-payload projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_caffeine_rebuild_01",
@@ -5090,7 +5180,7 @@ test("listMetricPointsRuntime rebuilds previous-version projections before servi
     const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       staleDatabase.exec(`
-        PRAGMA user_version = 9;
+        PRAGMA user_version = 11;
         DELETE FROM query_metric_points;
       `);
     } finally {
@@ -5507,7 +5597,7 @@ test("runtime wearable summaries read identically from compact and legacy full-f
   }
 });
 
-test("listMetricPointsRuntime round-trips stored metric points purely from metric_point_json", async () => {
+test("listMetricPointsRuntime reconstructs stored metric points from scalar columns and compact metadata", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const point: MetricPoint = {
@@ -5552,13 +5642,26 @@ test("listMetricPointsRuntime round-trips stored metric points purely from metri
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       insertProjectionMetricPoints(database, [point]);
+      const storedPayload = database
+        .prepare("SELECT metric_point_json AS metricPointJson FROM query_metric_points WHERE id = ?")
+        .get(point.id) as { metricPointJson: string } | undefined;
+      assert.ok(storedPayload);
+      assert.doesNotMatch(storedPayload.metricPointJson, /resourceId|function-health|externalRef|dataOrigin/u);
+      assert.match(storedPayload.metricPointJson, /fastingStatus|sourceLabel/u);
     } finally {
       database.close();
     }
 
     const points = await listMetricPointsRuntime(vaultRoot, { metricKey: "apob" });
     const stored = points.find((candidate) => candidate.id === point.id);
-    assert.deepEqual(stored, point);
+    assert.deepEqual(stored, {
+      ...point,
+      provenance: {
+        ...point.provenance,
+        dataOrigin: null,
+        externalRef: null,
+      },
+    });
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
