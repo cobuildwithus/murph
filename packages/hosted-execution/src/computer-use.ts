@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
+export const HOSTED_COMPUTER_CAPABILITIES_PATH = "/api/internal/computer/capabilities";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
 
@@ -283,6 +284,12 @@ export const hostedComputerStartRunRequestSchema = z.preprocess(
     .transform(({ goal: _goal, ...request }) => request),
 );
 
+export const hostedComputerCapabilitiesResponseSchema = z
+  .object({
+    memberScopedProfileRequired: z.literal(true),
+  })
+  .strict();
+
 export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
 const hostedComputerActTextSchema = z
@@ -460,6 +467,8 @@ export const hostedComputerFinishRunRequestSchema = z
 
 export type HostedComputerStartRunRequest =
   z.infer<typeof hostedComputerStartRunRequestSchema>;
+export type HostedComputerCapabilitiesResponse =
+  z.infer<typeof hostedComputerCapabilitiesResponseSchema>;
 export type HostedComputerObserveRequest =
   z.infer<typeof hostedComputerObserveRequestSchema>;
 export type HostedComputerActRequest =
@@ -518,6 +527,15 @@ export function isHostedComputerWebControlRequest(input: {
     || readHostedComputerRunOperationRoute(input.path) !== null;
 }
 
+export function buildHostedComputerCapabilitiesResponse(): HostedComputerCapabilitiesResponse {
+  parseHostedComputerStartRunRequest({
+    memberScopedProfileRequired: true,
+    profileKey: "default",
+  });
+
+  return { memberScopedProfileRequired: true };
+}
+
 export function parseHostedComputerStartRunRequest(
   value: unknown,
 ): HostedComputerStartRunRequest {
@@ -563,6 +581,16 @@ export function parseHostedComputerFinishRunRequest(
     hostedComputerFinishRunRequestSchema,
     value,
     "Hosted computer finish-run request",
+  );
+}
+
+export function parseHostedComputerCapabilitiesResponse(
+  value: unknown,
+): HostedComputerCapabilitiesResponse {
+  return parseHostedComputerRequest(
+    hostedComputerCapabilitiesResponseSchema,
+    value,
+    "Hosted computer capabilities response",
   );
 }
 

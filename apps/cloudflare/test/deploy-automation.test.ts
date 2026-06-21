@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { HOSTED_COMPUTER_CAPABILITIES_PATH } from "@murphai/hosted-execution/computer-use";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,6 +20,7 @@ import {
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 import { hostedLocalRunnerBaseImageTag } from "../scripts/runner-base-image-contract.ts";
+import { verifyHostedWebComputerCapabilities } from "../scripts/verify-web-computer-capabilities.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
 afterEach(() => {
@@ -632,6 +635,8 @@ describe("hosted deploy automation helpers", () => {
       "codex --version",
       "pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts",
       "name: Validate generated Worker deploy bundle",
+      "name: Verify hosted web computer-use compatibility",
+      "run: pnpm --dir apps/cloudflare deploy:web-computer:verify",
       "--dry-run",
       "predeploy-${GITHUB_SHA::12}",
       "Deploy commit SHA: ${checked_out_sha}",
@@ -696,6 +701,9 @@ describe("hosted deploy automation helpers", () => {
     const validateGeneratedDeployBundleStepIndex = workflow.indexOf(
       "- name: Validate generated Worker deploy bundle",
     );
+    const verifyHostedWebComputerStepIndex = workflow.indexOf(
+      "- name: Verify hosted web computer-use compatibility",
+    );
     const renderWorkerSecretsStepIndex = workflow.indexOf("- name: Render Worker secrets");
     const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
     expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
@@ -712,6 +720,7 @@ describe("hosted deploy automation helpers", () => {
     expect(immediateManifestValidateCommandIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestRefreshCommandIndex).toBeGreaterThanOrEqual(0);
     expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
+    expect(verifyHostedWebComputerStepIndex).toBeGreaterThanOrEqual(0);
     expect(renderWorkerSecretsStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
     expect(blacksmithPrepareRunnerStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
@@ -726,7 +735,8 @@ describe("hosted deploy automation helpers", () => {
       immediateManifestRefreshCommandIndex,
     );
     expect(prepareRunnerBaseImageStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
-    expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(deployWorkerStepIndex);
+    expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(verifyHostedWebComputerStepIndex);
+    expect(verifyHostedWebComputerStepIndex).toBeLessThan(deployWorkerStepIndex);
     const cloudflareRunnerSmokeGateStartIndex = workflow.indexOf("  cloudflare-runner-smoke-gate:");
     const deployJobStartIndex = workflow.indexOf("\n  deploy:", immediateBuildPrepJobStartIndex);
     expect(cloudflareRunnerSmokeGateStartIndex).toBeGreaterThanOrEqual(0);
@@ -775,6 +785,10 @@ describe("hosted deploy automation helpers", () => {
       deployWorkerStepIndex,
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
     );
+    const verifyHostedWebComputerStep = workflow.slice(
+      verifyHostedWebComputerStepIndex,
+      workflow.indexOf("\n      - name:", verifyHostedWebComputerStepIndex + 1),
+    );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
@@ -785,6 +799,9 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
+    expect(verifyHostedWebComputerStep).toContain(
+      "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}",
+    );
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
@@ -823,6 +840,42 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).toContain("printf -- '- Container max instances: `%s`\\n' \"${CF_CONTAINER_MAX_INSTANCES}\"");
     expect(workflow).toContain(
       "Native container image: base prepared from \\`Dockerfile.cloudflare-hosted-runner-base\\`; app layer built from \\`Dockerfile.cloudflare-hosted-runner\\` during deploy",
+    );
+  });
+
+  it("verifies production hosted web computer-use capabilities before Worker deploys", async () => {
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: "ECDSA",
+        namedCurve: "P-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+    const requests: Request[] = [];
+
+    await verifyHostedWebComputerCapabilities({
+      env: {
+        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: JSON.stringify(privateJwk),
+        HOSTED_WEB_PRODUCTION_BASE_URL: "https://web.example.test",
+      },
+      fetchImpl: async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+
+        return Response.json({
+          memberScopedProfileRequired: true,
+        });
+      },
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`https://web.example.test${HOSTED_COMPUTER_CAPABILITIES_PATH}`);
+    expect(requests[0]?.method).toBe("GET");
+    expect(requests[0]?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+      "member_deploy_computer_capability_check",
     );
   });
 

@@ -173,11 +173,6 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-    await this.expireStaleActiveRunsForMember({
-      memberId: input.memberId,
-      now,
-      store,
-    });
 
     if (input.resumeRunId) {
       return await this.resumeAwaitingRunById({
@@ -215,6 +210,12 @@ export class ComputerUseService {
       }
       return runHandle(activeRun, true);
     }
+
+    await this.expireStaleActiveRunsForMember({
+      memberId: input.memberId,
+      now,
+      store,
+    });
 
     const runId = createComputerId("hcr");
     const kernelBrowserName = buildKernelBrowserName({ runId });

@@ -901,6 +901,12 @@ jobs:
         if: ${{ !inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare verify:parallel
 
+      - name: Verify hosted web computer-use compatibility
+        if: ${{ inputs.deploy_worker }}
+        env:
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+        run: pnpm --dir apps/cloudflare deploy:web-computer:verify
+
       - name: Show generated artifact paths
         if: ${{ inputs.deploy_worker }}
         run: ls -lah apps/cloudflare/.deploy

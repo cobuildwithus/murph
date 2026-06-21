@@ -31,14 +31,17 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
+  buildHostedComputerCapabilitiesResponse,
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_CAPABILITIES_PATH,
   HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
+  parseHostedComputerCapabilitiesResponse,
   parseHostedComputerFinishRunRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
@@ -655,6 +658,12 @@ describe("hosted execution coverage gaps", () => {
 
   it("defines hosted computer-use routes and the generic pause checkpoint contract", () => {
     expect(HOSTED_COMPUTER_RUNS_PATH).toBe("/api/internal/computer/runs");
+    expect(HOSTED_COMPUTER_CAPABILITIES_PATH).toBe("/api/internal/computer/capabilities");
+    expect(parseHostedComputerCapabilitiesResponse(
+      buildHostedComputerCapabilitiesResponse(),
+    )).toEqual({
+      memberScopedProfileRequired: true,
+    });
 
     const pausePath = buildHostedComputerRunOperationPath({
       operation: "pause-for-user",

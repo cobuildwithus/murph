@@ -622,6 +622,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/hosted-runtime/log`
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
+- `GET /api/internal/computer/capabilities`
 - `POST /api/internal/computer/runs`
 - `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`

@@ -692,6 +692,59 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
+  it("resumes an explicit run without deleting an unrelated stale legacy sibling", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const appointmentsRun = createRunRecord({
+      awaitingReason: "login_needed",
+      id: "hcr_appointments",
+      kernelProfileName: "murph-test-member_123-appointments-b6c83d617dd29d666b836502",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const commerceSibling = createRunRecord({
+      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      id: "hcr_commerce_failed",
+      kernelLiveViewUrlEncrypted: null,
+      kernelProfileName: "murph-test-member_123-commerce-58e8aef26a4ed0371961f090",
+      kernelSessionId: "kernel-session-commerce",
+      status: "failed",
+      updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [appointmentsRun, commerceSibling],
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run: appointmentsRun,
+    });
+    const kernel = createFakeKernel({ deleteBrowserResults: ["fail"] });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: "hcr_appointments",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_appointments",
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      id: "hcr_appointments",
+      status: "running",
+    });
+  });
+
   it("rejects resume proof when the mailbox item was stored before the pause", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
@@ -5683,10 +5736,9 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async listStaleActiveRunsForMember(input: Parameters<ComputerUseStore["listStaleActiveRunsForMember"]>[0]): Promise<ComputerRunRecord[]> {
-    return input.memberId === this.run.memberId
-      && isStaleRunForCleanup(this.run, input.now)
-      ? [this.run]
-      : [];
+    return (this.memberRuns ?? [this.run])
+      .filter((run) => run.memberId === input.memberId && isStaleRunForCleanup(run, input.now))
+      .slice(0, input.limit);
   }
 
   async findActiveRunForMember(input: Parameters<ComputerUseStore["findActiveRunForMember"]>[0]): Promise<ComputerRunRecord | null> {
