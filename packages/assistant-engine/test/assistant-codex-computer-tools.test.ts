@@ -90,7 +90,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("keeps start-run profile keys off the model surface while sending old-compatible requests", async () => {
+  it("keeps start-run profile keys off the model surface while marking fresh starts member-scoped", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -98,6 +98,7 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
+        memberScopedProfileRequired: true,
         profileKey: "default",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
