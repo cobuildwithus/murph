@@ -210,6 +210,34 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the default warm shell through 99 clean invocations and recycles on 100", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble();
+
+    for (let index = 1; index <= 99; index += 1) {
+      await expect(container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(`evt_default_recycle_${index}`),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+      expect(destroy).not.toHaveBeenCalled();
+    }
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_default_recycle_100"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
   it("posts an exact runtime wake to the active workspace invocation", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();

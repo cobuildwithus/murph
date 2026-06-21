@@ -112,7 +112,7 @@ Defaulted worker vars:
   window before a dirty invocation checkpoints and returns
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the native container shell
   activity-expiry cleanup lifecycle (code default is `300000` when unset)
-- `HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT=25` to recycle the
+- `HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT=100` to recycle the
   native container shell after a bounded number of clean invocations
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
