@@ -109,6 +109,11 @@
       "import": "./dist/linq-runtime.js",
       "default": "./dist/linq-runtime.js"
     },
+    "./message-formatting": {
+      "types": "./dist/message-formatting.d.ts",
+      "import": "./dist/message-formatting.js",
+      "default": "./dist/message-formatting.js"
+    },
     "./operator-config": {
       "types": "./dist/operator-config.d.ts",
       "import": "./dist/operator-config.js",
