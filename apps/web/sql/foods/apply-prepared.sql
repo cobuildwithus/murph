@@ -32,6 +32,19 @@ SET serving_grams = NULL
 WHERE serving_grams IS NOT NULL
   AND NOT (serving_grams > 0 AND serving_grams <= 2000);
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM foods_prepared
+    WHERE data_origin IN ('usda_branded', 'usda_foundation', 'usda_sr_legacy', 'usda_fndds')
+      AND serving_grams IS NOT NULL
+      AND label->>'servingGramsContractVersion' IS DISTINCT FROM 'fdc_strict_serving_grams_v1'
+  ) THEN
+    RAISE EXCEPTION 'prepared FDC serving_grams require fdc_strict_serving_grams_v1; regenerate the prepared export';
+  END IF;
+END $$;
+
 ANALYZE foods_prepared;
 
 -- Generic origins first (small), then branded in four modulo batches to keep

@@ -410,6 +410,7 @@ prepared AS (
         'notSignificantSourceOf', source_rows.not_significant_source_of,
         'servingSize', source_rows.serving_size,
         'servingSizeUnit', source_rows.serving_size_unit,
+        'servingGramsContractVersion', 'fdc_strict_serving_grams_v1',
         'householdServing', COALESCE(
           source_rows.branded_household_serving,
           food_portions.first_portion_description

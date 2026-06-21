@@ -177,6 +177,7 @@ describe("product test contaminant schema", () => {
     expect(fdcImportSql).toContain("tablets?");
     expect(fdcImportSql).toContain("softgels?");
     expect(fdcImportSql).toContain("serving_grams = EXCLUDED.serving_grams");
+    expect(fdcImportSql).toContain("'servingGramsContractVersion', 'fdc_strict_serving_grams_v1'");
     expect(fdcImportSql).toContain("\\set reviewed_serving_grams_entity_type food");
     expect(fdcImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
     expect(fdcImportSql).toContain("\\unset reviewed_serving_grams_entity_type");
@@ -198,6 +199,15 @@ describe("product test contaminant schema", () => {
     expect(fdcApplyPreparedSql).toContain("UPDATE foods_prepared");
     expect(fdcApplyPreparedSql).toContain("SET serving_grams = NULL");
     expect(fdcApplyPreparedSql).toContain("NOT (serving_grams > 0 AND serving_grams <= 2000)");
+    expect(fdcApplyPreparedSql).toContain(
+      "label->>'servingGramsContractVersion' IS DISTINCT FROM 'fdc_strict_serving_grams_v1'",
+    );
+    expect(fdcApplyPreparedSql).toContain(
+      "prepared FDC serving_grams require fdc_strict_serving_grams_v1",
+    );
+    expect(fdcApplyPreparedSql).toContain(
+      "data_origin IN ('usda_branded', 'usda_foundation', 'usda_sr_legacy', 'usda_fndds')",
+    );
 
     for (const labelImportSql of [
       fdcImportSql,

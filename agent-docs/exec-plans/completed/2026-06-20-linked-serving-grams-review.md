@@ -166,11 +166,15 @@ serving masses.
   label before the final update. Automatic candidates now retain the source
   label JSON and update only if the current label still matches; exact reviewed
   TSV candidates remain exact-id overrides.
+- ReviewGPT round 7 found old prepared FDC exports could reintroduce pre-strict
+  serving masses through `apply-prepared.sql`. The strict FDC transformer now
+  stamps prepared labels with `fdc_strict_serving_grams_v1`, and the prepared
+  apply path fails fast on non-null FDC serving masses without that stamp.
 
 ## Next
 
-- Prove the round 6 stale-label guard, run verification, commit, push, and run
-  the next PR review loop.
+- Prove the round 7 prepared-contract guard, run verification, commit, push,
+  and run the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20
