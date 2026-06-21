@@ -271,6 +271,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedSubscriptionCancellationEmailSentMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062101_hosted_subscription_cancellation_email_sent/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLatencyMilestonesMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026060300_hosted_latency_milestones/migration.sql",
@@ -337,6 +344,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
       "2026062100_hosted_computer_single_member_profile",
+      "2026062101_hosted_subscription_cancellation_email_sent",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -546,6 +554,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("member.activated");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
+      'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',
+    );
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("UPDATE");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("CREATE TABLE");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("CREATE INDEX");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');

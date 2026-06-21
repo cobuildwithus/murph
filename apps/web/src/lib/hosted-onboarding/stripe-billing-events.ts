@@ -52,6 +52,15 @@ type HostedStripeActivationOutcome = {
   welcomeEmailMemberId: string | null;
 };
 
+export type HostedStripeSubscriptionUpdateOutcome = {
+  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
+};
+
+export type HostedSubscriptionCancellationEmailCandidate = {
+  memberId: string;
+  stripeSubscriptionId: string;
+};
+
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
   prisma: Prisma.TransactionClient,
@@ -330,14 +339,16 @@ export async function applyStripeSubscriptionUpdated(
   subscription: Stripe.Subscription,
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
-): Promise<void> {
+): Promise<HostedStripeSubscriptionUpdateOutcome> {
   const member = await findMemberForStripeSubscription({
     prisma,
     subscription,
   });
 
   if (!member) {
-    return;
+    return {
+      subscriptionCancellationEmail: null,
+    };
   }
 
   const {
@@ -349,7 +360,7 @@ export async function applyStripeSubscriptionUpdated(
     member,
   });
 
-  await writeHostedMemberStripeBillingTx({
+  const updatedMember = await writeHostedMemberStripeBillingTx({
     billingStatus: member.core.billingStatus,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
@@ -360,6 +371,16 @@ export async function applyStripeSubscriptionUpdated(
     stripeSubscriptionId: subscription.id,
     tx: prisma,
   });
+
+  return {
+    subscriptionCancellationEmail:
+      resolveHostedSubscriptionCancellationEmail({
+        sourceType: dispatchContext.sourceType,
+        stripeSubscriptionId: subscription.id,
+        subscriptionStatus: subscription.status,
+        updatedMember,
+      }),
+  };
 }
 
 export async function applyStripeInvoicePaid(
@@ -580,6 +601,26 @@ export async function applyStripeRefundCreated(
 
 function isHostedStripeSucceededRefund(refund: Stripe.Refund): boolean {
   return refund.status === "succeeded" && readHostedStripePositiveAmount(refund.amount) !== null;
+}
+
+function resolveHostedSubscriptionCancellationEmail(input: {
+  sourceType: string;
+  stripeSubscriptionId: string;
+  subscriptionStatus: Stripe.Subscription.Status;
+  updatedMember: HostedMemberBillingSnapshot | null;
+}): HostedSubscriptionCancellationEmailCandidate | null {
+  if (
+    input.sourceType !== "stripe.customer.subscription.deleted" ||
+    input.subscriptionStatus !== "canceled" ||
+    input.updatedMember?.core.billingStatus !== HostedBillingStatus.canceled
+  ) {
+    return null;
+  }
+
+  return {
+    memberId: input.updatedMember.core.id,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  };
 }
 
 async function isHostedStripeCurrentEntitlementFullRefund(input: {

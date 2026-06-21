@@ -511,6 +511,125 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("returns a cancellation email candidate when a subscription write newly cancels access", async () => {
+    const activeMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    });
+    const canceledMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.canceled,
+    });
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(activeMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      member: activeMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(canceledMember);
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        status: "canceled",
+      }),
+      {
+        eventCreatedAt: new Date("2026-06-21T12:00:00.000Z"),
+        occurredAt: "2026-06-21T12:00:00.000Z",
+        sourceEventId: "evt_sub_deleted",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      subscriptionCancellationEmail: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+
+    expect(mocks.prepareHostedMemberStripeBillingWrite).toHaveBeenCalledWith({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      dispatchContext: expect.objectContaining({
+        sourceType: "stripe.customer.subscription.deleted",
+      }),
+      member: activeMember,
+    });
+  });
+
+  it("returns a cancellation email candidate on repeated canceled writes so Resend owns retry idempotency", async () => {
+    const canceledMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.canceled,
+    });
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(canceledMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      member: canceledMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(canceledMember);
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        status: "canceled",
+      }),
+      {
+        eventCreatedAt: new Date("2026-06-21T12:00:00.000Z"),
+        occurredAt: "2026-06-21T12:00:00.000Z",
+        sourceEventId: "evt_sub_deleted_repeat",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      subscriptionCancellationEmail: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    }));
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      member: makeMemberSnapshot({
+        billingStatus: HostedBillingStatus.active,
+      }),
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        status: "canceled",
+      }),
+      {
+        eventCreatedAt: new Date("2026-06-21T12:05:00.000Z"),
+        occurredAt: "2026-06-21T12:05:00.000Z",
+        sourceEventId: "evt_sub_deleted_stale",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      subscriptionCancellationEmail: null,
+    });
+
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(canceledMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      member: canceledMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(canceledMember);
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        status: "canceled",
+      }),
+      {
+        eventCreatedAt: new Date("2026-06-22T12:05:00.000Z"),
+        occurredAt: "2026-06-22T12:05:00.000Z",
+        sourceEventId: "evt_sub_updated_after_cancel",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      subscriptionCancellationEmail: null,
+    });
+  });
+
   it("stores subscription periods from subscription items when Stripe omits root period fields", async () => {
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({

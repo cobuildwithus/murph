@@ -717,6 +717,7 @@ model HostedStripeEvent {
   nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
   claimExpiresAt   DateTime?               @map("claim_expires_at")
   processedAt      DateTime?               @map("processed_at")
+  subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
   lastErrorCode    String?                 @map("last_error_code")
   lastErrorMessage String?                 @map("last_error_message")
   createdAt        DateTime                @default(now()) @map("created_at")
