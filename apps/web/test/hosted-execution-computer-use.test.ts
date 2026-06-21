@@ -2301,18 +2301,16 @@ describe("ComputerUseService", () => {
 
   it("rejects short numeric code fill targets before serializing the input value", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const otpField = new FakeProbeElement({
-      attributes: {
-        "aria-label": "Code",
-        inputmode: "numeric",
-        maxlength: "6",
-        type: "text",
-      },
-    });
     const kernel = createFakeKernel({
       executeResultForCall(executeInput, callIndex) {
         if (callIndex === 0) {
-          return evaluateGeneratedSensitiveProbe(executeInput.code, otpField);
+          expect(executeInput.code).toContain("target.getAttribute");
+          expect(executeInput.code).toContain("\"Code\"");
+          expect(executeInput.code).not.toContain("target.evaluate");
+          expect(executeInput.code).not.toContain("element.getAttribute");
+          expect(executeInput.code).not.toContain(".closest(");
+          expect(executeInput.code).not.toContain(".ownerDocument");
+          return { sensitive: true };
         }
         return {
           title: "Checkout",
@@ -5726,62 +5724,6 @@ function createFakeKernel(input: {
       };
     },
   };
-}
-
-class FakeProbeElement {
-  readonly labels: Array<{ textContent: string }>;
-  readonly ownerDocument: { getElementById: (id: string) => { textContent: string } | null };
-  private readonly attributes: Record<string, string>;
-  private readonly closestLabelText: string | null;
-  private readonly labelledBy: Map<string, { textContent: string }>;
-
-  constructor(input: {
-    attributes?: Record<string, string>;
-    closestLabelText?: string | null;
-    labels?: string[];
-    labelledBy?: Record<string, string>;
-  } = {}) {
-    this.attributes = input.attributes ?? {};
-    this.closestLabelText = input.closestLabelText ?? null;
-    this.labels = (input.labels ?? []).map((textContent) => ({ textContent }));
-    this.labelledBy = new Map(
-      Object.entries(input.labelledBy ?? {}).map(([id, textContent]) => [
-        id,
-        { textContent },
-      ]),
-    );
-    this.ownerDocument = {
-      getElementById: (id: string) => this.labelledBy.get(id) ?? null,
-    };
-  }
-
-  get maxLength(): number {
-    const raw = this.getAttribute("maxlength");
-    return raw ? Number(raw) : -1;
-  }
-
-  closest(selector: string): { textContent: string } | null {
-    return selector === "label" && this.closestLabelText
-      ? { textContent: this.closestLabelText }
-      : null;
-  }
-
-  getAttribute(name: string): string | null {
-    return this.attributes[name.toLowerCase()] ?? null;
-  }
-}
-
-function evaluateGeneratedSensitiveProbe(code: string, element: FakeProbeElement): unknown {
-  const body = code.match(/return await target\.evaluate\(\(node\) => \{([\s\S]*)\n\}\);/u)?.[1];
-  if (!body) {
-    throw new Error("Sensitive input probe body not found.");
-  }
-  const evaluator = new Function(
-    "node",
-    "HTMLElement",
-    body,
-  ) as (node: unknown, htmlElement: typeof FakeProbeElement) => unknown;
-  return evaluator(element, FakeProbeElement);
 }
 
 function extractGeneratedSensitivePatterns(code: string): RegExp[] {

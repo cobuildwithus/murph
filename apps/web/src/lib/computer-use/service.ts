@@ -2286,19 +2286,19 @@ function buildComputerSensitiveInputProbeCode(
   locator: HostedComputerActLocator,
   timeoutMs: number,
 ): string {
+  const locatorHints = readComputerLocatorSensitiveHints(locator);
   return [
     `const target = ${buildComputerLocatorExpression(locator)};`,
     `await target.waitFor({ state: 'attached', timeout: ${timeoutMs} });`,
-    `return await target.evaluate((node) => {
-  const element = node instanceof HTMLElement ? node : null;
-  if (!element) return { sensitive: false };
+    `const locatorHints = ${JSON.stringify(locatorHints)}.map((value) => String(value || "").toLowerCase());`,
+    `const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();`,
+    `const type = await attr("type");`,
+    `const inputMode = await attr("inputmode");`,
+    `const maxLengthRaw = await attr("maxlength");`,
+    `const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;`,
+    `const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);`,
+    `if (type === "password") return { sensitive: true, reason: "password_type" };
   const lower = (value) => String(value || "").toLowerCase();
-  const attr = (name) => lower(element.getAttribute(name));
-  const type = attr("type");
-  const inputMode = attr("inputmode");
-  const maxLength = "maxLength" in element ? Number(element.maxLength) : -1;
-  const autocompleteTokens = attr("autocomplete").split(/\\s+/u).filter(Boolean);
-  if (type === "password") return { sensitive: true, reason: "password_type" };
   if (autocompleteTokens.some((token) =>
     token === "current-password" ||
     token === "new-password" ||
@@ -2307,28 +2307,21 @@ function buildComputerSensitiveInputProbeCode(
   )) {
     return { sensitive: true, reason: "sensitive_autocomplete" };
   }
-  const labels = [];
-  const labelList = "labels" in element ? element.labels : null;
-  if (labelList) {
-    for (const label of Array.from(labelList)) labels.push(label.textContent || "");
-  }
-  const closestLabel = element.closest("label");
-  if (closestLabel) labels.push(closestLabel.textContent || "");
-  for (const id of attr("aria-labelledby").split(/\\s+/u).filter(Boolean)) {
-    const label = element.ownerDocument.getElementById(id);
-    if (label) labels.push(label.textContent || "");
-  }
   const hints = [
-    attr("type"),
-    attr("name"),
-    attr("id"),
-    attr("aria-label"),
-    attr("placeholder"),
-    attr("title"),
-    attr("data-testid"),
-    attr("data-test"),
-    attr("data-qa"),
-    ...labels.map(lower),
+    type,
+    inputMode,
+    await attr("name"),
+    await attr("id"),
+    await attr("aria-label"),
+    await attr("aria-description"),
+    await attr("aria-describedby"),
+    await attr("aria-labelledby"),
+    await attr("placeholder"),
+    await attr("title"),
+    await attr("data-testid"),
+    await attr("data-test"),
+    await attr("data-qa"),
+    ...locatorHints.map(lower),
   ].join(" ");
   const sensitivePatterns = [
     /\\b(?:password|passcode|passphrase)\\b/u,
@@ -2354,8 +2347,23 @@ function buildComputerSensitiveInputProbeCode(
       (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
     );
   return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
-});`,
+`,
   ].join("\n");
+}
+
+function readComputerLocatorSensitiveHints(locator: HostedComputerActLocator): string[] {
+  switch (locator.by) {
+    case "role":
+      return uniqueStrings([locator.role, locator.name]);
+    case "testId":
+      return uniqueStrings([locator.testId]);
+    case "altText":
+    case "label":
+    case "placeholder":
+    case "text":
+    case "title":
+      return uniqueStrings([locator.text]);
+  }
 }
 
 function buildComputerLocatorExpression(locator: HostedComputerActLocator): string {
