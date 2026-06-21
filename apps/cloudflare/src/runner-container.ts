@@ -537,15 +537,17 @@ export class RunnerContainer extends Container {
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     const active = this.workspaceInvocationActiveOperation;
     if (
-      !active
-      || active.userId !== input.userId
-      || active.attemptId !== input.attemptId
-      || active.leaseGeneration !== input.leaseGeneration
+      active
+      && (
+        active.userId !== input.userId
+        || active.attemptId !== input.attemptId
+        || active.leaseGeneration !== input.leaseGeneration
+      )
     ) {
-      return { kind: "not-wakeable", reason: "no-active-child" };
+      return { kind: "unknown", reason: "active-child-rejected" };
     }
 
-    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
+    if (active && this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
       let activeInContainer = true;
       try {
         activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
@@ -569,11 +571,17 @@ export class RunnerContainer extends Container {
       const response = await this.containerFetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
+          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
           method: "POST",
           signal: runtimeWakeSignal,
         },
       );
       const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      const absent = response.headers.get("x-runtime-wake-absent") === "1";
+      const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
       const pending = response.headers.get("x-runtime-wake-pending") === "1";
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
@@ -583,8 +591,10 @@ export class RunnerContainer extends Container {
           component: "container",
           details: {
             runtimeWakeAccepted: accepted,
+            runtimeWakeAbsent: absent,
+            runtimeWakeMismatch: mismatch,
             runtimeWakeStatus: response.status,
-            workspaceAttemptId: active.attemptId,
+            workspaceAttemptId: input.attemptId,
           },
           level: "warn",
           message: "Hosted execution container runtime wake was not accepted by the active child.",
@@ -595,12 +605,15 @@ export class RunnerContainer extends Container {
       if (response.ok && accepted) {
         return { action: pending ? "already_running" : "woken", kind: "accepted" };
       }
+      if (response.ok && absent) {
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          workspaceAttemptId: active.attemptId,
+          workspaceAttemptId: input.attemptId,
         },
         error,
         level: "warn",

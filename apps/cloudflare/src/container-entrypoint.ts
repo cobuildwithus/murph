@@ -76,6 +76,7 @@ import {
 const HOSTED_CONTAINER_PROCESS_START_MS = Date.now() - Math.round(process.uptime() * 1000);
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+const HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
   "/internal/deploy-codex-shell-smoke";
@@ -308,6 +309,12 @@ interface HostedContainerProcessIsolationResult {
   killedPids: number[];
 }
 
+interface HostedContainerRuntimeWakeRequest {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+}
+
 type HostedContainerCleanupStatus = "not_run" | "passed" | "failed";
 
 export async function startHostedContainerEntrypoint(input: {
@@ -324,9 +331,13 @@ export async function startHostedContainerEntrypoint(input: {
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
   let activeRuntimeWake: ((notifiedAtEpochMs?: number) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
+  let activeRuntimeWakeLeaseGeneration: string | null = null;
+  let activeRuntimeWakeUserId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  let activeRuntimeWakePendingLeaseGeneration: string | null = null;
   let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
+  let activeRuntimeWakePendingUserId: string | null = null;
   let activeWorkspaceInvocationAbort: {
     abort: (reason: Error) => void;
     attemptId: string | null;
@@ -398,18 +409,62 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
-        discardUnreadRequestBody(request);
+        let wakeRequest: HostedContainerRuntimeWakeRequest | null;
+        try {
+          wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint rejected the runtime wake request body.",
+            phase: "failed",
+          });
+          const classified = classifyRequestDecodeError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
         const wake = activeRuntimeWake;
         const notifiedAtEpochMs = Date.now();
+        let absent = false;
+        let mismatch = false;
         let pending = false;
-        let accepted = wake?.(notifiedAtEpochMs) === true;
-        if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
-          if (!activeRuntimeWakePending) {
-            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+        let accepted = false;
+        if (wakeRequest && wake !== null) {
+          mismatch = !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
+            attemptId: activeRuntimeWakeAttemptId,
+            leaseGeneration: activeRuntimeWakeLeaseGeneration,
+            userId: activeRuntimeWakeUserId,
+          });
+          accepted = !mismatch && wake(notifiedAtEpochMs) === true;
+        } else if (!wakeRequest) {
+          accepted = wake?.(notifiedAtEpochMs) === true;
+        }
+        if (
+          !accepted
+          && !mismatch
+          && wake === null
+          && activeRuntimeWakePendingAttemptId !== null
+        ) {
+          if (
+            wakeRequest
+            && !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
+              attemptId: activeRuntimeWakePendingAttemptId,
+              leaseGeneration: activeRuntimeWakePendingLeaseGeneration,
+              userId: activeRuntimeWakePendingUserId,
+            })
+          ) {
+            mismatch = true;
+          } else {
+            if (!activeRuntimeWakePending) {
+              activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+            }
+            activeRuntimeWakePending = true;
+            pending = true;
+            accepted = true;
           }
-          activeRuntimeWakePending = true;
-          pending = true;
-          accepted = true;
+        } else if (!accepted && !mismatch && wakeRequest && wake === null) {
+          absent = activeRuntimeWakePendingAttemptId === null;
         }
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -418,6 +473,8 @@ export async function startHostedContainerEntrypoint(input: {
             activeRuntimeWakePending,
             activeRuntimeWakePresent: wake !== null,
             runtimeWakeAccepted: accepted,
+            runtimeWakeAbsent: absent,
+            runtimeWakeMismatch: mismatch,
             runtimeWakePending: pending,
             workspaceAttemptId: activeRuntimeWakeAttemptId,
             workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
@@ -433,6 +490,12 @@ export async function startHostedContainerEntrypoint(input: {
         }
         if (pending) {
           response.setHeader("x-runtime-wake-pending", "1");
+        }
+        if (absent) {
+          response.setHeader("x-runtime-wake-absent", "1");
+        }
+        if (mismatch) {
+          response.setHeader("x-runtime-wake-mismatch", "1");
         }
         response.statusCode = 204;
         response.end();
@@ -703,6 +766,8 @@ export async function startHostedContainerEntrypoint(input: {
         userId: readHostedExecutionRunnerJobUserId(job),
       });
       activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
+      activeRuntimeWakePendingLeaseGeneration = readHostedContainerWorkspaceLeaseGeneration(job);
+      activeRuntimeWakePendingUserId = readHostedExecutionRunnerJobUserId(job);
       activeAbortRecord = {
         abort(reason: Error) {
           if (!containerShutdownController.signal.aborted && !invocationAbort.signal.aborted) {
@@ -733,6 +798,12 @@ export async function startHostedContainerEntrypoint(input: {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
             ? readHostedContainerWorkspaceAttemptId(job)
+            : null;
+          activeRuntimeWakeLeaseGeneration = job
+            ? readHostedContainerWorkspaceLeaseGeneration(job)
+            : null;
+          activeRuntimeWakeUserId = job
+            ? readHostedExecutionRunnerJobUserId(job)
             : null;
           runtimeWakeForRequest = sendWake;
           const pendingWake = activeRuntimeWakePending;
@@ -812,6 +883,8 @@ export async function startHostedContainerEntrypoint(input: {
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
+        activeRuntimeWakeLeaseGeneration = null;
+        activeRuntimeWakeUserId = null;
       }
       if (
         job
@@ -819,7 +892,9 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeRuntimeWakePending = false;
         activeRuntimeWakePendingAttemptId = null;
+        activeRuntimeWakePendingLeaseGeneration = null;
         activeRuntimeWakePendingNotifiedAtEpochMs = null;
+        activeRuntimeWakePendingUserId = null;
       }
       if (
         activeAbortRecord
@@ -1234,6 +1309,68 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
     leaseGeneration,
     userId,
   };
+}
+
+async function readHostedContainerRuntimeWakeRequest(
+  request: IncomingMessage,
+): Promise<HostedContainerRuntimeWakeRequest | null> {
+  const body = (await readHostedContainerInvocationRequestBody(
+    request,
+    HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES,
+  )).trim();
+  if (!body) {
+    return null;
+  }
+
+  return parseHostedContainerRuntimeWakeRequest(JSON.parse(body));
+}
+
+function parseHostedContainerRuntimeWakeRequest(
+  value: unknown,
+): HostedContainerRuntimeWakeRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Runtime wake request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const attemptId = typeof record.attemptId === "string"
+    ? record.attemptId.trim()
+    : "";
+  const leaseGeneration = typeof record.leaseGeneration === "string"
+    ? record.leaseGeneration.trim()
+    : "";
+  const userId = typeof record.userId === "string"
+    ? record.userId.trim()
+    : "";
+
+  if (!attemptId) {
+    throw new TypeError("Runtime wake request requires attemptId.");
+  }
+  if (!leaseGeneration) {
+    throw new TypeError("Runtime wake request requires leaseGeneration.");
+  }
+  if (!userId) {
+    throw new TypeError("Runtime wake request requires userId.");
+  }
+
+  return {
+    attemptId,
+    leaseGeneration,
+    userId,
+  };
+}
+
+function hostedContainerRuntimeWakeIdentityMatches(
+  expected: HostedContainerRuntimeWakeRequest,
+  actual: {
+    attemptId: string | null;
+    leaseGeneration: string | null;
+    userId: string | null;
+  },
+): boolean {
+  return actual.attemptId === expected.attemptId
+    && actual.leaseGeneration === expected.leaseGeneration
+    && actual.userId === expected.userId;
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {

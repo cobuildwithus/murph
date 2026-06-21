@@ -21,6 +21,9 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
   const result = await checkpointHostedWorkspace({
+    ...("conversationImportedSeq" in body
+      ? { conversationImportedSeq: body.conversationImportedSeq }
+      : {}),
     expectedVersion: body.expectedWorkspaceVersion,
     reason: body.reason,
     snapshotRef: body.snapshotRef,
@@ -42,6 +45,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedWorkspaceCheckpointResponse({
     checkpointed: result.status === "updated",
+    ...(result.status === "conflict"
+      ? { checkpointConflictReason: "workspace_version" }
+      : result.status === "foreground_pending"
+        ? { checkpointConflictReason: "foreground_pending" }
+        : {}),
     workspace: {
       browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
       checkpointedAt: result.workspace.checkpointedAt,

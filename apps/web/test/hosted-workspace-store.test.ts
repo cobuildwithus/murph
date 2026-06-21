@@ -151,6 +151,105 @@ describe("hosted workspace store", () => {
     });
   });
 
+  it("blocks idle shutdown checkpoints when retained conversation input is ahead of the imported seq", async () => {
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
+    };
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [{ next_seq: 3n }]);
+    const tx = createHostedWorkspaceTx({
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      conversationImportedSeq: "1",
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      snapshotRef: createBundleRef("snapshot_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      select: {
+        laneSeq: true,
+      },
+      where: expect.objectContaining({
+        lane: "conversation",
+        userId: "member_workspace_1",
+      }),
+    }));
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+  });
+
+  it("falls back to the redacted mailbox imported seq for old idle checkpoint callers", async () => {
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
+    };
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [{ next_seq: 3n }]);
+    const tx = createHostedWorkspaceTx({
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+        state: "idle",
+      },
+      snapshotRef: createBundleRef("snapshot_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+  });
+
   it("rejects non-boolean assistant context snapshot checkpoint status", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate();
     const tx = createHostedWorkspaceTx({
@@ -2016,11 +2115,48 @@ interface HostedRuntimeLogFindFirstArgs {
   };
 }
 
+interface HostedMailboxItemFindFirstArgs {
+  orderBy: {
+    laneSeq: "desc";
+  };
+  select: {
+    laneSeq: true;
+  };
+  where: {
+    createdAt: {
+      gte: Date;
+    };
+    lane: "conversation";
+    OR: Array<
+      | {
+          expiresAt: null;
+        }
+      | {
+          expiresAt: {
+            gt: Date;
+          };
+        }
+    >;
+    userId: string;
+  };
+}
+
 type HostedWorkspaceUpdateMany = (args: HostedWorkspaceUpdateManyArgs) => Promise<{ count: number }>;
 type HostedWorkspaceFindUnique = (args: HostedWorkspaceFindUniqueArgs) => Promise<HostedWorkspaceRow | null>;
 type HostedWorkspaceUpsert = (args: HostedWorkspaceUpsertArgs) => Promise<HostedWorkspaceRow>;
 type HostedRuntimeLogCreate = (args: HostedRuntimeLogCreateArgs) => Promise<HostedRuntimeLogRow>;
 type HostedRuntimeLogFindFirst = (args: HostedRuntimeLogFindFirstArgs) => Promise<{ id: string } | null>;
+type HostedMailboxItemFindFirst = (
+  args: HostedMailboxItemFindFirstArgs,
+) => Promise<{ laneSeq: bigint } | null>;
+type HostedWorkspaceExecuteRaw = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<number>;
+type HostedWorkspaceQueryRaw = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<unknown>;
 
 function buildHostedWorkspaceRow(
   overrides: Partial<HostedWorkspaceRow> = {},
@@ -2153,10 +2289,18 @@ function createHostedRuntimeLogDelegate(overrides: Partial<{
 }
 
 function createHostedWorkspaceTx(input: {
+  $executeRaw?: ReturnType<typeof vi.fn<HostedWorkspaceExecuteRaw>>;
+  $queryRaw?: ReturnType<typeof vi.fn<HostedWorkspaceQueryRaw>>;
+  hostedMailboxItem?: {
+    findFirst: ReturnType<typeof vi.fn<HostedMailboxItemFindFirst>>;
+  };
   hostedRuntimeLog?: ReturnType<typeof createHostedRuntimeLogDelegate>;
   hostedWorkspace: ReturnType<typeof createHostedWorkspaceDelegate>;
 }) {
   return Object.assign(Object.create(null), {
+    ...(input.$executeRaw ? { $executeRaw: input.$executeRaw } : {}),
+    ...(input.$queryRaw ? { $queryRaw: input.$queryRaw } : {}),
+    ...(input.hostedMailboxItem ? { hostedMailboxItem: input.hostedMailboxItem } : {}),
     hostedRuntimeLog: input.hostedRuntimeLog ?? createHostedRuntimeLogDelegate(),
     hostedWorkspace: input.hostedWorkspace,
   }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];

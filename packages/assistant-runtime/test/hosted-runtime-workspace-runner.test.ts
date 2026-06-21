@@ -217,6 +217,29 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.expectedWorkspaceVersion, "3");
   });
 
+  test("passes imported conversation seq into idle snapshot checkpoint requests", async () => {
+    const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({
+        snapshotRef: null,
+      }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_snapshot_conversation_seq",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      },
+    });
+
+    const snapshotRequest = await snapshotBuilder.createRequest({
+      conversationImportedSeq: "12",
+      reason: "idle_shutdown",
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "12",
+      },
+    });
+
+    assert.equal(snapshotRequest.conversationImportedSeq, "12");
+  });
+
   test("checkpoint builders advance expected versions after accepted checkpoints", async () => {
     const requestInput = {
       reason: "idle_shutdown",

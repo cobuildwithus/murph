@@ -1044,6 +1044,7 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
+      conversationImportedSeq: "12",
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1058,6 +1059,7 @@ describe("hosted runtime control contracts", () => {
       snapshotRef: null,
     })).toEqual({
       attemptId: "attempt_1",
+      conversationImportedSeq: "12",
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1093,6 +1095,15 @@ describe("hosted runtime control contracts", () => {
       workspace,
     })).toEqual({
       checkpointed: true,
+      workspace,
+    });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+      workspace,
+    })).toEqual({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
       workspace,
     });
     expect(parseHostedBrowserVaultReplicaPublishResponse({

@@ -16,6 +16,14 @@ export class RunnerContainer extends BaseRunnerContainer {
     await this.onActivityExpired();
     return { ok: true };
   }
+
+  async dropActiveOperationForTest(_input: { userId: string }): Promise<{ ok: true }> {
+    Object.assign(this, {
+      workspaceInvocationActiveOperation: null,
+      workspaceInvocationActiveOperationPreservedAfterTransportFailure: false,
+    });
+    return { ok: true };
+  }
 }
 
 // The hosted-local generated wrangler config omits the Workers AI binding for

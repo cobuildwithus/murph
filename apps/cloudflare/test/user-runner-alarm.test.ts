@@ -1556,6 +1556,49 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("preserves a non-wakeable accepted fence when committed-progress recovery is unknown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const onStatusRead = vi.fn(async () => {
+      throw new Error("status unavailable");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-recover-unknown",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:01:01.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      backoff_until: null,
+      wake_at: null,
+    });
+  });
+
   it("does not give a replacement start a fresh caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

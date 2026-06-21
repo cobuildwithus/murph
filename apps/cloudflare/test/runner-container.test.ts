@@ -207,7 +207,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
-  it("posts a payloadless runtime wake to the active workspace invocation", async () => {
+  it("posts an exact runtime wake to the active workspace invocation", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
     const { container, containerFetch } = createContainerDouble({
@@ -266,9 +266,51 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/runtime-wake")
     );
     expect(wakeCall?.[1]).toMatchObject({
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
-    expect(wakeCall?.[1]?.body).toBeUndefined();
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_evt_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+  });
+
+  it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+            },
+            status: 204,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+
+    const wakeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    );
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    });
   });
 
   it("ensureProcessing wakes the exact active child without starting a replacement", async () => {
@@ -397,7 +439,33 @@ describe("RunnerContainer", () => {
   });
 
   it("ensureProcessing starts work when no active child can be woken", async () => {
-    const { container, containerFetch } = createContainerDouble();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-absent": "1",
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
 
     await expect(container.ensureProcessing({
       activeRuntime: {
@@ -871,8 +939,8 @@ describe("RunnerContainer", () => {
       leaseGeneration: "10",
       userId: "member_123",
     })).resolves.toEqual({
-      kind: "not-wakeable",
-      reason: "no-active-child",
+      kind: "unknown",
+      reason: "active-child-rejected",
     });
 
     expect(containerFetch.mock.calls.some(([url]) =>

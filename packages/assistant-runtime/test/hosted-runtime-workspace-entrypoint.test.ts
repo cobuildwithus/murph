@@ -3994,6 +3994,107 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground-pending idle checkpoint responses rerun the foreground pass before checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_checkpoint_foreground_pending_001",
+        laneSeq: "1",
+      }),
+    ];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_foreground_pending",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
+                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-foreground-pending-${checkpointRequests.length}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push(`workspace.checkpoint:${request.expectedWorkspaceVersion}`);
+                checkpointRequests.push(request);
+                if (checkpointRequests.length === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_checkpoint_foreground_pending_002",
+                    laneSeq: "2",
+                  }));
+                  return {
+                    checkpointConflictReason: "foreground_pending",
+                    checkpointed: false,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_foreground_pending_001",
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_foreground_pending_002",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "4",
+        "4",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.conversationImportedSeq),
+        ["1", "2"],
+      );
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime wakes that interrupt snapshot publication rerun the foreground pass before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];

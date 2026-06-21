@@ -154,6 +154,7 @@ const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
+const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
@@ -196,7 +197,7 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
-  status: "updated" | "conflict";
+  status: "updated" | "conflict" | "foreground_pending";
   workspace: HostedWorkspaceRecord | null;
 }
 
@@ -282,6 +283,7 @@ export async function readHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
+  conversationImportedSeq?: bigint | number | string | null;
   expectedVersion: bigint | number | string;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -301,6 +303,7 @@ export async function checkpointHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
+  conversationImportedSeq?: bigint | number | string | null;
   expectedVersion: bigint | number | string;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -310,7 +313,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedWorkspaceCheckpointResult> {
-  requireAllowedString(
+  const reason = requireAllowedString(
     input.reason,
     HOSTED_WORKSPACE_CHECKPOINT_REASONS,
     "Hosted workspace checkpoint reason",
@@ -349,6 +352,30 @@ export async function checkpointHostedWorkspaceTx(input: {
       ));
   }
 
+  const conversationImportedSeq = resolveCheckpointConversationImportedSeq({
+    conversationImportedSeq: input.conversationImportedSeq,
+    redactedStatusJson: input.redactedStatusJson,
+  });
+  if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
+    const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
+      conversationImportedSeq,
+      tx: input.tx,
+      userId,
+    });
+    if (pendingConversationSeq !== null) {
+      const row = await input.tx.hostedWorkspace.findUnique({
+        where: {
+          userId,
+        },
+      });
+
+      return {
+        status: "foreground_pending",
+        workspace: row ? projectHostedWorkspace(row) : null,
+      };
+    }
+  }
+
   const updated = await input.tx.hostedWorkspace.updateMany({
     data: updateData,
     where: {
@@ -366,6 +393,84 @@ export async function checkpointHostedWorkspaceTx(input: {
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };
+}
+
+function resolveCheckpointConversationImportedSeq(input: {
+  conversationImportedSeq?: bigint | number | string | null;
+  redactedStatusJson?: Record<string, unknown> | null;
+}): bigint | null {
+  if (input.conversationImportedSeq !== undefined && input.conversationImportedSeq !== null) {
+    return normalizeBigInt(
+      input.conversationImportedSeq,
+      "Hosted workspace checkpoint conversationImportedSeq",
+    );
+  }
+
+  const value = readCheckpointRedactedConversationImportedSeq(input.redactedStatusJson);
+  return value === null
+    ? null
+    : normalizeBigInt(
+        value,
+        "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
+      );
+}
+
+function readCheckpointRedactedConversationImportedSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return null;
+  }
+  const value = redactedStatusJson["hostedMailboxConversationImportedSeq"];
+  return typeof value === "string" && /^\d+$/u.test(value) ? value : null;
+}
+
+async function readForegroundPendingConversationSeqTx(input: {
+  conversationImportedSeq: bigint;
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<bigint | null> {
+  await input.tx.$executeRaw`
+    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
+    VALUES (${input.userId}, ${"conversation"}, 1, NOW())
+    ON CONFLICT (user_id, lane) DO NOTHING
+  `;
+  await input.tx.$queryRaw`
+    SELECT next_seq
+    FROM hosted_mailbox_lane_counter
+    WHERE user_id = ${input.userId}
+      AND lane = ${"conversation"}
+    FOR UPDATE
+  `;
+
+  const now = new Date();
+  const latest = await input.tx.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "desc",
+    },
+    select: {
+      laneSeq: true,
+    },
+    where: {
+      createdAt: {
+        gte: new Date(now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS),
+      },
+      lane: "conversation",
+      OR: [
+        {
+          expiresAt: null,
+        },
+        {
+          expiresAt: {
+            gt: now,
+          },
+        },
+      ],
+      userId: input.userId,
+    },
+  });
+  const maxSeq = latest?.laneSeq ?? 0n;
+  return maxSeq > input.conversationImportedSeq ? maxSeq : null;
 }
 
 export async function publishLatestBrowserVaultReplicaRef(input: {

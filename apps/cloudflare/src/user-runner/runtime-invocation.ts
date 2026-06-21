@@ -64,6 +64,17 @@ type RuntimeAttemptLivenessProbeOutcome =
   | "inactive"
   | "mismatch"
   | "timeout";
+export type AcceptedRuntimeCompletionRecoveryResult =
+  | {
+      kind: "completed";
+      result: HostedWorkspaceInvocationResult;
+    }
+  | {
+      kind: "not_completed";
+    }
+  | {
+      kind: "unknown";
+    };
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
@@ -234,8 +245,11 @@ export class RuntimeInvocationService {
             token,
             workspaceVersion,
           });
-        if (committedResult) {
-          return committedResult;
+        if (committedResult.kind === "completed") {
+          return committedResult.result;
+        }
+        if (committedResult.kind === "unknown") {
+          throw error;
         }
       }
 
@@ -307,17 +321,17 @@ export class RuntimeInvocationService {
     token: RunnerWriteFenceToken;
     transportError?: unknown;
     workspaceVersion: string | null;
-  }): Promise<HostedWorkspaceInvocationResult | null> {
+  }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     if (input.workspaceVersion === null) {
-      return null;
+      return { kind: "not_completed" };
     }
     const committedResult =
       await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
         executionInput: input.executionInput,
         workspaceVersion: input.workspaceVersion,
       });
-    if (!committedResult) {
-      return null;
+    if (committedResult.kind !== "completed") {
+      return committedResult;
     }
 
     const completion = await this.recordRuntimeCompletionAfterInvoke({
@@ -346,13 +360,16 @@ export class RuntimeInvocationService {
       phase: "checkpoint",
       userId: input.executionInput.userId,
     });
-    return committedResult;
+    return {
+      kind: "completed",
+      result: committedResult.result,
+    };
   }
 
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
     executionInput: RuntimeInvocationInput;
     workspaceVersion: string;
-  }): Promise<HostedWorkspaceInvocationResult | null> {
+  }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     let status: HostedRuntimeWebStatusResponse;
     try {
       status = await this.input.readHostedRuntimeStatusFromWeb(
@@ -371,7 +388,7 @@ export class RuntimeInvocationService {
         phase: "failed",
         userId: input.executionInput.userId,
       });
-      return null;
+      return { kind: "unknown" };
     }
 
     if (
@@ -382,14 +399,17 @@ export class RuntimeInvocationService {
       )
       || !hostedRuntimeMailboxLagDrained(status.mailboxLag)
     ) {
-      return null;
+      return { kind: "not_completed" };
     }
 
     return {
-      nextWakeAt: status.workspace.nextWakeAt,
-      nextWakeReason: status.workspace.nextWakeReason,
-      redactedStatus: status.workspace.redactedStatus,
-      status: "idle",
+      kind: "completed",
+      result: {
+        nextWakeAt: status.workspace.nextWakeAt,
+        nextWakeReason: status.workspace.nextWakeReason,
+        redactedStatus: status.workspace.redactedStatus,
+        status: "idle",
+      },
     };
   }
 

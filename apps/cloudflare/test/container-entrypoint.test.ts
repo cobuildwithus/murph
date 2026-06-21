@@ -619,6 +619,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
@@ -628,6 +630,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: true,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: true,
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -637,6 +641,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: true,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: true,
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -646,6 +652,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -655,11 +663,106 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
       ]);
+  });
+
+  it("requires exact runtime wake identity before waking an active invocation", async () => {
+    const invocationReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    let runtimeWakeCount = 0;
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onRuntimeWakeReady?.(() => {
+          runtimeWakeCount += 1;
+          return true;
+        });
+        invocationReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_identity",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await invocationReady.promise;
+
+    const staleWakeRequests = [
+      {
+        attemptId: "attempt_stale",
+        leaseGeneration: "1",
+        userId: "u1",
+      },
+      {
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "2",
+        userId: "u1",
+      },
+      {
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "1",
+        userId: "u2",
+      },
+    ];
+    const staleWakes: Response[] = [];
+    for (const wakeRequest of staleWakeRequests) {
+      staleWakes.push(await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify(wakeRequest),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }));
+    }
+    const matchingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    for (const staleWake of staleWakes) {
+      expect(staleWake.status).toBe(204);
+      expect(staleWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(staleWake.headers.get("x-runtime-wake-mismatch")).toBe("1");
+    }
+    expect(matchingWake.status).toBe(204);
+    expect(matchingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(matchingWake.headers.get("x-runtime-wake-mismatch")).toBeNull();
+    expect(runtimeWakeCount).toBe(1);
+    expect(invocationResponse.status).toBe(200);
   });
 
   it("does not mark runtime wakes accepted when the active invocation cannot consume them", async () => {
@@ -725,6 +828,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
@@ -734,6 +839,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
