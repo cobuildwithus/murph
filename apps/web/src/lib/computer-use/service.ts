@@ -2294,8 +2294,11 @@ function buildComputerSensitiveInputProbeCode(
   if (!element) return { sensitive: false };
   const lower = (value) => String(value || "").toLowerCase();
   const attr = (name) => lower(element.getAttribute(name));
+  const type = attr("type");
+  const inputMode = attr("inputmode");
+  const maxLength = "maxLength" in element ? Number(element.maxLength) : -1;
   const autocompleteTokens = attr("autocomplete").split(/\\s+/u).filter(Boolean);
-  if (attr("type") === "password") return { sensitive: true, reason: "password_type" };
+  if (type === "password") return { sensitive: true, reason: "password_type" };
   if (autocompleteTokens.some((token) =>
     token === "current-password" ||
     token === "new-password" ||
@@ -2330,14 +2333,27 @@ function buildComputerSensitiveInputProbeCode(
   const sensitivePatterns = [
     /\\b(?:password|passcode|passphrase)\\b/u,
     /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
-    /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b/u,
+    /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b|\\b(?:verification|authentication|security)(?:code|passcode|token)\\b/u,
     /\\b(?:cvc|cvv|cvn|cid)\\b/u,
     /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
     /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
     /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
     /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
   ];
-  return { sensitive: sensitivePatterns.some((pattern) => pattern.test(hints)) };
+  if (sensitivePatterns.some((pattern) => pattern.test(hints))) {
+    return { sensitive: true, reason: "sensitive_hint" };
+  }
+  const shortCodeField =
+    /\\bcode\\b/u.test(hints) &&
+    (
+      inputMode === "numeric" ||
+      inputMode === "decimal" ||
+      inputMode === "tel" ||
+      type === "number" ||
+      type === "tel" ||
+      (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
+    );
+  return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
 });`,
   ].join("\n");
 }

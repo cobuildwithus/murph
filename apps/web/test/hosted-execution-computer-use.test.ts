@@ -2299,6 +2299,53 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-password");
   });
 
+  it("rejects short numeric code fill targets before serializing the input value", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const otpField = new FakeProbeElement({
+      attributes: {
+        "aria-label": "Code",
+        inputmode: "numeric",
+        maxlength: "6",
+        type: "text",
+      },
+    });
+    const kernel = createFakeKernel({
+      executeResultForCall(executeInput, callIndex) {
+        if (callIndex === 0) {
+          return evaluateGeneratedSensitiveProbe(executeInput.code, otpField);
+        }
+        return {
+          title: "Checkout",
+          url: "https://shop.example.test/cart",
+        };
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "fill",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Code",
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      value: "123456",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("123456");
+  });
+
   it("rejects malformed sensitive preflight results before serializing the input value", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
@@ -5609,6 +5656,10 @@ const fakeKernel = createFakeKernel();
 function createFakeKernel(input: {
   createBrowserResults?: Array<"fail" | "ok">;
   deleteBrowserResults?: Array<"fail" | "ok">;
+  executeResultForCall?: (
+    input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
+    callIndex: number,
+  ) => unknown;
   executeResults?: unknown[];
   executeResult?: unknown;
   onExecutePlaywright?: (
@@ -5664,7 +5715,10 @@ function createFakeKernel(input: {
       this.executePlaywrightInputs.push(executeInput);
       input.onExecutePlaywright?.(executeInput, callIndex);
       return {
-        result: executeResults.shift() ?? input.executeResult ?? {
+        result: input.executeResultForCall?.(executeInput, callIndex)
+          ?? executeResults.shift()
+          ?? input.executeResult
+          ?? {
           title: "Page",
           url: "https://example.test",
           visibleText: "Page text",
@@ -5672,6 +5726,62 @@ function createFakeKernel(input: {
       };
     },
   };
+}
+
+class FakeProbeElement {
+  readonly labels: Array<{ textContent: string }>;
+  readonly ownerDocument: { getElementById: (id: string) => { textContent: string } | null };
+  private readonly attributes: Record<string, string>;
+  private readonly closestLabelText: string | null;
+  private readonly labelledBy: Map<string, { textContent: string }>;
+
+  constructor(input: {
+    attributes?: Record<string, string>;
+    closestLabelText?: string | null;
+    labels?: string[];
+    labelledBy?: Record<string, string>;
+  } = {}) {
+    this.attributes = input.attributes ?? {};
+    this.closestLabelText = input.closestLabelText ?? null;
+    this.labels = (input.labels ?? []).map((textContent) => ({ textContent }));
+    this.labelledBy = new Map(
+      Object.entries(input.labelledBy ?? {}).map(([id, textContent]) => [
+        id,
+        { textContent },
+      ]),
+    );
+    this.ownerDocument = {
+      getElementById: (id: string) => this.labelledBy.get(id) ?? null,
+    };
+  }
+
+  get maxLength(): number {
+    const raw = this.getAttribute("maxlength");
+    return raw ? Number(raw) : -1;
+  }
+
+  closest(selector: string): { textContent: string } | null {
+    return selector === "label" && this.closestLabelText
+      ? { textContent: this.closestLabelText }
+      : null;
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes[name.toLowerCase()] ?? null;
+  }
+}
+
+function evaluateGeneratedSensitiveProbe(code: string, element: FakeProbeElement): unknown {
+  const body = code.match(/return await target\.evaluate\(\(node\) => \{([\s\S]*)\n\}\);/u)?.[1];
+  if (!body) {
+    throw new Error("Sensitive input probe body not found.");
+  }
+  const evaluator = new Function(
+    "node",
+    "HTMLElement",
+    body,
+  ) as (node: unknown, htmlElement: typeof FakeProbeElement) => unknown;
+  return evaluator(element, FakeProbeElement);
 }
 
 function extractGeneratedSensitivePatterns(code: string): RegExp[] {
