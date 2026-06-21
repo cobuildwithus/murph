@@ -22,6 +22,11 @@ const ACTIVE_COMPUTER_RUN_STATUSES = [
   "awaiting_user",
   "cleanup_pending",
 ] satisfies HostedComputerRunStatus[];
+const LEGACY_COMPUTER_RUN_PROFILE_KEYS = [
+  "commerce",
+  "appointments",
+  "default",
+] as const;
 const LEGACY_COMPUTER_RUN_PROFILE_KEY = "default";
 const RUNNABLE_COMPUTER_RUN_STATUSES = [
   "running",
@@ -104,6 +109,7 @@ export interface ComputerUseStore {
     expiresAt: Date;
     id: string;
     kernelProfileName: string;
+    legacyProfileKey?: string | null;
     memberId: string;
     now: Date;
     startUrl: string | null;
@@ -357,6 +363,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     expiresAt: Date;
     id: string;
     kernelProfileName: string;
+    legacyProfileKey?: string | null;
     memberId: string;
     now: Date;
     startUrl: string | null;
@@ -388,7 +395,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           kernelProfileName: input.kernelProfileName,
           lastUrl: input.startUrl,
           memberId: input.memberId,
-          profileKey: LEGACY_COMPUTER_RUN_PROFILE_KEY,
+          profileKey: normalizeLegacyComputerRunProfileKey(input.legacyProfileKey)
+            ?? LEGACY_COMPUTER_RUN_PROFILE_KEY,
         },
       });
 
@@ -1206,6 +1214,10 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     suggestedReply: run.suggestedReply,
     updatedAt: run.updatedAt,
   };
+}
+
+function normalizeLegacyComputerRunProfileKey(value: string | null | undefined): string | null {
+  return LEGACY_COMPUTER_RUN_PROFILE_KEYS.find((profileKey) => profileKey === value) ?? null;
 }
 
 function readRunCheckpointContext(

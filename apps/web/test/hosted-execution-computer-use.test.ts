@@ -1500,8 +1500,8 @@ describe("ComputerUseService", () => {
 
   it("reuses the latest stored Kernel profile when migrating a member to one profile", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const olderProfileName = "murph-test-member_123-appointments-legacy";
-    const latestProfileName = "murph-test-member_123-commerce-legacy";
+    const olderProfileName = "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
+    const latestProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
     const store = new FakeComputerUseStore({
       memberRuns: [
         createRunRecord({
@@ -1561,6 +1561,64 @@ describe("ComputerUseService", () => {
       expect.objectContaining({
         profileName: latestProfileName,
         saveChanges: true,
+      }),
+    ]);
+  });
+
+  it("ignores stored Kernel profiles from another namespace", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const productionProfileName =
+      "murph-production-member_123-commerce-a033d2c7b5d9d324e370fbba";
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-17T11:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+          id: "hcr_production",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: productionProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+        id: "hcr_production",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: productionProfileName,
+        kernelSessionId: null,
+        status: "completed",
+        updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "preview",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+
+    expect(store.run.kernelProfileName).toBe(
+      "murph-preview-member_123-f9456097997816d7d81bab13",
+    );
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        profileName: "murph-preview-member_123-f9456097997816d7d81bab13",
       }),
     ]);
   });
@@ -1831,6 +1889,57 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.createdSessionIds).toEqual([]);
     expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      status: "completed",
+    });
+  });
+
+  it("requires a profile namespace before reusing stored profile history", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const legacyProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-17T11:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+          id: "hcr_legacy",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: legacyProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+        id: "hcr_legacy",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: legacyProfileName,
+        kernelSessionId: null,
+        status: "completed",
+        updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
+    });
+    expect(kernel.createdSessionIds).toEqual([]);
     expect(store.run).toMatchObject({
       status: "completed",
     });
@@ -4704,6 +4813,42 @@ describe("PrismaComputerUseStore", () => {
       },
     });
     expect(trace).toEqual(["lock-member", "find-active-run", "create-run"]);
+  });
+
+  it("preserves a sanitized legacy profile key when creating a run", async () => {
+    const create = vi.fn(async () => createRunRecord({
+      id: "hcr_created",
+      kernelProfileName: "murph-test-member",
+    }));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerRun: {
+        create,
+        findFirst: vi.fn(async () => null),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx)),
+    };
+    const store = new PrismaComputerUseStore(prisma as never);
+
+    await store.createRun({
+      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+      id: "hcr_created",
+      kernelProfileName: "murph-test-member",
+      legacyProfileKey: "appointments",
+      memberId: "member_123",
+      now: new Date("2026-06-17T12:00:00.000Z"),
+      startUrl: null,
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        profileKey: "appointments",
+      }),
+    });
   });
 
   it("locks member computer-use availability before attaching a browser to a reserved run", async () => {

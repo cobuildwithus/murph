@@ -685,9 +685,28 @@ describe("hosted execution coverage gaps", () => {
       startUrl: "https://example.test/start",
     });
     expect(legacyStartRequest).toMatchObject({
+      legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
     });
     expect(legacyStartRequest).not.toHaveProperty("profileKey");
+    expect(parseHostedComputerStartRunRequest({
+      legacyProfileKey: "appointments",
+      startUrl: "https://example.test/start",
+    })).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
+      startUrl: "https://example.test/start",
+    });
+    expect(parseHostedComputerStartRunRequest({
+      profileKey: "unknown",
+      startUrl: "https://example.test/start",
+    })).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
+      startUrl: "https://example.test/start",
+    });
     expect(parseHostedComputerStartRunRequest({
       goal: "Legacy runner goal.",
     })).toEqual({

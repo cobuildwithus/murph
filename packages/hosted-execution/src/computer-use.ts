@@ -18,6 +18,14 @@ export const HOSTED_COMPUTER_RUN_STATUSES = [
 ] as const;
 export type HostedComputerRunStatus = (typeof HOSTED_COMPUTER_RUN_STATUSES)[number];
 
+const LEGACY_HOSTED_COMPUTER_PROFILE_KEYS = [
+  "commerce",
+  "appointments",
+  "default",
+] as const;
+type LegacyHostedComputerProfileKey =
+  (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
+
 export const HOSTED_COMPUTER_AWAITING_REASONS = [
   "login_needed",
   "payment_needed",
@@ -231,13 +239,32 @@ function isPublicComputerNavigationIpv6(value: string): boolean {
   return /^[0-9a-f:.]+$/u.test(normalized);
 }
 
-function stripLegacyHostedComputerProfileKey(value: unknown): unknown {
-  if (!isRecord(value) || !Object.prototype.hasOwnProperty.call(value, "profileKey")) {
+function rewriteLegacyHostedComputerProfileKey(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    (
+      !Object.prototype.hasOwnProperty.call(value, "profileKey") &&
+      !Object.prototype.hasOwnProperty.call(value, "legacyProfileKey")
+    )
+  ) {
     return value;
   }
 
-  const { profileKey: _profileKey, ...request } = value;
-  return request;
+  const legacyProfileKey = readLegacyHostedComputerProfileKey(value.profileKey);
+  const {
+    legacyProfileKey: _legacyProfileKey,
+    profileKey: _profileKey,
+    ...request
+  } = value;
+  return legacyProfileKey
+    ? { ...request, legacyProfileKey }
+    : request;
+}
+
+function readLegacyHostedComputerProfileKey(
+  value: unknown,
+): LegacyHostedComputerProfileKey | null {
+  return LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.find((key) => key === value) ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -259,9 +286,10 @@ export const hostedComputerDeliveryContextSchema = z
   .strict();
 
 export const hostedComputerStartRunRequestSchema = z.preprocess(
-  stripLegacyHostedComputerProfileKey,
+  rewriteLegacyHostedComputerProfileKey,
   z.object({
     goal: z.string().trim().min(1).max(2_000).optional(),
+    legacyProfileKey: z.enum(LEGACY_HOSTED_COMPUTER_PROFILE_KEYS).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),

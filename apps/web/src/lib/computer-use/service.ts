@@ -45,6 +45,11 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
+const LEGACY_HOSTED_COMPUTER_PROFILE_KEYS = [
+  "commerce",
+  "appointments",
+  "default",
+] as const;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
@@ -141,6 +146,7 @@ export class ComputerUseService {
   }
 
   async startRun(input: {
+    legacyProfileKey?: string | null;
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
@@ -154,6 +160,7 @@ export class ComputerUseService {
   }
 
   private async startRunWithStore(input: {
+    legacyProfileKey?: string | null;
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
@@ -223,6 +230,7 @@ export class ComputerUseService {
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
         kernelProfileName,
+        legacyProfileKey: input.legacyProfileKey ?? null,
         memberId: input.memberId,
         now,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
@@ -1509,8 +1517,13 @@ export class ComputerUseService {
     fromStoredRun: boolean;
     name: string;
   }> {
+    const namespace = requireKernelProfileNamespace(this.env);
     const storedProfileName = findLatestStoredKernelProfileName(
-      await input.store.listMemberRuns({ memberId: input.memberId }),
+      {
+        memberId: input.memberId,
+        namespace,
+        runs: await input.store.listMemberRuns({ memberId: input.memberId }),
+      },
     );
     if (storedProfileName) {
       return {
@@ -1521,9 +1534,9 @@ export class ComputerUseService {
 
     return {
       fromStoredRun: false,
-      name: buildKernelProfileName({
-        env: this.env,
+      name: buildKernelProfileNameForNamespace({
         memberId: input.memberId,
+        namespace,
       }),
     };
   }
@@ -2714,23 +2727,49 @@ function buildKernelProfileName(input: {
   memberId: string;
 }): string {
   const namespace = requireKernelProfileNamespace(input.env);
-  const namespaceSegment = normalizeKernelNameSegment(
+  return buildKernelProfileNameForNamespace({
+    memberId: input.memberId,
     namespace,
+  });
+}
+
+function buildKernelProfileNameForNamespace(input: {
+  memberId: string;
+  namespace: string;
+}): string {
+  const namespaceSegment = normalizeKernelNameSegment(
+    input.namespace,
   );
   const memberSegment = normalizeKernelNameSegment(input.memberId);
-  const hash = shortHash(`${namespace}:${input.memberId}`);
+  const hash = shortHash(`${input.namespace}:${input.memberId}`);
   return `murph-${namespaceSegment}-${memberSegment}-${hash}`.slice(0, 255);
 }
 
 function findLatestStoredKernelProfileName(
-  runs: readonly ComputerRunRecord[],
+  input: {
+    memberId: string;
+    namespace: string;
+    runs: readonly ComputerRunRecord[];
+  },
 ): string | null {
+  const allowedProfileNames = new Set([
+    buildKernelProfileNameForNamespace({
+      memberId: input.memberId,
+      namespace: input.namespace,
+    }),
+    ...LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
+      buildLegacyKernelProfileName({
+        memberId: input.memberId,
+        namespace: input.namespace,
+        profileKey,
+      })),
+  ]);
   let latestProfileName: string | null = null;
   let latestUpdatedAtMs = Number.NEGATIVE_INFINITY;
 
-  for (const run of runs) {
+  for (const run of input.runs) {
     const profileName = run.kernelProfileName.trim();
-    if (!profileName) {
+    if (!allowedProfileNames.has(profileName)) {
       continue;
     }
     const updatedAtMs = run.updatedAt.getTime();
@@ -2741,6 +2780,18 @@ function findLatestStoredKernelProfileName(
   }
 
   return latestProfileName;
+}
+
+function buildLegacyKernelProfileName(input: {
+  memberId: string;
+  namespace: string;
+  profileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
+}): string {
+  const namespaceSegment = normalizeKernelNameSegment(input.namespace);
+  const memberSegment = normalizeKernelNameSegment(input.memberId);
+  const profileSegment = normalizeKernelNameSegment(input.profileKey);
+  const hash = shortHash(`${input.namespace}:${input.memberId}:${input.profileKey}`);
+  return `murph-${namespaceSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
 }
 
 function buildKernelProfileNamesForAccountDeletion(input: {
