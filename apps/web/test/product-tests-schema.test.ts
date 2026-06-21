@@ -35,6 +35,10 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/apply-reviewed-serving-grams.sql", import.meta.url),
       "utf8",
     );
+    const loadReviewedServingGramsOverlaySql = await readFile(
+      new URL("../sql/product-tests/load-reviewed-serving-grams-overlay.sql", import.meta.url),
+      "utf8",
+    );
     const importProductTestRemapsSql = await readFile(
       new URL("../sql/product-tests/import-product-test-remaps.sql", import.meta.url),
       "utf8",
@@ -124,11 +128,9 @@ describe("product test contaminant schema", () => {
 
     expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_import");
     expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_options");
-    expect(applyReviewedServingGramsSql).toContain("reviewed_serving_grams_entity_type");
+    expect(applyReviewedServingGramsSql).toContain("\\ir load-reviewed-serving-grams-overlay.sql");
     expect(applyReviewedServingGramsSql).toContain("DROP TABLE serving_grams_reviewed_overlay_import");
     expect(applyReviewedServingGramsSql).not.toContain("ON COMMIT DROP");
-    expect(applyReviewedServingGramsSql).toContain("reviewed-serving-grams.tsv");
-    expect(applyReviewedServingGramsSql).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(applyReviewedServingGramsSql).toContain("to_regclass('public.foods')");
     expect(applyReviewedServingGramsSql).toContain("to_regclass('public.supplements')");
     expect(applyReviewedServingGramsSql).toContain(
@@ -144,6 +146,19 @@ describe("product test contaminant schema", () => {
       "options.entity_type IS NULL OR options.entity_type = 'supplement'",
     );
     expect(applyReviewedServingGramsSql).not.toContain("product_tests");
+
+    expect(loadReviewedServingGramsOverlaySql).toContain("serving_grams_reviewed_overlay_import");
+    expect(loadReviewedServingGramsOverlaySql).toContain("serving_grams_reviewed_overlay_options");
+    expect(loadReviewedServingGramsOverlaySql).toContain("reviewed_serving_grams_entity_type");
+    expect(loadReviewedServingGramsOverlaySql).toContain("reviewed-serving-grams.tsv");
+    expect(loadReviewedServingGramsOverlaySql).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+    expect(loadReviewedServingGramsOverlaySql).toContain(
+      "reviewed serving grams overlay prepared zero rows",
+    );
+    expect(loadReviewedServingGramsOverlaySql).toContain(
+      "duplicate reviewed serving grams overlay label",
+    );
+    expect(loadReviewedServingGramsOverlaySql).not.toContain("product_tests");
   });
 
   it("keeps serving gram imports strict and convergent", async () => {
@@ -187,9 +202,10 @@ describe("product test contaminant schema", () => {
     expect(fdcApplyPreparedSql).toContain(
       "serving_grams = EXCLUDED.serving_grams",
     );
-    expect(fdcApplyPreparedSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+    expect(fdcApplyPreparedSql).toContain("\\ir ../product-tests/load-reviewed-serving-grams-overlay.sql");
     expect(fdcApplyPreparedSql).toContain("\\set reviewed_serving_grams_entity_type food");
     expect(fdcApplyPreparedSql).toContain("\\unset reviewed_serving_grams_entity_type");
+    expect(fdcApplyPreparedSql).not.toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
     expect(fdcApplyPreparedSql).not.toContain(
       "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
     );
@@ -208,10 +224,18 @@ describe("product test contaminant schema", () => {
     expect(fdcApplyPreparedSql).toContain(
       "data_origin IN ('usda_branded', 'usda_foundation', 'usda_sr_legacy', 'usda_fndds')",
     );
+    expect(fdcApplyPreparedSql.indexOf("\\ir ../product-tests/load-reviewed-serving-grams-overlay.sql")).toBeLessThan(
+      fdcApplyPreparedSql.indexOf("INSERT INTO foods"),
+    );
+    expect(fdcApplyPreparedSql.indexOf("FROM serving_grams_reviewed_overlay_import reviewed")).toBeLessThan(
+      fdcApplyPreparedSql.indexOf("INSERT INTO foods"),
+    );
+    expect(fdcApplyPreparedSql).not.toMatch(
+      /BEGIN;[\s\S]*INSERT INTO foods[\s\S]*COMMIT;/u,
+    );
 
     for (const labelImportSql of [
       fdcImportSql,
-      fdcApplyPreparedSql,
       dsldImportSql,
       dailymedImportSql,
     ]) {

@@ -45,12 +45,26 @@ BEGIN
   END IF;
 END $$;
 
+\set reviewed_serving_grams_entity_type food
+\ir ../product-tests/load-reviewed-serving-grams-overlay.sql
+\unset reviewed_serving_grams_entity_type
+
+-- Validate reviewed rows before writes, then put exact reviewed values into
+-- staging so the batched upserts keep their bounded commit behavior.
+UPDATE foods_prepared
+SET serving_grams = reviewed.serving_grams
+FROM serving_grams_reviewed_overlay_import reviewed
+WHERE reviewed.entity_type = 'food'
+  AND foods_prepared.id = reviewed.label_id
+  AND foods_prepared.serving_grams IS DISTINCT FROM reviewed.serving_grams;
+
+DROP TABLE serving_grams_reviewed_overlay_import;
+DROP TABLE serving_grams_reviewed_overlay_options;
+
 ANALYZE foods_prepared;
 
 -- Generic origins first (small), then branded in four modulo batches to keep
 -- every statement bounded. Re-runs are safe: same-source upserts.
-BEGIN;
-
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
@@ -208,9 +222,3 @@ SELECT
   count(*) FILTER (WHERE upc IS NULL) AS null_upc_rows,
   count(*) FILTER (WHERE brand IS NULL) AS null_brand_rows
 FROM foods;
-
-\set reviewed_serving_grams_entity_type food
-\ir ../product-tests/apply-reviewed-serving-grams.sql
-\unset reviewed_serving_grams_entity_type
-
-COMMIT;
