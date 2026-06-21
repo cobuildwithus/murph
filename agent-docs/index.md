@@ -17,6 +17,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-04-26 |
+| `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace file-count invariant for restored runtime write paths, checkpoint/restore cost, and compact side-effect storage choices. | Hosted workspace checkpoint/restore contract | High | 2026-06-21 |
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-05-13 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-05-13 |
