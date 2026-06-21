@@ -18,13 +18,6 @@ export const HOSTED_COMPUTER_RUN_STATUSES = [
 ] as const;
 export type HostedComputerRunStatus = (typeof HOSTED_COMPUTER_RUN_STATUSES)[number];
 
-export const HOSTED_COMPUTER_PROFILE_KEYS = [
-  "commerce",
-  "appointments",
-  "default",
-] as const;
-export type HostedComputerProfileKey = (typeof HOSTED_COMPUTER_PROFILE_KEYS)[number];
-
 export const HOSTED_COMPUTER_AWAITING_REASONS = [
   "login_needed",
   "payment_needed",
@@ -238,6 +231,19 @@ function isPublicComputerNavigationIpv6(value: string): boolean {
   return /^[0-9a-f:.]+$/u.test(normalized);
 }
 
+function stripLegacyHostedComputerProfileKey(value: unknown): unknown {
+  if (!isRecord(value) || !Object.prototype.hasOwnProperty.call(value, "profileKey")) {
+    return value;
+  }
+
+  const { profileKey: _profileKey, ...request } = value;
+  return request;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const hostedComputerNavigationUrlSchema = z
   .string()
   .url()
@@ -252,17 +258,18 @@ export const hostedComputerDeliveryContextSchema = z
   })
   .strict();
 
-export const hostedComputerStartRunRequestSchema = z
-  .object({
+export const hostedComputerStartRunRequestSchema = z.preprocess(
+  stripLegacyHostedComputerProfileKey,
+  z.object({
     goal: z.string().trim().min(1).max(2_000).optional(),
-    profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default("default"),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
-  .strict()
-  .transform(({ goal: _goal, ...request }) => request);
+    .strict()
+    .transform(({ goal: _goal, ...request }) => request),
+);
 
 export const hostedComputerObserveRequestSchema = z.object({}).strict();
 

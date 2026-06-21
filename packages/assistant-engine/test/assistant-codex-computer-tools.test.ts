@@ -89,7 +89,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("sends start-run requests without model-supplied resume evidence", async () => {
+  it("strips stale start-run profile keys and model-supplied resume evidence", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -97,7 +97,6 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,
@@ -115,24 +114,40 @@ describe("murph computer dynamic tools", () => {
       });
     });
 
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        profileKey: "appointments",
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: {
+          conversationId: "model-authored-conversation",
+          recipientKey: "model-authored-recipient",
+        },
+        resumeRunId: null,
+        startUrl: null,
+      },
+      tool: "computer_start_run",
+    }));
+
+    if (!request || request.kind !== "computer-start-run") {
+      throw new Error("Expected stale profileKey to be stripped from start-run input.");
+    }
+
+    expect(request.args).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: {
+        conversationId: "model-authored-conversation",
+        recipientKey: "model-authored-recipient",
+      },
+      resumeRunId: null,
+      startUrl: null,
+    });
+
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
-      request: {
-        args: {
-          profileKey: "appointments",
-          resumeAfterMailboxItemId: null,
-          resumeDeliveryContext: {
-            conversationId: "model-authored-conversation",
-            recipientKey: "model-authored-recipient",
-          },
-          resumeRunId: null,
-          startUrl: null,
-        },
-        kind: "computer-start-run",
-      },
+      request,
     });
 
     expect(result.rpcResult.success).toBe(true);
@@ -146,7 +161,6 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
           conversationId: "conversation-123",
@@ -180,7 +194,6 @@ describe("murph computer dynamic tools", () => {
       }),
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: "model_supplied_mailbox_item",
           resumeDeliveryContext: {
             conversationId: "model-authored-conversation",
@@ -209,7 +222,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: null,
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: null,
           resumeDeliveryContext: null,
           resumeRunId: null,

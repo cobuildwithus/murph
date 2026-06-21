@@ -127,7 +127,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
 - `HostedComputerRun` and `HostedComputerHandoff`
-  own run-scoped Kernel profile names, resumable run state, and durable
+  own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
   runs resume only after a newer hosted `conversation.message` mailbox item for
@@ -205,7 +205,7 @@ Required when hosted computer-use is enabled:
 - `KERNEL_API_KEY`
 - `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
   boundary. Keep production stable; previews should use a deployment/branch
-  namespace or disable persistent profiles.
+  namespace or disable persistent computer-use profiles.
 - `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
   list of allowed Kernel live-view origins for handoff iframes
 

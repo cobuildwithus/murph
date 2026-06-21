@@ -1,7 +1,6 @@
 import { lookup as lookupDns } from "node:dns/promises";
 
 import {
-  HOSTED_COMPUTER_PROFILE_KEYS,
   isHostedComputerIpLiteral,
   isHostedComputerNavigationUrl,
   isHostedComputerPublicIpAddress,
@@ -10,7 +9,6 @@ import {
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
-  type HostedComputerProfileKey,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -144,7 +142,6 @@ export class ComputerUseService {
 
   async startRun(input: {
     memberId: string;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
@@ -158,7 +155,6 @@ export class ComputerUseService {
 
   private async startRunWithStore(input: {
     memberId: string;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
@@ -166,23 +162,20 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-    await this.expireStaleActiveRunsForProfileKey({
+    await this.expireStaleActiveRunsForMember({
       memberId: input.memberId,
       now,
-      profileKey: input.profileKey,
       store,
     });
-    let activeRun = await store.findActiveRunForProfileKey({
+    let activeRun = await store.findActiveRunForMember({
       memberId: input.memberId,
       now,
-      profileKey: input.profileKey,
     });
 
     if (input.resumeRunId) {
       return await this.resumeAwaitingRunById({
         memberId: input.memberId,
         now,
-        profileKey: input.profileKey,
         resumeAfterMailboxItemId: input.resumeAfterMailboxItemId ?? null,
         resumeDeliveryContext: input.resumeDeliveryContext ?? null,
         runId: input.resumeRunId,
@@ -200,10 +193,9 @@ export class ComputerUseService {
         if (recovery === "busy") {
           throw browserProvisioningInProgressError();
         }
-        activeRun = await store.findActiveRunForProfileKey({
+        activeRun = await store.findActiveRunForMember({
           memberId: input.memberId,
           now,
-          profileKey: input.profileKey,
         });
         if (!activeRun) {
           return await this.startRunWithStore(input, store);
@@ -216,7 +208,6 @@ export class ComputerUseService {
     const kernelProfileName = buildKernelProfileName({
       env: this.env,
       memberId: input.memberId,
-      profileKey: input.profileKey,
     });
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
@@ -233,7 +224,6 @@ export class ComputerUseService {
         kernelProfileName,
         memberId: input.memberId,
         now,
-        profileKey: input.profileKey,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
       });
       if (!createResult.created) {
@@ -1311,7 +1301,6 @@ export class ComputerUseService {
   private async resumeAwaitingRunById(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId: string | null;
     resumeDeliveryContext: HostedComputerDeliveryContext | null;
     runId: string;
@@ -1322,13 +1311,6 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     });
-
-    if (run.profileKey !== input.profileKey) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
-        message: "Computer run belongs to a different browser profile.",
-      });
-    }
 
     if (run.expiresAt <= input.now && (run.status === "running" || run.status === "awaiting_user")) {
       if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -1453,14 +1435,13 @@ export class ComputerUseService {
     return runHandle(resumed, true);
   }
 
-  private async expireStaleActiveRunsForProfileKey(input: {
+  private async expireStaleActiveRunsForMember(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     store?: ComputerUseStore;
   }): Promise<void> {
     const store = input.store ?? this.store;
-    const staleRuns = await store.listStaleActiveRunsForProfileKey({
+    const staleRuns = await store.listStaleActiveRunsForMember({
       ...input,
       limit: COMPUTER_CLEANUP_BATCH_SIZE,
     });
@@ -2703,16 +2684,14 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
 function buildKernelProfileName(input: {
   env: EnvSource;
   memberId: string;
-  profileKey: HostedComputerProfileKey;
 }): string {
   const namespace = requireKernelProfileNamespace(input.env);
   const namespaceSegment = normalizeKernelNameSegment(
     namespace,
   );
   const memberSegment = normalizeKernelNameSegment(input.memberId);
-  const profileSegment = normalizeKernelNameSegment(input.profileKey);
-  const hash = shortHash(`${namespace}:${input.memberId}:${input.profileKey}`);
-  return `murph-${namespaceSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
+  const hash = shortHash(`${namespace}:${input.memberId}`);
+  return `murph-${namespaceSegment}-${memberSegment}-${hash}`.slice(0, 255);
 }
 
 function buildKernelProfileNamesForAccountDeletion(input: {
@@ -2724,12 +2703,10 @@ function buildKernelProfileNamesForAccountDeletion(input: {
     const shouldDeleteDeterministicProfiles =
       input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
     const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-          buildKernelProfileName({
-            env: input.env,
-            memberId: input.memberId,
-            profileKey,
-          }))
+      ? [buildKernelProfileName({
+          env: input.env,
+          memberId: input.memberId,
+        })]
       : [];
 
     return uniqueStrings([

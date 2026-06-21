@@ -273,7 +273,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       goal: "Book a dentist appointment.",
-      profileKey: "appointments",
       startUrl: "https://example.test",
       taskKind: "appointment",
     },
@@ -703,7 +702,6 @@ describe("handleRunnerOutboundRequest", () => {
       new Request(`http://web-control.worker${HOSTED_COMPUTER_RUNS_PATH}`, {
         body: JSON.stringify({
           goal: "Book a dentist appointment.",
-          profileKey: "appointments",
           startUrl: "https://example.test",
           taskKind: "appointment",
         }),

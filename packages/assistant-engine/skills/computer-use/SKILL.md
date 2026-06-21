@@ -16,10 +16,8 @@ verified on the site, or the run is paused/finished with a clear blocker.
 
 ## Tools
 
-1. `murph.computer_start_run` starts or resumes a run. Pick `profileKey:
-   "commerce"` for shopping, `profileKey: "appointments"` for booking, and
-   `profileKey: "default"` when neither applies. `startUrl` is only a first-page
-   convenience.
+1. `murph.computer_start_run` starts or resumes a run in the member's single
+   persistent browser session. `startUrl` is only a first-page convenience.
 2. `murph.computer_observe` reads the current URL, title, and visible text. Use
    it after starting, resuming, or any action where page state is needed.
 3. `murph.computer_act` runs one bounded browser action against the current page.
