@@ -1226,7 +1226,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "objectFetchMs",
         "decryptMs",
         "archiveExtractMs",
-        "restorePreflightMs",
         "durableRootReplaceMs",
         "cleanupMs",
         "extractMs",

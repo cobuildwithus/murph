@@ -307,7 +307,6 @@ export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   objectFetchMs?: number;
   decryptMs?: number;
   archiveExtractMs?: number;
-  restorePreflightMs?: number;
   durableRootReplaceMs?: number;
   cleanupMs?: number;
   extractMs?: number;

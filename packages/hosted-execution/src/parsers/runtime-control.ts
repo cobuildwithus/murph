@@ -833,7 +833,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "objectFetchMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "decryptMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "archiveExtractMs", restoreLabel),
-      ...requireOptionalNonNegativeInteger(restore, "restorePreflightMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "durableRootReplaceMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "cleanupMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
