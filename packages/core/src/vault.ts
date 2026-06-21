@@ -5,7 +5,9 @@ import {
   safeParseContract,
   type ContractSchema,
   inboxAttachmentRetentionRecordSchema,
+  inboxCaptureRecordSchema,
   type InboxAttachmentRetentionRecord,
+  type InboxCaptureRecord,
   type RawImportManifest,
   type VaultFamilyId,
   type VaultFrontmatterFamilyDescriptor,
@@ -563,6 +565,8 @@ function resolveJsonlFamilyPostValidator(
         );
     case "events":
       return async (record) => validateEventRecordReferences(vaultRoot, record);
+    case "inboxCaptures":
+      return async (record) => validateInboxCaptureRecordReferences(vaultRoot, record);
     default:
       return undefined;
   }
@@ -636,9 +640,6 @@ async function validateExistingVaultFile(
     const resolved = resolveVaultPath(vaultRoot, relativePath);
 
     if (!(await pathExists(resolved.absolutePath))) {
-      if (await hasExpiredInboxRawContentRecord(vaultRoot, relativePath)) {
-        return [];
-      }
       return [validationIssue(code, message, relativePath)];
     }
   } catch (error) {
@@ -654,13 +655,17 @@ async function validateExistingVaultFile(
   return [];
 }
 
-async function hasExpiredInboxRawContentRecord(
+async function hasExpiredInboxCaptureAttachmentRecord(
   vaultRoot: string,
-  relativePath: string,
+  input: {
+    attachmentId: string;
+    captureId: string;
+    storedPath: string;
+  },
 ): Promise<boolean> {
   let normalizedRelativePath: string;
   try {
-    normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+    normalizedRelativePath = normalizeRelativeVaultPath(input.storedPath);
   } catch {
     return false;
   }
@@ -690,6 +695,8 @@ async function hasExpiredInboxRawContentRecord(
       if (
         result.success &&
         result.data.reason === "inbox_media_retention" &&
+        result.data.captureId === input.captureId &&
+        result.data.attachmentId === input.attachmentId &&
         result.data.storedPath === normalizedRelativePath
       ) {
         return true;
@@ -698,6 +705,47 @@ async function hasExpiredInboxRawContentRecord(
   }
 
   return false;
+}
+
+async function validateInboxCaptureRecordReferences(
+  vaultRoot: string,
+  record: UnknownRecord,
+): Promise<ValidationIssue[]> {
+  const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record);
+  if (!result.success) {
+    return [];
+  }
+
+  const capture = result.data;
+  const issues: ValidationIssue[] = [];
+  for (const attachment of capture.attachments) {
+    if (!attachment.storedPath) {
+      continue;
+    }
+
+    const referenceIssues = await validateExistingVaultFile(
+      vaultRoot,
+      attachment.storedPath,
+      "RAW_REFERENCE_MISSING",
+      `Inbox capture attachment "${attachment.storedPath}" is missing.`,
+    );
+    if (referenceIssues.length === 0) {
+      continue;
+    }
+    if (
+      await hasExpiredInboxCaptureAttachmentRecord(vaultRoot, {
+        attachmentId: attachment.attachmentId,
+        captureId: capture.captureId,
+        storedPath: attachment.storedPath,
+      })
+    ) {
+      continue;
+    }
+
+    issues.push(...referenceIssues);
+  }
+
+  return issues;
 }
 
 async function validateAssessmentRecordReferences(

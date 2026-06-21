@@ -14,6 +14,9 @@ import {
   runCanonicalWrite,
 } from "@murphai/core";
 import {
+  persistCanonicalInboxCapture,
+} from "@murphai/inboxd";
+import {
   readAssistantInputEvent,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -607,8 +610,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const suppliedWorkspace = createWorkspaceState({ version: "0" });
 
     try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -718,6 +719,102 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, "2026-04-27T00:02:00.000Z");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("carries inbox media retention wake through the idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const recordedAt = new Date(Date.now() - 13 * dayMs).toISOString();
+    const expectedRetentionWakeAt = new Date(Date.parse(recordedAt) + 14 * dayMs).toISOString();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_retention_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "2".repeat(64),
+                key: "users/bundles/member-synthetic/retention-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            await persistCanonicalInboxCapture({
+              vaultRoot,
+              captureId: "cap_workspace_retention_wake",
+              eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V1",
+              storedAt: recordedAt,
+              input: {
+                source: "telegram",
+                externalId: "msg-workspace-retention-wake",
+                accountId: "self",
+                thread: {
+                  id: "thread-workspace-retention-wake",
+                  isDirect: true,
+                },
+                actor: {
+                  isSelf: false,
+                },
+                occurredAt: recordedAt,
+                receivedAt: recordedAt,
+                text: "fresh media",
+                attachments: [
+                  {
+                    kind: "audio",
+                    mime: "audio/mp4",
+                    fileName: "voice.m4a",
+                    data: Buffer.from("audio-bytes"),
+                  },
+                ],
+                raw: {},
+              },
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, expectedRetentionWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, expectedRetentionWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }

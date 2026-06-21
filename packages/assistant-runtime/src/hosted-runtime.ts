@@ -1554,6 +1554,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
           continue;
         }
+        const idleCheckpointWake = selectEarliestHostedRuntimeWake([
+          {
+            at: accumulatedProjection.nextWakeAt,
+            reason: accumulatedProjection.nextWakeReason,
+          },
+          {
+            at: idleMaintenance.nextWakeAt ?? null,
+            reason: idleMaintenance.nextWakeReason ?? null,
+          },
+        ]);
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
@@ -1561,8 +1571,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             assertRuntimeNotAborted,
             checkpointRequestBuilder,
             expectedUserId: input.request.userId,
-            nextWakeAt: accumulatedProjection.nextWakeAt,
-            nextWakeReason: accumulatedProjection.nextWakeReason,
+            nextWakeAt: idleCheckpointWake.nextWakeAt,
+            nextWakeReason: idleCheckpointWake.nextWakeReason,
             issueExportPort: runtime.platform.issueExportPort ?? null,
             redactedStatus: accumulatedProjection.redactedStatus,
             runtimeAbortSignal: runtimeAbortController.signal,

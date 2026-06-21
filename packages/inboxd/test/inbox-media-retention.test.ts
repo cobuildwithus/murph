@@ -350,6 +350,8 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   });
 
   assert.equal(result.expiredAttachments, 1);
+  assert.equal(result.hasMoreEligibleAttachments, false);
+  assert.equal(result.nextEligibleAt, "2026-07-05T00:00:00.001Z");
   assert.deepEqual(result.records.map((record) => record.storedPath), [duplicatePath]);
   assert.equal(await fileExists(vaultRoot, freshPath), true);
   assert.equal(await fileExists(vaultRoot, durablePath), true);
@@ -407,6 +409,8 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
     vaultRoot,
   });
   assert.equal(firstPass.expiredAttachments, 1);
+  assert.equal(firstPass.hasMoreEligibleAttachments, true);
+  assert.equal(firstPass.nextEligibleAt, null);
   assert.equal(await fileExists(vaultRoot, firstPath), false);
   assert.equal(await fileExists(vaultRoot, secondPath), true);
 
@@ -416,6 +420,8 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
     vaultRoot,
   });
   assert.equal(secondPass.expiredAttachments, 1);
+  assert.equal(secondPass.hasMoreEligibleAttachments, false);
+  assert.equal(secondPass.nextEligibleAt, null);
   assert.equal(await fileExists(vaultRoot, secondPath), false);
 });
 

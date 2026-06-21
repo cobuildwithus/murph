@@ -46,6 +46,8 @@ export interface RunInboxMediaRetentionInput {
 export interface InboxMediaRetentionResult {
   expiredAttachments: number;
   expiredBytes: number;
+  hasMoreEligibleAttachments: boolean;
+  nextEligibleAt: string | null;
   records: InboxAttachmentRetentionRecord[];
 }
 
@@ -67,17 +69,26 @@ export async function runInboxMediaRetention(
   const cutoffMs = Date.parse(now) - INBOX_MEDIA_RETENTION_WINDOW_MS;
   const protectedAttachmentIds = new Set(input.protectedAttachmentIds ?? []);
   const protectedStoredPaths = normalizeProtectedStoredPaths(input.protectedStoredPaths ?? []);
-  const [captureRecords, durableRawInboxRefs] = await Promise.all([
+  const [captureRecords, durableRawInboxRefs, initialRetentionRecords] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot),
     listDurableRawInboxReferences(input.vaultRoot),
+    listInboxAttachmentRetentionRecords(input.vaultRoot),
   ]);
+  const initiallyRetainedAttachmentIds = new Set(
+    initialRetentionRecords.map((record) => record.attachmentId),
+  );
+  const initiallyRetainedStoredPaths = new Set(
+    initialRetentionRecords.map((record) => record.storedPath),
+  );
   const candidates: InboxMediaRetentionCandidate[] = [];
+  let hasMoreEligibleAttachments = false;
+  let nextEligibleAt: string | null = null;
 
   captureLoop:
   for (const capture of captureRecords) {
     throwIfRetentionAborted(input.signal);
     const recordedAtMs = Date.parse(capture.recordedAt);
-    if (!Number.isFinite(recordedAtMs) || recordedAtMs > cutoffMs) {
+    if (!Number.isFinite(recordedAtMs)) {
       continue;
     }
 
@@ -95,6 +106,19 @@ export async function runInboxMediaRetention(
         continue;
       }
 
+      const alreadyRetained =
+        initiallyRetainedAttachmentIds.has(attachment.attachmentId) ||
+        initiallyRetainedStoredPaths.has(storedPath);
+      if (recordedAtMs > cutoffMs) {
+        if (!alreadyRetained) {
+          nextEligibleAt = selectEarliestRetentionWake(
+            nextEligibleAt,
+            new Date(recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString(),
+          );
+        }
+        continue;
+      }
+
       const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
       if (
         integrity.kind !== "ok" ||
@@ -104,19 +128,23 @@ export async function runInboxMediaRetention(
         continue;
       }
 
+      if (candidates.length >= maxAttachments) {
+        hasMoreEligibleAttachments = true;
+        break captureLoop;
+      }
       candidates.push({
         attachment,
         capture,
         storedPath,
       });
-      if (candidates.length >= maxAttachments) {
-        break captureLoop;
-      }
     }
   }
 
   if (candidates.length === 0) {
-    return emptyRetentionResult();
+    return emptyRetentionResult({
+      hasMoreEligibleAttachments,
+      nextEligibleAt,
+    });
   }
 
   return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
@@ -182,31 +210,39 @@ export async function runInboxMediaRetention(
       }
 
       if (storedPathsToDelete.length === 0) {
-        return emptyRetentionResult();
+        return emptyRetentionResult({
+          hasMoreEligibleAttachments,
+          nextEligibleAt,
+        });
       }
 
       const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
-      await runCanonicalWrite({
-        vaultRoot: input.vaultRoot,
-        operationType: "inbox_media_retention",
-        summary: `Delete ${storedPathsToDelete.length} raw inbox media attachment${storedPathsToDelete.length === 1 ? "" : "s"}.`,
-        occurredAt: now,
-        mutate: async ({ batch }) => {
-          for (const record of records) {
-            await batch.stageJsonlAppend(
-              buildInboxAttachmentRetentionLedgerPath(record.purgedAt),
-              `${JSON.stringify(record)}\n`,
-            );
-          }
-          for (const storedPath of storedPathsToDelete) {
-            await batch.stageDelete(storedPath, { allowRaw: true });
-          }
-        },
-      });
+      if (records.length > 0) {
+        await runCanonicalWrite({
+          vaultRoot: input.vaultRoot,
+          operationType: "inbox_media_retention",
+          summary: `Record ${records.length} raw inbox media attachment expiration${records.length === 1 ? "" : "s"}.`,
+          occurredAt: now,
+          mutate: async ({ batch }) => {
+            for (const record of records) {
+              await batch.stageJsonlAppend(
+                buildInboxAttachmentRetentionLedgerPath(record.purgedAt),
+                `${JSON.stringify(record)}\n`,
+              );
+            }
+          },
+        });
+      }
+
+      for (const storedPath of storedPathsToDelete) {
+        await deleteVaultFileIfPresent(input.vaultRoot, storedPath, input.signal);
+      }
 
       return {
         expiredAttachments: records.length,
         expiredBytes,
+        hasMoreEligibleAttachments,
+        nextEligibleAt,
         records,
       };
     } finally {
@@ -385,12 +421,28 @@ function normalizeRetentionBatchSize(value: number | undefined): number {
   return DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE;
 }
 
-function emptyRetentionResult(): InboxMediaRetentionResult {
+function emptyRetentionResult(input: {
+  hasMoreEligibleAttachments?: boolean;
+  nextEligibleAt?: string | null;
+} = {}): InboxMediaRetentionResult {
   return {
     expiredAttachments: 0,
     expiredBytes: 0,
+    hasMoreEligibleAttachments: input.hasMoreEligibleAttachments ?? false,
+    nextEligibleAt: input.nextEligibleAt ?? null,
     records: [],
   };
+}
+
+function selectEarliestRetentionWake(
+  previous: string | null,
+  candidate: string,
+): string {
+  if (previous === null) {
+    return candidate;
+  }
+
+  return Date.parse(candidate) < Date.parse(previous) ? candidate : previous;
 }
 
 function normalizeProtectedStoredPaths(values: Iterable<string>): Set<string> {
@@ -447,6 +499,24 @@ async function hashExistingVaultFile(
     byteSize: stats.size,
     sha256: await sha256File(resolved.absolutePath, signal),
   };
+}
+
+async function deleteVaultFileIfPresent(
+  vaultRoot: string,
+  relativePath: string,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  throwIfRetentionAborted(signal);
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  try {
+    await fs.unlink(resolved.absolutePath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throwIfRetentionAborted(signal);
 }
 
 async function sha256File(absolutePath: string, signal?: AbortSignal | null): Promise<string> {

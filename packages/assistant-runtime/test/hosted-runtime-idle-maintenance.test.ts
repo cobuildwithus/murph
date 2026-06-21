@@ -166,6 +166,48 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
   });
 
+  it("returns an immediate retention wake when the retention batch has more eligible work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 1,
+      expiredBytes: 512,
+      hasMoreEligibleAttachments: true,
+      nextEligibleAt: null,
+      records: [],
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      });
+
+      expect(outcome).toEqual({
+        kind: "skipped",
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        nextWakeReason: "inbox_media_retention",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("aborts inbox media retention on a pending wake and re-notifies the wake signal", async () => {
     vi.useFakeTimers();
     const wakeAt = new Date("2026-04-26T00:00:01.000Z");

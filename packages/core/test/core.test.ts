@@ -2613,7 +2613,6 @@ test("direct and batched writes reject the same invalid vault targets", async ()
     () => deleteBatch.stageDelete(rawPath),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
   );
-  assert.equal(await deleteBatch.stageDelete(rawPath, { allowRaw: true }), rawPath);
   await assert.rejects(
     () => deleteBatch.stageDelete(jsonlPath),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
@@ -3280,7 +3279,7 @@ test("validateVault allows envelope-based inbox raw evidence without manifest si
   assert.deepEqual(validation.issues, []);
 });
 
-test("validateVault accepts expired raw inbox media when retention ledger records the deletion", async () => {
+test("validateVault rejects event rawRefs that point at retention-expired inbox media", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
   const storedPath = "raw/inbox/cap_retention_expired/attachments/photo.jpg";
@@ -3299,6 +3298,88 @@ test("validateVault accepts expired raw inbox media when retention ledger record
       title: "Expired inbox media",
       note: "The raw inbox media bytes were retention-expired.",
       rawRefs: [storedPath],
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-attachment-retention/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-attachment-retention.v1",
+      captureId: "cap_retention_expired",
+      attachmentId: "att_cap_retention_expired_01",
+      ordinal: 1,
+      kind: "image",
+      mime: "image/jpeg",
+      fileName: "photo.jpg",
+      byteSize: 10,
+      storedPath,
+      sha256: "a".repeat(64),
+      captureOccurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      purgedAt: "2026-07-05T00:00:00.000Z",
+      reason: "inbox_media_retention",
+      retainedDerivative: null,
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_REFERENCE_MISSING" &&
+        issue.path === storedPath,
+    ),
+  );
+});
+
+test("validateVault accepts expired raw inbox media for the matching inbox capture attachment", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-06.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-capture.v1",
+      captureId: "cap_retention_expired",
+      identityKey: "telegram:self:msg-expired",
+      eventId: "evt_01JQ8PWXP5A68SQM1W0GYM40V6",
+      source: "telegram",
+      accountId: "self",
+      externalId: "msg-expired",
+      thread: {
+        id: "thread-retention-expired",
+        title: null,
+        isDirect: true,
+      },
+      actor: {
+        id: "actor-retention-expired",
+        displayName: "Sender",
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      receivedAt: "2026-06-01T00:00:05.000Z",
+      text: "expired media",
+      raw: {},
+      sourceDirectory: "raw/inbox/cap_retention_expired",
+      envelopePath: "raw/inbox/cap_retention_expired/envelope.json",
+      rawRefs: [],
+      attachments: [
+        {
+          attachmentId: "att_cap_retention_expired_01",
+          ordinal: 1,
+          kind: "image",
+          mime: "image/jpeg",
+          fileName: "photo.jpg",
+          byteSize: 10,
+          storedPath,
+          sha256: "a".repeat(64),
+        },
+      ],
     },
   });
   await appendJsonlRecord({

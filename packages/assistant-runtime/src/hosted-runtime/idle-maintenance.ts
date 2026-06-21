@@ -13,7 +13,10 @@ import {
   normalizeHostedAiUsageAllowancePricedModelId,
   resolveHostedAiUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/runtime-control";
-import { runInboxMediaRetention } from "@murphai/inboxd";
+import {
+  runInboxMediaRetention,
+  type InboxMediaRetentionResult,
+} from "@murphai/inboxd";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 
@@ -22,10 +25,15 @@ import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
 
+type HostedIdleMaintenanceWake = {
+  nextWakeAt?: string;
+  nextWakeReason?: "inbox_media_retention";
+};
+
 export type HostedIdleMaintenanceOutcome =
-  | CodexWarmThreadCompactionOutcome
-  | { kind: "failed"; reason: "exception"; threadContextTokensBefore: null }
-  | {
+  | (CodexWarmThreadCompactionOutcome & HostedIdleMaintenanceWake)
+  | ({ kind: "failed"; reason: "exception"; threadContextTokensBefore: null } & HostedIdleMaintenanceWake)
+  | ({
       kind: "skipped";
       reason:
         | "missing_model"
@@ -34,7 +42,7 @@ export type HostedIdleMaintenanceOutcome =
         | "shutdown"
         | "unpriced_model";
       threadContextTokensBefore: null;
-    };
+    } & HostedIdleMaintenanceWake);
 
 // One idle-checkpoint maintenance step: opportunistic, fail-open thread
 // compaction. Runs only on TTL idle shutdown (never deploy evacuation), and a
@@ -80,12 +88,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     .catch(() => undefined);
 
   try {
+    let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
       try {
-        await runInboxMediaRetention({
+        const retentionResult = await runInboxMediaRetention({
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
+        retentionWake = resolveInboxMediaRetentionWake(retentionResult);
       } catch {
         if (abortController.signal.aborted) {
           return buildInterruptedMaintenanceOutcome({
@@ -108,14 +118,23 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     // tokens. The two reasons are distinct on purpose: missing_model means a
     // misconfigured runtime; unpriced_model means a deliberate unsupported model.
     if (!input.model) {
-      return { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null };
+      return attachInboxMediaRetentionWake(
+        { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null },
+        retentionWake,
+      );
     }
     const providerName = input.providerName?.trim() || null;
     if (!providerName) {
-      return { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null };
+      return attachInboxMediaRetentionWake(
+        { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null },
+        retentionWake,
+      );
     }
     if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
-      return { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null };
+      return attachInboxMediaRetentionWake(
+        { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null },
+        retentionWake,
+      );
     }
 
     // Structurally fail-open: the runtime seam must not assume the engine
@@ -129,7 +148,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
       });
     } catch {
-      return { kind: "failed", reason: "exception", threadContextTokensBefore: null };
+      return attachInboxMediaRetentionWake(
+        { kind: "failed", reason: "exception", threadContextTokensBefore: null },
+        retentionWake,
+      );
     }
 
     if (
@@ -179,12 +201,47 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       })().catch(() => undefined);
     }
 
-    return outcome;
+    return attachInboxMediaRetentionWake(outcome, retentionWake);
   } finally {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function resolveInboxMediaRetentionWake(
+  result: InboxMediaRetentionResult,
+): HostedIdleMaintenanceWake {
+  if (result.hasMoreEligibleAttachments) {
+    return {
+      nextWakeAt: new Date().toISOString(),
+      nextWakeReason: "inbox_media_retention",
+    };
+  }
+
+  if (result.nextEligibleAt) {
+    return {
+      nextWakeAt: result.nextEligibleAt,
+      nextWakeReason: "inbox_media_retention",
+    };
+  }
+
+  return {};
+}
+
+function attachInboxMediaRetentionWake(
+  outcome: HostedIdleMaintenanceOutcome,
+  wake: HostedIdleMaintenanceWake,
+): HostedIdleMaintenanceOutcome {
+  if (!wake.nextWakeAt) {
+    return outcome;
+  }
+
+  return {
+    ...outcome,
+    nextWakeAt: wake.nextWakeAt,
+    nextWakeReason: wake.nextWakeReason,
+  };
 }
 
 function buildInterruptedMaintenanceOutcome(input: {
