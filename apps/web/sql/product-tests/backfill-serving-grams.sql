@@ -15,6 +15,7 @@ SELECT
   foods.name,
   foods.data_origin,
   foods.data_origin_id,
+  foods.label AS source_label,
   strict_serving_mass.source_rule,
   strict_serving_mass.serving_grams
 FROM foods
@@ -158,6 +159,7 @@ SELECT
   supplements.name,
   supplements.data_origin,
   supplements.data_origin_id,
+  supplements.label AS source_label,
   strict_serving_mass.source_rule,
   strict_serving_mass.serving_grams
 FROM supplements
@@ -355,6 +357,7 @@ INSERT INTO serving_grams_food_candidates (
   name,
   data_origin,
   data_origin_id,
+  source_label,
   source_rule,
   serving_grams
 )
@@ -363,6 +366,7 @@ SELECT
   foods.name,
   foods.data_origin,
   foods.data_origin_id,
+  NULL::jsonb AS source_label,
   'reviewed_serving_grams' AS source_rule,
   reviewed.serving_grams
 FROM serving_grams_reviewed_import reviewed
@@ -381,6 +385,7 @@ INSERT INTO serving_grams_supplement_candidates (
   name,
   data_origin,
   data_origin_id,
+  source_label,
   source_rule,
   serving_grams
 )
@@ -389,6 +394,7 @@ SELECT
   supplements.name,
   supplements.data_origin,
   supplements.data_origin_id,
+  NULL::jsonb AS source_label,
   'reviewed_serving_grams' AS source_rule,
   reviewed.serving_grams
 FROM serving_grams_reviewed_import reviewed
@@ -497,6 +503,10 @@ LIMIT 20;
       foods.serving_grams IS NULL
       OR candidates.source_rule = 'reviewed_serving_grams'
     )
+    AND (
+      candidates.source_rule = 'reviewed_serving_grams'
+      OR foods.label IS NOT DISTINCT FROM candidates.source_label
+    )
     AND candidates.serving_grams > 0
     AND candidates.serving_grams <= 2000;
 
@@ -507,6 +517,10 @@ LIMIT 20;
     AND (
       supplements.serving_grams IS NULL
       OR candidates.source_rule = 'reviewed_serving_grams'
+    )
+    AND (
+      candidates.source_rule = 'reviewed_serving_grams'
+      OR supplements.label IS NOT DISTINCT FROM candidates.source_label
     )
     AND candidates.serving_grams > 0
     AND candidates.serving_grams <= 2000;

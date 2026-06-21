@@ -61,6 +61,8 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsSql).toContain("serving_grams_supplement_candidates");
     expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.food_id AS id");
     expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.supplement_id AS id");
+    expect(backfillServingGramsSql).toContain("foods.label AS source_label");
+    expect(backfillServingGramsSql).toContain("supplements.label AS source_label");
     expect(backfillServingGramsSql).toContain("foods.label->>'servingSize'");
     expect(backfillServingGramsSql).toContain("foods.label->>'servingSizeUnit'");
     expect(backfillServingGramsSql).toContain(
@@ -89,6 +91,12 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
     expect(backfillServingGramsSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
     expect(backfillServingGramsSql).toContain("OR candidates.source_rule = 'reviewed_serving_grams'");
+    expect(backfillServingGramsSql).toContain(
+      "foods.label IS NOT DISTINCT FROM candidates.source_label",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "supplements.label IS NOT DISTINCT FROM candidates.source_label",
+    );
     expect(backfillServingGramsSql).toContain("missing_serving_grams");
     expect(backfillServingGramsSql).toContain("linked_product_test_rows");
     expect(backfillServingGramsSql).toContain("candidate.serving_grams <= 2000");

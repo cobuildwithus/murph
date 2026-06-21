@@ -161,11 +161,16 @@ serving masses.
   refreshes. Added small DSLD/DailyMed supplement wrappers that set absolute
   paths, and made source imports call the reviewed overlay with an explicit
   food-only or supplement-only scope.
+- ReviewGPT round 6 found automatic backfill candidates could write a
+  serving mass parsed from an older label if a source refresh changed that
+  label before the final update. Automatic candidates now retain the source
+  label JSON and update only if the current label still matches; exact reviewed
+  TSV candidates remain exact-id overrides.
 
 ## Next
 
-- Prove the round 5 wrapper and scoped-overlay fixes, run verification, commit,
-  push, and run the next PR review loop.
+- Prove the round 6 stale-label guard, run verification, commit, push, and run
+  the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20
