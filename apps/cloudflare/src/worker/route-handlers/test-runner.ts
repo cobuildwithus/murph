@@ -46,7 +46,17 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
 }
 
 interface HostedLocalTestRunnerContainerStubLike {
+  dropActiveOperationForTest?(input: { userId: string }): Promise<{ ok: true }>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
+}
+
+function hasHostedLocalTestRunnerContainerActiveOperationControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & {
+  dropActiveOperationForTest(input: { userId: string }): Promise<{ ok: true }>;
+} {
+  return "dropActiveOperationForTest" in stub
+    && typeof stub.dropActiveOperationForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerActivityControl(
@@ -96,6 +106,19 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     match: matchHostedLocalTestUserRoute("/__test/users/", "/container-activity-expired"),
     methods: ["POST"],
     name: "test-container-activity-expired",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestContainerActiveOperationDropRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/container-active-operation-drop"),
+    methods: ["POST"],
+    name: "test-container-active-operation-drop",
     wrongMethodResponse: "not-found",
   },
   {
@@ -197,6 +220,39 @@ export async function handleTestContainerActivityExpiredRoute(
     throw new Error("Hosted runner container test activity-expiry RPC is unavailable.");
   }
   return json(await stub.expireActivityForTest({ userId }));
+}
+
+export async function handleTestContainerActiveOperationDropRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-container-active-operation-drop",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(
+    runnerContainerName,
+  );
+  if (!hasHostedLocalTestRunnerContainerActiveOperationControl(stub)) {
+    throw new Error("Hosted runner container test active-operation drop RPC is unavailable.");
+  }
+  return json(await stub.dropActiveOperationForTest({ userId }));
 }
 
 export async function handleTestStartStuckInvocationRoute(

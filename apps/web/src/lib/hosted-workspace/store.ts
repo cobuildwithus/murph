@@ -154,6 +154,7 @@ const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
+const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
@@ -196,7 +197,7 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
-  status: "updated" | "conflict";
+  status: "updated" | "conflict" | "foreground_pending";
   workspace: HostedWorkspaceRecord | null;
 }
 
@@ -310,7 +311,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedWorkspaceCheckpointResult> {
-  requireAllowedString(
+  const reason = requireAllowedString(
     input.reason,
     HOSTED_WORKSPACE_CHECKPOINT_REASONS,
     "Hosted workspace checkpoint reason",
@@ -319,6 +320,10 @@ export async function checkpointHostedWorkspaceTx(input: {
   const snapshotRef = parseHostedExecutionSnapshotRef(
     input.snapshotRef,
     "Hosted workspace snapshotRef",
+  );
+  const expectedVersion = normalizeBigInt(
+    input.expectedVersion,
+    "Hosted workspace expectedVersion",
   );
   const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
     checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
@@ -349,11 +354,43 @@ export async function checkpointHostedWorkspaceTx(input: {
       ));
   }
 
+  const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
+  if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
+    await lockHostedWorkspaceForCheckpointTx({
+      tx: input.tx,
+      userId,
+    });
+    const lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
+      where: {
+        userId,
+      },
+    });
+    if (!lockedWorkspace || lockedWorkspace.version !== expectedVersion) {
+      return {
+        status: "conflict",
+        workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
+      };
+    }
+    if (!isMailboxContinuationCheckpoint(input)) {
+      const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
+        conversationImportedSeq,
+        tx: input.tx,
+        userId,
+      });
+      if (pendingConversationSeq !== null) {
+        return {
+          status: "foreground_pending",
+          workspace: projectHostedWorkspace(lockedWorkspace),
+        };
+      }
+    }
+  }
+
   const updated = await input.tx.hostedWorkspace.updateMany({
     data: updateData,
     where: {
       userId,
-      version: normalizeBigInt(input.expectedVersion, "Hosted workspace expectedVersion"),
+      version: expectedVersion,
     },
   });
   const row = await input.tx.hostedWorkspace.findUnique({
@@ -366,6 +403,126 @@ export async function checkpointHostedWorkspaceTx(input: {
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };
+}
+
+function readCheckpointConversationImportedSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint | null {
+  const value = readCheckpointRedactedConversationImportedSeq(redactedStatusJson);
+  return value === null
+    ? null
+    : normalizeBigInt(
+        value,
+        "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
+      );
+}
+
+function isMailboxContinuationCheckpoint(input: {
+  nextWakeAt?: Date | string | null;
+  nextWakeReason?: string | null;
+  redactedStatusJson?: Record<string, unknown> | null;
+}): boolean {
+  if (readCheckpointRetryableBlockedCount(input.redactedStatusJson) > 0n) {
+    return true;
+  }
+  return input.nextWakeAt !== undefined
+    && input.nextWakeAt !== null
+    && normalizeNullableString(input.nextWakeReason) === "mailbox";
+}
+
+function readCheckpointRetryableBlockedCount(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return 0n;
+  }
+  const value = redactedStatusJson["hostedMailboxRetryableBlockedCount"];
+  if (value === undefined || value === null) {
+    return 0n;
+  }
+  if (
+    typeof value === "bigint"
+    || typeof value === "number"
+    || typeof value === "string"
+  ) {
+    return normalizeBigInt(
+      value,
+      "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount",
+    );
+  }
+  throw new TypeError(
+    "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount must be a non-negative integer.",
+  );
+}
+
+async function lockHostedWorkspaceForCheckpointTx(input: {
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT user_id
+    FROM hosted_workspace
+    WHERE user_id = ${input.userId}
+    FOR UPDATE
+  `;
+}
+
+function readCheckpointRedactedConversationImportedSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return null;
+  }
+  const value = redactedStatusJson["hostedMailboxConversationImportedSeq"];
+  return typeof value === "string" && /^\d+$/u.test(value) ? value : null;
+}
+
+async function readForegroundPendingConversationSeqTx(input: {
+  conversationImportedSeq: bigint;
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<bigint | null> {
+  await input.tx.$executeRaw`
+    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
+    VALUES (${input.userId}, ${"conversation"}, 1, NOW())
+    ON CONFLICT (user_id, lane) DO NOTHING
+  `;
+  await input.tx.$queryRaw`
+    SELECT next_seq
+    FROM hosted_mailbox_lane_counter
+    WHERE user_id = ${input.userId}
+      AND lane = ${"conversation"}
+    FOR UPDATE
+  `;
+
+  const now = new Date();
+  const latest = await input.tx.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "desc",
+    },
+    select: {
+      laneSeq: true,
+    },
+    where: {
+      createdAt: {
+        gte: new Date(now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS),
+      },
+      lane: "conversation",
+      OR: [
+        {
+          expiresAt: null,
+        },
+        {
+          expiresAt: {
+            gt: now,
+          },
+        },
+      ],
+      userId: input.userId,
+    },
+  });
+  const maxSeq = latest?.laneSeq ?? 0n;
+  return maxSeq > input.conversationImportedSeq ? maxSeq : null;
 }
 
 export async function publishLatestBrowserVaultReplicaRef(input: {

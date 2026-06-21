@@ -252,12 +252,14 @@ durably recorded that metadata-only row, it may send a cooldown-throttled,
 payload-free `runtime_recheck_requested` Temporal signal. That row carries the
 fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
 in `redactedJson`, the `attemptLivenessProbeOutcome` enum
-(`active`/`inactive`/`mismatch`/`error`/`timeout`) alongside the derived
+(`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
 `attemptStillActive`/`fenceCleared` flags. The probe outcome is the primary
 diagnostic for distinguishing transport-only failures against a still-live
 invocation (`active`) from real invocation deaths, and for watching the
 documented RunnerContainer DO-restart residual (`inactive` despite a live
-container suggests the in-memory active-op record was lost to a DO restart). That signal only
+container suggests the in-memory active-op record was lost to a DO restart).
+`unsupported` means the liveness probe could not run through the expected
+RunnerContainer method; it is not proof that the child stopped. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
@@ -357,10 +359,25 @@ A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity
 (`attemptId`, `leaseGeneration`, `userId`); a still-active matching attempt
-keeps its fence so wakes keep routing to the live invocation, while a missing,
-mismatched, or unreachable attempt clears the fence exactly as before. This
-prevents orphaned write-fenced invocations that block the runner slot until
-their idle timer expires while no wake can reach them.
+keeps its fence so wakes keep routing to the live invocation. If that accepted
+attempt has no durable committed progress yet and the local active-operation
+pointer is missing, the fence is preserved for the next identity-aware wake
+recheck instead of being cleared from the pointer alone; only the wake path may
+then replace the fence after it explicitly reports no active child. Mismatched
+liveness probes clear the fence because they prove the active child is not the
+fenced attempt; unsupported, error, timeout, and inactive probe outcomes preserve
+the accepted fence when durable progress is not visible yet. This prevents
+duplicate replacement while a live child may still be running and leaves
+replacement ownership in the exact identity-aware wake path.
+When the outer RunnerContainer active-operation pointer is missing, a container
+wake response must carry explicit identity-checked wake metadata before an
+accepted wake is trusted; identity-blind accepted responses from deploy-skewed
+or legacy bridges are treated as unconfirmed and retried rather than as proof of
+the fenced child. Explicit identity-blind rejected responses from legacy bridges
+(`x-runtime-wake-accepted: 0`) fall back to the container health active-job
+count: a valid numeric zero active-job count is explicit no-active-child proof,
+while missing wake headers and active, missing, malformed, or unavailable health
+remain unconfirmed.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
@@ -558,6 +575,19 @@ checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
+The direct-R2 snapshot-complete bridge must preserve semantic checkpoint
+responses from web. In particular, `checkpointed: false` with
+`checkpointConflictReason: "foreground_pending"` is a successful transport
+response that interrupts idle checkpointing so the same invocation can import
+fresh foreground mailbox input; Cloudflare may retire the upload session as an
+orphan candidate, but it must not collapse that response into a generic HTTP
+conflict before `packages/assistant-runtime` handles it.
+Web must evaluate the workspace-version CAS before returning
+`foreground_pending`: pending conversation input may interrupt only a checkpoint
+whose locked workspace version still equals the request's expected version.
+Retryable mailbox import blocks are mailbox-continuation checkpoints even when
+an earlier assistant or device wake wins the projected `nextWakeReason`; web
+uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
 publishing, inbox projection and audio/video transcript enrichment, provider cleanup and read
 acknowledgement, usage record, telemetry, log export, post-checkpoint

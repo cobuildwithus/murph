@@ -832,6 +832,39 @@ it("calls the hosted-local activity-expiry route with bound user headers and a t
   }
 });
 
+it("calls the hosted-local active-operation drop route with bound user headers and a timeout", async () => {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    return Response.json({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+  });
+
+  try {
+    await expect(harness.dropRunnerActiveOperationForTest("member_drop")).resolves.toEqual({ ok: true });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [request, init] = fetch.mock.calls[0]!;
+    expect(String(request)).toBe("http://127.0.0.1:8787/__test/users/member_drop/container-active-operation-drop");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer oidc-token");
+    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_drop");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init).toMatchObject({
+      method: "POST",
+    });
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("calls the hosted-local run-until-idle route without an idle checkpoint reason", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ status: "idle" });

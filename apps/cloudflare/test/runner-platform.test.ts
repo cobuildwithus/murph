@@ -903,6 +903,125 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
   });
 
+  it("returns foreground-pending snapshot completion checkpoints to the runtime", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot session fetch");
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey: ref.objectKey,
+                snapshotId: ref.snapshotId,
+                userId: "member_123",
+              }),
+              dataKeyBase64,
+              ivBase64: ref.encryption.ivBase64,
+              rootKeyId: ref.encryption.rootKeyId,
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: ref.encryption.wrappedDataKey,
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey: ref.objectKey,
+            snapshotId: ref.snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        return new Response(
+          JSON.stringify({
+            checkpoint: {
+              checkpointConflictReason: "foreground_pending",
+              checkpointed: false,
+              workspace: {
+                checkpointedAt: "2026-04-26T00:00:05.000Z",
+                createdAt: "2026-04-26T00:00:00.000Z",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                redactedStatus: null,
+                snapshotRef: null,
+                updatedAt: "2026-04-26T00:00:05.000Z",
+                userId: "member_123",
+                version: "4",
+              },
+            },
+            ok: true,
+            snapshotRef: ref,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const recordCheckpoint = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint,
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    currentLease = {
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+      userId: "member_123",
+      workspaceVersion: "5",
+    };
+    const completed = await platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "idle_shutdown",
+        snapshotRef: ref,
+      },
+      ref,
+    });
+
+    expect(completed.checkpoint).toEqual(expect.objectContaining({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+    }));
+    expect(completed.snapshotRef).toEqual(ref);
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
+    expect(completeRequest.method).toBe("POST");
+    expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+  });
+
   it("rejects workspace snapshot start payloads whose AAD user is not the bound runner user", async () => {
     const snapshotId = "snapshot_runner_platform_start";
     const objectKey =

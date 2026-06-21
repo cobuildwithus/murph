@@ -207,7 +207,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
-  it("posts a payloadless runtime wake to the active workspace invocation", async () => {
+  it("posts an exact runtime wake to the active workspace invocation", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
     const { container, containerFetch } = createContainerDouble({
@@ -225,6 +225,7 @@ describe("RunnerContainer", () => {
           return new Response(null, {
             headers: {
               "x-runtime-wake-accepted": "1",
+              "x-runtime-wake-identity-checked": "1",
             },
             status: 204,
           });
@@ -266,9 +267,360 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/runtime-wake")
     );
     expect(wakeCall?.[1]).toMatchObject({
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
-    expect(wakeCall?.[1]?.body).toBeUndefined();
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_evt_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+  });
+
+  it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+              "x-runtime-wake-identity-checked": "1",
+            },
+            status: 204,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+
+    const wakeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    );
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    });
+  });
+
+  it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+            },
+            status: 204,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "container-rpc-error",
+    });
+  });
+
+  it("treats a legacy identity-blind rejected wake as no active child when health reports idle", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 0,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+  });
+
+  it("does not use the legacy health fallback when the wake response omits the accepted header", async () => {
+    let healthCallCount = 0;
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          healthCallCount += 1;
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 0,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(healthCallCount).toBe(0);
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed while health reports active work", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 1,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health is unavailable", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          throw new Error("health probe unavailable");
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health omits active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health is malformed", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response("not-json", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a nonnumeric active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: "0",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a negative active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: -1,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
   });
 
   it("ensureProcessing wakes the exact active child without starting a replacement", async () => {
@@ -397,7 +749,33 @@ describe("RunnerContainer", () => {
   });
 
   it("ensureProcessing starts work when no active child can be woken", async () => {
-    const { container, containerFetch } = createContainerDouble();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-absent": "1",
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
 
     await expect(container.ensureProcessing({
       activeRuntime: {
@@ -871,8 +1249,8 @@ describe("RunnerContainer", () => {
       leaseGeneration: "10",
       userId: "member_123",
     })).resolves.toEqual({
-      kind: "not-wakeable",
-      reason: "no-active-child",
+      kind: "unknown",
+      reason: "active-child-rejected",
     });
 
     expect(containerFetch.mock.calls.some(([url]) =>

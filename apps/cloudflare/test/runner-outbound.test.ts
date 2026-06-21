@@ -5380,6 +5380,90 @@ describe("handleRunnerOutboundRequest", () => {
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
+  it("returns foreground-pending checkpoint responses from snapshot completion without failing the invocation", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_foreground_pending";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        ...createHostedWorkspaceCheckpointResponse("4", null),
+        checkpointConflictReason: "foreground_pending",
+        checkpointed: false,
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = requireTestObject(await response.json(), "workspace snapshot foreground pending response");
+    expect(responseBody.ok).toBe(true);
+    expect(responseBody.snapshotRef).toEqual(expect.objectContaining({
+      objectKey,
+      snapshotId,
+    }));
+    expect(responseBody.checkpoint).toEqual(expect.objectContaining({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+      workspace: expect.objectContaining({
+        snapshotRef: null,
+        userId: "member_123",
+        version: "4",
+      }),
+    }));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    }));
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
   it("rejects workspace snapshot completion when checkpoint returns a mutated v2 ref", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_checkpoint_ref_mutated";

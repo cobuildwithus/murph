@@ -1101,6 +1101,14 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
 export type HostedWorkspaceCheckpointReason =
   (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
 
+export const HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS = [
+  "foreground_pending",
+  "workspace_version",
+] as const;
+
+export type HostedWorkspaceCheckpointConflictReason =
+  (typeof HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS)[number];
+
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
@@ -1115,6 +1123,7 @@ export interface HostedWorkspaceCheckpointRequest {
 
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
+  checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
   workspace: HostedWorkspaceState;
 }
 

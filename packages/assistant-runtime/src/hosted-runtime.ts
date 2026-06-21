@@ -2396,6 +2396,12 @@ function assertIdleShutdownCheckpointAccepted(
     });
   }
   if (!checkpoint.checkpointed) {
+    if (checkpoint.checkpointConflictReason === "foreground_pending") {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        message:
+          "Hosted runtime checkpoint was interrupted by pending foreground mailbox input.",
+      });
+    }
     throw new HostedMailboxImportCheckpointConflictError(checkpoint);
   }
 }

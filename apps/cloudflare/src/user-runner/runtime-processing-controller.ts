@@ -230,7 +230,7 @@ export class RuntimeProcessingController {
           },
           workspaceVersion: activeFence.workspaceVersion,
         });
-      if (recoveredCompletion) {
+      if (recoveredCompletion.kind === "completed") {
         return {
           action: "already_running",
           kind: "runtime_processing_accepted",
@@ -238,6 +238,13 @@ export class RuntimeProcessingController {
             this.computeRuntimeProcessingOwnerRecheckAt(),
           runtimeAttemptId: activeFence.attemptId,
         };
+      }
+      if (recoveredCompletion.kind === "unknown") {
+        await this.syncRunnerAlarm(record);
+        return createRuntimeProcessingRetryLater({
+          reason: "container_rpc_error",
+          userId: input.input.userId,
+        });
       }
 
       const cleared = await this.input.stateStore.clearWriteFenceForReplacement({

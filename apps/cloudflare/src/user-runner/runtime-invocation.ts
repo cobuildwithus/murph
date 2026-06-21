@@ -63,7 +63,19 @@ type RuntimeAttemptLivenessProbeOutcome =
   | "error"
   | "inactive"
   | "mismatch"
+  | "unsupported"
   | "timeout";
+export type AcceptedRuntimeCompletionRecoveryResult =
+  | {
+      kind: "completed";
+      result: HostedWorkspaceInvocationResult;
+    }
+  | {
+      kind: "not_completed";
+    }
+  | {
+      kind: "unknown";
+    };
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
@@ -234,8 +246,37 @@ export class RuntimeInvocationService {
             token,
             workspaceVersion,
           });
-        if (committedResult) {
-          return committedResult;
+        if (committedResult.kind === "completed") {
+          return committedResult.result;
+        }
+        if (committedResult.kind === "unknown") {
+          throw error;
+        }
+        if (probeOutcome !== "mismatch") {
+          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+            error,
+            executionInput,
+            fenceCleared: false,
+            probeOutcome,
+            token,
+            workspaceVersion,
+          });
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+              orchestrationAttemptId: executionInput.orchestrationAttemptId,
+              transportFailureFenceCleared: false,
+              workspaceAttemptId: token.attemptId,
+              workspaceVersion,
+            },
+            level: "warn",
+            message:
+            "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+            phase: "failed",
+            userId: executionInput.userId,
+          });
+          throw error;
         }
       }
 
@@ -307,17 +348,17 @@ export class RuntimeInvocationService {
     token: RunnerWriteFenceToken;
     transportError?: unknown;
     workspaceVersion: string | null;
-  }): Promise<HostedWorkspaceInvocationResult | null> {
+  }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     if (input.workspaceVersion === null) {
-      return null;
+      return { kind: "not_completed" };
     }
     const committedResult =
       await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
         executionInput: input.executionInput,
         workspaceVersion: input.workspaceVersion,
       });
-    if (!committedResult) {
-      return null;
+    if (committedResult.kind !== "completed") {
+      return committedResult;
     }
 
     const completion = await this.recordRuntimeCompletionAfterInvoke({
@@ -346,13 +387,16 @@ export class RuntimeInvocationService {
       phase: "checkpoint",
       userId: input.executionInput.userId,
     });
-    return committedResult;
+    return {
+      kind: "completed",
+      result: committedResult.result,
+    };
   }
 
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
     executionInput: RuntimeInvocationInput;
     workspaceVersion: string;
-  }): Promise<HostedWorkspaceInvocationResult | null> {
+  }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     let status: HostedRuntimeWebStatusResponse;
     try {
       status = await this.input.readHostedRuntimeStatusFromWeb(
@@ -371,7 +415,7 @@ export class RuntimeInvocationService {
         phase: "failed",
         userId: input.executionInput.userId,
       });
-      return null;
+      return { kind: "unknown" };
     }
 
     if (
@@ -382,14 +426,17 @@ export class RuntimeInvocationService {
       )
       || !hostedRuntimeMailboxLagDrained(status.mailboxLag)
     ) {
-      return null;
+      return { kind: "not_completed" };
     }
 
     return {
-      nextWakeAt: status.workspace.nextWakeAt,
-      nextWakeReason: status.workspace.nextWakeReason,
-      redactedStatus: status.workspace.redactedStatus,
-      status: "idle",
+      kind: "completed",
+      result: {
+        nextWakeAt: status.workspace.nextWakeAt,
+        nextWakeReason: status.workspace.nextWakeReason,
+        redactedStatus: status.workspace.redactedStatus,
+        status: "idle",
+      },
     };
   }
 
@@ -636,25 +683,24 @@ export class RuntimeInvocationService {
    * pre-dispatch readiness window. Keeping the fence is correct across that
    * whole window: a live DO invoke either proceeds to run the invocation under
    * the intact fence, or dies and releases the container slot, after which the
-   * pre-existing stale-fence replacement path reclaims the fence. Only
-   * `"active"` keeps the fence; every unconfirmed outcome (inactive, identity
-   * mismatch, probe error, probe timeout) fails toward today's
-   * clear-the-fence behavior. The probe cannot see liveness across a
-   * RunnerContainer DO restart because the active-op record is in-memory; that
-   * mode also falls back to the pre-existing recovery paths.
+   * pre-existing stale-fence replacement path reclaims the fence. Accepted
+   * background invocations also keep the fence when durable progress is not
+   * visible yet unless the probe positively identifies a different child. The
+   * next ensure command uses the identity-aware wake endpoint to distinguish a
+   * lost local pointer from a truly missing child.
    */
   private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
   ): Promise<RuntimeAttemptLivenessProbeOutcome> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
-      return "inactive";
+      return "unsupported";
     }
     let probeTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const container = namespace.getByName(prepared.runnerContainerName);
       if (!container.readActiveRuntimeUserFence) {
-        return "inactive";
+        return "unsupported";
       }
       const active = await Promise.race([
         container.readActiveRuntimeUserFence(),
@@ -713,7 +759,7 @@ export class RuntimeInvocationService {
       },
       level: "warn",
       message:
-        "Hosted runner attempt liveness probe was unconfirmed; clearing the write fence as before.",
+        "Hosted runner attempt liveness probe was unconfirmed.",
       phase: "failed",
       userId: input.prepared.input.userId,
     });
@@ -722,11 +768,19 @@ export class RuntimeInvocationService {
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
     error: unknown;
     executionInput: RuntimeInvocationInput;
+    fenceCleared?: boolean;
     probeOutcome: RuntimeAttemptLivenessProbeOutcome;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<void> {
     const attemptStillActive = input.probeOutcome === "active";
+    const fenceCleared = input.fenceCleared ?? !attemptStillActive;
+    if (
+      !fenceCleared
+      && !await this.acceptedRuntimeAttemptStillOwnsFenceBestEffort(input.token)
+    ) {
+      return;
+    }
     const body = {
       entries: [
         {
@@ -742,7 +796,7 @@ export class RuntimeInvocationService {
             ...buildHostedRunnerRedactedErrorJson(input.error),
             attemptLivenessProbeOutcome: input.probeOutcome,
             attemptStillActive,
-            fenceCleared: !attemptStillActive,
+            fenceCleared,
           },
           workspaceVersion: input.workspaceVersion,
         },
@@ -783,6 +837,20 @@ export class RuntimeInvocationService {
         phase: "failed",
         userId: input.executionInput.userId,
       });
+    }
+  }
+
+  private async acceptedRuntimeAttemptStillOwnsFenceBestEffort(
+    token: RunnerWriteFenceToken,
+  ): Promise<boolean> {
+    try {
+      const current = await this.input.stateStore.readWriteFenceToken();
+      return current !== null
+        && current.attemptId === token.attemptId
+        && current.generation === token.generation
+        && current.userId === token.userId;
+    } catch {
+      return true;
     }
   }
 }

@@ -324,6 +324,7 @@ describe("cloudflare worker routes", () => {
       "test-run-until-idle",
       "test-run-alarm",
       "test-container-activity-expired",
+      "test-container-active-operation-drop",
       "test-start-stuck-invocation",
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
@@ -1108,6 +1109,23 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
+    const activeOperationDropResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/container-active-operation-drop",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(activeOperationDropResponse.status).toBe(401);
+    await expect(activeOperationDropResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
     const directR2Response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
@@ -1364,6 +1382,39 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(stub.runAlarmForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("drops the hosted-local runner active-operation pointer for correctly bound callers", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const dropActiveOperationForTest = vi.fn(async () => ({ ok: true as const }));
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      dropActiveOperationForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/container-active-operation-drop",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+    expect(dropActiveOperationForTest).toHaveBeenCalledWith({ userId: "member_123" });
   });
 
   it("starts the hosted-local stuck invocation test route for correctly bound callers", async () => {
@@ -2902,6 +2953,9 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
     getByName(name: string) {
       return {
         async destroyInstance() {},
+        async dropActiveOperationForTest() {
+          return { ok: true as const };
+        },
         async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
           throw new Error("Runner container should not be invoked by route tests.");
         },

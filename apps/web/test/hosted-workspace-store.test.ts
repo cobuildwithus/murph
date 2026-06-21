@@ -151,6 +151,299 @@ describe("hosted workspace store", () => {
     });
   });
 
+  it("blocks idle shutdown checkpoints when retained conversation input is ahead of the imported seq", async () => {
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
+    };
+    const rawOperations: string[] = [];
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async (strings) => {
+      rawOperations.push(strings.join("?"));
+      return [{ next_seq: 3n }];
+    });
+    const tx = createHostedWorkspaceTx({
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+      },
+      snapshotRef: createBundleRef("snapshot_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(rawOperations[0]).toContain("hosted_workspace");
+    expect(rawOperations[1]).toContain("hosted_mailbox_lane_counter");
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      select: {
+        laneSeq: true,
+      },
+      where: expect.objectContaining({
+        lane: "conversation",
+        userId: "member_workspace_1",
+      }),
+    }));
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+  });
+
+  it("falls back to the redacted mailbox imported seq for old idle checkpoint callers", async () => {
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
+    };
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [{ next_seq: 3n }]);
+    const tx = createHostedWorkspaceTx({
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+        state: "idle",
+      },
+      snapshotRef: createBundleRef("snapshot_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+  });
+
+  it("returns workspace-version conflict before foreground-pending when the locked row is stale", async () => {
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 5n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 0 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 6n })),
+    };
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+      },
+      snapshotRef: createBundleRef("snapshot_stale_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "conflict",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "5",
+      },
+    });
+  });
+
+  it("allows mailbox-continuation idle checkpoints to persist bounded mailbox progress", async () => {
+    const beforeCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const afterCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_checkpointed"),
+      version: 5n,
+    });
+    let findUniqueCount = 0;
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => {
+        findUniqueCount += 1;
+        return findUniqueCount === 1 ? beforeCheckpoint : afterCheckpoint;
+      }),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 6n })),
+    };
+    const rawOperations: string[] = [];
+    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async (strings) => {
+      rawOperations.push(strings.join("?"));
+      return 0;
+    });
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async (strings) => {
+      rawOperations.push(strings.join("?"));
+      return [];
+    });
+    const tx = createHostedWorkspaceTx({
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxFetchedCount: 3,
+        hostedMailboxImportedCount: 2,
+      },
+      snapshotRef: createBundleRef("snapshot_checkpointed"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_checkpointed"),
+        version: "5",
+      },
+    });
+    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nextWakeReason: "mailbox",
+        redactedStatusJson: expect.objectContaining({
+          hostedMailboxConversationImportedSeq: "2",
+        }),
+      }),
+      where: {
+        userId: "member_workspace_1",
+        version: 4n,
+      },
+    }));
+    expect(rawOperations.join("\n")).toContain("hosted_workspace");
+    expect(rawOperations.join("\n")).not.toContain("hosted_mailbox_lane_counter");
+  });
+
+  it("allows retryable mailbox continuation checkpoints even when an earlier non-mailbox wake is selected", async () => {
+    const beforeCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const afterCheckpoint = buildHostedWorkspaceRow({
+      nextWakeAt: new Date("2026-04-26T00:00:05.000Z"),
+      nextWakeReason: "assistant",
+      snapshotRef: createBundleRef("snapshot_retryable_block"),
+      version: 5n,
+    });
+    let findUniqueCount = 0;
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => {
+        findUniqueCount += 1;
+        return findUniqueCount === 1 ? beforeCheckpoint : afterCheckpoint;
+      }),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 6n })),
+    };
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxImportedCount: 2,
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+      snapshotRef: createBundleRef("snapshot_retryable_block"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nextWakeAt: new Date("2026-04-26T00:00:05.000Z"),
+        nextWakeReason: "assistant",
+        redactedStatusJson: expect.objectContaining({
+          hostedMailboxRetryableBlockedCount: 1,
+        }),
+      }),
+      where: {
+        userId: "member_workspace_1",
+        version: 4n,
+      },
+    }));
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        nextWakeReason: "assistant",
+        snapshotRef: createBundleRef("snapshot_retryable_block"),
+        version: "5",
+      },
+    });
+  });
+
   it("rejects non-boolean assistant context snapshot checkpoint status", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate();
     const tx = createHostedWorkspaceTx({
@@ -2016,11 +2309,48 @@ interface HostedRuntimeLogFindFirstArgs {
   };
 }
 
+interface HostedMailboxItemFindFirstArgs {
+  orderBy: {
+    laneSeq: "desc";
+  };
+  select: {
+    laneSeq: true;
+  };
+  where: {
+    createdAt: {
+      gte: Date;
+    };
+    lane: "conversation";
+    OR: Array<
+      | {
+          expiresAt: null;
+        }
+      | {
+          expiresAt: {
+            gt: Date;
+          };
+        }
+    >;
+    userId: string;
+  };
+}
+
 type HostedWorkspaceUpdateMany = (args: HostedWorkspaceUpdateManyArgs) => Promise<{ count: number }>;
 type HostedWorkspaceFindUnique = (args: HostedWorkspaceFindUniqueArgs) => Promise<HostedWorkspaceRow | null>;
 type HostedWorkspaceUpsert = (args: HostedWorkspaceUpsertArgs) => Promise<HostedWorkspaceRow>;
 type HostedRuntimeLogCreate = (args: HostedRuntimeLogCreateArgs) => Promise<HostedRuntimeLogRow>;
 type HostedRuntimeLogFindFirst = (args: HostedRuntimeLogFindFirstArgs) => Promise<{ id: string } | null>;
+type HostedMailboxItemFindFirst = (
+  args: HostedMailboxItemFindFirstArgs,
+) => Promise<{ laneSeq: bigint } | null>;
+type HostedWorkspaceExecuteRaw = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<number>;
+type HostedWorkspaceQueryRaw = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<unknown>;
 
 function buildHostedWorkspaceRow(
   overrides: Partial<HostedWorkspaceRow> = {},
@@ -2153,10 +2483,18 @@ function createHostedRuntimeLogDelegate(overrides: Partial<{
 }
 
 function createHostedWorkspaceTx(input: {
+  $executeRaw?: ReturnType<typeof vi.fn<HostedWorkspaceExecuteRaw>>;
+  $queryRaw?: ReturnType<typeof vi.fn<HostedWorkspaceQueryRaw>>;
+  hostedMailboxItem?: {
+    findFirst: ReturnType<typeof vi.fn<HostedMailboxItemFindFirst>>;
+  };
   hostedRuntimeLog?: ReturnType<typeof createHostedRuntimeLogDelegate>;
   hostedWorkspace: ReturnType<typeof createHostedWorkspaceDelegate>;
 }) {
   return Object.assign(Object.create(null), {
+    ...(input.$executeRaw ? { $executeRaw: input.$executeRaw } : {}),
+    ...(input.$queryRaw ? { $queryRaw: input.$queryRaw } : {}),
+    ...(input.hostedMailboxItem ? { hostedMailboxItem: input.hostedMailboxItem } : {}),
     hostedRuntimeLog: input.hostedRuntimeLog ?? createHostedRuntimeLogDelegate(),
     hostedWorkspace: input.hostedWorkspace,
   }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];
