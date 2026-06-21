@@ -211,18 +211,111 @@ describe('assistant channels runtime seam', () => {
       reply_to_message_id: 42,
       text: 'a'.repeat(4096),
     })
+    expect(readJsonBody(fetchImplementation.mock.calls[0][1]?.body)).not.toHaveProperty(
+      'entities',
+    )
     expect(readJsonBody(fetchImplementation.mock.calls[1][1]?.body)).toMatchObject({
       chat_id: '456',
       reply_to_message_id: 42,
       text: 'a'.repeat(4096),
     })
+    expect(readJsonBody(fetchImplementation.mock.calls[1][1]?.body)).not.toHaveProperty(
+      'entities',
+    )
     expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).toMatchObject({
       chat_id: '456',
       text: 'b',
     })
     expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).not.toHaveProperty(
+      'entities',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).not.toHaveProperty(
       'reply_to_message_id',
     )
+  })
+
+  it('converts markdown emphasis to Telegram message entities', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 123,
+        },
+      }),
+    ])
+
+    await sendTelegramMessage(
+      {
+        message: 'This is **bold** and _italic_. ~~gone~~',
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      entities: [
+        { offset: 8, length: 4, type: 'bold' },
+        { offset: 17, length: 6, type: 'italic' },
+        { offset: 25, length: 4, type: 'strikethrough' },
+      ],
+      text: 'This is bold and italic. gone',
+    })
+  })
+
+  it('splits decorated Telegram chunks with marker-free text and UTF-16 entity ranges', async () => {
+    const smile = '\u{1F600}'
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 123,
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 124,
+        },
+      }),
+    ])
+
+    await sendTelegramMessage(
+      {
+        message: `${'a'.repeat(4094)} **b${smile}c** d`,
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      entities: [
+        { offset: 4095, length: 1, type: 'bold' },
+      ],
+      text: `${'a'.repeat(4094)} b`,
+    })
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      entities: [
+        { offset: 0, length: 3, type: 'bold' },
+      ],
+      text: `${smile}c d`,
+    })
   })
 
   it('preserves sent Telegram chunk ids when a later chunk fails and rollback cannot be confirmed', async () => {

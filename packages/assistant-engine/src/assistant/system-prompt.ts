@@ -531,7 +531,7 @@ Constraints:
 - Answer in natural conversation by default. Use structured sections only when the user asks for a breakdown, when you are compiling research or a longer synthesis, or when structure materially improves clarity.
 
 Output style:
-- Avoid Markdown bold or italic markers for emphasis in ordinary replies. In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.
+- Prefer plain wording, order, and concise labels over Markdown bold or italic markers for emphasis in ordinary replies. Use Markdown-style emphasis only where later channel guidance explicitly allows native emphasis conversion; otherwise assume messaging clients may show raw markers.
 - User-facing links and sources:
   - Never output Markdown link syntax in a user-facing reply, in any channel. Do not write any substring shaped like \`[text](url)\`, including source citations, parenthesized source links, product links, evidence links, or action links.
   - This rule is channel-independent. Do not decide based on iMessage, Telegram, SMS, web chat, Slack, or local chat. Links are plain text only when a link is appropriate.
@@ -736,7 +736,7 @@ function buildAssistantNotificationDecisionGuidanceText(
 - \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
 - Never include Markdown links in \`text\`; use raw URLs only when the URL itself is the deliverable or the user asks for links.
-- Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\` unless the user-facing message genuinely needs it.
+- Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\`. Use Markdown bold or italic markers only when the bound channel guidance explicitly allows native emphasis conversion.
 - Keep \`text\` brief, natural, and channel-appropriate. Keep \`subject\` concise and useful when you include it.`
   );
 }
@@ -744,18 +744,25 @@ function buildAssistantNotificationDecisionGuidanceText(
 function buildAssistantEvidenceAndReplyStyleText(
   channel: string | null
 ): string {
+  const normalizedChannel = channel?.trim().toLowerCase() ?? null
+
   if (!isAssistantUserFacingChannel(channel)) {
     return `In local chat, mention relative file paths, record ids, dates, or source details when they genuinely help the user verify something or when the user asks for that level of detail.
 Otherwise, keep the reply natural and direct.`;
   }
 
+  const emphasisGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
+    ? `For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer. Prefer plain text. Use bold or italic only when it materially improves comprehension or scannability, and keep emphasis to short labels or key phrases.
+When emphasis is truly helpful, use only simple emphasis spans such as \`**key phrase**\` or \`_short aside_\`; do not use emphasis as decoration or on whole paragraphs.`
+    : `Do not wrap words in double asterisks or underscores for bold or italic emphasis; some messaging clients may show those raw markers.`
+
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as durable evidence.
-Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default unless the user explicitly asks for them.
+Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default unless the user explicitly asks for them.
 If source provenance improves trust, name the source naturally in prose without a URL. Do not add a source list unless the user asks for sources. Never output Markdown link syntax such as \`[text](url)\`.
-Do not wrap words in double asterisks or underscores for bold or italic emphasis; SMS-style clients may show those raw markers.
-Reply naturally in plain conversational prose that fits the channel.`;
+${emphasisGuidance}
+For commands, paths, counts, or structured values, put them on their own plain-text lines without code fences. Reply naturally in conversational prose that fits the channel.`;
 }
 
 function buildAssistantUserFacingLinkSelfCheckText(): string {
@@ -764,6 +771,7 @@ function buildAssistantUserFacingLinkSelfCheckText(): string {
 - No parenthesized source links or evidence notes after facts.
 - No citationMarker, tracking parameters, generated citation URLs, or source wrapper URLs.
 - No source list unless the user asked for sources.
+- No Markdown tables, Markdown headers, fenced code blocks, or whole-paragraph emphasis. Use bold or italic short spans only when the channel guidance explicitly allows native emphasis.
 - Raw URLs only when the URL is an action link, the deliverable, or the user asked for links.`;
 }
 

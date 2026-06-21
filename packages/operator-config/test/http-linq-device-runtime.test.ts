@@ -354,6 +354,65 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   })
 })
 
+test('linq runtime converts markdown emphasis to iMessage text decorations', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{
+    body?: string | Blob
+    method: string
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    seenRequests.push({
+      body: init.body,
+      method: init.method,
+      url,
+    })
+
+    return createJsonResponse({
+      message: {
+        id: 'message-1',
+      },
+    })
+  })
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message: '  This is **bold** and _italic_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.  ',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(seenRequests.length, 1)
+  assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
+    message: {
+      parts: [
+        {
+          text_decorations: [
+            {
+              range: [8, 12],
+              style: 'bold',
+            },
+            {
+              range: [17, 23],
+              style: 'italic',
+            },
+            {
+              range: [25, 29],
+              style: 'strikethrough',
+            },
+          ],
+          type: 'text',
+          value: 'This is bold and italic. gone Keep durable/home/*/rollout-*.jsonl intact.',
+        },
+      ],
+    },
+  })
+})
+
 test('linq runtime creates, uploads, and sends voice memo attachments without replay keys', async () => {
   const env = {
     LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',

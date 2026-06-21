@@ -153,6 +153,57 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
+  it('allows only sparing native emphasis on Linq and Telegram messaging routes', () => {
+    const linqPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'linq',
+    }))
+
+    expect(linqPrompt).toContain(
+      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+    )
+    expect(linqPrompt).toContain('Prefer plain text')
+    expect(linqPrompt).toContain(
+      'Use bold or italic only when it materially improves comprehension or scannability',
+    )
+    expect(linqPrompt).toContain(
+      'Use Markdown-style emphasis only where later channel guidance explicitly allows native emphasis conversion',
+    )
+    expect(linqPrompt).toContain('No Markdown tables, Markdown headers, fenced code blocks')
+    expect(linqPrompt).not.toContain(
+      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+    )
+
+    const telegramPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'telegram',
+    }))
+    expect(telegramPrompt).toContain(
+      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+    )
+    expect(telegramPrompt).toContain(
+      'Use bold or italic only when it materially improves comprehension or scannability',
+    )
+    expect(telegramPrompt).not.toContain(
+      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+    )
+
+    const emailPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'email',
+    }))
+    expect(emailPrompt).toContain(
+      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+    )
+
+    const whatsappPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'whatsapp',
+    }))
+    expect(whatsappPrompt).toContain(
+      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+    )
+    expect(whatsappPrompt).not.toContain(
+      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+    )
+  })
+
   it('uses the hosted computer step guidance without forced final-action handoff', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -648,7 +699,7 @@ describe('assistant user-facing wording guidance', () => {
       'Never copy citation helper URLs, citationMarker parameters, tracking parameters, or generated source wrappers into the user reply',
     )
     expect(prompt).toContain(
-      'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default',
+      'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default',
     )
     expect(prompt).toContain(
       'If source provenance improves trust, name the source naturally in prose without a URL',
@@ -703,7 +754,7 @@ describe('assistant user-facing wording guidance', () => {
       'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
     )
     expect(prompt).toContain(
-      'Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text` unless the user-facing message genuinely needs it',
+      'Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use Markdown bold or italic markers only when the bound channel guidance explicitly allows native emphasis conversion',
     )
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
@@ -905,7 +956,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '07d713e99c1c5bfa6475fefeec6c61546dcc27b4c0511a780e6f39d51dbed76a',
+      '82cfd390c7d8a7749380c3c13b0108133e89a57130b5320228037d686b4ad1f0',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
