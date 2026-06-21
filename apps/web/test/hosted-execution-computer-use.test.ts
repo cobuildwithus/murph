@@ -1448,6 +1448,7 @@ describe("ComputerUseService", () => {
       new Date("2026-06-17T12:10:00.000Z"),
     ];
     const store = new FakeComputerUseStore({
+      memberRuns: [],
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
@@ -1497,9 +1498,77 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("reuses the latest stored Kernel profile when migrating a member to one profile", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const olderProfileName = "murph-test-member_123-appointments-legacy";
+    const latestProfileName = "murph-test-member_123-commerce-legacy";
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-17T10:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:00:00.000Z"),
+          id: "hcr_older",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: olderProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T10:05:00.000Z"),
+        }),
+        createRunRecord({
+          completedAt: new Date("2026-06-17T11:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+          id: "hcr_latest",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: latestProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+        id: "hcr_latest",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: latestProfileName,
+        kernelSessionId: null,
+        status: "completed",
+        updatedAt: new Date("2026-06-17T11:05:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+
+    expect(store.run.kernelProfileName).toBe(latestProfileName);
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        profileName: latestProfileName,
+        saveChanges: true,
+      }),
+    ]);
+  });
+
   it("installs the public-network route guard before storing a blank browser live view", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
+      memberRuns: [],
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
@@ -1734,6 +1803,7 @@ describe("ComputerUseService", () => {
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
+      memberRuns: [],
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
@@ -1769,6 +1839,7 @@ describe("ComputerUseService", () => {
   it("keeps profile namespaces distinct when raw values normalize the same", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const firstStore = new FakeComputerUseStore({
+      memberRuns: [],
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
@@ -1777,6 +1848,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const secondStore = new FakeComputerUseStore({
+      memberRuns: [],
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
@@ -4841,6 +4913,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoff: ComputerHandoffRecord | null = null;
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
+  memberRuns: ComputerRunRecord[] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
   rejectReplaceRunBrowser = false;
@@ -4864,6 +4937,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     failCreateRunWithConcurrentRun?: boolean;
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
+    memberRuns?: ComputerRunRecord[];
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
     rejectReplaceRunBrowser?: boolean;
@@ -4888,6 +4962,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.failNextUpdateRunBrowserState = input.failNextUpdateRunBrowserState ?? false;
     this.handoff = input.handoff ?? null;
     this.handoffs = this.handoff ? [this.handoff] : [];
+    this.memberRuns = input.memberRuns ?? null;
     this.pauseRunAfterFailedAttachRunBrowser =
       input.pauseRunAfterFailedAttachRunBrowser ?? false;
     this.pauseRunBeforeSecondRequireOwnedRun =
@@ -4951,10 +5026,9 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async listMemberRuns(input: Parameters<ComputerUseStore["listMemberRuns"]>[0]): Promise<ComputerRunRecord[]> {
-    if (input.memberId !== this.run.memberId) {
-      return [];
-    }
-    return [this.run];
+    return (this.memberRuns ?? [this.run]).filter((run) =>
+      run.memberId === input.memberId
+    );
   }
 
   async hasConversationMailboxItemAfter(
@@ -5023,6 +5097,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         status: "running",
         updatedAt: new Date("2026-06-17T12:05:00.000Z"),
       });
+      this.storeMemberRun(this.run);
       return {
         created: false,
         run: this.run,
@@ -5040,6 +5115,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       status: "running",
       updatedAt: new Date("2026-06-17T12:05:00.000Z"),
     });
+    this.storeMemberRun(this.run);
     return {
       created: true,
       run: this.run,
@@ -5582,6 +5658,16 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.handoff = handoff;
     }
     return handoff;
+  }
+
+  private storeMemberRun(run: ComputerRunRecord): void {
+    if (!this.memberRuns) {
+      return;
+    }
+    this.memberRuns = [
+      ...this.memberRuns.filter((storedRun) => storedRun.id !== run.id),
+      run,
+    ];
   }
 
   private isExpectedHandoffCheckpointing(

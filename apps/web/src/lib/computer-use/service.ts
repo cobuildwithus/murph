@@ -205,10 +205,11 @@ export class ComputerUseService {
     }
 
     const runId = createComputerId("hcr");
-    const kernelProfileName = buildKernelProfileName({
-      env: this.env,
+    const kernelProfile = await this.resolveKernelProfile({
       memberId: input.memberId,
+      store,
     });
+    const kernelProfileName = kernelProfile.name;
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
@@ -316,6 +317,7 @@ export class ComputerUseService {
       if (
         !skipCompensation &&
         isMemberSuspendedComputerUseError(error) &&
+        !kernelProfile.fromStoredRun &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {
         profileCleanupFailed = true;
@@ -1498,6 +1500,32 @@ export class ComputerUseService {
     }
 
     return "recovered";
+  }
+
+  private async resolveKernelProfile(input: {
+    memberId: string;
+    store: ComputerUseStore;
+  }): Promise<{
+    fromStoredRun: boolean;
+    name: string;
+  }> {
+    const storedProfileName = findLatestStoredKernelProfileName(
+      await input.store.listMemberRuns({ memberId: input.memberId }),
+    );
+    if (storedProfileName) {
+      return {
+        fromStoredRun: true,
+        name: storedProfileName,
+      };
+    }
+
+    return {
+      fromStoredRun: false,
+      name: buildKernelProfileName({
+        env: this.env,
+        memberId: input.memberId,
+      }),
+    };
   }
 
   private async prepareMemberRunsForAccountDeletion(input: {
@@ -2692,6 +2720,27 @@ function buildKernelProfileName(input: {
   const memberSegment = normalizeKernelNameSegment(input.memberId);
   const hash = shortHash(`${namespace}:${input.memberId}`);
   return `murph-${namespaceSegment}-${memberSegment}-${hash}`.slice(0, 255);
+}
+
+function findLatestStoredKernelProfileName(
+  runs: readonly ComputerRunRecord[],
+): string | null {
+  let latestProfileName: string | null = null;
+  let latestUpdatedAtMs = Number.NEGATIVE_INFINITY;
+
+  for (const run of runs) {
+    const profileName = run.kernelProfileName.trim();
+    if (!profileName) {
+      continue;
+    }
+    const updatedAtMs = run.updatedAt.getTime();
+    if (updatedAtMs >= latestUpdatedAtMs) {
+      latestProfileName = profileName;
+      latestUpdatedAtMs = updatedAtMs;
+    }
+  }
+
+  return latestProfileName;
 }
 
 function buildKernelProfileNamesForAccountDeletion(input: {
