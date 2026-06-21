@@ -2103,9 +2103,15 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
+  const blockedMaintenance = createDeferred<void>()
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  mocks.maybeRunAssistantRuntimeMaintenance
+    .mockResolvedValueOnce(undefined)
+    .mockImplementationOnce(async () => {
+      await blockedMaintenance.promise
+    })
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
@@ -2152,6 +2158,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Follow-up while running'])
   })
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
   providerRelease.resolve()
 
   const [firstResult, steeredResult] = await Promise.all([

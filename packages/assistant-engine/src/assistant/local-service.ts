@@ -258,12 +258,6 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
-  await runAssistantTurnBestEffort(() =>
-    maybeRunAssistantRuntimeMaintenance({
-      vault: input.vault,
-    })
-  )
-
   await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
@@ -287,6 +281,12 @@ export async function sendAssistantMessageLocal(
       throw createAssistantActiveTurnNotActiveError()
     }
   }
+
+  await runAssistantTurnBestEffort(() =>
+    maybeRunAssistantRuntimeMaintenance({
+      vault: input.vault,
+    })
+  )
 
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
