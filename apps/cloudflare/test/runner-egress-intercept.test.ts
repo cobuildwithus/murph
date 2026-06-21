@@ -1087,6 +1087,20 @@ describe("hostedRunnerIntercept", () => {
         },
         method: "POST",
       }),
+      new Request("http://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request("https://api.elevenlabs.io:444/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
       new Request("https://api.elevenlabs.io/v1/voices", {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
@@ -1113,6 +1127,34 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(403);
     }
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized ElevenLabs TTS bodies before upstream fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "x".repeat(33 * 1024),
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

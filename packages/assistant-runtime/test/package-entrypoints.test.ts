@@ -8,18 +8,6 @@ import {
   runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessPublic,
 } from "@murphai/assistant-runtime";
 import {
-  HOSTED_ASSISTANT_CONFIG_ENV_NAMES as HOSTED_ASSISTANT_CONFIG_ENV_NAMES_PUBLIC,
-  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS as HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_PUBLIC,
-  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES as HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_PUBLIC,
-  HostedAssistantConfigurationError as HostedAssistantConfigurationErrorPublic,
-  readHostedAssistantApiKeyEnvName as readHostedAssistantApiKeyEnvNamePublic,
-} from "@murphai/assistant-runtime/hosted-assistant-env";
-import {
-  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES as HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_PUBLIC,
-  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES as HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES_PUBLIC,
-  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES as HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC,
-} from "@murphai/assistant-runtime/hosted-assistant-env-constants";
-import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestPublic,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
@@ -41,6 +29,11 @@ import {
 import {
   buildHostedRuntimeForwardedEnv as buildHostedRuntimeForwardedEnvPublic,
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecPublic,
+  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES as HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_PUBLIC,
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS as HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_PUBLIC,
+  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES as HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES_PUBLIC,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES as HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_PUBLIC,
+  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES as HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputPublic,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponsePublic,
   projectHostedRuntimeProcessEnv as projectHostedRuntimeProcessEnvPublic,
@@ -50,18 +43,6 @@ import {
   parseHostedAssistantRuntimeConfig as parseHostedAssistantRuntimeConfigWorkerPublic,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseWorkerPublic,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
-import {
-  HOSTED_ASSISTANT_CONFIG_ENV_NAMES as HOSTED_ASSISTANT_CONFIG_ENV_NAMES_DIRECT,
-  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS as HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_DIRECT,
-  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES as HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_DIRECT,
-  HostedAssistantConfigurationError as HostedAssistantConfigurationErrorDirect,
-  readHostedAssistantApiKeyEnvName as readHostedAssistantApiKeyEnvNameDirect,
-} from "../src/hosted-assistant-env.ts";
-import {
-  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES as HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_DIRECT,
-  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES as HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES_DIRECT,
-  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES as HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_DIRECT,
-} from "../src/hosted-assistant-env-constants.ts";
 import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestDirect,
 } from "../src/hosted-email.ts";
@@ -91,6 +72,11 @@ import {
 import {
   buildHostedRuntimeForwardedEnv as buildHostedRuntimeForwardedEnvDirect,
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecDirect,
+  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES as HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_DIRECT,
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS as HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_DIRECT,
+  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES as HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES_DIRECT,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES as HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_DIRECT,
+  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES as HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_DIRECT,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputDirect,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseDirect,
   projectHostedRuntimeProcessEnv as projectHostedRuntimeProcessEnvDirect,
@@ -104,8 +90,6 @@ import {
 const expectedAssistantRuntimePublicExportKeys = [
   ".",
   "./hosted-assistant-bootstrap",
-  "./hosted-assistant-env",
-  "./hosted-assistant-env-constants",
   "./hosted-checkpoint-bridge",
   "./hosted-email",
   "./hosted-invocation",
@@ -180,8 +164,7 @@ test("hosted assistant bootstrap exposes the CLI surface reader", async () => {
   assert.equal(typeof bootstrap.readHostedAssistantCliSurfaceBootstrapContext, "function");
 });
 
-test("hosted-assistant-env subpath stays wired to the hosted env source surface", () => {
-  assert.equal(HOSTED_ASSISTANT_CONFIG_ENV_NAMES_PUBLIC, HOSTED_ASSISTANT_CONFIG_ENV_NAMES_DIRECT);
+test("hosted runtime contracts expose hosted env categories from the runtime owner", () => {
   assert.equal(
     HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_PUBLIC,
     HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS_DIRECT,
@@ -190,18 +173,6 @@ test("hosted-assistant-env subpath stays wired to the hosted env source surface"
     HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_PUBLIC,
     HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES_DIRECT,
   );
-  assert.equal(
-    HostedAssistantConfigurationErrorPublic,
-    HostedAssistantConfigurationErrorDirect,
-  );
-  assert.equal(readHostedAssistantApiKeyEnvNamePublic, readHostedAssistantApiKeyEnvNameDirect);
-  assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES_PUBLIC));
-  assert.ok(HOSTED_ASSISTANT_CONFIG_ENV_NAMES_PUBLIC.length > 0);
-  assert.equal(typeof readHostedAssistantApiKeyEnvNamePublic, "function");
-  assert.equal(typeof HostedAssistantConfigurationErrorPublic, "function");
-});
-
-test("hosted-assistant-env-constants subpath stays wired to the hosted env constants source surface", () => {
   assert.equal(
     HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_PUBLIC,
     HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_DIRECT,
@@ -228,6 +199,13 @@ test("hosted-assistant-env-constants subpath stays wired to the hosted env const
       "HOSTED_LOG_FINGERPRINT_SECRET",
     ),
   );
+});
+
+test("assistant-runtime omits hosted assistant env shim subpaths", async () => {
+  const manifest = readPackageManifest();
+
+  assert.equal(manifest.exports?.["./hosted-assistant-env"], undefined);
+  assert.equal(manifest.exports?.["./hosted-assistant-env-constants"], undefined);
 });
 
 test("hosted-email subpath export stays wired to the hosted email source surface", () => {

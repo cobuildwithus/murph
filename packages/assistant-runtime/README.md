@@ -54,10 +54,12 @@ Current non-goals:
 The current implementation imports its local-only assistant runtime plus the canonical vault/inbox app surfaces directly from `@murphai/assistant-engine`, and explicit operator/setup owner subpaths such as `@murphai/operator-config/operator-config`, `@murphai/operator-config/hosted-assistant-config`, and `@murphai/operator-config/text/shared`. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
 
 Hosted runtime env/config helpers that Cloudflare needs at the app boundary export from
-`@murphai/assistant-runtime/hosted-assistant-env` and
-`@murphai/assistant-runtime/hosted-runtime-contracts`, so hosted apps do not need
-to reach into lower owner packages for runtime launch/profile contracts. Concrete
-Codex app-server process lifecycle hooks remain owned by `@murphai/assistant-engine/codex-lifecycle`.
+`@murphai/assistant-runtime/hosted-runtime-contracts` and
+`@murphai/assistant-runtime/hosted-runtime-worker-contracts`. Hosted capability
+membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
+runtime launch/profile contracts do not re-export lower owner packages through
+legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
+`@murphai/assistant-engine/codex-lifecycle`.
 Host apps may still decide which env profiles are enabled and how
 transport-specific URL rewriting works, but the profile key sets and runtime
 manifest shape come from this package.

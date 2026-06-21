@@ -145,7 +145,7 @@ export function expectAdvertisedMurphDynamicTools(
   const expectedToolNames = listMurphDynamicToolNames()
     .filter((name) => {
       if (
-        options.computerToolsAvailable === false
+        options.computerToolsAvailable !== true
         && name.startsWith("murph.computer_")
       ) {
         return false;

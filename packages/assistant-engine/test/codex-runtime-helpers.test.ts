@@ -61,6 +61,10 @@ import {
   resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
+} from '../src/assistant-codex/dynamic-tools.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionResult,
@@ -1813,11 +1817,14 @@ describe('Codex assistant registry helpers', () => {
     ).resolves.toMatchObject({
       response: 'ok',
     })
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
-    ).toMatchObject({
-      voiceMemoDeliveryChannel: 'telegram',
+    const telegramTurnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(telegramTurnInput).toMatchObject({
+      voiceMemoRuntime: {
+        kind: 'telegram',
+      },
     })
+    expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
       provider: 'codex-cli',
@@ -1827,11 +1834,14 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt.ok).toBe(true)
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
-    ).toMatchObject({
-      voiceMemoDeliveryChannel: 'linq',
+    const linqTurnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
+    expect(linqTurnInput).toMatchObject({
+      voiceMemoRuntime: {
+        kind: 'linq',
+      },
     })
+    expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
   })
 
   it('forwards Telegram reaction availability through input wrappers to Codex execution', async () => {
@@ -1882,7 +1892,9 @@ describe('Codex assistant registry helpers', () => {
     expect(
       findProviderPromptSizeTraceRawEvent(traceEvents, 'primary'),
     ).toMatchObject({
-      dynamicToolCount: 6,
+      dynamicToolCount: resolveMurphDynamicTools({
+        allowMessageReactions: true,
+      }).length,
       messageReactionsAvailable: true,
       reactionDynamicToolAvailable: true,
     })

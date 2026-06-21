@@ -171,7 +171,7 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
 
 async function startTelegramScenario(): Promise<void> {
   telegramStub = await startHostedLocalTelegramStub({
-    botToken: telegramBotToken,
+    botToken: hostedLocalTelegramRequestToken,
     debugLogFile: telegramDebugLogFile,
   });
   scenario = await startHostedLocalFullStackScenario({

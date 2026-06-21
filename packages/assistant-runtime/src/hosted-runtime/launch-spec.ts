@@ -8,6 +8,11 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
+  HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+  HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
+  HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
+} from "@murphai/hosted-execution/assistant-capabilities";
 
 import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
@@ -61,6 +66,7 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_RUNTIME_CHECKPOINT_DEBUG_ENV_KEYS,
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+    ...HOSTED_ELEVENLABS_TTS_ENV_NAMES,
     HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
     HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
     HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -71,12 +77,8 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   // Linq webhook verification stays on the ingress boundary. The runtime only
   // receives outbound Linq API config.
   linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
-  exa: [
-    "EXA_API_KEY",
-  ],
-  mapbox: [
-    "MAPBOX_ACCESS_TOKEN",
-  ],
+  exa: HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
+  mapbox: HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
   // Parser support is a semantic runner capability. Concrete native binary and
   // model paths are image-owned toolchain config, not forwarded runtime env.
   parsers: [],

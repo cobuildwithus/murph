@@ -33,21 +33,44 @@ export interface GenerateVoiceMemoToolResult {
 
 export type VoiceMemoDeliveryChannel = 'linq' | 'telegram'
 
+export interface VoiceMemoElevenLabsRuntimeConfig {
+  apiKeyAvailable: boolean
+  modelId: string | null
+  voiceId: string | null
+}
+
+export type VoiceMemoToolRuntime =
+  | {
+      elevenLabs: VoiceMemoElevenLabsRuntimeConfig
+      kind: 'telegram'
+    }
+  | {
+      elevenLabs: VoiceMemoElevenLabsRuntimeConfig
+      generateAndUpload(input: {
+        filenameBase: string
+        modelId: string
+        signal?: AbortSignal | null
+        text: string
+        voiceId: string
+      }): Promise<{
+        attachmentId: string
+        contentType: 'audio/mpeg'
+        filename: string
+        sizeBytes: number
+      }>
+      kind: 'linq'
+    }
+
 const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
-  env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
-  publicFetchImpl?: typeof fetch | null
-  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
+  runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  const deliveryChannel = resolveVoiceMemoDeliveryChannel(
-    input.voiceMemoDeliveryChannel,
-  )
-  if (!deliveryChannel) {
+  const runtime = input.runtime ?? null
+  if (!runtime) {
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generation is only available for deliverable iMessage or Telegram replies',
@@ -61,8 +84,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const apiKey = resolveElevenLabsApiKey(input.env)
-  if (!apiKey) {
+  if (!runtime.elevenLabs.apiKeyAvailable) {
     return {
       rpcSuccess: false,
       rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
@@ -71,7 +93,7 @@ export async function executeGenerateVoiceMemoTool(input: {
 
   const voiceId =
     normalizeNullableString(input.args.voiceId) ??
-    resolveElevenLabsVoiceId(input.env)
+    runtime.elevenLabs.voiceId
   if (!voiceId) {
     return {
       rpcSuccess: false,
@@ -79,9 +101,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const modelId = normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
-    resolveElevenLabsModelId(input.env),
-  )
+  const modelId = runtime.elevenLabs.modelId
   if (!modelId) {
     return {
       rpcSuccess: false,
@@ -89,7 +109,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  if (deliveryChannel === 'telegram') {
+  if (runtime.kind === 'telegram') {
     const filename = `voice-memo-${randomUUID()}.mp3`
     return {
       responseMedia: [
@@ -115,24 +135,13 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const linqApiToken = resolveLinqApiToken(input.env)
-  if (!linqApiToken) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
-    }
-  }
-  const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
-  const uploadFetchImplementation = createStringFetchAdapter(
-    input.publicFetchImpl ?? input.fetchImpl,
-  )
-  let speech: Awaited<ReturnType<typeof generateElevenLabsSpeech>>
+  const filenameBase = `voice-memo-${randomUUID()}`
+  let upload: Awaited<ReturnType<typeof runtime.generateAndUpload>>
   try {
-    speech = await generateElevenLabsSpeech({
-      apiKey,
-      fetchImplementation,
+    upload = await runtime.generateAndUpload({
+      filenameBase,
       modelId,
-      signal: input.abortSignal ?? undefined,
+      signal: input.abortSignal ?? null,
       text: input.args.text,
       voiceId,
     })
@@ -140,78 +149,168 @@ export async function executeGenerateVoiceMemoTool(input: {
     if (isAbortError(error)) {
       throw error
     }
-    return {
-      rpcSuccess: false,
-      rpcText: 'voice memo generation failed',
+    if (error instanceof VoiceMemoToolConfigurationError) {
+      return {
+        rpcSuccess: false,
+        rpcText: error.rpcText,
+      }
     }
-  }
-
-  if (
-    speech.bytes.byteLength === 0 ||
-    speech.bytes.byteLength > MAX_VOICE_MEMO_BYTES
-  ) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'voice memo generation returned invalid audio data',
-    }
-  }
-
-  const linqFilename = `voice-memo-${randomUUID()}.${speech.filenameExtension}`
-  try {
-    const upload = await createLinqAttachmentUpload(
-      {
-        contentType: speech.contentType,
-        filename: linqFilename,
-        sizeBytes: speech.bytes.byteLength,
-      },
-      {
-        env: input.env,
-        fetchImplementation,
-        signal: input.abortSignal ?? undefined,
-      },
-    )
-    await uploadLinqAttachmentBytes(
-      {
-        bytes: speech.bytes,
-        requiredHeaders: upload.requiredHeaders,
-        uploadUrl: upload.uploadUrl,
-      },
-      {
-        fetchImplementation: uploadFetchImplementation,
-        signal: input.abortSignal ?? undefined,
-      },
-    )
-
-    return {
-      responseMedia: [
-        {
-          kind: 'voice_memo',
-          url: null,
-          mimeType: speech.contentType,
-          filename: linqFilename,
-          sizeBytes: speech.bytes.byteLength,
-          transcript: input.args.text,
-          source: 'elevenlabs',
-          voiceId,
-          modelId,
-          transportRefs: {
-            linq: {
-              attachmentId: upload.attachmentId,
-            },
-          },
-        },
-      ],
-      rpcSuccess: true,
-      rpcText: 'generated voice memo attached to the final response',
-    }
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error
+    if (error instanceof VoiceMemoToolGenerationError) {
+      return {
+        rpcSuccess: false,
+        rpcText: error.rpcText,
+      }
     }
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generated but Linq attachment upload failed',
     }
+  }
+
+  return {
+    responseMedia: [
+      {
+        kind: 'voice_memo',
+        url: null,
+        mimeType: upload.contentType,
+        filename: upload.filename,
+        sizeBytes: upload.sizeBytes,
+        transcript: input.args.text,
+        source: 'elevenlabs',
+        voiceId,
+        modelId,
+        transportRefs: {
+          linq: {
+            attachmentId: upload.attachmentId,
+          },
+        },
+      },
+    ],
+    rpcSuccess: true,
+    rpcText: 'generated voice memo attached to the final response',
+  }
+}
+
+export function createVoiceMemoToolRuntimeFromEnv(input: {
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  publicFetchImpl?: typeof fetch | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
+}): VoiceMemoToolRuntime | null {
+  const deliveryChannel = resolveVoiceMemoDeliveryChannel(
+    input.voiceMemoDeliveryChannel,
+  )
+  if (!deliveryChannel) {
+    return null
+  }
+
+  const apiKey = resolveElevenLabsApiKey(input.env)
+  const elevenLabs: VoiceMemoElevenLabsRuntimeConfig = {
+    apiKeyAvailable: apiKey !== null,
+    modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
+      resolveElevenLabsModelId(input.env),
+    ),
+    voiceId: resolveElevenLabsVoiceId(input.env),
+  }
+
+  if (deliveryChannel === 'telegram') {
+    return {
+      elevenLabs,
+      kind: 'telegram',
+    }
+  }
+
+  const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
+  const uploadFetchImplementation = createStringFetchAdapter(
+    input.publicFetchImpl ?? input.fetchImpl,
+  )
+
+  return {
+    elevenLabs,
+    kind: 'linq',
+    generateAndUpload: async (request) => {
+      if (!apiKey) {
+        throw new VoiceMemoToolConfigurationError(
+          'ELEVENLABS_API_KEY is required for voice memo generation',
+        )
+      }
+      const linqApiToken = resolveLinqApiToken(input.env)
+      if (!linqApiToken) {
+        throw new VoiceMemoToolConfigurationError(
+          'LINQ_API_TOKEN is required for voice memo attachment upload',
+        )
+      }
+
+      let speech: Awaited<ReturnType<typeof generateElevenLabsSpeech>>
+      try {
+        speech = await generateElevenLabsSpeech({
+          apiKey,
+          fetchImplementation,
+          modelId: request.modelId,
+          signal: request.signal ?? undefined,
+          text: request.text,
+          voiceId: request.voiceId,
+        })
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error
+        }
+        throw new VoiceMemoToolGenerationError('voice memo generation failed')
+      }
+
+      if (
+        speech.bytes.byteLength === 0 ||
+        speech.bytes.byteLength > MAX_VOICE_MEMO_BYTES
+      ) {
+        throw new VoiceMemoToolGenerationError(
+          'voice memo generation returned invalid audio data',
+        )
+      }
+
+      const linqFilename = `${request.filenameBase}.${speech.filenameExtension}`
+      const upload = await createLinqAttachmentUpload(
+        {
+          contentType: speech.contentType,
+          filename: linqFilename,
+          sizeBytes: speech.bytes.byteLength,
+        },
+        {
+          env: input.env,
+          fetchImplementation,
+          signal: request.signal ?? undefined,
+        },
+      )
+      await uploadLinqAttachmentBytes(
+        {
+          bytes: speech.bytes,
+          requiredHeaders: upload.requiredHeaders,
+          uploadUrl: upload.uploadUrl,
+        },
+        {
+          fetchImplementation: uploadFetchImplementation,
+          signal: request.signal ?? undefined,
+        },
+      )
+
+      return {
+        attachmentId: upload.attachmentId,
+        contentType: speech.contentType,
+        filename: linqFilename,
+        sizeBytes: speech.bytes.byteLength,
+      }
+    },
+  }
+}
+
+class VoiceMemoToolConfigurationError extends Error {
+  constructor(readonly rpcText: string) {
+    super(rpcText)
+  }
+}
+
+class VoiceMemoToolGenerationError extends Error {
+  constructor(readonly rpcText: string) {
+    super(rpcText)
   }
 }
 

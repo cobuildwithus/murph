@@ -4,6 +4,9 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
+} from "@murphai/hosted-execution/assistant-capabilities";
+import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-env";
 
@@ -27,11 +30,7 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   // mark egress for the Worker intercept. In hosted runs each value is only
   // the __cloudflare_injected__ sentinel; the real token is swapped in at
   // egress, so no raw provider key enters the runner shell.
-  "ELEVENLABS_API_KEY",
-  "EXA_API_KEY",
-  "MAPBOX_ACCESS_TOKEN",
-  "MURPH_ELEVENLABS_MODEL_ID",
-  "MURPH_ELEVENLABS_VOICE_ID",
+  ...HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
   "NODE_EXTRA_CA_CERTS",
   "NO_COLOR",
   "PATH",

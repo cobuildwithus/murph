@@ -386,7 +386,7 @@ function requireTelegramStub(): HostedLocalTelegramStub {
 
 async function startTelegramScenario(): Promise<void> {
   telegramStub = await startHostedLocalTelegramStub({
-    botToken: telegramBotToken,
+    botToken: hostedLocalTelegramRequestToken,
     debugLogFile: telegramDebugLogFile,
   });
   scenario = await startHostedLocalFullStackScenario({

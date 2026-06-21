@@ -689,10 +689,7 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expectAdvertisedMurphDynamicTools(
-      requireScenario().assistantProviderRequests,
-      { computerToolsAvailable: false },
-    );
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();

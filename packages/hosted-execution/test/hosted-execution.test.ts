@@ -501,6 +501,7 @@ describe("hosted execution coverage gaps", () => {
 
     expect(exportKeys).toEqual([
       ".",
+      "./assistant-capabilities",
       "./assistant-identifiers",
       "./assistant-usage",
       "./auth",
@@ -530,6 +531,8 @@ describe("hosted execution coverage gaps", () => {
     expect(exportKeys).not.toContain("./outbox-payload");
 
     const rootModule = await import("@murphai/hosted-execution");
+    const assistantCapabilitiesModule =
+      await import("@murphai/hosted-execution/assistant-capabilities") as Record<string, unknown>;
     const assistantUsageModule =
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule =
@@ -555,6 +558,13 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
+    expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
+    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
+      "ELEVENLABS_API_KEY",
+      "MURPH_ELEVENLABS_MODEL_ID",
+      "MURPH_ELEVENLABS_VOICE_ID",
+    ]);
     expectTypeOf<RuntimeControlCodexRootProcess>().toEqualTypeOf<{
       commandLineDigest: string;
       owner: "codex-app-server";

@@ -5,8 +5,12 @@ import {
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  createVoiceMemoToolRuntimeFromEnv,
   executeGenerateVoiceMemoTool,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
 
 const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
 
@@ -25,9 +29,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {},
-        fetchImpl,
-        voiceMemoDeliveryChannel: null,
+        runtime: createRuntime({}, fetchImpl, null),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -46,12 +48,10 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {
+        runtime: createRuntime({
           LINQ_API_TOKEN: 'linq-token',
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-        },
-        fetchImpl,
-        voiceMemoDeliveryChannel: 'linq',
+        }, fetchImpl, 'linq'),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -64,12 +64,10 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {
+        runtime: createRuntime({
           ELEVENLABS_API_KEY: 'elevenlabs-key',
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-        },
-        fetchImpl,
-        voiceMemoDeliveryChannel: 'linq',
+        }, fetchImpl, 'linq'),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -82,12 +80,10 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {
+        runtime: createRuntime({
           ELEVENLABS_API_KEY: 'elevenlabs-key',
           LINQ_API_TOKEN: 'linq-token',
-        },
-        fetchImpl,
-        voiceMemoDeliveryChannel: 'linq',
+        }, fetchImpl, 'linq'),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -106,14 +102,12 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {
+        runtime: createRuntime({
           ELEVENLABS_API_KEY: 'elevenlabs-key',
           LINQ_API_TOKEN: 'linq-token',
           MURPH_ELEVENLABS_MODEL_ID: 'eleven_monolingual_v1',
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-        },
-        fetchImpl,
-        voiceMemoDeliveryChannel: 'linq',
+        }, fetchImpl, 'linq'),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -139,13 +133,11 @@ describe('executeGenerateVoiceMemoTool', () => {
           text: 'Send a short reminder.',
           voiceId: null,
         },
-        env: {
+        runtime: createRuntime({
           ELEVENLABS_API_KEY: 'elevenlabs-key',
           LINQ_API_TOKEN: 'linq-token',
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-        },
-        fetchImpl,
-        voiceMemoDeliveryChannel: 'linq',
+        }, fetchImpl, 'linq'),
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -174,13 +166,11 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         LINQ_API_TOKEN: 'linq-token',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl,
-      voiceMemoDeliveryChannel: 'linq',
+      }, fetchImpl, 'linq'),
     })
 
     expect(result).toMatchObject({
@@ -210,13 +200,11 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         LINQ_API_TOKEN: 'linq-token',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl,
-      voiceMemoDeliveryChannel: 'linq',
+      }, fetchImpl, 'linq'),
     })
 
     expect(result).toMatchObject({
@@ -290,14 +278,12 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         LINQ_API_TOKEN: 'linq-token',
         MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl,
-      voiceMemoDeliveryChannel: 'linq',
+      }, fetchImpl, 'linq'),
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -330,13 +316,11 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl,
-      voiceMemoDeliveryChannel: 'telegram',
+      }, fetchImpl, 'telegram'),
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -398,14 +382,11 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         LINQ_API_TOKEN: 'linq-token',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl: providerFetchImpl,
-      publicFetchImpl,
-      voiceMemoDeliveryChannel: 'linq',
+      }, providerFetchImpl, 'linq', publicFetchImpl),
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -445,13 +426,11 @@ describe('executeGenerateVoiceMemoTool', () => {
         text: 'Send a short reminder.',
         voiceId: null,
       },
-      env: {
+      runtime: createRuntime({
         ELEVENLABS_API_KEY: 'elevenlabs-key',
         LINQ_API_TOKEN: 'linq-token',
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
-      fetchImpl,
-      voiceMemoDeliveryChannel: 'linq',
+      }, fetchImpl, 'linq'),
     })
 
     expect(result).toMatchObject({
@@ -464,6 +443,12 @@ describe('executeGenerateVoiceMemoTool', () => {
 })
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('keeps voice-only replies text-empty in the model-visible contract', () => {
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'If the user asks for voice memos only, attach the voice memo and leave the final response text empty.',
+    )
+  })
+
   it('rejects voice memo payloads on the image-only attach response media tool', async () => {
     const request = readMurphDynamicToolRequest({
       id: 10,
@@ -543,11 +528,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     })
 
     const result = await executeMurphDynamicToolRequest({
-      env: {
-        ELEVENLABS_API_KEY: 'elevenlabs-key',
-        LINQ_API_TOKEN: 'linq-token',
-        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
+      env: {},
       fetchImpl,
       nextUsageOrdinal,
       progressDelivery: null,
@@ -591,16 +572,11 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
           source: null,
         },
       ],
-      env: {
-        ELEVENLABS_API_KEY: 'elevenlabs-key',
-        LINQ_API_TOKEN: 'linq-token',
-        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
+      env: {},
       fetchImpl,
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
-      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result.rpcResult).toEqual({
@@ -724,16 +700,16 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     const nextUsageOrdinal = vi.fn(() => 99)
     const result = await executeMurphDynamicToolRequest({
-      env: {
-        ELEVENLABS_API_KEY: 'elevenlabs-key',
-        LINQ_API_TOKEN: 'linq-token',
-        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      },
+      env: {},
       fetchImpl,
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
-      voiceMemoDeliveryChannel: 'linq',
+      voiceMemoRuntime: createRuntime({
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      }, fetchImpl, 'linq'),
     })
 
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
@@ -774,4 +750,18 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 
 function readHeader(headers: HeadersInit | undefined, name: string): string | null {
   return new Headers(headers).get(name)
+}
+
+function createRuntime(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  voiceMemoDeliveryChannel: 'linq' | 'telegram' | null,
+  publicFetchImpl?: typeof fetch | null,
+) {
+  return createVoiceMemoToolRuntimeFromEnv({
+    env,
+    fetchImpl,
+    publicFetchImpl,
+    voiceMemoDeliveryChannel,
+  })
 }

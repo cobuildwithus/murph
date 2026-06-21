@@ -55,6 +55,9 @@ import {
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
+import type {
+  VoiceMemoToolRuntime,
+} from './assistant-codex/generate-voice-memo-tool.js'
 import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
@@ -134,6 +137,9 @@ export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexAppServerImageInput } from './assistant-codex/images.js'
+export type {
+  VoiceMemoToolRuntime,
+} from './assistant-codex/generate-voice-memo-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -430,7 +436,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
-  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
+  voiceMemoRuntime?: VoiceMemoToolRuntime | null
   workingDirectory: string
 }
 
@@ -599,6 +605,7 @@ export async function executeCodexAppServerTurn(
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
+    voiceMemoRuntime: input.voiceMemoRuntime ?? null,
     workingDirectory,
   }
 
@@ -2803,7 +2810,10 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
-      voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
+      voiceMemoRuntime:
+        dynamicToolRequest.kind === 'generate-voice-memo'
+          ? input.voiceMemoRuntime ?? null
+          : null,
     }).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()

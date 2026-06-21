@@ -61,6 +61,9 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  createVoiceMemoToolRuntimeFromEnv,
+} from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
 import {
@@ -79,11 +82,9 @@ import {
   type CodexNormalizedEvent,
 } from '../src/assistant-codex-events.ts'
 
+const MURPH_DYNAMIC_TOOLS = resolveMurphDynamicTools({})
 const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
   computerToolsAvailable: true,
-})
-const MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER = resolveMurphDynamicTools({
-  computerToolsAvailable: false,
 })
 
 const tempRoots: string[] = []
@@ -360,19 +361,25 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
     return child
   })
 
+  const env = {
+    ELEVENLABS_API_KEY: 'elevenlabs-test-key',
+    MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+    MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+    PATH: '/custom/bin',
+  }
+
   return await executeCodexAppServerTurn({
     approvalPolicy: 'never',
     codexCommand: 'codex',
     codexHome,
-    env: {
-      ELEVENLABS_API_KEY: 'elevenlabs-test-key',
-      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
-      MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      PATH: '/custom/bin',
-    },
+    env,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
-    voiceMemoDeliveryChannel: 'telegram',
+    voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
+      env,
+      fetchImpl: fetch,
+      voiceMemoDeliveryChannel: 'telegram',
+    }),
     workingDirectory,
   })
 }
@@ -455,7 +462,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -475,7 +482,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -487,7 +494,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -675,7 +682,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+              dynamicTools: MURPH_DYNAMIC_TOOLS,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -8991,7 +8998,7 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
-        dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -9108,7 +9115,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({
@@ -9793,7 +9800,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({
