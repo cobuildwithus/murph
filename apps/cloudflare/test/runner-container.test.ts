@@ -1247,13 +1247,13 @@ describe("RunnerContainer", () => {
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
-          model: "gpt-5.4-nano",
+          model: "gpt-5.5",
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: "gpt-5.4-nano",
+            model: "gpt-5.5",
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1276,14 +1276,14 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       },
     });
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
       egressGrantConsumed: true,
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
       stdoutBytes: 2_048,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
@@ -1333,7 +1333,7 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             liveModelTurn: {
               durationMs: 1_234,
-              model: "gpt-5.4-nano",
+              model: "gpt-5.5",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -1354,7 +1354,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1433,7 +1433,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1453,7 +1453,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       },
     }).catch((caught: unknown) => caught);
 

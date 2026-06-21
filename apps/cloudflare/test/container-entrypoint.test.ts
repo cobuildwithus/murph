@@ -889,7 +889,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -915,13 +915,13 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
       signal: expect.any(AbortSignal),
     });
   });
@@ -991,7 +991,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(response.json).toMatchObject({
         liveModelTurn: {
-          model: "gpt-5.4-nano",
+          model: "gpt-5.5",
         },
         ok: true,
       });

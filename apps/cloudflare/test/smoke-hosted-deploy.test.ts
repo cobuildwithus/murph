@@ -469,7 +469,7 @@ describe("runSmokeHostedDeploy", () => {
             liveModelTurn: {
               durationMs: 1_234,
               egressGrantConsumed: true,
-              model: "gpt-5.4-nano",
+              model: "gpt-5.5",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -594,7 +594,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: false,
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
         stdoutBytes: 2_048,
       }),
       log() {},
@@ -605,7 +605,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: true,
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
         stdoutBytes: 0,
       }),
       log() {},

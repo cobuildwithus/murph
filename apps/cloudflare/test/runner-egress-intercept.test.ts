@@ -128,7 +128,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
 } = {}): Record<string, unknown> {
   return {
     input: "anything Codex emits",
-    model: input.model ?? "gpt-5.4-nano",
+    model: input.model ?? "gpt-5.5",
     stream: true,
   };
 }
@@ -1356,7 +1356,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1402,7 +1402,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1437,7 +1437,7 @@ describe("hostedRunnerIntercept", () => {
       vi.stubGlobal("fetch", fetchMock);
       const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
         active: true,
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       }));
       const env = createInterceptEnv({
         OPENAI_API_KEY: "openai-worker-secret",
@@ -1469,7 +1469,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1479,7 +1479,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-smoke-mismatch" })),
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           "content-type": "application/json",
