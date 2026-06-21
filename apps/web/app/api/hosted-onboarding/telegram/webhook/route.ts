@@ -8,13 +8,6 @@ import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboardi
 
 const HOSTED_TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
-export async function GET() {
-  return jsonOk({
-    ok: true,
-    provider: "telegram",
-  });
-}
-
 export const POST = withJsonError(async (request: Request) => {
   const secretToken = request.headers.get("x-telegram-bot-api-secret-token");
   assertHostedTelegramWebhookSecret(secretToken);
