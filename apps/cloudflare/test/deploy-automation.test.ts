@@ -539,7 +539,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       "live_model_turn:",
-      "description: Run one real gpt-5.4-nano turn in the deployed container smoke",
+      "description: Run one real gpt-5.5 turn in the deployed container smoke",
       'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",

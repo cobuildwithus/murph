@@ -553,7 +553,7 @@ describe("cloudflare worker routes", () => {
         model: string;
       };
     }) => {
-      if (input.liveModelTurn?.model !== "gpt-5.4-nano") {
+      if (input.liveModelTurn?.model !== "gpt-5.5") {
         throw new Error("Expected the live model turn smoke input.");
       }
 
@@ -561,7 +561,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.4-nano",
+          model: "gpt-5.5",
           stdoutBytes: 2_048,
         },
         ok: true,
@@ -603,7 +603,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(smokeHealth).toHaveBeenCalledWith({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: "gpt-5.5",
       },
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -612,7 +612,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.4-nano",
+          model: "gpt-5.5",
           stdoutBytes: 2_048,
         },
       },

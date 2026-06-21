@@ -39,7 +39,7 @@ on:
         default: true
         type: boolean
       live_model_turn:
-        description: Run one real gpt-5.4-nano turn in the deployed container smoke
+        description: Run one real gpt-5.5 turn in the deployed container smoke
         required: true
         default: true
         type: boolean
