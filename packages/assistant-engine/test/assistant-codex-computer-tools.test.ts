@@ -98,6 +98,7 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
+        memberScopedProfileRequired: true,
         profileKey: "default",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
@@ -276,6 +277,7 @@ describe("murph computer dynamic tools", () => {
         resumeRunId: "hcr_run123",
       }),
     ]);
+    expect(bodies[0]).not.toHaveProperty("memberScopedProfileRequired");
   });
 
   it("rejects computer requests when hosted computer transport is unavailable", async () => {

@@ -169,6 +169,9 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
+    const profileSnapshotRuns = input.resumeRunId
+      ? null
+      : await store.listMemberRuns({ memberId: input.memberId });
     await this.expireStaleActiveRunsForMember({
       memberId: input.memberId,
       now,
@@ -214,7 +217,7 @@ export class ComputerUseService {
     const runId = createComputerId("hcr");
     const kernelProfile = await this.resolveKernelProfile({
       memberId: input.memberId,
-      store,
+      runs: profileSnapshotRuns ?? await store.listMemberRuns({ memberId: input.memberId }),
     });
     const kernelProfileName = kernelProfile.name;
     const legacyProfileKey = kernelProfile.legacyProfileKey ?? input.legacyProfileKey ?? null;
@@ -1513,7 +1516,7 @@ export class ComputerUseService {
 
   private async resolveKernelProfile(input: {
     memberId: string;
-    store: ComputerUseStore;
+    runs: readonly ComputerRunRecord[];
   }): Promise<{
     fromStoredRun: boolean;
     legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
@@ -1524,7 +1527,7 @@ export class ComputerUseService {
       {
         memberId: input.memberId,
         namespace,
-        runs: await input.store.listMemberRuns({ memberId: input.memberId }),
+        runs: input.runs,
       },
     );
     if (storedProfileName) {
@@ -1537,10 +1540,11 @@ export class ComputerUseService {
 
     return {
       fromStoredRun: false,
-      legacyProfileKey: null,
-      name: buildKernelProfileNameForNamespace({
+      legacyProfileKey: "default",
+      name: buildLegacyKernelProfileName({
         memberId: input.memberId,
         namespace,
+        profileKey: "default",
       }),
     };
   }
@@ -2726,17 +2730,6 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
   return baseUrl;
 }
 
-function buildKernelProfileName(input: {
-  env: EnvSource;
-  memberId: string;
-}): string {
-  const namespace = requireKernelProfileNamespace(input.env);
-  return buildKernelProfileNameForNamespace({
-    memberId: input.memberId,
-    namespace,
-  });
-}
-
 function buildKernelProfileNameForNamespace(input: {
   memberId: string;
   namespace: string;
@@ -2818,10 +2811,12 @@ function buildKernelProfileNamesForAccountDeletion(input: {
   try {
     const shouldDeleteDeterministicProfiles =
       input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
+    const namespace = requireKernelProfileNamespace(input.env);
     const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? [buildKernelProfileName({
-          env: input.env,
+      ? [buildLegacyKernelProfileName({
           memberId: input.memberId,
+          namespace,
+          profileKey: "default",
         })]
       : [];
 

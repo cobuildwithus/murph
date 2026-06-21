@@ -1479,7 +1479,7 @@ describe("ComputerUseService", () => {
       status: "running",
     });
     expect(store.run.kernelProfileName).toMatch(
-      /^murph-staging\.alpha-member_123-[0-9a-f]{24}$/u,
+      /^murph-staging\.alpha-member_123-default-[0-9a-f]{24}$/u,
     );
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
@@ -1618,13 +1618,71 @@ describe("ComputerUseService", () => {
     });
 
     expect(store.run.kernelProfileName).toBe(
-      "murph-preview-member_123-f9456097997816d7d81bab13",
+      "murph-preview-member_123-default-35c4dcc37332cb0317fad4fe",
     );
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
-        profileName: "murph-preview-member_123-f9456097997816d7d81bab13",
+        profileName: "murph-preview-member_123-default-35c4dcc37332cb0317fad4fe",
       }),
     ]);
+  });
+
+  it("selects the migration profile from history before stale cleanup updates timestamps", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
+    const appointmentsProfileName =
+      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
+    const appointmentsRun = createRunRecord({
+      completedAt: new Date("2026-06-17T10:00:00.000Z"),
+      expiresAt: new Date("2026-06-17T11:00:00.000Z"),
+      id: "hcr_appointments",
+      kernelLiveViewUrlEncrypted: "encrypted-live-view",
+      kernelProfileName: appointmentsProfileName,
+      kernelSessionId: "kernel-session-appointments",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T10:05:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-17T11:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+          id: "hcr_commerce",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: commerceProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T11:55:00.000Z"),
+        }),
+        appointmentsRun,
+      ],
+      run: appointmentsRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-appointments"]);
+    expect(store.run.kernelProfileName).toBe(commerceProfileName);
+    expect(store.createRunInputs.at(-1)).toMatchObject({
+      legacyProfileKey: "commerce",
+    });
   });
 
   it("installs the public-network route guard before storing a blank browser live view", async () => {
@@ -4122,7 +4180,7 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toHaveLength(2);
     expect(kernel.deletedProfileNames).toEqual(expect.arrayContaining([
       "kernel-profile-member",
-      expect.stringMatching(/^murph-test-member_123-[0-9a-f]{24}$/u),
+      expect.stringMatching(/^murph-test-member_123-default-[0-9a-f]{24}$/u),
     ]));
   });
 
@@ -5648,6 +5706,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         suggestedReply: null,
         updatedAt: input.now,
       };
+      this.storeMemberRun(this.run);
     }
     let expired = false;
     if (
@@ -5677,6 +5736,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       suggestedReply: null,
       updatedAt: input.now,
     };
+    this.storeMemberRun(this.run);
     return {
       expired,
       run: this.run,
@@ -5787,6 +5847,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         kernelSessionId: null,
         updatedAt: input.now,
       };
+      this.storeMemberRun(this.run);
     }
     return this.run;
   }

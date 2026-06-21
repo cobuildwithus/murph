@@ -244,7 +244,8 @@ function rewriteLegacyHostedComputerProfileKey(value: unknown): unknown {
     !isRecord(value) ||
     (
       !Object.prototype.hasOwnProperty.call(value, "profileKey") &&
-      !Object.prototype.hasOwnProperty.call(value, "legacyProfileKey")
+      !Object.prototype.hasOwnProperty.call(value, "legacyProfileKey") &&
+      !Object.prototype.hasOwnProperty.call(value, "memberScopedProfileRequired")
     )
   ) {
     return value;
@@ -253,6 +254,7 @@ function rewriteLegacyHostedComputerProfileKey(value: unknown): unknown {
   const legacyProfileKey = readLegacyHostedComputerProfileKey(value.profileKey);
   const {
     legacyProfileKey: _legacyProfileKey,
+    memberScopedProfileRequired: _memberScopedProfileRequired,
     profileKey: _profileKey,
     ...request
   } = value;
