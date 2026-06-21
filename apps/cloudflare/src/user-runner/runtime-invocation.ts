@@ -252,7 +252,7 @@ export class RuntimeInvocationService {
         if (committedResult.kind === "unknown") {
           throw error;
         }
-        if (probeOutcome === "inactive") {
+        if (probeOutcome !== "mismatch") {
           await this.recordAcceptedRuntimeAttemptFailureBestEffort({
             error,
             executionInput,
@@ -272,7 +272,7 @@ export class RuntimeInvocationService {
             },
             level: "warn",
             message:
-              "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+            "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
             phase: "failed",
             userId: executionInput.userId,
           });
@@ -684,11 +684,10 @@ export class RuntimeInvocationService {
    * whole window: a live DO invoke either proceeds to run the invocation under
    * the intact fence, or dies and releases the container slot, after which the
    * pre-existing stale-fence replacement path reclaims the fence. Accepted
-   * background invocations also keep the fence when the probe reports inactive
-   * but durable progress is not visible yet; the next ensure command uses the
-   * identity-aware wake endpoint to distinguish a lost local pointer from a
-   * truly missing child. Identity mismatch, unsupported probes, probe error,
-   * and probe timeout still fail toward clear-the-fence behavior.
+   * background invocations also keep the fence when durable progress is not
+   * visible yet unless the probe positively identifies a different child. The
+   * next ensure command uses the identity-aware wake endpoint to distinguish a
+   * lost local pointer from a truly missing child.
    */
   private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
@@ -760,7 +759,7 @@ export class RuntimeInvocationService {
       },
       level: "warn",
       message:
-        "Hosted runner attempt liveness probe was unconfirmed; clearing the write fence as before.",
+        "Hosted runner attempt liveness probe was unconfirmed.",
       phase: "failed",
       userId: input.prepared.input.userId,
     });
@@ -776,6 +775,12 @@ export class RuntimeInvocationService {
   }): Promise<void> {
     const attemptStillActive = input.probeOutcome === "active";
     const fenceCleared = input.fenceCleared ?? !attemptStillActive;
+    if (
+      !fenceCleared
+      && !await this.acceptedRuntimeAttemptStillOwnsFenceBestEffort(input.token)
+    ) {
+      return;
+    }
     const body = {
       entries: [
         {
@@ -832,6 +837,20 @@ export class RuntimeInvocationService {
         phase: "failed",
         userId: input.executionInput.userId,
       });
+    }
+  }
+
+  private async acceptedRuntimeAttemptStillOwnsFenceBestEffort(
+    token: RunnerWriteFenceToken,
+  ): Promise<boolean> {
+    try {
+      const current = await this.input.stateStore.readWriteFenceToken();
+      return current !== null
+        && current.attemptId === token.attemptId
+        && current.generation === token.generation
+        && current.userId === token.userId;
+    } catch {
+      return true;
     }
   }
 }

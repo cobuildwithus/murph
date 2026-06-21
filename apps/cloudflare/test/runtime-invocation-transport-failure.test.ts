@@ -183,7 +183,7 @@ describe("runtime invocation transport failure fence handling", () => {
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
   });
 
-  it("clears the write fence when the liveness probe itself fails", async () => {
+  it("keeps the accepted write fence when the liveness probe itself fails but progress is not durable yet", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => {
         throw new Error("container probe unreachable");
@@ -192,10 +192,25 @@ describe("runtime invocation transport failure fence handling", () => {
 
     await expect(harness.invoke()).rejects.toThrow("container transport failed");
 
-    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "error",
+          attemptStillActive: false,
+          fenceCleared: false,
+        }),
+      }),
+    ]);
   });
 
-  it("clears the write fence when the liveness probe hangs past its timeout", async () => {
+  it("keeps the accepted write fence when the liveness probe hangs past its timeout but progress is not durable yet", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: () =>
         new Promise<WorkerActiveRuntimeUserFenceResult>(() => {}),
@@ -211,7 +226,22 @@ describe("runtime invocation transport failure fence handling", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     await expect(settled).resolves.toBe("rejected");
 
-    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "timeout",
+          attemptStillActive: false,
+          fenceCleared: false,
+        }),
+      }),
+    ]);
   });
 
   it("clears the write fence when only the lease generation differs", async () => {
@@ -254,20 +284,26 @@ describe("runtime invocation transport failure fence handling", () => {
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
   });
 
-  it("clears the write fence when the container stub lacks the liveness probe method", async () => {
+  it("keeps the accepted write fence when the container stub lacks the liveness probe method but progress is not durable yet", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: null,
     });
 
     await expect(harness.invoke()).rejects.toThrow("container transport failed");
 
-    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
     expect(harness.loggedFailureEntries()).toEqual([
       expect.objectContaining({
         eventCode: "runner.accepted_attempt_failed",
         redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "unsupported",
           attemptStillActive: false,
-          fenceCleared: true,
+          fenceCleared: false,
         }),
       }),
     ]);

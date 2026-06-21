@@ -321,6 +321,10 @@ export async function checkpointHostedWorkspaceTx(input: {
     input.snapshotRef,
     "Hosted workspace snapshotRef",
   );
+  const expectedVersion = normalizeBigInt(
+    input.expectedVersion,
+    "Hosted workspace expectedVersion",
+  );
   const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
     checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
       ? new Date()
@@ -356,6 +360,17 @@ export async function checkpointHostedWorkspaceTx(input: {
       tx: input.tx,
       userId,
     });
+    const lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
+      where: {
+        userId,
+      },
+    });
+    if (!lockedWorkspace || lockedWorkspace.version !== expectedVersion) {
+      return {
+        status: "conflict",
+        workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
+      };
+    }
     if (!isMailboxContinuationCheckpoint(input)) {
       const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
         conversationImportedSeq,
@@ -363,15 +378,9 @@ export async function checkpointHostedWorkspaceTx(input: {
         userId,
       });
       if (pendingConversationSeq !== null) {
-        const row = await input.tx.hostedWorkspace.findUnique({
-          where: {
-            userId,
-          },
-        });
-
         return {
           status: "foreground_pending",
-          workspace: row ? projectHostedWorkspace(row) : null,
+          workspace: projectHostedWorkspace(lockedWorkspace),
         };
       }
     }
@@ -381,7 +390,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     data: updateData,
     where: {
       userId,
-      version: normalizeBigInt(input.expectedVersion, "Hosted workspace expectedVersion"),
+      version: expectedVersion,
     },
   });
   const row = await input.tx.hostedWorkspace.findUnique({
@@ -411,10 +420,39 @@ function readCheckpointConversationImportedSeq(
 function isMailboxContinuationCheckpoint(input: {
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
+  redactedStatusJson?: Record<string, unknown> | null;
 }): boolean {
+  if (readCheckpointRetryableBlockedCount(input.redactedStatusJson) > 0n) {
+    return true;
+  }
   return input.nextWakeAt !== undefined
     && input.nextWakeAt !== null
     && normalizeNullableString(input.nextWakeReason) === "mailbox";
+}
+
+function readCheckpointRetryableBlockedCount(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return 0n;
+  }
+  const value = redactedStatusJson["hostedMailboxRetryableBlockedCount"];
+  if (value === undefined || value === null) {
+    return 0n;
+  }
+  if (
+    typeof value === "bigint"
+    || typeof value === "number"
+    || typeof value === "string"
+  ) {
+    return normalizeBigInt(
+      value,
+      "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount",
+    );
+  }
+  throw new TypeError(
+    "Hosted workspace checkpoint redactedStatus hostedMailboxRetryableBlockedCount must be a non-negative integer.",
+  );
 }
 
 async function lockHostedWorkspaceForCheckpointTx(input: {

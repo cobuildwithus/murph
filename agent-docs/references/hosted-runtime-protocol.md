@@ -259,8 +259,7 @@ invocation (`active`) from real invocation deaths, and for watching the
 documented RunnerContainer DO-restart residual (`inactive` despite a live
 container suggests the in-memory active-op record was lost to a DO restart).
 `unsupported` means the liveness probe could not run through the expected
-RunnerContainer method; it is not live-child proof, so it clears unless the
-accepted-attempt durable progress recheck itself is unknown. That signal only
+RunnerContainer method; it is not proof that the child stopped. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
@@ -364,10 +363,12 @@ keeps its fence so wakes keep routing to the live invocation. If that accepted
 attempt has no durable committed progress yet and the local active-operation
 pointer is missing, the fence is preserved for the next identity-aware wake
 recheck instead of being cleared from the pointer alone; only the wake path may
-then replace the fence after it explicitly reports no active child. Mismatched,
-unsupported, or unreachable liveness probes still clear the fence exactly as
-before. This prevents duplicate replacement while a live child is still running,
-without leaving unsupported or unprobeable fences to block the runner slot.
+then replace the fence after it explicitly reports no active child. Mismatched
+liveness probes clear the fence because they prove the active child is not the
+fenced attempt; unsupported, error, timeout, and inactive probe outcomes preserve
+the accepted fence when durable progress is not visible yet. This prevents
+duplicate replacement while a live child may still be running and leaves
+replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
@@ -581,6 +582,12 @@ response that interrupts idle checkpointing so the same invocation can import
 fresh foreground mailbox input; Cloudflare may retire the upload session as an
 orphan candidate, but it must not collapse that response into a generic HTTP
 conflict before `packages/assistant-runtime` handles it.
+Web must evaluate the workspace-version CAS before returning
+`foreground_pending`: pending conversation input may interrupt only a checkpoint
+whose locked workspace version still equals the request's expected version.
+Retryable mailbox import blocks are mailbox-continuation checkpoints even when
+an earlier assistant or device wake wins the projected `nextWakeReason`; web
+uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
 publishing, inbox projection and audio/video transcript enrichment, provider cleanup and read
 acknowledgement, usage record, telemetry, log export, post-checkpoint

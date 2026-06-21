@@ -258,13 +258,63 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("allows mailbox-continuation idle checkpoints to persist bounded mailbox progress", async () => {
+  it("returns workspace-version conflict before foreground-pending when the locked row is stale", async () => {
     const current = buildHostedWorkspaceRow({
-      snapshotRef: createBundleRef("snapshot_checkpointed"),
+      snapshotRef: createBundleRef("snapshot_current"),
       version: 5n,
     });
     const hostedWorkspace = createHostedWorkspaceDelegate({
       findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 0 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 6n })),
+    };
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+      },
+      snapshotRef: createBundleRef("snapshot_stale_idle"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "conflict",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "5",
+      },
+    });
+  });
+
+  it("allows mailbox-continuation idle checkpoints to persist bounded mailbox progress", async () => {
+    const beforeCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const afterCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_checkpointed"),
+      version: 5n,
+    });
+    let findUniqueCount = 0;
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => {
+        findUniqueCount += 1;
+        return findUniqueCount === 1 ? beforeCheckpoint : afterCheckpoint;
+      }),
       updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
     });
     const hostedMailboxItem = {
@@ -323,6 +373,75 @@ describe("hosted workspace store", () => {
     }));
     expect(rawOperations.join("\n")).toContain("hosted_workspace");
     expect(rawOperations.join("\n")).not.toContain("hosted_mailbox_lane_counter");
+  });
+
+  it("allows retryable mailbox continuation checkpoints even when an earlier non-mailbox wake is selected", async () => {
+    const beforeCheckpoint = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_current"),
+      version: 4n,
+    });
+    const afterCheckpoint = buildHostedWorkspaceRow({
+      nextWakeAt: new Date("2026-04-26T00:00:05.000Z"),
+      nextWakeReason: "assistant",
+      snapshotRef: createBundleRef("snapshot_retryable_block"),
+      version: 5n,
+    });
+    let findUniqueCount = 0;
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => {
+        findUniqueCount += 1;
+        return findUniqueCount === 1 ? beforeCheckpoint : afterCheckpoint;
+      }),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxItem = {
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 6n })),
+    };
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedMailboxItem,
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:05.000Z",
+      nextWakeReason: "assistant",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxImportedCount: 2,
+        hostedMailboxRetryableBlockedCount: 1,
+      },
+      snapshotRef: createBundleRef("snapshot_retryable_block"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nextWakeAt: new Date("2026-04-26T00:00:05.000Z"),
+        nextWakeReason: "assistant",
+        redactedStatusJson: expect.objectContaining({
+          hostedMailboxRetryableBlockedCount: 1,
+        }),
+      }),
+      where: {
+        userId: "member_workspace_1",
+        version: 4n,
+      },
+    }));
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        nextWakeReason: "assistant",
+        snapshotRef: createBundleRef("snapshot_retryable_block"),
+        version: "5",
+      },
+    });
   });
 
   it("rejects non-boolean assistant context snapshot checkpoint status", async () => {
