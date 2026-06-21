@@ -217,6 +217,7 @@ export class ComputerUseService {
       store,
     });
     const kernelProfileName = kernelProfile.name;
+    const legacyProfileKey = kernelProfile.legacyProfileKey ?? input.legacyProfileKey ?? null;
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
@@ -230,7 +231,7 @@ export class ComputerUseService {
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
         kernelProfileName,
-        legacyProfileKey: input.legacyProfileKey ?? null,
+        legacyProfileKey,
         memberId: input.memberId,
         now,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
@@ -1515,6 +1516,7 @@ export class ComputerUseService {
     store: ComputerUseStore;
   }): Promise<{
     fromStoredRun: boolean;
+    legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
     name: string;
   }> {
     const namespace = requireKernelProfileNamespace(this.env);
@@ -1528,12 +1530,14 @@ export class ComputerUseService {
     if (storedProfileName) {
       return {
         fromStoredRun: true,
-        name: storedProfileName,
+        legacyProfileKey: storedProfileName.legacyProfileKey,
+        name: storedProfileName.name,
       };
     }
 
     return {
       fromStoredRun: false,
+      legacyProfileKey: null,
       name: buildKernelProfileNameForNamespace({
         memberId: input.memberId,
         namespace,
@@ -2751,35 +2755,47 @@ function findLatestStoredKernelProfileName(
     namespace: string;
     runs: readonly ComputerRunRecord[];
   },
-): string | null {
-  const allowedProfileNames = new Set([
-    buildKernelProfileNameForNamespace({
+): {
+  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
+  name: string;
+} | null {
+  const allowedProfileNames = new Map<string, (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null>([
+    [buildKernelProfileNameForNamespace({
       memberId: input.memberId,
       namespace: input.namespace,
-    }),
+    }), null],
     ...LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-      buildLegacyKernelProfileName({
+      [buildLegacyKernelProfileName({
         memberId: input.memberId,
         namespace: input.namespace,
         profileKey,
-      })),
+      }), profileKey] as const),
   ]);
-  let latestProfileName: string | null = null;
+  let latestProfile:
+    | {
+        legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
+        name: string;
+      }
+    | null = null;
   let latestUpdatedAtMs = Number.NEGATIVE_INFINITY;
 
   for (const run of input.runs) {
     const profileName = run.kernelProfileName.trim();
-    if (!allowedProfileNames.has(profileName)) {
+    const legacyProfileKey = allowedProfileNames.get(profileName);
+    if (legacyProfileKey === undefined) {
       continue;
     }
     const updatedAtMs = run.updatedAt.getTime();
     if (updatedAtMs >= latestUpdatedAtMs) {
-      latestProfileName = profileName;
+      latestProfile = {
+        legacyProfileKey,
+        name: profileName,
+      };
       latestUpdatedAtMs = updatedAtMs;
     }
   }
 
-  return latestProfileName;
+  return latestProfile;
 }
 
 function buildLegacyKernelProfileName(input: {

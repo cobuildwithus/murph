@@ -1223,6 +1223,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
+      legacyProfileKey: "appointments",
       memberId: "member_123",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
@@ -1557,6 +1558,9 @@ describe("ComputerUseService", () => {
     });
 
     expect(store.run.kernelProfileName).toBe(latestProfileName);
+    expect(store.createRunInputs.at(-1)).toMatchObject({
+      legacyProfileKey: "commerce",
+    });
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
         profileName: latestProfileName,
@@ -5055,6 +5059,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   failAfterReplaceRunBrowser = false;
   failCreateRunWithConcurrentRun = false;
   failNextUpdateRunBrowserState = false;
+  createRunInputs: Parameters<ComputerUseStore["createRun"]>[0][] = [];
   handoff: ComputerHandoffRecord | null = null;
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
@@ -5228,6 +5233,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async createRun(input: Parameters<ComputerUseStore["createRun"]>[0]): ReturnType<ComputerUseStore["createRun"]> {
+    this.createRunInputs.push(input);
     await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
     if (this.failCreateRunWithConcurrentRun) {
       this.run = createRunRecord({

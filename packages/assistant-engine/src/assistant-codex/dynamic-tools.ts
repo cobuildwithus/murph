@@ -53,6 +53,12 @@ import {
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
+const LEGACY_HOSTED_COMPUTER_PROFILE_KEYS = [
+  'default',
+  'commerce',
+  'appointments',
+] as const
+const DEFAULT_LEGACY_HOSTED_COMPUTER_PROFILE_KEY = 'default'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -967,24 +973,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
     case 'computer-start-run': {
-      const { resumeRunId, startUrl } = input.request.args
-      return await executeHostedComputerApiTool({
+      return await executeHostedComputerStartRunTool({
         abortSignal: input.abortSignal ?? null,
-        body: {
-          goal: 'Hosted computer task.',
-          resumeAfterMailboxItemId: resumeRunId
-            ? currentHostedMailboxItemId(input.progressDelivery)
-            : null,
-          resumeDeliveryContext: resumeRunId
-            ? currentHostedDeliveryContext(input.progressDelivery)
-            : null,
-          resumeRunId,
-          startUrl,
-        },
+        args: input.request.args,
         fetchImpl: input.fetchImpl,
-        path: HOSTED_COMPUTER_RUNS_PATH,
-        sanitizer: 'start',
-        unknownOutcomeOnTransportError: true,
+        progressDelivery: input.progressDelivery,
       })
     }
     case 'computer-observe':
@@ -1164,6 +1157,91 @@ function savedComputerPauseDeliveryFailureResult(input: {
     }),
     { computerRunPausedForUser: true },
   )
+}
+
+async function executeHostedComputerStartRunTool(input: {
+  abortSignal: AbortSignal | null
+  args: ComputerStartRunToolArgs
+  fetchImpl: typeof fetch
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const body = buildHostedComputerStartRunBody({
+    args: input.args,
+    progressDelivery: input.progressDelivery,
+    profileKey: DEFAULT_LEGACY_HOSTED_COMPUTER_PROFILE_KEY,
+  })
+  const firstResult = await callHostedComputerApi({
+    abortSignal: input.abortSignal,
+    body,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_COMPUTER_RUNS_PATH,
+    unknownOutcomeOnTransportError: true,
+  })
+  if (firstResult.ok) {
+    return toolTextResult(true, safeToolPayloadText(sanitizeHostedComputerPayload(
+      'start',
+      firstResult.payload,
+    )))
+  }
+
+  if (
+    !input.args.resumeRunId ||
+    !isHostedComputerRunProfileMismatchErrorText(firstResult.errorText)
+  ) {
+    return toolTextResult(false, firstResult.errorText)
+  }
+
+  for (const profileKey of LEGACY_HOSTED_COMPUTER_PROFILE_KEYS) {
+    if (profileKey === DEFAULT_LEGACY_HOSTED_COMPUTER_PROFILE_KEY) {
+      continue;
+    }
+    const retryResult = await callHostedComputerApi({
+      abortSignal: input.abortSignal,
+      body: buildHostedComputerStartRunBody({
+        args: input.args,
+        progressDelivery: input.progressDelivery,
+        profileKey,
+      }),
+      fetchImpl: input.fetchImpl,
+      path: HOSTED_COMPUTER_RUNS_PATH,
+      unknownOutcomeOnTransportError: true,
+    })
+    if (retryResult.ok) {
+      return toolTextResult(true, safeToolPayloadText(sanitizeHostedComputerPayload(
+        'start',
+        retryResult.payload,
+      )))
+    }
+    if (!isHostedComputerRunProfileMismatchErrorText(retryResult.errorText)) {
+      return toolTextResult(false, retryResult.errorText)
+    }
+  }
+
+  return toolTextResult(false, firstResult.errorText)
+}
+
+function buildHostedComputerStartRunBody(input: {
+  args: ComputerStartRunToolArgs
+  profileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number]
+  progressDelivery: AssistantProgressDelivery | null
+}): Record<string, unknown> {
+  const { resumeRunId, startUrl } = input.args
+  return {
+    goal: 'Hosted computer task.',
+    profileKey: input.profileKey,
+    resumeAfterMailboxItemId: resumeRunId
+      ? currentHostedMailboxItemId(input.progressDelivery)
+      : null,
+    resumeDeliveryContext: resumeRunId
+      ? currentHostedDeliveryContext(input.progressDelivery)
+      : null,
+    resumeRunId,
+    startUrl,
+  }
+}
+
+function isHostedComputerRunProfileMismatchErrorText(text: string): boolean {
+  return text.includes('HOSTED_COMPUTER_RUN_PROFILE_MISMATCH')
 }
 
 async function executeHostedComputerApiTool(input: {
