@@ -89,6 +89,7 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
+import { maybeRunAssistantRuntimeMaintenance } from './runtime-budgets.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -257,6 +258,12 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  await runAssistantTurnBestEffort(() =>
+    maybeRunAssistantRuntimeMaintenance({
+      vault: input.vault,
+    })
+  )
+
   await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,

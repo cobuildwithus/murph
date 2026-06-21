@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
@@ -76,6 +76,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/prompt-attempts.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/service-usage.js')
+  vi.doUnmock('../src/assistant/runtime-budgets.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
@@ -139,6 +140,54 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
+    vault: '/vaults/test',
+  })
+  assert.ok(
+    (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) <
+      (mocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0),
+  )
+})
+
+test('sendAssistantMessageLocal compacts oversized runtime logs before foreground turn writes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-local-service-runtime-maintenance-',
+  )
+  tempRoots.push(parentRoot)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(paths.journalsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    paths.runtimeEventsPath,
+    Array.from({ length: 2050 }, (_value, index) =>
+      JSON.stringify(makeRuntimeEvent(index)),
+    ).join('\n') + '\n',
+    'utf8',
+  )
+
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    useRealRuntimeMaintenance: true,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Summarize my inbox',
+    vault: vaultRoot,
+  })
+
+  const compactedRuntimeEvents = await readFile(paths.runtimeEventsPath, 'utf8')
+  const compactedRuntimeEventCount = compactedRuntimeEvents
+    .trim()
+    .split('\n')
+    .filter(Boolean).length
+
+  assert.ok(compactedRuntimeEventCount <= 2000)
+  assert.match(compactedRuntimeEvents, /runtime\.maintenance/)
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length > 0, true)
 })
 
 test('sendAssistantMessageLocal delivers media-only provider replies', async () => {
@@ -6990,6 +7039,7 @@ async function loadLocalServiceModule(input?: {
     session: AssistantSession
   }
   reactionOutcome?: AssistantDeliveryOutcome
+  useRealRuntimeMaintenance?: boolean
   route?: {
     provider: string
     providerOptions?: {
@@ -7004,6 +7054,7 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const useRealRuntimeMaintenance = input?.useRealRuntimeMaintenance === true
   const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
     '../src/assistant/store.js',
   )
@@ -7293,6 +7344,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
+    maybeRunAssistantRuntimeMaintenance: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/runtime-budgets.js').maybeRunAssistantRuntimeMaintenance
+        >[0],
+      ) => undefined,
+    ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
     saveAssistantSession: vi.fn(),
@@ -7520,6 +7578,12 @@ async function loadLocalServiceModule(input?: {
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
+  if (!useRealRuntimeMaintenance) {
+    vi.doMock('../src/assistant/runtime-budgets.js', () => ({
+      maybeRunAssistantRuntimeMaintenance:
+        mocks.maybeRunAssistantRuntimeMaintenance,
+    }))
+  }
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/runtime-state-service.js', () => ({
       createAssistantRuntimeStateService: vi.fn(() => mocks.runtimeState),
@@ -7568,6 +7632,22 @@ function isTraceEventWithRawType(
     !Array.isArray(rawEvent) &&
     (rawEvent as { type?: unknown }).type === type
   )
+}
+
+function makeRuntimeEvent(index: number) {
+  return {
+    at: `2026-04-08T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(
+      index % 60,
+    ).padStart(2, '0')}.000Z`,
+    component: 'test',
+    dataJson: null,
+    entityId: `entity-${index}`,
+    entityType: 'session',
+    kind: 'runtime.maintenance' as const,
+    level: 'info' as const,
+    message: `event-${index}`,
+    schema: 'murph.assistant-runtime-event.v1' as const,
+  }
 }
 
 function createHostedMailboxSourceRef(input: {
