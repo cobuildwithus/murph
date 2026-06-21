@@ -175,10 +175,6 @@ export class ComputerUseService {
       now,
       store,
     });
-    let activeRun = await store.findActiveRunForMember({
-      memberId: input.memberId,
-      now,
-    });
 
     if (input.resumeRunId) {
       return await this.resumeAwaitingRunById({
@@ -190,6 +186,16 @@ export class ComputerUseService {
         store,
       });
     }
+
+    await this.reconcileMemberActiveRuns({
+      memberId: input.memberId,
+      now,
+      store,
+    });
+    let activeRun = await store.findActiveRunForMember({
+      memberId: input.memberId,
+      now,
+    });
 
     if (activeRun) {
       while (isBlockingBrowserlessProvisioningRun(activeRun)) {
@@ -1324,6 +1330,15 @@ export class ComputerUseService {
       runId: input.runId,
     });
 
+    if (isActiveComputerRun(run, input.now)) {
+      await this.reconcileMemberActiveRuns({
+        keepRunId: run.id,
+        memberId: input.memberId,
+        now: input.now,
+        store,
+      });
+    }
+
     if (run.expiresAt <= input.now && (run.status === "running" || run.status === "awaiting_user")) {
       if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
         throw browserCleanupFailedError();
@@ -1445,6 +1460,36 @@ export class ComputerUseService {
       runId: run.id,
     });
     return runHandle(resumed, true);
+  }
+
+  private async reconcileMemberActiveRuns(input: {
+    keepRunId?: string;
+    memberId: string;
+    now: Date;
+    store: ComputerUseStore;
+  }): Promise<void> {
+    const activeRuns = (await input.store.listMemberRuns({ memberId: input.memberId }))
+      .filter((run) => isActiveComputerRun(run, input.now))
+      .sort(compareActiveComputerRunsForReuse);
+    if (activeRuns.length <= 1) {
+      return;
+    }
+
+    const keepRun = input.keepRunId
+      ? activeRuns.find((run) => run.id === input.keepRunId) ?? null
+      : activeRuns[0] ?? null;
+    if (!keepRun) {
+      return;
+    }
+
+    for (const run of activeRuns) {
+      if (run.id === keepRun.id) {
+        continue;
+      }
+      if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, input.store) === "failed") {
+        throw browserCleanupFailedError();
+      }
+    }
   }
 
   private async expireStaleActiveRunsForMember(input: {
@@ -2779,6 +2824,30 @@ function hasKernelProfileSelectionEvidence(run: ComputerRunRecord): boolean {
     run.kernelLiveViewUrlEncrypted !== null ||
     run.pausedAt !== null ||
     run.pendingHandoffId !== null;
+}
+
+function isActiveComputerRun(run: ComputerRunRecord, now: Date): boolean {
+  return run.expiresAt > now &&
+    (
+      run.status === "running" ||
+      run.status === "awaiting_user" ||
+      run.status === "cleanup_pending"
+    );
+}
+
+function compareActiveComputerRunsForReuse(
+  left: ComputerRunRecord,
+  right: ComputerRunRecord,
+): number {
+  const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
+  if (updatedAtDelta !== 0) {
+    return updatedAtDelta;
+  }
+  const createdAtDelta = right.createdAt.getTime() - left.createdAt.getTime();
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 function buildLegacyKernelProfileName(input: {

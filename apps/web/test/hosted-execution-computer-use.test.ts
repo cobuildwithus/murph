@@ -1205,6 +1205,112 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
+  it("reconciles pre-migration active profile runs before implicit reuse", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const commerceHandoff = createHandoffRecord({
+      id: "hch_commerce",
+      runId: "hcr_commerce",
+      status: "open",
+    });
+    const commerceRun = createRunRecord({
+      awaitingReason: "login_needed",
+      id: "hcr_commerce",
+      kernelSessionId: "kernel-session-commerce",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      pendingHandoffId: commerceHandoff.id,
+      status: "awaiting_user",
+      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
+    });
+    const appointmentsRun = createRunRecord({
+      id: "hcr_appointments",
+      kernelSessionId: "kernel-session-appointments",
+      status: "running",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: commerceHandoff,
+      memberRuns: [commerceRun, appointmentsRun],
+      run: appointmentsRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      reused: true,
+      runId: "hcr_appointments",
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-commerce"]);
+    expect(store.memberRuns?.find((run) => run.id === "hcr_commerce")).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_commerce")).toMatchObject({
+      status: "expired",
+    });
+  });
+
+  it("keeps an explicit resume target when reconciling pre-migration active profile runs", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const commerceRun = createRunRecord({
+      awaitingReason: "login_needed",
+      id: "hcr_commerce",
+      kernelSessionId: "kernel-session-commerce",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
+    });
+    const appointmentsRun = createRunRecord({
+      id: "hcr_appointments",
+      kernelSessionId: "kernel-session-appointments",
+      status: "running",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [commerceRun, appointmentsRun],
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: commerceRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: "hcr_commerce",
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      reused: true,
+      runId: "hcr_commerce",
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-appointments"]);
+    expect(store.run).toMatchObject({
+      id: "hcr_commerce",
+      status: "running",
+    });
+    expect(store.memberRuns?.find((run) => run.id === "hcr_appointments")).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+  });
+
   it("does not return a browser handle while an active run is still provisioning", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
@@ -5327,15 +5433,11 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async findActiveRunForMember(input: Parameters<ComputerUseStore["findActiveRunForMember"]>[0]): Promise<ComputerRunRecord | null> {
-    return input.memberId === this.run.memberId
-      && this.run.expiresAt > input.now
-      && (
-        this.run.status === "running" ||
-        this.run.status === "awaiting_user" ||
-        this.run.status === "cleanup_pending"
-      )
-      ? this.run
-      : null;
+    return selectActiveRunForTest(
+      this.memberRuns ?? [this.run],
+      input.memberId,
+      input.now,
+    );
   }
 
   async createHandoff(input: Parameters<ComputerUseStore["createHandoff"]>[0]): Promise<ComputerHandoffRecord> {
@@ -5761,9 +5863,10 @@ class FakeComputerUseStore implements ComputerUseStore {
   async markRunExpired(
     input: Parameters<ComputerUseStore["markRunExpired"]>[0],
   ): ReturnType<ComputerUseStore["markRunExpired"]> {
+    let run = this.findStoredRun(input.runId) ?? this.run;
     if (this.completeRunBeforeMarkExpired) {
-      this.run = {
-        ...this.run,
+      run = this.storeRun({
+        ...run,
         awaitingMessage: null,
         awaitingReason: null,
         completedAt: input.now,
@@ -5773,27 +5876,26 @@ class FakeComputerUseStore implements ComputerUseStore {
         status: "completed",
         suggestedReply: null,
         updatedAt: input.now,
-      };
-      this.storeMemberRun(this.run);
+      });
     }
     let expired = false;
     if (
-      this.run.id !== input.runId
-      || this.run.kernelSessionId !== input.expectedKernelSessionId
+      run.id !== input.runId
+      || run.kernelSessionId !== input.expectedKernelSessionId
       || (
-        this.run.status !== "running" &&
-        this.run.status !== "awaiting_user" &&
-        this.run.status !== "cleanup_pending"
+        run.status !== "running" &&
+        run.status !== "awaiting_user" &&
+        run.status !== "cleanup_pending"
       )
     ) {
       return {
         expired,
-        run: this.run,
+        run,
       };
     }
     expired = true;
-    this.run = {
-      ...this.run,
+    run = this.storeRun({
+      ...run,
       awaitingMessage: null,
       awaitingReason: null,
       completedAt: input.now,
@@ -5803,11 +5905,10 @@ class FakeComputerUseStore implements ComputerUseStore {
       status: "expired",
       suggestedReply: null,
       updatedAt: input.now,
-    };
-    this.storeMemberRun(this.run);
+    });
     return {
       expired,
-      run: this.run,
+      run,
     };
   }
 
@@ -5899,25 +6000,30 @@ class FakeComputerUseStore implements ComputerUseStore {
   async clearTerminalRunBrowser(
     input: Parameters<ComputerUseStore["clearTerminalRunBrowser"]>[0],
   ): Promise<ComputerRunRecord> {
+    const run = this.findStoredRun(input.runId) ?? this.run;
     if (
-      this.run.id === input.runId &&
-      this.run.kernelSessionId === input.expectedKernelSessionId &&
+      run.id === input.runId &&
+      run.kernelSessionId === input.expectedKernelSessionId &&
       (
-        this.run.status === "completed" ||
-        this.run.status === "failed" ||
-        this.run.status === "expired" ||
-        this.run.status === "canceled"
+        run.status === "completed" ||
+        run.status === "failed" ||
+        run.status === "expired" ||
+        run.status === "canceled"
       )
     ) {
-      this.run = {
-        ...this.run,
+      return this.storeRun({
+        ...run,
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
         updatedAt: input.now,
-      };
-      this.storeMemberRun(this.run);
+      });
     }
-    return this.run;
+    return run;
+  }
+
+  private findStoredRun(runId: string): ComputerRunRecord | null {
+    return this.memberRuns?.find((run) => run.id === runId) ??
+      (this.run.id === runId ? this.run : null);
   }
 
   private findStoredHandoff(handoffId: string): ComputerHandoffRecord | null {
@@ -5938,6 +6044,14 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.handoff = handoff;
     }
     return handoff;
+  }
+
+  private storeRun(run: ComputerRunRecord): ComputerRunRecord {
+    if (this.run.id === run.id) {
+      this.run = run;
+    }
+    this.storeMemberRun(run);
+    return run;
   }
 
   private storeMemberRun(run: ComputerRunRecord): void {
@@ -6144,4 +6258,32 @@ function isStaleRunForCleanup(
         run.status === "canceled"
       )
   );
+}
+
+function selectActiveRunForTest(
+  runs: readonly ComputerRunRecord[],
+  memberId: string,
+  now: Date,
+): ComputerRunRecord | null {
+  return [...runs]
+    .filter((run) =>
+      run.memberId === memberId &&
+      run.expiresAt > now &&
+      (
+        run.status === "running" ||
+        run.status === "awaiting_user" ||
+        run.status === "cleanup_pending"
+      )
+    )
+    .sort((left, right) => {
+      const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
+      if (updatedAtDelta !== 0) {
+        return updatedAtDelta;
+      }
+      const createdAtDelta = right.createdAt.getTime() - left.createdAt.getTime();
+      if (createdAtDelta !== 0) {
+        return createdAtDelta;
+      }
+      return left.id.localeCompare(right.id);
+    })[0] ?? null;
 }
