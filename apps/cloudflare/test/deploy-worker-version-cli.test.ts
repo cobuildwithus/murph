@@ -6,10 +6,17 @@ const wranglerMocks = vi.hoisted(() => ({
   runWranglerJson: vi.fn(),
   runWranglerLogged: vi.fn(),
 }));
+const hostedWebCapabilityMocks = vi.hoisted(() => ({
+  verifyHostedWebComputerCapabilities: vi.fn(async () => {}),
+}));
 
 vi.mock("../scripts/wrangler-runner.js", () => ({
   runWranglerJson: wranglerMocks.runWranglerJson,
   runWranglerLogged: wranglerMocks.runWranglerLogged,
+}));
+vi.mock("../scripts/verify-web-computer-capabilities.js", () => ({
+  verifyHostedWebComputerCapabilities:
+    hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities,
 }));
 
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
@@ -18,6 +25,8 @@ describe("runDeployWorkerVersionCli", () => {
   beforeEach(() => {
     wranglerMocks.runWranglerJson.mockReset();
     wranglerMocks.runWranglerLogged.mockReset();
+    hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities.mockReset();
+    hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities.mockResolvedValue(undefined);
   });
 
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
@@ -99,14 +108,16 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   it("uses configured gradual container rollout on direct deploys by default", async () => {
+    const env = {
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_WORKER_NAME: "hosted-worker",
+    };
+
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
-        env: {
-          CF_BUNDLES_BUCKET: "hosted-bundles",
-          CF_WORKER_NAME: "hosted-worker",
-        },
+        env,
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
           await dependencies.deployDirect({
@@ -124,6 +135,9 @@ describe("runDeployWorkerVersionCli", () => {
       },
     );
 
+    expect(hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities).toHaveBeenCalledWith({
+      env,
+    });
     expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledWith([
       "deploy",
       "--config",
@@ -141,6 +155,15 @@ describe("runDeployWorkerVersionCli", () => {
 
   it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
     const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
+    const trace: string[] = [];
+    hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities.mockImplementationOnce(
+      async () => {
+        trace.push("verify-web");
+      },
+    );
+    wranglerMocks.runWranglerLogged.mockImplementation(async (args: string[]) => {
+      trace.push(args[0] === "deploy" ? "deploy" : "lifecycle");
+    });
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -209,6 +232,7 @@ describe("runDeployWorkerVersionCli", () => {
       "--tag",
       "manual-version",
     ]);
+    expect(trace).toEqual(["verify-web", "lifecycle", "lifecycle", "deploy"]);
   });
 
   it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {

@@ -211,6 +211,14 @@ export class ComputerUseService {
       return runHandle(activeRun, true);
     }
 
+    const kernel = this.requireKernel();
+    this.requireConfiguredLiveViewOrigins();
+    const kernelProfile = await this.resolveKernelProfile({
+      kernel,
+      memberId: input.memberId,
+    });
+    const kernelProfileName = kernelProfile.name;
+
     await this.expireStaleActiveRunsForMember({
       memberId: input.memberId,
       now,
@@ -223,17 +231,8 @@ export class ComputerUseService {
     let browserDeleteName: string | null = null;
     let attachAttempt: AttachRunBrowserInput | null = null;
     let attachedSessionId: string | null = null;
-    let kernelProfile: ResolvedKernelProfile | null = null;
-    let kernelProfileName: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
-      const kernel = this.requireKernel();
-      this.requireConfiguredLiveViewOrigins();
-      kernelProfile = await this.resolveKernelProfile({
-        kernel,
-        memberId: input.memberId,
-      });
-      kernelProfileName = kernelProfile.name;
       const legacyProfileKey = kernelProfile.legacyProfileKey;
       const createResult = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
@@ -334,8 +333,6 @@ export class ComputerUseService {
       if (
         !skipCompensation &&
         isMemberSuspendedComputerUseError(error) &&
-        kernelProfile &&
-        kernelProfileName &&
         !kernelProfile.fromUsedProfile &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {

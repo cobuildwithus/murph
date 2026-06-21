@@ -2064,11 +2064,17 @@ describe("ComputerUseService", () => {
       ],
       run: appointmentsRun,
     });
+    const profiles = {
+      [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
+      [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+    };
     const kernel = createFakeKernel({
-      profiles: {
-        [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
-        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+      onDeleteBrowserByIdOrName(sessionId) {
+        if (sessionId === "kernel-session-appointments") {
+          profiles[appointmentsProfileName] = new Date("2026-06-17T12:00:00.000Z");
+        }
       },
+      profiles,
     });
     const service = new ComputerUseService({
       env: {
@@ -6403,6 +6409,7 @@ function createFakeKernel(input: {
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
   ) => void;
+  onDeleteBrowserByIdOrName?: (sessionId: string) => void;
   profiles?: Record<string, Date | null>;
 } = {}): ComputerKernelClient & {
   createdBrowserInputs: Parameters<ComputerKernelClient["createBrowser"]>[0][];
@@ -6444,6 +6451,7 @@ function createFakeKernel(input: {
       if (result === "fail") {
         throw new Error("deleteBrowser failed");
       }
+      input.onDeleteBrowserByIdOrName?.(sessionId);
     },
     async deleteProfile(name: string) {
       this.deletedProfileNames.push(name);

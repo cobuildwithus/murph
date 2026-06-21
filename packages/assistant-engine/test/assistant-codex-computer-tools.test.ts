@@ -99,7 +99,6 @@ describe("murph computer dynamic tools", () => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
         memberScopedProfileRequired: true,
-        profileKey: "default",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,
@@ -164,7 +163,7 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "default",
+        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
           conversationId: "conversation-123",
@@ -214,7 +213,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("retries legacy profile keys when old web rejects a resume mismatch", async () => {
+  it("does not retry legacy profile keys when old web rejects a resume mismatch", async () => {
     const bodies: unknown[] = [];
     const fetchImpl = vi.fn(async (
       _url: string | URL | Request,
@@ -222,24 +221,12 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       const body = JSON.parse(String(init?.body));
       bodies.push(body);
-      if (body.profileKey !== "commerce") {
-        return jsonResponse({
-          error: {
-            code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
-            message: "Computer run belongs to a different browser profile.",
-          },
-        }, 409);
-      }
-
       return jsonResponse({
-        awaitingReason: null,
-        expiresAt: "2026-06-17T13:00:00.000Z",
-        lastTitle: null,
-        lastUrl: null,
-        reused: true,
-        runId: "hcr_run123",
-        status: "running",
-      });
+        error: {
+          code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
+          message: "Computer run belongs to a different browser profile.",
+        },
+      }, 409);
     });
 
     const result = await executeMurphDynamicToolRequest({
@@ -264,20 +251,16 @@ describe("murph computer dynamic tools", () => {
       },
     });
 
-    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        profileKey: "default",
-        resumeAfterMailboxItemId: "hmi_user_reply",
-        resumeRunId: "hcr_run123",
-      }),
-      expect.objectContaining({
-        profileKey: "commerce",
+        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeRunId: "hcr_run123",
       }),
     ]);
-    expect(bodies[0]).not.toHaveProperty("memberScopedProfileRequired");
+    expect(bodies[0]).not.toHaveProperty("profileKey");
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("rejects computer requests when hosted computer transport is unavailable", async () => {

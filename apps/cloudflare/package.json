@@ -36,7 +36,6 @@
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh",
     "deploy:config:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-deploy-config.ts",
     "deploy:preflight": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-deploy-env.ts",
-    "deploy:web-computer:verify": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/verify-web-computer-capabilities.ts",
     "deploy:artifacts": "pnpm deploy:config:render && pnpm deploy:secrets:render && pnpm runner:bundle && pnpm deploy:artifacts:validate",
     "deploy:artifacts:validate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-deploy-artifacts.ts",
     "images:cleanup": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/cleanup-container-images.ts",

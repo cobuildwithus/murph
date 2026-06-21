@@ -635,8 +635,6 @@ describe("hosted deploy automation helpers", () => {
       "codex --version",
       "pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts",
       "name: Validate generated Worker deploy bundle",
-      "name: Verify hosted web computer-use compatibility",
-      "run: pnpm --dir apps/cloudflare deploy:web-computer:verify",
       "--dry-run",
       "predeploy-${GITHUB_SHA::12}",
       "Deploy commit SHA: ${checked_out_sha}",
@@ -701,9 +699,6 @@ describe("hosted deploy automation helpers", () => {
     const validateGeneratedDeployBundleStepIndex = workflow.indexOf(
       "- name: Validate generated Worker deploy bundle",
     );
-    const verifyHostedWebComputerStepIndex = workflow.indexOf(
-      "- name: Verify hosted web computer-use compatibility",
-    );
     const renderWorkerSecretsStepIndex = workflow.indexOf("- name: Render Worker secrets");
     const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
     expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
@@ -720,7 +715,6 @@ describe("hosted deploy automation helpers", () => {
     expect(immediateManifestValidateCommandIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestRefreshCommandIndex).toBeGreaterThanOrEqual(0);
     expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
-    expect(verifyHostedWebComputerStepIndex).toBeGreaterThanOrEqual(0);
     expect(renderWorkerSecretsStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
     expect(blacksmithPrepareRunnerStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
@@ -735,8 +729,7 @@ describe("hosted deploy automation helpers", () => {
       immediateManifestRefreshCommandIndex,
     );
     expect(prepareRunnerBaseImageStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
-    expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(verifyHostedWebComputerStepIndex);
-    expect(verifyHostedWebComputerStepIndex).toBeLessThan(deployWorkerStepIndex);
+    expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(deployWorkerStepIndex);
     const cloudflareRunnerSmokeGateStartIndex = workflow.indexOf("  cloudflare-runner-smoke-gate:");
     const deployJobStartIndex = workflow.indexOf("\n  deploy:", immediateBuildPrepJobStartIndex);
     expect(cloudflareRunnerSmokeGateStartIndex).toBeGreaterThanOrEqual(0);
@@ -785,10 +778,6 @@ describe("hosted deploy automation helpers", () => {
       deployWorkerStepIndex,
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
     );
-    const verifyHostedWebComputerStep = workflow.slice(
-      verifyHostedWebComputerStepIndex,
-      workflow.indexOf("\n      - name:", verifyHostedWebComputerStepIndex + 1),
-    );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
@@ -799,9 +788,6 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
-    expect(verifyHostedWebComputerStep).toContain(
-      "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}",
-    );
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
