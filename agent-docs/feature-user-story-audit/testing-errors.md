@@ -6,7 +6,7 @@ Canonical source: `feature-status.csv`. Detailed cause analysis for the missing/
 
 ## Current Result
 
-- Passed story rows: 191
+- Passed story rows: 189
 - Blocked story rows: 24
 - Failed story rows: 0
 - Remaining not-started rows: 0
