@@ -3591,6 +3591,50 @@ async function createMetricObservationVault(
   return vaultRoot;
 }
 
+interface MetricSampleInput {
+  id: string;
+  metric: string;
+  recordedAt: string;
+  unit: string;
+  value: number;
+}
+
+async function createMetricSampleVault(samples: readonly MetricSampleInput[]): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-metric-samples-"));
+
+  await mkdir(path.join(vaultRoot, "ledger/metric-samples/glucose/2026"), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Metric sample vault",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "ledger/metric-samples/glucose/2026/2026-04.jsonl"),
+    `${samples.map((sample) =>
+      JSON.stringify({
+        schemaVersion: "murph.metric-sample.v1",
+        id: sample.id,
+        metric: sample.metric,
+        recordedAt: sample.recordedAt,
+        dayKey: sample.recordedAt.slice(0, 10),
+        source: "device",
+        quality: "derived",
+        value: sample.value,
+        unit: sample.unit,
+      })
+    ).join("\n")}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
 async function createSparseVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-sparse-"));
 
@@ -4591,6 +4635,41 @@ test("rebuildQueryProjection stores compact metric point payloads for rich provi
     assert.equal(points[0]?.provenance.dataOrigin, null);
     assert.equal(points[0]?.provenance.externalRef, null);
     assert.deepEqual(points[0]?.provenance.rawRefs, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime preserves full compact metric point context from rebuilt sample summaries", async () => {
+  const vaultRoot = await createMetricSampleVault([
+    {
+      id: "smp_query_context_glucose_01",
+      metric: "glucose",
+      recordedAt: "2026-04-01T08:00:00Z",
+      unit: "mg_dL",
+      value: 92,
+    },
+    {
+      id: "smp_query_context_glucose_02",
+      metric: "glucose",
+      recordedAt: "2026-04-01T12:15:00Z",
+      unit: "mg_dL",
+      value: 100,
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey: "glucose" });
+    const sampleSummary = points.find((point) => point.source.kind === "sample-summary");
+
+    assert.ok(sampleSummary);
+    assert.equal(sampleSummary.context.firstSampleAt, "2026-04-01T08:00:00Z");
+    assert.equal(sampleSummary.context.lastSampleAt, "2026-04-01T12:15:00Z");
+    assert.equal(sampleSummary.context.numericSampleCount, 2);
+    assert.equal(sampleSummary.context.sampleCount, 2);
+    assert.equal(sampleSummary.context.sourceStream, "glucose");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

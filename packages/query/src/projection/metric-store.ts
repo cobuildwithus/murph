@@ -5,6 +5,7 @@ import {
   resolveMetricDefinitionForBiomarker,
   type GoalMetricTarget,
   type MetricConfidence,
+  type MetricComparator,
   type MetricGrain,
   type MetricPoint,
   type MetricPointContext,
@@ -21,7 +22,10 @@ import type {
 } from "../query-projection-types.ts";
 import {
   assertQueryProjectionTables,
+  expectEnumString,
   expectNullableString,
+  expectNumber,
+  expectString,
   openQueryProjectionDatabase,
   parseJsonValue,
   type DatabaseSync,
@@ -29,32 +33,20 @@ import {
   type SqliteRow,
 } from "./schema.ts";
 
-const METRIC_POINT_CONTEXT_STORAGE_KEYS = [
-  "aggregatePointCount",
-  "aggregation",
-  "candidateCount",
-  "conflictingProviders",
-  "contributingRecordIds",
-  "exactDuplicateCount",
-  "fastingStatus",
-  "flag",
-  "latestWindowDays",
-  "measurementMethodKey",
-  "observationGrain",
-  "qualifiers",
-  "quality",
-  "recordedAt",
-  "referenceRange",
-  "sampleCount",
-  "source",
-  "sourceFamily",
-  "sourceKind",
-  "sourceStream",
-  "syntheticRecordId",
-  "timeZone",
-  "windowEnd",
-  "windowStart",
-] as const;
+const METRIC_COMPARATOR_VALUES = ["<", "<=", ">", ">="] as const satisfies readonly MetricComparator[];
+const METRIC_CONFIDENCE_VALUES = ["none", "low", "medium", "high"] as const satisfies readonly MetricConfidence[];
+const METRIC_GRAIN_VALUES = ["instant", "event", "day", "week", "month", "window"] as const satisfies readonly MetricGrain[];
+const METRIC_SOURCE_FAMILY_VALUES = ["derived", "event", "sample"] as const satisfies readonly MetricSourceFamily[];
+const METRIC_STATISTIC_VALUES = [
+  "value",
+  "latest",
+  "mean",
+  "median",
+  "min",
+  "max",
+  "sum",
+  "count",
+] as const satisfies readonly MetricStatistic[];
 
 interface StoredMetricPointPayload {
   context?: MetricPointContext;
@@ -308,13 +300,12 @@ function normalizeMetricPointLimit(value: number): number {
 
 function stringifyStoredMetricPointPayload(point: MetricPoint): string {
   const payload: StoredMetricPointPayload = {};
-  const context = compactStoredMetricPointContext(point.context);
   const provenance = compactStoredMetricPointProvenance(point);
   const storedValue = point.canonicalValue ?? point.value;
   const storedUnit = point.canonicalUnit ?? point.unit;
 
-  if (!isEmptyRecord(context)) {
-    payload.context = context;
+  if (!isEmptyRecord(point.context)) {
+    payload.context = point.context;
   }
   if (!isEmptyRecord(provenance)) {
     payload.provenance = provenance;
@@ -327,21 +318,6 @@ function stringifyStoredMetricPointPayload(point: MetricPoint): string {
   }
 
   return JSON.stringify(payload);
-}
-
-function compactStoredMetricPointContext(context: MetricPointContext): MetricPointContext {
-  const compact: MetricPointContext = {};
-  const compactRecord = compact as Record<string, unknown>;
-  const record = context as Record<string, unknown>;
-
-  for (const key of METRIC_POINT_CONTEXT_STORAGE_KEYS) {
-    const value = record[key];
-    if (value !== undefined) {
-      compactRecord[key] = value;
-    }
-  }
-
-  return compact;
 }
 
 function compactStoredMetricPointProvenance(point: MetricPoint): StoredMetricPointProvenance {
@@ -408,11 +384,19 @@ function readStoredMetricPointPayload(value: string, sourceKind: string): {
   const record = isRecord(parsed) ? parsed : {};
 
   return {
-    context: compactStoredMetricPointContext(isRecord(record.context) ? record.context : {}),
+    context: readStoredMetricPointContext(record.context),
     provenance: readStoredMetricPointProvenance(record.provenance, sourceKind),
     unit: Object.hasOwn(record, "unit") ? readNullableString(record.unit) : undefined,
     value: Object.hasOwn(record, "value") ? readNullableNumber(record.value) : undefined,
   };
+}
+
+function readStoredMetricPointContext(value: unknown): MetricPointContext {
+  const context: MetricPointContext = {};
+  if (isRecord(value)) {
+    Object.assign(context, value);
+  }
+  return context;
 }
 
 function readStoredMetricPointProvenance(value: unknown, sourceKind: string): MetricPointProvenance {
@@ -427,94 +411,34 @@ function readStoredMetricPointProvenance(value: unknown, sourceKind: string): Me
   };
 }
 
-function expectString(value: unknown, field: string): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`Expected ${field} to be a string.`);
-  }
-  return value;
-}
-
 function expectNullableNumber(value: unknown, field: string): number | null {
   if (value === null) {
     return null;
   }
-  if (typeof value !== "number") {
-    throw new TypeError(`Expected ${field} to be a number or null.`);
-  }
-  return value;
+  return expectNumber(value, field);
 }
 
 function expectMetricConfidence(value: unknown): MetricConfidence {
-  const confidence = expectString(value, "query_metric_points.confidence");
-  switch (confidence) {
-    case "none":
-    case "low":
-    case "medium":
-    case "high":
-      return confidence;
-    default:
-      throw new TypeError(`Expected query_metric_points.confidence to be a metric confidence.`);
-  }
+  return expectEnumString(value, "query_metric_points.confidence", METRIC_CONFIDENCE_VALUES);
 }
 
 function expectMetricComparator(value: unknown): MetricPoint["comparator"] {
   if (value === null) {
     return null;
   }
-  const comparator = expectString(value, "query_metric_points.comparator");
-  switch (comparator) {
-    case "<":
-    case "<=":
-    case ">":
-    case ">=":
-      return comparator;
-    default:
-      throw new TypeError(`Expected query_metric_points.comparator to be a metric comparator.`);
-  }
+  return expectEnumString(value, "query_metric_points.comparator", METRIC_COMPARATOR_VALUES);
 }
 
 function expectMetricGrain(value: unknown): MetricGrain {
-  const grain = expectString(value, "query_metric_points.grain");
-  switch (grain) {
-    case "instant":
-    case "event":
-    case "day":
-    case "week":
-    case "month":
-    case "window":
-      return grain;
-    default:
-      throw new TypeError(`Expected query_metric_points.grain to be a metric grain.`);
-  }
+  return expectEnumString(value, "query_metric_points.grain", METRIC_GRAIN_VALUES);
 }
 
 function expectMetricSourceFamily(value: unknown): MetricSourceFamily {
-  const family = expectString(value, "query_metric_points.source_family");
-  switch (family) {
-    case "derived":
-    case "event":
-    case "sample":
-      return family;
-    default:
-      throw new TypeError(`Expected query_metric_points.source_family to be a metric source family.`);
-  }
+  return expectEnumString(value, "query_metric_points.source_family", METRIC_SOURCE_FAMILY_VALUES);
 }
 
 function expectMetricStatistic(value: unknown): MetricStatistic {
-  const statistic = expectString(value, "query_metric_points.statistic");
-  switch (statistic) {
-    case "value":
-    case "latest":
-    case "mean":
-    case "median":
-    case "min":
-    case "max":
-    case "sum":
-    case "count":
-      return statistic;
-    default:
-      throw new TypeError(`Expected query_metric_points.statistic to be a metric statistic.`);
-  }
+  return expectEnumString(value, "query_metric_points.statistic", METRIC_STATISTIC_VALUES);
 }
 
 function readOptionalString(value: unknown): string | undefined {
