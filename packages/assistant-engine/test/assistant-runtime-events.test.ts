@@ -8,10 +8,12 @@ import {
   quarantineAssistantStateFile,
   summarizeAssistantQuarantines,
 } from '../src/assistant/quarantine.ts'
+import { compactAssistantEventLogsAtPaths } from '../src/assistant/event-log-retention.ts'
 import {
   appendAssistantRuntimeEventAtPaths,
   listAssistantRuntimeEventsAtPath,
 } from '../src/assistant/runtime-events.ts'
+import { runAssistantRuntimeMaintenance } from '../src/assistant/runtime-budgets.ts'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -165,6 +167,157 @@ describe('assistant runtime events', () => {
       {
         code: 'EISDIR',
       },
+    )
+  })
+
+  it('bounds runtime events by age, count, and bytes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-15T00:00:00.000Z'))
+
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-runtime-events-retention-',
+    )
+    tempRoots.push(parentRoot)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+
+    await mkdir(paths.journalsDirectory, {
+      recursive: true,
+    })
+    await writeFile(
+      paths.runtimeEventsPath,
+      Array.from({ length: 2005 }, (_value, index) => {
+        const minute = String(Math.floor(index / 60)).padStart(2, '0')
+        const second = String(index % 60).padStart(2, '0')
+        return JSON.stringify({
+          ...makeRuntimeEvent(index),
+          at: `2026-04-14T00:${minute}:${second}.000Z`,
+          message: `count-event-${index}`,
+        })
+      }).join('\n') + '\n',
+      'utf8',
+    )
+    await writeFile(
+      paths.runtimeEventsPath,
+      `${await readFile(paths.runtimeEventsPath, 'utf8')}${JSON.stringify({
+        ...makeRuntimeEvent(2005),
+        at: '2026-04-07T23:59:59.000Z',
+        message: 'too-old',
+      })}\n`,
+      'utf8',
+    )
+
+    await runAssistantRuntimeMaintenance({
+      now: new Date('2026-04-15T01:01:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    let retained = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath, 2500)
+    expect(retained).toHaveLength(250)
+    expect(retained[0]).toMatchObject({ kind: 'runtime.maintenance' })
+    const retainedRawAfterCount = await readFile(paths.runtimeEventsPath, 'utf8')
+    expect(retainedRawAfterCount.trim().split('\n')).toHaveLength(2000)
+    expect(retainedRawAfterCount).not.toContain('"message":"count-event-5"')
+    expect(retainedRawAfterCount).toContain('"message":"count-event-6"')
+    expect(retainedRawAfterCount).not.toContain('too-old')
+
+    await writeFile(
+      paths.runtimeEventsPath,
+      `${retainedRawAfterCount}${Array.from({ length: 60 }, (_value, index) =>
+        JSON.stringify({
+          ...makeRuntimeEvent(3000 + index),
+          at: `2026-04-15T01:02:${String(index).padStart(2, '0')}.000Z`,
+          dataJson: JSON.stringify({
+            payload: 'x'.repeat(24_000),
+          }),
+          message: `large-event-${index}`,
+        }),
+      ).join('\n')}\n${JSON.stringify({
+        ...makeRuntimeEvent(4000),
+        at: '2026-04-15T01:02:59.500Z',
+        dataJson: JSON.stringify({
+          payload: 'x'.repeat(2 * 1024 * 1024),
+        }),
+        message: 'oversized-event',
+      })}\n`,
+      'utf8',
+    )
+    await runAssistantRuntimeMaintenance({
+      now: new Date('2026-04-15T01:03:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    const retainedRawAfterBytes = await readFile(paths.runtimeEventsPath, 'utf8')
+    expect(Buffer.byteLength(retainedRawAfterBytes, 'utf8')).toBeLessThanOrEqual(
+      1024 * 1024,
+    )
+    expect(retainedRawAfterBytes).toContain('large-event-59')
+    expect(retainedRawAfterBytes).not.toContain('large-event-0')
+    expect(retainedRawAfterBytes).not.toContain('oversized-event')
+    retained = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath, 5)
+    expect(retained[0]).toMatchObject({ kind: 'runtime.maintenance' })
+  })
+
+  it('compacts oversized pre-existing runtime logs from a bounded tail', async () => {
+    const paths = await createAssistantPaths('assistant-runtime-events-large-tail-')
+
+    await mkdir(paths.journalsDirectory, {
+      recursive: true,
+    })
+    await writeFile(
+      paths.runtimeEventsPath,
+      `${'x'.repeat(9 * 1024 * 1024)}\n${Array.from({ length: 5 }, (_value, index) =>
+        JSON.stringify({
+          ...makeRuntimeEvent(index),
+          at: `2026-04-15T01:00:0${index}.000Z`,
+          message: `tail-event-${index}`,
+        }),
+      ).join('\n')}\n`,
+      'utf8',
+    )
+
+    const result = await compactAssistantEventLogsAtPaths({
+      now: new Date('2026-04-15T01:01:00.000Z'),
+      paths,
+    })
+
+    const runtimeResult = result.runtimeEvents
+    expect(runtimeResult).toMatchObject({
+      readWasTruncated: true,
+      retainedEventCount: 5,
+    })
+    if (!runtimeResult) {
+      throw new Error('Expected runtime event retention result.')
+    }
+    expect(runtimeResult.readBytes).toBeLessThan(runtimeResult.originalBytes)
+    const retainedRaw = await readFile(paths.runtimeEventsPath, 'utf8')
+    expect(Buffer.byteLength(retainedRaw, 'utf8')).toBeLessThanOrEqual(
+      1024 * 1024,
+    )
+    expect(retainedRaw).toContain('tail-event-4')
+    expect(retainedRaw).not.toContain('xxxxxxxx')
+  })
+
+  it('records a maintenance note when event log compaction fails', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-runtime-events-retention-failure-',
+    )
+    tempRoots.push(parentRoot)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+
+    await mkdir(paths.runtimeEventsPath, {
+      recursive: true,
+    })
+
+    const snapshot = await runAssistantRuntimeMaintenance({
+      now: new Date('2026-04-15T01:01:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(snapshot.maintenance.notes).toContain(
+      'Assistant event log compaction failed and will be retried by a later maintenance pass.',
+    )
+    await expect(readFile(paths.resourceBudgetPath, 'utf8')).resolves.toContain(
+      'Assistant event log compaction failed and will be retried by a later maintenance pass.',
     )
   })
 })
