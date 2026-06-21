@@ -98,6 +98,7 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
+        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,

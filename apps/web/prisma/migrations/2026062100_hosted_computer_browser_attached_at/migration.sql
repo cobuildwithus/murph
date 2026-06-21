@@ -5,6 +5,9 @@ UPDATE "hosted_computer_run"
 SET "browser_attached_at" = "updated_at"
 WHERE "browser_attached_at" IS NULL
   AND (
-    "kernel_session_id" IS NOT NULL
+    (
+      "kernel_session_id" IS NOT NULL
+      AND "kernel_session_id" NOT LIKE 'murph-browser-%'
+    )
     OR "kernel_live_view_url_encrypted" IS NOT NULL
   );

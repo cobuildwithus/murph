@@ -2783,7 +2783,10 @@ function readKernelProfileUsedAt(run: ComputerRunRecord): Date | null {
     return run.completedAt ?? run.updatedAt;
   }
   if (
-    run.kernelSessionId !== null ||
+    (
+      run.kernelSessionId !== null &&
+      !isDeterministicBrowserCleanupId(run.kernelSessionId)
+    ) ||
     run.kernelLiveViewUrlEncrypted !== null ||
     run.pausedAt !== null ||
     run.pendingHandoffId !== null
@@ -2791,6 +2794,10 @@ function readKernelProfileUsedAt(run: ComputerRunRecord): Date | null {
     return run.updatedAt;
   }
   return null;
+}
+
+function isDeterministicBrowserCleanupId(value: string): boolean {
+  return value.startsWith("murph-browser-");
 }
 
 function buildLegacyKernelProfileName(input: {

@@ -1228,6 +1228,7 @@ function buildHostedComputerStartRunBody(input: {
   const { resumeRunId, startUrl } = input.args
   return {
     goal: 'Hosted computer task.',
+    ...(resumeRunId ? {} : { memberScopedProfileRequired: true }),
     ...(resumeRunId ? { profileKey: input.profileKey } : {}),
     resumeAfterMailboxItemId: resumeRunId
       ? currentHostedMailboxItemId(input.progressDelivery)
