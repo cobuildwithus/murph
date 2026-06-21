@@ -42,7 +42,6 @@ const TERMINAL_COMPUTER_RUN_STATUSES = [
 export interface ComputerRunRecord {
   awaitingMessage: string | null;
   awaitingReason: HostedComputerAwaitingReason | null;
-  browserAttachedAt: Date | null;
   checkpointContext: ComputerRunCheckpointContext | null;
   completedAt: Date | null;
   createdAt: Date;
@@ -415,7 +414,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       await lockMemberComputerUseAvailable(tx, input.memberId);
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
-          browserAttachedAt: input.now,
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelSessionId: input.kernelSessionId,
         },
@@ -827,7 +825,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       });
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
-          browserAttachedAt: input.now,
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelSessionId: input.kernelSessionId,
         },
@@ -894,7 +891,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
-        ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
         completedAt: input.now,
         lastTitle: null,
         lastUrl: null,
@@ -935,7 +931,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
-        ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
         completedAt: input.now,
         ...(input.terminalBrowserCleanupId
           ? { kernelSessionId: input.terminalBrowserCleanupId }
@@ -977,9 +972,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }): Promise<ComputerRunRecord> {
     await this.prisma.hostedComputerRun.updateMany({
       data: {
-        ...(!isDeterministicBrowserCleanupId(input.expectedKernelSessionId)
-          ? { browserAttachedAt: input.now }
-          : {}),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
       },
@@ -1202,7 +1194,6 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
   return {
     awaitingMessage: run.awaitingMessage,
     awaitingReason: readAwaitingReason(run.awaitingReason),
-    browserAttachedAt: run.browserAttachedAt,
     checkpointContext: readRunCheckpointContext(run.metadataJson),
     completedAt: run.completedAt,
     createdAt: run.createdAt,
@@ -1260,10 +1251,6 @@ function activeRunUsabilityRank(run: ComputerRunRecord): number {
     return 1;
   }
   return 2;
-}
-
-function isDeterministicBrowserCleanupId(value: string): boolean {
-  return value.startsWith("murph-browser-");
 }
 
 function readRunCheckpointContext(

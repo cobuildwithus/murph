@@ -13,6 +13,11 @@ export interface KernelPlaywrightResult {
   result: unknown;
 }
 
+export interface KernelProfileMetadata {
+  lastUsedAt: Date | null;
+  name: string | null;
+}
+
 export interface ComputerKernelClient {
   createBrowser(input: {
     browserName: string;
@@ -23,6 +28,7 @@ export interface ComputerKernelClient {
   deleteBrowserByIdOrName(idOrName: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
   ensureProfile(name: string): Promise<void>;
+  retrieveProfile(name: string): Promise<KernelProfileMetadata | null>;
   executePlaywright(input: {
     code: string;
     sessionId: string;
@@ -51,6 +57,21 @@ export class KernelComputerClient implements ComputerKernelClient {
     } catch (error) {
       if (error instanceof ConflictError) {
         return;
+      }
+      throw error;
+    }
+  }
+
+  async retrieveProfile(name: string): Promise<KernelProfileMetadata | null> {
+    try {
+      const profile = await this.kernel.profiles.retrieve(name);
+      return {
+        lastUsedAt: parseKernelProfileDate(profile.last_used_at),
+        name: profile.name ?? null,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        return null;
       }
       throw error;
     }
@@ -134,6 +155,14 @@ export class KernelComputerClient implements ComputerKernelClient {
       throw error;
     }
   }
+}
+
+function parseKernelProfileDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function requireKernelApiKey(source: EnvSource): string {

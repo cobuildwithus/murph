@@ -6,6 +6,7 @@ import type {
 } from "../src/lib/computer-use/crypto";
 import type {
   ComputerKernelClient,
+  KernelProfileMetadata,
 } from "../src/lib/computer-use/kernel-client";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
@@ -1702,7 +1703,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("reuses the latest stored Kernel profile when migrating a member to one profile", async () => {
+  it("reuses the latest Kernel profile metadata when migrating a member to one profile", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const olderProfileName = "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
     const latestProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
@@ -1740,7 +1741,12 @@ describe("ComputerUseService", () => {
         updatedAt: new Date("2026-06-17T11:05:00.000Z"),
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      profiles: {
+        [olderProfileName]: new Date("2026-06-17T10:00:00.000Z"),
+        [latestProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+      },
+    });
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
@@ -1772,7 +1778,7 @@ describe("ComputerUseService", () => {
     ]);
   });
 
-  it("selects a failed terminal profile when a browser was attached", async () => {
+  it("selects a failed terminal profile when Kernel says it was used last", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const appointmentsProfileName =
       "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
@@ -1790,7 +1796,6 @@ describe("ComputerUseService", () => {
           updatedAt: new Date("2026-06-17T10:05:00.000Z"),
         }),
         createRunRecord({
-          browserAttachedAt: new Date("2026-06-17T11:00:00.000Z"),
           completedAt: new Date("2026-06-17T11:20:00.000Z"),
           expiresAt: new Date("2026-06-17T11:30:00.000Z"),
           id: "hcr_commerce_failed",
@@ -1802,7 +1807,6 @@ describe("ComputerUseService", () => {
         }),
       ],
       run: createRunRecord({
-        browserAttachedAt: new Date("2026-06-17T11:00:00.000Z"),
         completedAt: new Date("2026-06-17T11:20:00.000Z"),
         expiresAt: new Date("2026-06-17T11:30:00.000Z"),
         id: "hcr_commerce_failed",
@@ -1813,7 +1817,12 @@ describe("ComputerUseService", () => {
         updatedAt: new Date("2026-06-17T11:20:00.000Z"),
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      profiles: {
+        [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
+        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+      },
+    });
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
@@ -1839,7 +1848,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("selects the profile most recently used instead of the newest run", async () => {
+  it("selects the Kernel profile most recently used instead of the newest run", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const appointmentsProfileName =
       "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
@@ -1881,7 +1890,12 @@ describe("ComputerUseService", () => {
         updatedAt: new Date("2026-06-17T11:20:00.000Z"),
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      profiles: {
+        [appointmentsProfileName]: new Date("2026-06-17T11:20:00.000Z"),
+        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+      },
+    });
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
@@ -1965,7 +1979,7 @@ describe("ComputerUseService", () => {
     ]);
   });
 
-  it("selects the migration profile from history before stale cleanup updates timestamps", async () => {
+  it("selects the migration profile from Kernel before stale cleanup updates timestamps", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
     const appointmentsProfileName =
@@ -1997,7 +2011,12 @@ describe("ComputerUseService", () => {
       ],
       run: appointmentsRun,
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      profiles: {
+        [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
+        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+      },
+    });
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
@@ -2066,7 +2085,12 @@ describe("ComputerUseService", () => {
         updatedAt: new Date("2026-06-17T11:30:00.000Z"),
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      profiles: {
+        [appointmentsProfileName]: new Date("2026-06-17T10:30:00.000Z"),
+        [commerceProfileName]: null,
+      },
+    });
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
@@ -5002,7 +5026,6 @@ describe("PrismaComputerUseStore", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       data: {
-        browserAttachedAt: now,
         kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
         kernelSessionId: "kernel-session-2",
       },
@@ -5154,7 +5177,6 @@ describe("PrismaComputerUseStore", () => {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
-        browserAttachedAt: now,
         completedAt: now,
         lastTitle: null,
         lastUrl: null,
@@ -5211,7 +5233,6 @@ describe("PrismaComputerUseStore", () => {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
-        browserAttachedAt: now,
         completedAt: now,
         lastTitle: null,
         lastUrl: null,
@@ -5367,7 +5388,6 @@ describe("PrismaComputerUseStore", () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
       data: {
-        browserAttachedAt: new Date("2026-06-17T12:00:00.000Z"),
         kernelLiveViewUrlEncrypted: "encrypted-live-view",
         kernelSessionId: "kernel-session-1",
       },
@@ -5762,7 +5782,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
     this.run = {
       ...this.run,
-      browserAttachedAt: input.now,
       kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
       kernelSessionId: input.kernelSessionId,
     };
@@ -6042,7 +6061,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
     this.run = {
       ...this.run,
-      browserAttachedAt: input.now,
       kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
       kernelSessionId: input.kernelSessionId,
       updatedAt: input.now,
@@ -6137,7 +6155,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...run,
       awaitingMessage: null,
       awaitingReason: null,
-      ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
       completedAt: input.now,
       lastTitle: null,
       lastUrl: null,
@@ -6225,7 +6242,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...this.run,
       awaitingMessage: null,
       awaitingReason: null,
-      ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
       completedAt: input.now,
       ...(input.terminalBrowserCleanupId ? { kernelSessionId: input.terminalBrowserCleanupId } : {}),
       lastTitle: null,
@@ -6254,9 +6270,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     ) {
       return this.storeRun({
         ...run,
-        ...(!run.kernelSessionId?.startsWith("murph-browser-")
-          ? { browserAttachedAt: input.now }
-          : {}),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
         updatedAt: input.now,
@@ -6338,6 +6351,7 @@ function createFakeKernel(input: {
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
   ) => void;
+  profiles?: Record<string, Date | null>;
 } = {}): ComputerKernelClient & {
   createdBrowserInputs: Parameters<ComputerKernelClient["createBrowser"]>[0][];
   createdSessionIds: string[];
@@ -6345,6 +6359,7 @@ function createFakeKernel(input: {
   deletedSessionIds: string[];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
+  retrievedProfileNames: string[];
 } {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
@@ -6357,6 +6372,7 @@ function createFakeKernel(input: {
     deletedSessionIds: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
+    retrievedProfileNames: [],
     async createBrowser(browserInput) {
       this.createdBrowserInputs.push(browserInput);
       const result = createBrowserResults.shift() ?? "ok";
@@ -6381,6 +6397,16 @@ function createFakeKernel(input: {
       this.deletedProfileNames.push(name);
     },
     async ensureProfile() {},
+    async retrieveProfile(name: string): Promise<KernelProfileMetadata | null> {
+      this.retrievedProfileNames.push(name);
+      if (!Object.hasOwn(input.profiles ?? {}, name)) {
+        return null;
+      }
+      return {
+        lastUsedAt: input.profiles?.[name] ?? null,
+        name,
+      };
+    },
     async executePlaywright(executeInput) {
       const callIndex = this.executePlaywrightCalls;
       this.executePlaywrightCalls += 1;
@@ -6458,7 +6484,6 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
   return {
     awaitingMessage: null,
     awaitingReason: null,
-    browserAttachedAt: null,
     checkpointContext: null,
     completedAt: null,
     createdAt: new Date("2026-06-17T12:00:00.000Z"),

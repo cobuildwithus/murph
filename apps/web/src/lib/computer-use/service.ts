@@ -26,6 +26,7 @@ import {
 import {
   KernelComputerClient,
   type ComputerKernelClient,
+  type KernelProfileMetadata,
 } from "./kernel-client";
 import {
   PrismaComputerUseStore,
@@ -56,6 +57,11 @@ type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: str
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
+type ResolvedKernelProfile = {
+  fromUsedProfile: boolean;
+  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
+  name: string;
+};
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -167,9 +173,6 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-    const profileSnapshotRuns = input.resumeRunId
-      ? null
-      : await store.listMemberRuns({ memberId: input.memberId });
     await this.expireStaleActiveRunsForMember({
       memberId: input.memberId,
       now,
@@ -214,21 +217,23 @@ export class ComputerUseService {
     }
 
     const runId = createComputerId("hcr");
-    const kernelProfile = await this.resolveKernelProfile({
-      memberId: input.memberId,
-      runs: profileSnapshotRuns ?? await store.listMemberRuns({ memberId: input.memberId }),
-    });
-    const kernelProfileName = kernelProfile.name;
-    const legacyProfileKey = kernelProfile.legacyProfileKey;
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
     let attachAttempt: AttachRunBrowserInput | null = null;
     let attachedSessionId: string | null = null;
+    let kernelProfile: ResolvedKernelProfile | null = null;
+    let kernelProfileName: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
       const kernel = this.requireKernel();
       this.requireConfiguredLiveViewOrigins();
+      kernelProfile = await this.resolveKernelProfile({
+        kernel,
+        memberId: input.memberId,
+      });
+      kernelProfileName = kernelProfile.name;
+      const legacyProfileKey = kernelProfile.legacyProfileKey;
       const createResult = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
@@ -328,7 +333,9 @@ export class ComputerUseService {
       if (
         !skipCompensation &&
         isMemberSuspendedComputerUseError(error) &&
-        !kernelProfile.fromStoredRun &&
+        kernelProfile &&
+        kernelProfileName &&
+        !kernelProfile.fromUsedProfile &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {
         profileCleanupFailed = true;
@@ -1514,31 +1521,25 @@ export class ComputerUseService {
   }
 
   private async resolveKernelProfile(input: {
+    kernel: ComputerKernelClient;
     memberId: string;
-    runs: readonly ComputerRunRecord[];
-  }): Promise<{
-    fromStoredRun: boolean;
-    legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
-    name: string;
-  }> {
+  }): Promise<ResolvedKernelProfile> {
     const namespace = requireKernelProfileNamespace(this.env);
-    const storedProfileName = findLatestStoredKernelProfileName(
-      {
-        memberId: input.memberId,
-        namespace,
-        runs: input.runs,
-      },
-    );
-    if (storedProfileName) {
+    const latestUsedProfile = await findLatestUsedLegacyKernelProfile({
+      kernel: input.kernel,
+      memberId: input.memberId,
+      namespace,
+    });
+    if (latestUsedProfile) {
       return {
-        fromStoredRun: true,
-        legacyProfileKey: storedProfileName.legacyProfileKey,
-        name: storedProfileName.name,
+        fromUsedProfile: true,
+        legacyProfileKey: latestUsedProfile.legacyProfileKey,
+        name: latestUsedProfile.name,
       };
     }
 
     return {
-      fromStoredRun: false,
+      fromUsedProfile: false,
       legacyProfileKey: "default",
       name: buildLegacyKernelProfileName({
         memberId: input.memberId,
@@ -2729,75 +2730,63 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
   return baseUrl;
 }
 
-function findLatestStoredKernelProfileName(
-  input: {
-    memberId: string;
-    namespace: string;
-    runs: readonly ComputerRunRecord[];
-  },
-): {
+async function findLatestUsedLegacyKernelProfile(input: {
+  kernel: ComputerKernelClient;
+  memberId: string;
+  namespace: string;
+}): Promise<{
   legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
   name: string;
-} | null {
-  const allowedProfileNames = new Map<string, (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number]>([
-    ...LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-      [buildLegacyKernelProfileName({
-        memberId: input.memberId,
-        namespace: input.namespace,
-        profileKey,
-      }), profileKey] as const),
-  ]);
+} | null> {
+  const candidates = await Promise.all(LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map(async (profileKey) => {
+    const name = buildLegacyKernelProfileName({
+      memberId: input.memberId,
+      namespace: input.namespace,
+      profileKey,
+    });
+    const profile = await input.kernel.retrieveProfile(name);
+    return {
+      legacyProfileKey: profileKey,
+      name,
+      profile,
+    };
+  }));
   let latestProfile:
     | {
         legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
+        lastUsedAtMs: number;
         name: string;
       }
     | null = null;
-  let latestUsedAtMs = Number.NEGATIVE_INFINITY;
 
-  for (const run of input.runs) {
-    const profileName = run.kernelProfileName.trim();
-    const legacyProfileKey = allowedProfileNames.get(profileName);
-    const usedAt = readKernelProfileUsedAt(run);
-    if (legacyProfileKey === undefined || !usedAt) {
+  for (const candidate of candidates) {
+    const lastUsedAtMs = readKernelProfileLastUsedAtMs(candidate.profile);
+    if (lastUsedAtMs === null) {
       continue;
     }
-    const usedAtMs = usedAt.getTime();
-    if (usedAtMs >= latestUsedAtMs) {
+    if (!latestProfile || lastUsedAtMs > latestProfile.lastUsedAtMs) {
       latestProfile = {
-        legacyProfileKey,
-        name: profileName,
+        legacyProfileKey: candidate.legacyProfileKey,
+        lastUsedAtMs,
+        name: candidate.name,
       };
-      latestUsedAtMs = usedAtMs;
     }
   }
 
-  return latestProfile;
+  return latestProfile
+    ? {
+        legacyProfileKey: latestProfile.legacyProfileKey,
+        name: latestProfile.name,
+      }
+    : null;
 }
 
-function readKernelProfileUsedAt(run: ComputerRunRecord): Date | null {
-  if (run.browserAttachedAt) {
-    return run.completedAt ?? run.updatedAt;
+function readKernelProfileLastUsedAtMs(profile: KernelProfileMetadata | null): number | null {
+  if (!profile?.lastUsedAt) {
+    return null;
   }
-  if (run.status === "completed") {
-    return run.completedAt ?? run.updatedAt;
-  }
-  if (
-    (
-      run.kernelSessionId !== null &&
-      !isDeterministicBrowserCleanupId(run.kernelSessionId)
-    ) ||
-    run.kernelLiveViewUrlEncrypted !== null ||
-    run.pausedAt !== null ||
-    run.pendingHandoffId !== null
-  ) {
-    return run.updatedAt;
-  }
-  return null;
-}
-
-function isDeterministicBrowserCleanupId(value: string): boolean {
-  return value.startsWith("murph-browser-");
+  const value = profile.lastUsedAt.getTime();
+  return Number.isFinite(value) ? value : null;
 }
 
 function buildLegacyKernelProfileName(input: {

@@ -384,7 +384,6 @@ model HostedComputerRun {
   status                     HostedComputerRunStatus        @default(running)
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
-  browserAttachedAt          DateTime?                      @map("browser_attached_at")
   lastUrl                    String?                        @map("last_url")
   lastTitle                  String?                        @map("last_title")
   awaitingReason             HostedComputerAwaitingReason?  @map("awaiting_reason")
