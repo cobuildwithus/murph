@@ -63,6 +63,7 @@ import {
 import type {
   AssistantChannelDependencies,
 } from '../src/assistant/channels/types.ts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -1412,6 +1413,60 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
     })
     expect(setLinqMessageReaction).not.toHaveBeenCalled()
+  })
+
+  it('abandons post-dispatch Linq reaction transport ambiguity without retrying', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-transport-ambiguous-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-ambiguous',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-ambiguous',
+      targetMessageId: 'linq-message-ambiguous',
+      turnId: 'turn-linq-reaction-ambiguous',
+      vault: vaultRoot,
+    })
+    expect(queued.intent.deliveryTransportIdempotent).toBe(false)
+
+    const setLinqMessageReaction = vi.fn(async () => {
+      throw Object.assign(
+        new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Linq request POST /messages/linq-message-ambiguous/reactions failed before a response was returned.',
+          {
+            failureStage: 'transport',
+            operation: 'set_message_reaction',
+            provider: 'linq',
+            retryable: false,
+          },
+        ),
+        {
+          deliveryMayHaveSucceeded: true,
+        },
+      )
+    })
+
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-04-08T01:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(abandoned.intent.status).toBe('abandoned')
+    expect(abandoned.intent.deliveryConfirmationPending).toBe(false)
+    expect(abandoned.intent.deliveryTransportIdempotent).toBe(false)
+    expect(abandoned.intent.nextAttemptAt).toBeNull()
+    expect(abandoned.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
   })
 
   it('updates an unsent deduped reaction intent before dispatching it', async () => {

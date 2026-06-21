@@ -4130,6 +4130,177 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
+  it('derives Linq reaction availability from the same mixed late input as the reply target', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async ({ captureId }: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId,
+            externalId: `linq:${captureId}-message`,
+            occurredAt: '2026-04-08T00:04:00.000Z',
+            source: 'linq',
+            threadId: 'linq-thread-1',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const initialCapture = createCaptureSummary({
+      captureId: 'capture-initial',
+      externalId: 'linq:linq-message-initial',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      source: 'linq',
+      threadId: 'linq-thread-1',
+    })
+    const context = reply.createAssistantAutoReplyGroupContext([
+      {
+        ...createReplyGroupItem(initialCapture),
+        inputCandidate: {
+          ...assistantInputCandidateFromInboxCapture(initialCapture),
+          event: {
+            ...assistantInputCandidateFromInboxCapture(initialCapture).event,
+            sourceMetadata: {
+              kind: 'linq',
+              partCount: 1,
+              service: 'iMessage',
+            },
+          },
+        },
+      },
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const projectedLateCapture = createCaptureSummary({
+      captureId: 'capture-late-imessage',
+      externalId: 'linq:linq-message-imessage',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      source: 'linq',
+      threadId: 'linq-thread-1',
+    })
+    const projectedLateBase = assistantInputCandidateFromInboxCapture(
+      projectedLateCapture,
+    )
+    const projectedLateInput: AssistantInputCandidate = {
+      ...projectedLateBase,
+      event: {
+        ...projectedLateBase.event,
+        sourceMetadata: {
+          kind: 'linq',
+          partCount: 1,
+          service: 'iMessage',
+        },
+      },
+    }
+    const capturelessLateSms = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'linq-thread-1',
+      inputId: 'ain_fefefefefefefefefefefefefefefefe',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-message-sms',
+        threadId: 'linq-thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        service: 'sms',
+      },
+      text: 'late sms text',
+    })
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+        if (input.knownInputIds?.includes(capturelessLateSms.event.inputId)) {
+          return {
+            inputs: [],
+            nextCursor: input.afterCursor ?? null,
+          }
+        }
+        return {
+          inputs: [projectedLateInput, capturelessLateSms],
+          nextCursor: capturelessLateSms.event.cursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const admitted = await input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        deliveryMessageReactionsAvailable: false,
+        deliveryReplyToMessageId: 'linq-message-sms',
+        deliveryTarget: 'linq-thread-1',
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [
+          projectedLateInput.event.inputId,
+          capturelessLateSms.event.inputId,
+        ],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'linq-thread-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'revised response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+  })
+
   it('merges multiple pending captureless active-turn admissions before one checkpoint', async () => {
     const initialInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_rapid',

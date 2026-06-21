@@ -1516,10 +1516,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       )
     }
 
-    const shownFinalGroup = await loadAssistantAutoReplyPromptInputs({
-      group: nextContext,
-    })
-
     const captureAcceptedInputs = buildAutoReplyAcceptedTurnInputItems({
       inputSummaries: lateInputSummaries,
       inputCandidates: lateCaptureCandidates,
@@ -1531,18 +1527,27 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...captureAcceptedInputs,
       ...capturelessAcceptedInputs,
     ]
-    const acceptedInputReplyToMessageId =
-      readLatestAssistantInputReplyTargetMessageId({
+    const acceptedInputReplyTargetCandidate =
+      readLatestAssistantInputReplyTargetCandidate({
         candidates: lateInputs.inputs,
         expectedChannel: context.firstItem.summary.source,
       })
-    const acceptedInputDeliveryTarget = readLatestAssistantInputDeliveryTarget({
-      candidates: lateInputs.inputs,
-      expectedChannel: context.firstItem.summary.source,
-    })
+    const acceptedInputReplyToMessageId =
+      readAssistantInputCandidateReplyTargetMessageId(
+        acceptedInputReplyTargetCandidate,
+      )
+    const acceptedInputDeliveryTarget = readAssistantInputReplyTargetDeliveryTarget(
+      acceptedInputReplyTargetCandidate?.event.replyTarget ?? null,
+    )
     const acceptedInputMessageReactionsAvailable =
-      readAutoReplyDeliveryMessageReactionsAvailable({
-        context: nextContext,
+      readAssistantInputCandidateMessageReactionsAvailable({
+        candidate: acceptedInputReplyTargetCandidate,
+        expectedChannel: context.firstItem.summary.source,
+      })
+    const acceptedInputDeliveryTargetForIdempotency =
+      acceptedInputDeliveryTarget ?? readLatestAssistantInputDeliveryTarget({
+        candidates: lateInputs.inputs,
+        expectedChannel: context.firstItem.summary.source,
       })
     const lateItems = [
       ...nextContext.items,
@@ -1594,7 +1599,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       acceptedInputs,
       deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
         context: finalContext,
-        deliveryTarget: acceptedInputDeliveryTarget ?? input.deliveryTarget,
+        deliveryTarget: acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
         executionContext: input.executionContext,
       }),
       ...(acceptedInputDeliveryTarget !== null
@@ -1606,12 +1611,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
             deliveryMessageReactionsAvailable:
               acceptedInputMessageReactionsAvailable,
           }),
-      deliveryReplyToMessageId:
-        acceptedInputReplyToMessageId ??
-        readAutoReplyDeliveryReplyToMessageId({
-          inputs: shownFinalGroup,
-          context: nextContext,
-        }),
+      ...(acceptedInputReplyToMessageId !== undefined
+        ? { deliveryReplyToMessageId: acceptedInputReplyToMessageId }
+        : {}),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
         basePrompt: preparedInput.prompt,
@@ -2264,13 +2266,33 @@ function readAutoReplyDeliveryMessageReactionsAvailable(input: {
   context: AssistantAutoReplyGroupContext
 }): boolean | null {
   const candidates = autoReplyInputCandidatesFromContext(input.context)
-  const replyTarget = readLatestAssistantInputReplyTarget({
+  const candidate = readLatestAssistantInputReplyTargetCandidate({
     candidates,
     expectedChannel: input.context.firstItem.summary.source,
   })
-  const channel = normalizeNullableString(replyTarget?.channel)
-  if (channel !== 'linq') {
+  return readAssistantInputCandidateMessageReactionsAvailable({
+    candidate,
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+}
+
+function readAssistantInputCandidateMessageReactionsAvailable(input: {
+  candidate: AssistantInputCandidate | null
+  expectedChannel: string | null
+}): boolean | null {
+  const expectedChannel = normalizeNullableString(input.expectedChannel)
+  if (expectedChannel !== 'linq') {
     return null
+  }
+
+  const candidate = input.candidate
+  const replyTarget = candidate?.event.replyTarget ?? null
+  if (
+    !candidate ||
+    normalizeNullableString(replyTarget?.channel) !== 'linq' ||
+    readAssistantInputCandidateChannel(candidate) !== 'linq'
+  ) {
+    return false
   }
 
   const messageId = readProviderRouteScalar(replyTarget?.messageId)
@@ -2278,39 +2300,10 @@ function readAutoReplyDeliveryMessageReactionsAvailable(input: {
     return false
   }
 
-  const candidate = readLatestAssistantInputCandidateForReplyTarget({
-    candidates,
-    messageId,
-    threadId: readProviderRouteScalar(replyTarget?.threadId),
-  })
-  if (!candidate || readAssistantInputCandidateChannel(candidate) !== 'linq') {
-    return false
-  }
-
   const metadata = candidate.event.sourceMetadata
   return metadata?.kind === 'linq'
     && normalizeNullableString(metadata.service)?.toLowerCase() === 'imessage'
     && metadata.partCount === 1
-}
-
-function readLatestAssistantInputCandidateForReplyTarget(input: {
-  candidates: readonly AssistantInputCandidate[]
-  messageId: string
-  threadId: string | null
-}): AssistantInputCandidate | null {
-  for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
-    const candidate = input.candidates[index]
-    if (
-      readProviderRouteScalar(candidate?.event.replyTarget?.messageId) === input.messageId &&
-      (
-        input.threadId === null ||
-        readProviderRouteScalar(candidate?.event.replyTarget?.threadId) === input.threadId
-      )
-    ) {
-      return candidate ?? null
-    }
-  }
-  return null
 }
 
 function readPromptInputReplyTargetMessageId(input: {
@@ -2407,6 +2400,13 @@ function readLatestAssistantInputReplyTarget(input: {
   candidates: readonly AssistantInputCandidate[]
   expectedChannel: string | null
 }): AssistantInputCandidate['event']['replyTarget'] | null {
+  return readLatestAssistantInputReplyTargetCandidate(input)?.event.replyTarget ?? null
+}
+
+function readLatestAssistantInputReplyTargetCandidate(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): AssistantInputCandidate | null {
   const expectedChannel = normalizeNullableString(input.expectedChannel)
   for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
     const candidate = input.candidates[index]
@@ -2425,7 +2425,7 @@ function readLatestAssistantInputReplyTarget(input: {
         readProviderRouteScalar(replyTarget.messageId)
       )
     ) {
-      return replyTarget
+      return candidate
     }
   }
 
@@ -2436,8 +2436,15 @@ function readLatestAssistantInputReplyTargetMessageId(input: {
   candidates: readonly AssistantInputCandidate[]
   expectedChannel: string | null
 }): string | undefined {
-  const replyTarget = readLatestAssistantInputReplyTarget(input)
-  return readProviderRouteScalar(replyTarget?.messageId) ?? undefined
+  return readAssistantInputCandidateReplyTargetMessageId(
+    readLatestAssistantInputReplyTargetCandidate(input),
+  )
+}
+
+function readAssistantInputCandidateReplyTargetMessageId(
+  candidate: AssistantInputCandidate | null,
+): string | undefined {
+  return readProviderRouteScalar(candidate?.event.replyTarget?.messageId) ?? undefined
 }
 
 function readProviderRouteScalar(value: string | null | undefined): string | null {

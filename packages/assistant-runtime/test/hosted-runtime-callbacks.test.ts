@@ -17,6 +17,7 @@ import {
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
@@ -3100,6 +3101,74 @@ describe("hosted runtime callbacks", () => {
       expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
     },
   );
+
+  it("blocks the same-turn reply after an ambiguous non-idempotent Linq reaction", async () => {
+    const reactionEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_reaction",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_reaction",
+      payload: createPayload({
+        channel: "linq",
+        idempotencyKey: "assistant-outbox:intent_reaction",
+        message: "",
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
+      }),
+    });
+    const messageEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_message",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_message",
+      payload: createPayload({
+        channel: "linq",
+        idempotencyKey: "assistant-outbox:intent_message",
+        message: "fallback reply",
+        replyToMessageId: "linq_message_1",
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+        deliveryTransportIdempotent: false,
+        intentId: "intent_reaction",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          intentId: "intent_reaction",
+          lastError: {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
+          },
+          status: "abandoned",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          message: "Ambiguous Linq reaction delivery.",
+        },
+      ),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [reactionEffect, messageEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
+      "intent_reaction",
+    ]);
+    expect(outcomes[0]?.deliveryStatus).toBe("failed_ambiguous");
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves provider diagnostics from persisted mirror failures", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_reaction",
@@ -3855,6 +3924,80 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    let capturedError: unknown = null;
+    mocks.setLinqMessageReaction.mockRejectedValueOnce(
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq request POST /messages/linq_message_1/reactions failed before a response was returned.",
+        {
+          failureStage: "transport",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.setLinqMessageReaction({
+          reaction: "heart",
+          target: "linq_chat_123",
+          targetMessageId: "linq_message_1",
+        });
+      } catch (error) {
+        capturedError = error;
+        return createDispatchResult(
+          {
+            intentId: "intent_123",
+            lastError: {
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Ambiguous Linq reaction delivery.",
+            },
+            status: "abandoned",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
+          },
+        );
+      }
+
+      throw new Error("expected Linq reaction transport failure");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(capturedError).toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
         retryable: false,
       }),
     ]);

@@ -1000,10 +1000,36 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   effect: HostedAssistantDeliveryEffect;
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
+  if (
+    input.effect.deliveryPhase === "foreground_current_turn"
+    && isHostedAssistantReactionOnlyEffect(input.effect)
+    && input.outcome.deliveryStatus === "failed_ambiguous"
+  ) {
+    return true;
+  }
+
   return input.effect.deliveryPhase === "foreground_current_turn"
     && !isHostedAssistantReactionOnlyEffect(input.effect)
     && input.outcome.deliveryStatus !== "sent"
     && input.outcome.retryable === true;
+}
+
+function isHostedLinqTransportFailure(error: unknown): boolean {
+  return error instanceof VaultCliError
+    && error.code === "LINQ_API_REQUEST_FAILED"
+    && error.context?.failureStage === "transport";
+}
+
+function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: true,
+    });
+  }
+
+  return Object.assign(new Error("Hosted provider delivery may have succeeded."), {
+    deliveryMayHaveSucceeded: true,
+  });
 }
 
 function isHostedAssistantReactionOnlyEffect(
@@ -1214,20 +1240,27 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          const result = await setHostedProviderLinqMessageReaction(
-            {
-              reaction: request.reaction,
-              targetMessageId: request.targetMessageId,
+          let reactionProviderDispatchEntered = false;
+          const result = await setHostedProviderLinqMessageReaction({
+            reaction: request.reaction,
+            targetMessageId: request.targetMessageId,
+          }, {
+            env: input.linqEnv,
+            fetchImplementation: input.providerFetch,
+            onProviderDispatchEntered: () => {
+              providerDispatchEntered = true;
+              reactionProviderDispatchEntered = true;
             },
-            {
-              env: input.linqEnv,
-              fetchImplementation: input.providerFetch,
-              onProviderDispatchEntered: () => {
-                providerDispatchEntered = true;
-              },
-              ...(input.signal ? { signal: input.signal } : {}),
-            },
-          );
+            ...(input.signal ? { signal: input.signal } : {}),
+          }).catch((error: unknown) => {
+            if (
+              reactionProviderDispatchEntered &&
+              isHostedLinqTransportFailure(error)
+            ) {
+              throw markHostedDeliveryMayHaveSucceeded(error);
+            }
+            throw error;
+          });
           await assertHostedDeliveryLiveNow(input);
           return {
             ...result,
