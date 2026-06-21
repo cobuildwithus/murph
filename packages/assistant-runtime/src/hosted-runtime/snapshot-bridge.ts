@@ -6,6 +6,10 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "../hosted-runtime.ts";
 import {
+  pruneTerminalWriteOperationRecords,
+  type PruneTerminalWriteOperationRecordsResult,
+} from "@murphai/core";
+import {
   collectHostedWorkspaceSnapshotArchivePlan,
   createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
   type HostedWorkspaceSnapshotArchiveEntry,
@@ -157,6 +161,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           redactedStatus: checkpointInput.redactedStatus ?? null,
           snapshotRef: null,
         },
+        previousWorkspaceCheckpointedAt: input.request.workspace?.checkpointedAt ?? null,
         snapshotDiagnosticsHashSecret:
           normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(
             input.snapshotDiagnosticsHashSecret,
@@ -191,6 +196,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
@@ -254,6 +260,7 @@ interface HostedWorkspaceBridgeV2SnapshotInput {
     ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
   >;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
@@ -304,6 +311,7 @@ async function createHostedWorkspaceV2Snapshot(
   let checkpointAttempted = false;
   let localWorkspaceCleanForWarmReuse = false;
   let prunedRuntimeSymlinkCount = 0;
+  let terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null = null;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
     leaseCheckCount += 1;
@@ -335,6 +343,40 @@ async function createHostedWorkspaceV2Snapshot(
         },
         level: "warn",
         message: "Hosted workspace snapshot pruned runtime-owned symlinks.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
+    try {
+      terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
+        checkpointedAfter: input.previousWorkspaceCheckpointedAt,
+        vaultRoot: input.vaultRoot,
+      });
+      if (terminalWriteOperationPruneResult.prunedCount > 0) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            ...createTerminalWriteOperationPruneLogDetails(
+              terminalWriteOperationPruneResult,
+            ),
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          },
+          level: "info",
+          message: "Hosted workspace snapshot pruned terminal write-operation records.",
+          phase: "checkpoint",
+          userId: input.userId,
+        });
+      }
+    } catch (cleanupError) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          terminalWriteOperationPruneFailed: true,
+        },
+        error: cleanupError,
+        level: "warn",
+        message: "Hosted workspace terminal write-operation cleanup failed.",
         phase: "checkpoint",
         userId: input.userId,
       });
@@ -550,6 +592,9 @@ async function createHostedWorkspaceV2Snapshot(
               runtimeSymlinkPruneScope: "operator-home",
             }
           : {}),
+        ...createTerminalWriteOperationPruneLogDetails(
+          terminalWriteOperationPruneResult,
+        ),
         ...snapshotTimings,
         ...(workspaceSnapshotFileCount > 0
           ? { workspaceSnapshotFileCount }
@@ -600,6 +645,7 @@ async function createHostedWorkspaceV2Snapshot(
     plainByteSize: workspaceSnapshotPlainBytes,
     platform: input.platform,
     prunedRuntimeSymlinkCount,
+    terminalWriteOperationPruneResult,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
@@ -817,6 +863,25 @@ function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
   };
 }
 
+function createTerminalWriteOperationPruneLogDetails(
+  result: PruneTerminalWriteOperationRecordsResult | null,
+): HostedRuntimeRedactedJson {
+  if (!result || result.prunedCount === 0) {
+    return {};
+  }
+
+  return {
+    prunedTerminalWriteOperationBytes: result.prunedByteCount,
+    prunedTerminalWriteOperationCount: result.prunedCount,
+    prunedTerminalWriteOperationFileCount: result.prunedFileCount,
+    terminalWriteOperationPruneErroredCount: result.retainedErroredTerminalCount,
+    terminalWriteOperationPruneInvalidCount: result.invalidCount,
+    terminalWriteOperationPruneNewestRetainedCount: result.retainedNewestTerminalCount,
+    terminalWriteOperationPruneScannedCount: result.scannedCount,
+    terminalWriteOperationPruneStageDirectoryCount: result.retainedStageDirectoryCount,
+  };
+}
+
 async function writeHostedCheckpointSnapshotMetricLog(input: {
   encryptedByteSize: number;
   fileCount: number;
@@ -824,6 +889,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   plainByteSize: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   prunedRuntimeSymlinkCount: number;
+  terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null;
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
@@ -844,6 +910,9 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
           runtimeSymlinkPruneScope: "operator-home",
         }
       : {}),
+    ...createTerminalWriteOperationPruneLogDetails(
+      input.terminalWriteOperationPruneResult,
+    ),
     ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,

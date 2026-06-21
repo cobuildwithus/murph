@@ -219,9 +219,13 @@ describe("hosted workspace restore Codex continuity", () => {
                 presignGetMs: 4,
                 objectFetchMs: 5,
                 decryptMs: 6,
-                extractMs: 7,
-                encryptedBytes: 8,
-                plainBytes: 9,
+                archiveExtractMs: 7,
+                restorePreflightMs: 8,
+                durableRootReplaceMs: 9,
+                cleanupMs: 10,
+                extractMs: 11,
+                encryptedBytes: 12,
+                plainBytes: 13,
               };
             },
             async startSnapshotSession() {
@@ -241,9 +245,13 @@ describe("hosted workspace restore Codex continuity", () => {
         presignGetMs: 4,
         objectFetchMs: 5,
         decryptMs: 6,
-        extractMs: 7,
-        encryptedBytes: 8,
-        plainBytes: 9,
+        archiveExtractMs: 7,
+        restorePreflightMs: 8,
+        durableRootReplaceMs: 9,
+        cleanupMs: 10,
+        extractMs: 11,
+        encryptedBytes: 12,
+        plainBytes: 13,
       });
 
       // Null-bootstrap (no snapshot ref) is a warm/empty path: restoreTiming stays null.

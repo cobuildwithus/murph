@@ -38,6 +38,10 @@ describe("hosted onboarding Telegram webhook route", () => {
     });
   });
 
+  it("does not expose a public GET health handler", () => {
+    expect(hostedOnboardingTelegramRoute).not.toHaveProperty("GET");
+  });
+
   it("forwards the public request signal into the hosted Telegram webhook service", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
       method: "POST",

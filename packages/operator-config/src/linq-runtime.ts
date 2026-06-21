@@ -21,6 +21,10 @@ import {
   normalizeNullableString,
 } from './text/shared.js'
 import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
+import {
+  renderMarkdownMessageText,
+  type MessageTextDecoration,
+} from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -1332,6 +1336,7 @@ function buildLinqMessageBody(input: {
     idempotency_key?: string
     parts: Array<
       | {
+          text_decorations?: MessageTextDecoration[]
           type: 'text'
           value: string
         }
@@ -1348,9 +1353,21 @@ function buildLinqMessageBody(input: {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
   const media = normalizeLinqMediaList(input.media ?? [])
-  const textPart = {
+  const renderedText = renderMarkdownMessageText(
+    normalizeRequiredString(input.message, 'message'),
+  )
+  const textPart: {
+    text_decorations?: MessageTextDecoration[]
+    type: 'text'
+    value: string
+  } = {
+    ...(renderedText.decorations.length > 0
+      ? {
+          text_decorations: renderedText.decorations,
+        }
+      : {}),
     type: 'text' as const,
-    value: normalizeRequiredString(input.message, 'message'),
+    value: renderedText.text,
   }
   const parts = [textPart, ...media]
   if (parts.length > LINQ_MAX_MESSAGE_PARTS) {

@@ -37,6 +37,11 @@ import {
   createTimeoutAbortController,
 } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  renderMarkdownMessageText,
+  splitDecoratedMessageText,
+  type MessageTextDecoration,
+} from '@murphai/operator-config/message-formatting'
 import type {
   AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,
@@ -59,6 +64,13 @@ const LINQ_TYPING_REFRESH_MS = 2_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation = 'sendMessage' | 'sendVoice'
+
+type TelegramMessageEntity = {
+  length: number
+  offset: number
+  type: MessageTextDecoration['style']
+}
+
 interface TelegramCleanupMessage {
   messageId: string
   target: string
@@ -741,17 +753,19 @@ async function sendTelegramMessageDetailed(
   const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
-  const chunks = splitTelegramMessageText(input.message)
+  const renderedMessage = renderMarkdownMessageText(input.message)
+  const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
   for (const chunk of chunks) {
     try {
       const delivered = await sendTelegramTextChunk({
         baseUrl,
+        entities: buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         replyToMessageId,
         signal: dependencies.signal,
         target,
         targetLabel,
-        text: chunk,
+        text: chunk.text,
         token,
       })
       target = delivered.target
@@ -945,6 +959,7 @@ function resolveAgentmailThreadReplyMessageId(input: {
 
 async function sendTelegramTextChunk(input: {
   baseUrl: string
+  entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   signal?: AbortSignal
@@ -968,6 +983,7 @@ async function sendTelegramTextChunk(input: {
       operation: 'sendMessage',
       result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
+        entities: input.entities,
         fetchImplementation: input.fetchImplementation,
         replyToMessageId: input.replyToMessageId,
         signal: input.signal,
@@ -1288,33 +1304,6 @@ function buildTelegramTargetPayload(target: TelegramParsedTarget): Record<string
   }
 }
 
-function splitTelegramMessageText(message: string): string[] {
-  const codePoints = Array.from(message)
-  if (codePoints.length <= TELEGRAM_MAX_TEXT_LENGTH) {
-    return [message]
-  }
-
-  const chunks: string[] = []
-  let startIndex = 0
-
-  while (startIndex < codePoints.length) {
-    const endIndex = Math.min(
-      startIndex + TELEGRAM_MAX_TEXT_LENGTH,
-      codePoints.length,
-    )
-
-    if (endIndex === codePoints.length) {
-      chunks.push(codePoints.slice(startIndex).join(''))
-      break
-    }
-
-    chunks.push(codePoints.slice(startIndex, endIndex).join(''))
-    startIndex = endIndex
-  }
-
-  return chunks
-}
-
 function shouldRetryTelegramSend(
   status: number,
   errorCode: number | null,
@@ -1407,6 +1396,7 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
 
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
+  entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   signal?: AbortSignal
@@ -1423,6 +1413,11 @@ async function sendTelegramTextChunkOnce(input: {
       operation: 'sendMessage',
       payload: {
         ...buildTelegramTargetPayload(input.target),
+        ...(input.entities.length > 0
+          ? {
+              entities: input.entities,
+            }
+          : {}),
         reply_to_message_id: input.replyToMessageId ? Number.parseInt(input.replyToMessageId, 10) : undefined,
         text: input.text,
       },
@@ -1456,6 +1451,16 @@ async function sendTelegramTextChunkOnce(input: {
       ),
     }
   }
+}
+
+function buildTelegramMessageEntities(
+  decorations: readonly MessageTextDecoration[],
+): TelegramMessageEntity[] {
+  return decorations.map((decoration) => ({
+    length: decoration.range[1] - decoration.range[0],
+    offset: decoration.range[0],
+    type: decoration.style,
+  }))
 }
 
 async function sendTelegramVoiceMemoOnce(input: {

@@ -31,6 +31,7 @@ export {
   HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   listProtectedCanonicalPaths,
+  pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
@@ -40,6 +41,8 @@ export {
   runCanonicalWrite,
   withHostedCanonicalWritePort,
   WriteBatch,
+  TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT,
+  TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS,
   WRITE_OPERATION_DIRECTORY,
   WRITE_OPERATION_SCHEMA_VERSION,
 } from "./write-batch.ts";
@@ -50,5 +53,7 @@ export type {
   HostedCanonicalWriteReceipt,
   HostedCanonicalWriteReceiptAction,
   HostedCanonicalWriteReceiptContentRef,
+  PruneTerminalWriteOperationRecordsInput,
+  PruneTerminalWriteOperationRecordsResult,
   RecoverableStoredWriteOperation,
 } from "./write-batch.ts";

@@ -1,6 +1,6 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { writeFile, mkdtemp, rm, access, mkdir, readFile, symlink } from "node:fs/promises";
+import { writeFile, mkdtemp, rm, access, mkdir, readFile, readdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -124,16 +124,23 @@ describe("workspace snapshot local restore", () => {
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: restoredDurableRoot,
         encryptedFilePath: encrypted.encryptedFilePath,
+        postExtractIntegrityCheck: true,
         ref,
         scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
-      expect(typeof restoreTimings.decryptMs).toBe("number");
-      expect(typeof restoreTimings.extractMs).toBe("number");
-      expect(Number.isFinite(restoreTimings.decryptMs)).toBe(true);
-      expect(Number.isFinite(restoreTimings.extractMs)).toBe(true);
-      expect(restoreTimings.decryptMs).toBeGreaterThanOrEqual(0);
-      expect(restoreTimings.extractMs).toBeGreaterThanOrEqual(0);
+      for (const key of [
+        "decryptMs",
+        "archiveExtractMs",
+        "restorePreflightMs",
+        "durableRootReplaceMs",
+        "cleanupMs",
+        "extractMs",
+      ] as const) {
+        expect(typeof restoreTimings[key]).toBe("number");
+        expect(Number.isFinite(restoreTimings[key])).toBe(true);
+        expect(restoreTimings[key]).toBeGreaterThanOrEqual(0);
+      }
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
@@ -152,6 +159,18 @@ describe("workspace snapshot local restore", () => {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
     }
+  });
+
+  it("rejects encrypted digest mismatches without replacing durable state", async () => {
+    await expectUnsafeTarArchive({
+      archiveOverride: () => ({ encryptedObjectSha256: "0".repeat(64) }),
+      entries: [{
+        body: Buffer.from("new workspace\n", "utf8"),
+        name: "vault/note.md",
+      }],
+      expectedError: "Hosted workspace snapshot encrypted digest does not match its ref.",
+      unwrittenRelativePath: "vault/note.md",
+    });
   });
 
   it("rejects selected archive entries that traverse symlink parents or path aliases", async () => {
@@ -220,6 +239,23 @@ describe("workspace snapshot local restore", () => {
     });
   });
 
+  it("rejects duplicate normalized tar member paths before extraction", async () => {
+    await expectUnsafeTarArchive({
+      entries: [
+        {
+          body: Buffer.from("first\n", "utf8"),
+          name: "safe/inside.txt",
+        },
+        {
+          body: Buffer.from("second\n", "utf8"),
+          name: "./safe//inside.txt",
+        },
+      ],
+      expectedError: "Hosted workspace snapshot tar archive contains duplicate entries.",
+      unwrittenRelativePath: "safe/inside.txt",
+    });
+  });
+
   it.each([
     { name: "symlink", typeFlag: "2" },
     { name: "hardlink", typeFlag: "1" },
@@ -255,7 +291,7 @@ describe("workspace snapshot local restore", () => {
         body: Buffer.from("manifest mismatch\n", "utf8"),
         name: "safe/inside.txt",
       }],
-      expectedError: "Hosted workspace snapshot restored state does not match its ref.",
+      expectedError: "Hosted workspace snapshot archive manifest does not match its ref.",
       unwrittenRelativePath: "safe/inside.txt",
     });
   });
@@ -294,6 +330,17 @@ describe("workspace snapshot local restore", () => {
       expectedError: "Hosted workspace snapshot tar entry count is unsafe.",
     });
   });
+
+  it("rejects tar archives containing environment files before extraction", async () => {
+    await expectUnsafeTarArchive({
+      entries: [{
+        body: Buffer.from("PLACEHOLDER=redacted\n", "utf8"),
+        name: "vault/.env",
+      }],
+      expectedError: "Hosted workspace snapshot durable root contains environment files.",
+      unwrittenRelativePath: "vault/.env",
+    });
+  });
 });
 
 async function expectUnsafeTarArchive(input: {
@@ -308,6 +355,7 @@ async function expectUnsafeTarArchive(input: {
   const durableRoot = path.join(tempRoot, "durable");
   const existingDurableFile = path.join(durableRoot, "existing.txt");
   const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
+  const scratchRoot = path.join(tempRoot, "restore-scratch");
   const snapshotId = "snapshot_unsafe_tar";
   const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
   const userId = "member_123";
@@ -368,8 +416,10 @@ async function expectUnsafeTarArchive(input: {
       durableRoot,
       encryptedFilePath,
       ref,
+      scratchRoot,
     })).rejects.toThrow(input.expectedError);
     await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
+    await expect(readdir(scratchRoot)).resolves.toEqual([]);
     if (input.unwrittenRelativePath) {
       await expect(access(path.join(durableRoot, input.unwrittenRelativePath))).rejects.toThrow();
       await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");

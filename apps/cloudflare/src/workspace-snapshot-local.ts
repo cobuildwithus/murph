@@ -30,14 +30,18 @@ import {
 
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
-  "--fast=1",
+  "-1",
   "--no-progress",
-  "-T1",
+  "-T2",
 ] as const;
 const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES = 20_000;
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_FAILURE_MARKER =
   Symbol("hosted.workspace-snapshot.process-failure");
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_SCAN_LIMIT_BYTES = 8192;
+const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_CHECK_ENV =
+  "MURPH_HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_CHECK";
+const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_SAMPLE_RATE_ENV =
+  "MURPH_HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_SAMPLE_RATE";
 
 export const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABELS = [
   "tar",
@@ -325,6 +329,10 @@ async function realpathIfExists(inputPath: string): Promise<string> {
 
 export interface RestoreEncryptedWorkspaceSnapshotTimings {
   decryptMs: number;
+  archiveExtractMs: number;
+  restorePreflightMs: number;
+  durableRootReplaceMs: number;
+  cleanupMs: number;
   extractMs: number;
 }
 
@@ -332,6 +340,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   dataKey: string;
   durableRoot: string;
   encryptedFilePath: string;
+  postExtractIntegrityCheck?: boolean;
   ref: HostedWorkspaceSnapshotV2Ref;
   scratchRoot?: string | null;
 }): Promise<RestoreEncryptedWorkspaceSnapshotTimings> {
@@ -342,10 +351,6 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   const encryptedStat = await stat(encryptedFilePath);
   if (encryptedStat.size !== input.ref.archive.encryptedByteSize) {
     throw new Error("Hosted workspace snapshot encrypted size does not match its ref.");
-  }
-  const encryptedObjectSha256 = await sha256FileHex(encryptedFilePath);
-  if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
-    throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
   }
   if (encryptedStat.size <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
     throw new Error("Hosted workspace snapshot encrypted object is too small.");
@@ -375,6 +380,10 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   const backupRoot = path.join(restoreTempDir, "previous-durable-root");
   let dataKey: Uint8Array | null = null;
   let decryptMs = 0;
+  let archiveExtractMs = 0;
+  let restorePreflightMs = 0;
+  let durableRootReplaceMs = 0;
+  let cleanupMs = 0;
   let extractMs = 0;
 
   try {
@@ -393,6 +402,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.ref.encryption.aad)));
     decipher.setAuthTag(authTag);
 
+    const encryptedObjectHash = createHash("sha256");
     const plaintextArchiveHash = createHash("sha256");
     const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.zst");
     await pipeline(
@@ -400,22 +410,29 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
         end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
         start: 0,
       }),
+      createHashTransform(encryptedObjectHash),
       decipher,
       createHashTransform(plaintextArchiveHash),
       createWriteStream(plaintextArchivePath, { mode: 0o600 }),
     );
 
+    encryptedObjectHash.update(authTag);
+    const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
+    if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
+      throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
+    }
     const plaintextArchiveSha256 = plaintextArchiveHash.digest("hex");
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
     await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchivePath, {
-      maxFileCount: input.ref.archive.fileCount,
-      maxTotalPlainBytes: input.ref.archive.totalPlainBytes,
+      expectedFileCount: input.ref.archive.fileCount,
+      expectedTotalPlainBytes: input.ref.archive.totalPlainBytes,
     });
     decryptMs = Date.now() - decryptStartedAt;
 
     const extractStartedAt = Date.now();
+    const archiveExtractStartedAt = Date.now();
     const zstd = spawn("zstd", [
       "-d",
       "--stdout",
@@ -459,30 +476,49 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       }
       throw error;
     }
+    archiveExtractMs = Date.now() - archiveExtractStartedAt;
 
-    const restoredState = await preflightHostedWorkspaceSnapshotDurableRoot(restoreRoot);
-    if (
-      restoredState.fileCount !== input.ref.archive.fileCount
-      || restoredState.totalPlainBytes !== input.ref.archive.totalPlainBytes
-    ) {
-      throw new Error("Hosted workspace snapshot restored state does not match its ref.");
+    if (shouldRunHostedWorkspaceSnapshotPostExtractIntegrityCheck(input.postExtractIntegrityCheck)) {
+      const restorePreflightStartedAt = Date.now();
+      const restoredState = await preflightHostedWorkspaceSnapshotDurableRoot(restoreRoot);
+      if (
+        restoredState.fileCount !== input.ref.archive.fileCount
+        || restoredState.totalPlainBytes !== input.ref.archive.totalPlainBytes
+      ) {
+        throw new Error("Hosted workspace snapshot restored state does not match its ref.");
+      }
+      restorePreflightMs = Date.now() - restorePreflightStartedAt;
     }
 
+    const durableRootReplaceStartedAt = Date.now();
     await replaceHostedWorkspaceSnapshotDurableRoot({
       backupRoot,
       durableRoot,
       restoreRoot,
     });
+    durableRootReplaceMs = Date.now() - durableRootReplaceStartedAt;
     extractMs = Date.now() - extractStartedAt;
   } finally {
     dataKey?.fill(0);
-    if (scratchTempDir !== restoreTempDir) {
-      await rm(scratchTempDir, { force: true, recursive: true });
+    const cleanupStartedAt = Date.now();
+    try {
+      if (scratchTempDir !== restoreTempDir) {
+        await rm(scratchTempDir, { force: true, recursive: true });
+      }
+      await rm(restoreTempDir, { force: true, recursive: true });
+    } finally {
+      cleanupMs = Date.now() - cleanupStartedAt;
     }
-    await rm(restoreTempDir, { force: true, recursive: true });
   }
 
-  return { decryptMs, extractMs };
+  return {
+    decryptMs,
+    archiveExtractMs,
+    restorePreflightMs,
+    durableRootReplaceMs,
+    cleanupMs,
+    extractMs,
+  };
 }
 
 export async function preflightHostedWorkspaceSnapshotDurableRoot(
@@ -735,20 +771,21 @@ function assertHostedWorkspaceSnapshotRelativePathSafe(
 async function assertHostedWorkspaceSnapshotTarEntriesSafe(
   archivePath: string,
   limits: {
-    maxFileCount: number;
-    maxTotalPlainBytes: number;
+    expectedFileCount: number;
+    expectedTotalPlainBytes: number;
   },
 ): Promise<void> {
   if (
-    !Number.isSafeInteger(limits.maxFileCount)
-    || limits.maxFileCount < 0
-    || !Number.isSafeInteger(limits.maxTotalPlainBytes)
-    || limits.maxTotalPlainBytes < 0
+    !Number.isSafeInteger(limits.expectedFileCount)
+    || limits.expectedFileCount < 0
+    || !Number.isSafeInteger(limits.expectedTotalPlainBytes)
+    || limits.expectedTotalPlainBytes < 0
   ) {
     throw new Error("Hosted workspace snapshot archive manifest is unsafe.");
   }
   const entries = await listHostedWorkspaceSnapshotVerboseTarEntries(archivePath);
   let fileCount = 0;
+  const seen = new Set<string>();
   let totalPlainBytes = 0;
   for (const entry of entries) {
     const type = entry[0];
@@ -756,7 +793,10 @@ async function assertHostedWorkspaceSnapshotTarEntriesSafe(
       throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
     }
     const parsed = parseHostedWorkspaceSnapshotVerboseTarEntry(entry);
-    const normalized = parsed.path.replace(/\\/gu, "/").replace(/^\.\/+/u, "");
+    const normalized = parsed.path
+      .replace(/\\/gu, "/")
+      .replace(/\/+/gu, "/")
+      .replace(/^\.\/+/u, "");
     const normalizedForSafety = normalized.replace(/\/+$/u, "");
     if (normalizedForSafety.length === 0 && parsed.type === "d") {
       continue;
@@ -765,18 +805,72 @@ async function assertHostedWorkspaceSnapshotTarEntriesSafe(
       normalizedForSafety,
       "Hosted workspace snapshot tar entry path is unsafe.",
     );
+    if (isHostedWorkspaceSnapshotEnvPath(normalizedForSafety)) {
+      throw new Error("Hosted workspace snapshot durable root contains environment files.");
+    }
+    if (seen.has(normalizedForSafety)) {
+      throw new Error("Hosted workspace snapshot tar archive contains duplicate entries.");
+    }
+    seen.add(normalizedForSafety);
     if (parsed.type === "-") {
       fileCount += 1;
       totalPlainBytes += parsed.size;
       if (
-        fileCount > limits.maxFileCount
+        fileCount > limits.expectedFileCount
         || !Number.isSafeInteger(totalPlainBytes)
-        || totalPlainBytes > limits.maxTotalPlainBytes
+        || totalPlainBytes > limits.expectedTotalPlainBytes
       ) {
         throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
       }
     }
   }
+  if (
+    fileCount !== limits.expectedFileCount
+    || totalPlainBytes !== limits.expectedTotalPlainBytes
+  ) {
+    throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
+  }
+}
+
+function shouldRunHostedWorkspaceSnapshotPostExtractIntegrityCheck(
+  override: boolean | undefined,
+): boolean {
+  if (typeof override === "boolean") {
+    return override;
+  }
+  const explicit = parseHostedWorkspaceSnapshotBooleanEnv(
+    process.env[HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_CHECK_ENV],
+  );
+  if (explicit !== null) {
+    return explicit;
+  }
+  const sampleRateText =
+    process.env[HOSTED_WORKSPACE_SNAPSHOT_RESTORE_INTEGRITY_SAMPLE_RATE_ENV];
+  if (typeof sampleRateText !== "string" || sampleRateText.trim().length === 0) {
+    return false;
+  }
+  const sampleRate = Number(sampleRateText);
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return false;
+  }
+  if (sampleRate >= 1) {
+    return true;
+  }
+  return Math.random() < sampleRate;
+}
+
+function parseHostedWorkspaceSnapshotBooleanEnv(value: string | undefined): boolean | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return null;
 }
 
 async function listHostedWorkspaceSnapshotVerboseTarEntries(
@@ -896,14 +990,6 @@ function createHashTransform(hash: ReturnType<typeof createHash>): Transform {
       callback(null, chunk);
     },
   });
-}
-
-async function sha256FileHex(filePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(filePath)) {
-    hash.update(chunk);
-  }
-  return hash.digest("hex");
 }
 
 async function readHostedWorkspaceSnapshotAuthTag(

@@ -364,9 +364,18 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           step: "archive_restore",
         });
         timing.decryptMs = archiveTimings.decryptMs;
+        timing.archiveExtractMs = archiveTimings.archiveExtractMs;
+        timing.restorePreflightMs = archiveTimings.restorePreflightMs;
+        timing.durableRootReplaceMs = archiveTimings.durableRootReplaceMs;
+        timing.cleanupMs = archiveTimings.cleanupMs;
         timing.extractMs = archiveTimings.extractMs;
       } finally {
-        await rm(tempDir, { force: true, recursive: true });
+        const cleanupStartedAt = Date.now();
+        try {
+          await rm(tempDir, { force: true, recursive: true });
+        } finally {
+          timing.cleanupMs = (timing.cleanupMs ?? 0) + readHostedRuntimeStepElapsedMs(cleanupStartedAt);
+        }
       }
       return timing;
     },

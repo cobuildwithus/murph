@@ -57,6 +57,10 @@ describe("hosted onboarding Linq webhook route", () => {
     });
   });
 
+  it("does not expose a public GET health handler", () => {
+    expect(hostedOnboardingLinqRoute).not.toHaveProperty("GET");
+  });
+
   it("does not bind durable Linq webhook handling to the public request abort signal", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
       method: "POST",

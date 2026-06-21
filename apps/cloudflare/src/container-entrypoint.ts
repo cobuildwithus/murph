@@ -91,9 +91,11 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS = 220;
 const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
 const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 5_000;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -667,8 +669,8 @@ export async function startHostedContainerEntrypoint(input: {
             return;
           }
           // Live-turn smoke diagnostics carry locally constructed labels plus
-          // a capped, ASCII-only codex stderr excerpt; no env or credential
-          // material is ever included, so surface the message for CI logs.
+          // capped, redacted Codex stdout/stderr excerpts so CI can show the
+          // provider-side reason without dumping raw JSONL or credentials.
           writeJsonResponse(response, 500, {
             error: "Hosted live model turn smoke failed.",
             ok: false,
@@ -1704,23 +1706,72 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         finish(new Error(
           `Hosted live model turn smoke codex exec exited with ${code ?? signal ?? "unknown"}. `
             + `stdoutBytes=${stdoutBytes} `
-            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
+            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(
+              stderrBuffer,
+              HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS,
+            ))} `
+            + `stdoutExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeStdoutSafeText(stdoutTail))}`,
         ));
       });
       child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
     }));
 }
 
-// Smoke failure text may embed codex stderr. The subprocess only ever holds
-// the credential placeholder, so there is no real key to leak, but cap the
-// excerpt and strip non-printable/non-ASCII bytes so diagnostics stay
-// content-bounded.
-function buildHostedContainerLiveModelTurnSmokeSafeText(value: string): string {
+// Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
+// printable diagnostic text and scrub obvious credential shapes before the
+// message leaves the container.
+function buildHostedContainerLiveModelTurnSmokeSafeText(
+  value: string,
+  maxChars = HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS,
+): string {
   return value
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"',}]+/giu, "$1<REDACTED>")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <REDACTED>")
+    .replace(
+      /((?:api|auth|access|refresh|id)?[_-]?(?:token|secret|password|private[_-]?jwk|key)\s*[:=]\s*)[^\s"',}]+/giu,
+      "$1<REDACTED>",
+    )
+    .replace(/\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
+    .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu, "<REDACTED>")
+    .replace(/\bwhsec[_-][A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
+    .replace(/\bgh[opsru]_[A-Za-z0-9_]{16,}\b/gu, "<REDACTED>")
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu, "<REDACTED>")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu, "<REDACTED>")
     .replace(/[^\x20-\x7e]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim()
-    .slice(0, HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS);
+    .slice(0, maxChars);
+}
+
+function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): string {
+  const extractedText = value
+    .split(/\r?\n/gu)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return "";
+        }
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.message === "string") {
+          return record.message;
+        }
+        const error = record.error;
+        if (error && typeof error === "object" && !Array.isArray(error)) {
+          const errorRecord = error as Record<string, unknown>;
+          return typeof errorRecord.message === "string" ? errorRecord.message : "";
+        }
+      } catch {
+        return "";
+      }
+      return "";
+    })
+    .filter((line) => line.length > 0)
+    .join(" ");
+  return buildHostedContainerLiveModelTurnSmokeSafeText(
+    extractedText,
+    HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS,
+  );
 }
 
 async function withHostedContainerCodexSmokeWorkspace<T>(
