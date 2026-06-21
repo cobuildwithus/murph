@@ -18,7 +18,6 @@ import {
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 import { hostedLocalRunnerBaseImageTag } from "../scripts/runner-base-image-contract.ts";
-import { verifyHostedWebComputerCapabilities } from "../scripts/verify-web-computer-capabilities.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
 afterEach(() => {
@@ -825,78 +824,6 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).toContain(
       "Native container image: base prepared from \\`Dockerfile.cloudflare-hosted-runner-base\\`; app layer built from \\`Dockerfile.cloudflare-hosted-runner\\` during deploy",
     );
-  });
-
-  it("verifies production hosted web computer-use capabilities before Worker deploys", async () => {
-    const requests: Request[] = [];
-
-    await verifyHostedWebComputerCapabilities({
-      env: {
-        HOSTED_WEB_PRODUCTION_BASE_URL: "https://web.example.test",
-      },
-      fetchImpl: async (input, init) => {
-        const request = new Request(input, init);
-        requests.push(request);
-
-        return Response.json({
-          computerUse: {
-            profileMode: "member",
-          },
-          ok: true,
-          service: "hosted-web",
-        });
-      },
-    });
-
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.url).toBe("https://web.example.test/api/internal/health");
-    expect(requests[0]?.method).toBe("GET");
-    const headerNames: string[] = [];
-    requests[0]?.headers.forEach((_value, key) => headerNames.push(key));
-    expect(headerNames).toEqual([]);
-  });
-
-  it.each([
-    {
-      expectedError: "Hosted web computer-use capability check is missing computerUse.profileMode=member",
-      name: "missing computer-use capability",
-      response: () => Response.json({
-        ok: true,
-        service: "hosted-web",
-      }),
-    },
-    {
-      expectedError: "Hosted web computer-use capability check is missing computerUse.profileMode=member",
-      name: "old computer capabilities shape",
-      response: () => Response.json({
-        memberScopedProfileRequired: true,
-      }),
-    },
-    {
-      expectedError: "Hosted web computer-use capability check returned invalid JSON",
-      name: "invalid JSON",
-      response: () => new Response("{not json", {
-        headers: {
-          "content-type": "application/json",
-        },
-        status: 200,
-      }),
-    },
-    {
-      expectedError: "Hosted web computer-use capability check failed with HTTP 503",
-      name: "non-2xx health response",
-      response: () => new Response("unavailable", { status: 503 }),
-    },
-  ])("rejects stale hosted web computer-use capabilities: $name", async ({
-    expectedError,
-    response,
-  }) => {
-    await expect(verifyHostedWebComputerCapabilities({
-      env: {
-        HOSTED_WEB_PRODUCTION_BASE_URL: "https://web.example.test",
-      },
-      fetchImpl: async () => response(),
-    })).rejects.toThrow(expectedError);
   });
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {

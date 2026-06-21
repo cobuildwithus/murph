@@ -20,7 +20,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
 The rendered deploy helper path is the canonical direct Wrangler deploy contract. The checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
-`deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, `.deploy/runner-bundle/` manifest, and hosted-web computer-use capability before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
+`deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; the two assistant-engine resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`).
@@ -58,14 +58,10 @@ origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
 private-network Worker and hosted web origins, including DNS names
 that resolve to private-network addresses.
-Before deploying the Worker, the deploy helper calls
-`GET /api/internal/health` on `HOSTED_WEB_PRODUCTION_BASE_URL` and requires
-`computerUse.profileMode` to be `member`. If that check fails, deploy hosted
-web first. The single member-scoped computer-use profile change is a greenfield
-hard cut, not an old-Web/old-Worker compatibility rollout: keep hosted
-computer-use traffic paused during the Web/Worker skew window and finish the
-Worker deploy immediately after hosted web exposes the member profile health
-capability.
+The single member-scoped computer-use profile change is a greenfield hard cut,
+not an old-Web/old-Worker compatibility rollout. Keep hosted computer-use
+traffic paused during the Web/Worker skew window and finish the Worker deploy
+immediately after the hosted web deploy.
 Normal deploy smoke targets the public Worker banner and health endpoints after deploy, then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
 
 The production smoke also runs one real `gpt-5.4-nano` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.4-nano` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the only otherwise-uncovered boundary (real OpenAI auth, quota, and network on the production egress path) without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one low-cost model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.

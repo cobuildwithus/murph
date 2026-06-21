@@ -38,7 +38,6 @@ export interface ComputerRunRecord {
   awaitingReason: HostedComputerAwaitingReason | null;
   checkpointContext: ComputerRunCheckpointContext | null;
   completedAt: Date | null;
-  createdAt: Date;
   expiresAt: Date;
   id: string;
   kernelLiveViewUrlEncrypted: string | null;
@@ -247,7 +246,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     memberId: string;
     now: Date;
   }): Promise<ComputerRunRecord | null> {
-    const runs = await this.prisma.hostedComputerRun.findMany({
+    const run = await this.prisma.hostedComputerRun.findFirst({
       where: {
         expiresAt: { gt: input.now },
         memberId: input.memberId,
@@ -255,7 +254,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       },
     });
 
-    return selectActiveRunForReuse(runs.map(mapRun));
+    return run ? mapRun(run) : null;
   }
 
   async listStaleActiveRunsForMember(input: {
@@ -361,18 +360,17 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return await this.prisma.$transaction(async (tx) => {
       await lockMemberComputerUseAvailable(tx, input.memberId);
 
-      const activeRuns = await tx.hostedComputerRun.findMany({
+      const activeRun = await tx.hostedComputerRun.findFirst({
         where: {
           expiresAt: { gt: input.now },
           memberId: input.memberId,
           status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
         },
       });
-      const activeRun = selectActiveRunForReuse(activeRuns.map(mapRun));
       if (activeRun) {
         return {
           created: false,
-          run: activeRun,
+          run: mapRun(activeRun),
         };
       }
 
@@ -1186,7 +1184,6 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     awaitingReason: readAwaitingReason(run.awaitingReason),
     checkpointContext: readRunCheckpointContext(run.metadataJson),
     completedAt: run.completedAt,
-    createdAt: run.createdAt,
     expiresAt: run.expiresAt,
     id: run.id,
     kernelLiveViewUrlEncrypted: run.kernelLiveViewUrlEncrypted,
@@ -1201,42 +1198,6 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     suggestedReply: run.suggestedReply,
     updatedAt: run.updatedAt,
   };
-}
-
-function selectActiveRunForReuse(runs: readonly ComputerRunRecord[]): ComputerRunRecord | null {
-  return [...runs].sort(compareActiveRunsForReuse)[0] ?? null;
-}
-
-function compareActiveRunsForReuse(
-  left: ComputerRunRecord,
-  right: ComputerRunRecord,
-): number {
-  const usabilityDelta = activeRunUsabilityRank(left) - activeRunUsabilityRank(right);
-  if (usabilityDelta !== 0) {
-    return usabilityDelta;
-  }
-  const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
-  if (updatedAtDelta !== 0) {
-    return updatedAtDelta;
-  }
-  const createdAtDelta = right.createdAt.getTime() - left.createdAt.getTime();
-  if (createdAtDelta !== 0) {
-    return createdAtDelta;
-  }
-  return left.id.localeCompare(right.id);
-}
-
-function activeRunUsabilityRank(run: ComputerRunRecord): number {
-  if (
-    (run.status === "running" || run.status === "awaiting_user") &&
-    run.kernelSessionId
-  ) {
-    return 0;
-  }
-  if (run.status === "running" || run.status === "awaiting_user") {
-    return 1;
-  }
-  return 2;
 }
 
 function readRunCheckpointContext(

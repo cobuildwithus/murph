@@ -1258,210 +1258,6 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("selects one active member run before implicit reuse", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const commerceHandoff = createHandoffRecord({
-      id: "hch_commerce",
-      runId: "hcr_commerce",
-      status: "open",
-    });
-    const commerceRun = createRunRecord({
-      awaitingReason: "login_needed",
-      id: "hcr_commerce",
-      kernelSessionId: "kernel-session-commerce",
-      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-      pendingHandoffId: commerceHandoff.id,
-      status: "awaiting_user",
-      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
-    });
-    const appointmentsRun = createRunRecord({
-      id: "hcr_appointments",
-      kernelSessionId: "kernel-session-appointments",
-      status: "running",
-      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      handoff: commerceHandoff,
-      memberRuns: [commerceRun, appointmentsRun],
-      run: appointmentsRun,
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    const result = await service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: null,
-    });
-
-    expect(result).toMatchObject({
-      reused: true,
-      runId: "hcr_appointments",
-      status: "running",
-    });
-    expect(kernel.deletedSessionIds).toEqual([]);
-    expect(store.memberRuns?.find((run) => run.id === "hcr_commerce")).toMatchObject({
-      kernelSessionId: "kernel-session-commerce",
-      status: "awaiting_user",
-    });
-    expect(store.handoffs.find((handoff) => handoff.id === "hch_commerce")).toMatchObject({
-      status: "open",
-    });
-  });
-
-  it("selects a usable active browser over newer cleanup debris", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const commerceHandoff = createHandoffRecord({
-      id: "hch_commerce",
-      runId: "hcr_commerce",
-      status: "open",
-    });
-    const commerceRun = createRunRecord({
-      awaitingReason: "login_needed",
-      id: "hcr_commerce",
-      kernelSessionId: "kernel-session-commerce",
-      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-      pendingHandoffId: commerceHandoff.id,
-      status: "awaiting_user",
-      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
-    });
-    const cleanupRun = createRunRecord({
-      id: "hcr_cleanup",
-      kernelLiveViewUrlEncrypted: null,
-      kernelSessionId: null,
-      status: "cleanup_pending",
-      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      handoff: commerceHandoff,
-      memberRuns: [commerceRun, cleanupRun],
-      run: commerceRun,
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    const result = await service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: null,
-    });
-
-    expect(result).toMatchObject({
-      reused: true,
-      runId: "hcr_commerce",
-      status: "awaiting_user",
-    });
-    expect(kernel.deletedSessionIds).toEqual([]);
-    expect(store.memberRuns?.find((run) => run.id === "hcr_cleanup")).toMatchObject({
-      status: "cleanup_pending",
-    });
-    expect(store.handoffs.find((handoff) => handoff.id === "hch_commerce")).toMatchObject({
-      status: "open",
-    });
-  });
-
-  it("keeps an explicit resume target without deleting sibling active runs", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const commerceRun = createRunRecord({
-      awaitingReason: "login_needed",
-      id: "hcr_commerce",
-      kernelSessionId: "kernel-session-commerce",
-      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-      status: "awaiting_user",
-      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
-    });
-    const appointmentsRun = createRunRecord({
-      id: "hcr_appointments",
-      kernelSessionId: "kernel-session-appointments",
-      status: "running",
-      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      memberRuns: [commerceRun, appointmentsRun],
-      resumeMailboxItems: [createResumeMailboxItem()],
-      run: commerceRun,
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    const result = await service.startRun({
-      memberId: "member_123",
-      resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_commerce",
-      startUrl: null,
-    });
-
-    expect(result).toMatchObject({
-      reused: true,
-      runId: "hcr_commerce",
-      status: "running",
-    });
-    expect(kernel.deletedSessionIds).toEqual([]);
-    expect(store.run).toMatchObject({
-      id: "hcr_commerce",
-      status: "running",
-    });
-    expect(store.memberRuns?.find((run) => run.id === "hcr_appointments")).toMatchObject({
-      kernelSessionId: "kernel-session-appointments",
-      status: "running",
-    });
-  });
-
-  it("does not delete sibling active runs when explicit resume authorization fails", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const commerceRun = createRunRecord({
-      awaitingReason: "login_needed",
-      id: "hcr_commerce",
-      kernelSessionId: "kernel-session-commerce",
-      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-      status: "awaiting_user",
-      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
-    });
-    const appointmentsRun = createRunRecord({
-      id: "hcr_appointments",
-      kernelSessionId: "kernel-session-appointments",
-      status: "running",
-      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      memberRuns: [commerceRun, appointmentsRun],
-      run: commerceRun,
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeAfterMailboxItemId: null,
-      resumeRunId: "hcr_commerce",
-      startUrl: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
-    });
-
-    expect(kernel.deletedSessionIds).toEqual([]);
-    expect(store.memberRuns?.find((run) => run.id === "hcr_appointments")).toMatchObject({
-      kernelSessionId: "kernel-session-appointments",
-      status: "running",
-    });
-  });
-
   it("does not return a browser handle while an active run is still provisioning", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
@@ -3613,6 +3409,55 @@ describe("ComputerUseService", () => {
     )).toBe(true);
   });
 
+  it("does not delete the member profile when suspension races with login checkpoint replacement", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      computerUseChecksBeforeUnavailable: 2,
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Signed in",
+        url: "https://shop.example.test/account",
+        visibleText: "Account",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      "kernel-session-1",
+      "kernel-session-2",
+    ]);
+    expect(kernel.deletedProfileNames).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      kernelProfileName: "murph-test-member",
+      kernelSessionId: null,
+      status: "awaiting_user",
+    });
+  });
+
   it("retries a stale checkpointing login handoff instead of leaving it stuck", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
@@ -5000,9 +4845,9 @@ describe("PrismaComputerUseStore", () => {
             kernelProfileName: "murph-test-member",
           });
         }),
-        findMany: vi.fn(async () => {
+        findFirst: vi.fn(async () => {
           trace.push("find-active-run");
-          return [];
+          return null;
         }),
       },
     };
@@ -5029,7 +4874,7 @@ describe("PrismaComputerUseStore", () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(tx.hostedComputerRun.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerRun.findFirst).toHaveBeenCalledTimes(1);
     expect(tx.hostedComputerRun.create).toHaveBeenCalledTimes(1);
     expect(tx.hostedComputerRun.create).toHaveBeenCalledWith({
       data: {
@@ -6173,7 +6018,6 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     awaitingReason: null,
     checkpointContext: null,
     completedAt: null,
-    createdAt: new Date("2026-06-17T12:00:00.000Z"),
     expiresAt: new Date("2026-06-17T13:00:00.000Z"),
     id: "hcr_run123",
     kernelLiveViewUrlEncrypted: "encrypted-live-view",
@@ -6222,43 +6066,13 @@ function selectActiveRunForTest(
   memberId: string,
   now: Date,
 ): ComputerRunRecord | null {
-  return [...runs]
-    .filter((run) =>
-      run.memberId === memberId &&
-      run.expiresAt > now &&
-      (
-        run.status === "running" ||
-        run.status === "awaiting_user" ||
-        run.status === "cleanup_pending"
-      )
+  return runs.find((run) =>
+    run.memberId === memberId &&
+    run.expiresAt > now &&
+    (
+      run.status === "running" ||
+      run.status === "awaiting_user" ||
+      run.status === "cleanup_pending"
     )
-    .sort((left, right) => {
-      const usabilityDelta =
-        activeRunUsabilityRankForTest(left) - activeRunUsabilityRankForTest(right);
-      if (usabilityDelta !== 0) {
-        return usabilityDelta;
-      }
-      const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
-      if (updatedAtDelta !== 0) {
-        return updatedAtDelta;
-      }
-      const createdAtDelta = right.createdAt.getTime() - left.createdAt.getTime();
-      if (createdAtDelta !== 0) {
-        return createdAtDelta;
-      }
-      return left.id.localeCompare(right.id);
-    })[0] ?? null;
-}
-
-function activeRunUsabilityRankForTest(run: ComputerRunRecord): number {
-  if (
-    (run.status === "running" || run.status === "awaiting_user") &&
-    run.kernelSessionId
-  ) {
-    return 0;
-  }
-  if (run.status === "running" || run.status === "awaiting_user") {
-    return 1;
-  }
-  return 2;
+  ) ?? null;
 }

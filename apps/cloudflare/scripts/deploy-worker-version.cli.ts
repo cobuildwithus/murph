@@ -18,7 +18,6 @@ import {
   buildHostedLifecycleWranglerArgs,
   resolveHostedLifecycleBucketNames,
 } from "./r2-lifecycle.js";
-import { verifyHostedWebComputerCapabilities } from "./verify-web-computer-capabilities.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -47,7 +46,6 @@ export async function runDeployWorkerVersionCli(
           ? ["--containers-rollout=immediate"]
           : [];
 
-        await verifyHostedWebComputerCapabilities({ env });
         await applyHostedTransientLifecycleRules({
           deployRoot,
           source: env,

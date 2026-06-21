@@ -1243,7 +1243,6 @@ export class ComputerUseService {
       await store.replaceRunBrowser(replaceInput);
       browser = null;
     } catch (error) {
-      let skipCleanup = false;
       if (browser && replaceAttempt && !isMemberSuspendedComputerUseError(error)) {
         const attachedRun = await this.replayAmbiguousRunBrowserReplace({
           replaceInput: replaceAttempt,
@@ -1252,7 +1251,6 @@ export class ComputerUseService {
         if (attachedRun === "unknown") {
           browser = null;
           browserDeleteName = null;
-          skipCleanup = true;
         } else if (attachedRun) {
           browser = null;
           return;
@@ -1261,13 +1259,6 @@ export class ComputerUseService {
       let cleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
-        cleanupFailed = true;
-      }
-      if (
-        !skipCleanup &&
-        isMemberSuspendedComputerUseError(error) &&
-        !await this.deleteProfileBestEffort(run.kernelProfileName)
-      ) {
         cleanupFailed = true;
       }
       if (cleanupFailed) {
@@ -1871,15 +1862,6 @@ export class ComputerUseService {
       return true;
     } catch {
       // Cleanup is best effort after a failed start path.
-      return false;
-    }
-  }
-
-  private async deleteProfileBestEffort(profileName: string): Promise<boolean> {
-    try {
-      await this.requireKernel().deleteProfile(profileName);
-      return true;
-    } catch {
       return false;
     }
   }

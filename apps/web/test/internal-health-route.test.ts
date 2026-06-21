@@ -15,9 +15,6 @@ describe("internal health route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
-      computerUse: {
-        profileMode: "member",
-      },
       ok: true,
       service: "hosted-web",
     });
