@@ -1223,7 +1223,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      legacyProfileKey: "appointments",
       memberId: "member_123",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
@@ -1634,6 +1633,7 @@ describe("ComputerUseService", () => {
       "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
     const appointmentsRun = createRunRecord({
       completedAt: new Date("2026-06-17T10:00:00.000Z"),
+      createdAt: new Date("2026-06-17T09:55:00.000Z"),
       expiresAt: new Date("2026-06-17T11:00:00.000Z"),
       id: "hcr_appointments",
       kernelLiveViewUrlEncrypted: "encrypted-live-view",
@@ -1682,6 +1682,74 @@ describe("ComputerUseService", () => {
     expect(store.run.kernelProfileName).toBe(commerceProfileName);
     expect(store.createRunInputs.at(-1)).toMatchObject({
       legacyProfileKey: "commerce",
+    });
+  });
+
+  it("does not select a newer browserless failed profile during migration", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const appointmentsProfileName =
+      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
+    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-17T10:30:00.000Z"),
+          createdAt: new Date("2026-06-17T10:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:00:00.000Z"),
+          id: "hcr_appointments",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: appointmentsProfileName,
+          kernelSessionId: null,
+          status: "completed",
+          updatedAt: new Date("2026-06-17T10:30:00.000Z"),
+        }),
+        createRunRecord({
+          completedAt: new Date("2026-06-17T11:30:00.000Z"),
+          createdAt: new Date("2026-06-17T11:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+          id: "hcr_commerce_failed",
+          kernelLiveViewUrlEncrypted: null,
+          kernelProfileName: commerceProfileName,
+          kernelSessionId: null,
+          status: "failed",
+          updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:30:00.000Z"),
+        createdAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+        id: "hcr_commerce_failed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: commerceProfileName,
+        kernelSessionId: null,
+        status: "failed",
+        updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+
+    expect(store.run.kernelProfileName).toBe(appointmentsProfileName);
+    expect(store.createRunInputs.at(-1)).toMatchObject({
+      legacyProfileKey: "appointments",
     });
   });
 
@@ -6034,6 +6102,7 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     awaitingReason: null,
     checkpointContext: null,
     completedAt: null,
+    createdAt: new Date("2026-06-17T12:00:00.000Z"),
     expiresAt: new Date("2026-06-17T13:00:00.000Z"),
     id: "hcr_run123",
     kernelLiveViewUrlEncrypted: "encrypted-live-view",

@@ -685,7 +685,6 @@ describe("hosted execution coverage gaps", () => {
       startUrl: "https://example.test/start",
     });
     expect(legacyStartRequest).toMatchObject({
-      legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
     });
     expect(legacyStartRequest).not.toHaveProperty("profileKey");
@@ -712,7 +711,6 @@ describe("hosted execution coverage gaps", () => {
       profileKey: "default",
       startUrl: "https://example.test/start",
     })).toEqual({
-      legacyProfileKey: "default",
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       resumeRunId: null,

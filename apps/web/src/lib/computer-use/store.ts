@@ -44,6 +44,7 @@ export interface ComputerRunRecord {
   awaitingReason: HostedComputerAwaitingReason | null;
   checkpointContext: ComputerRunCheckpointContext | null;
   completedAt: Date | null;
+  createdAt: Date;
   expiresAt: Date;
   id: string;
   kernelLiveViewUrlEncrypted: string | null;
@@ -1200,6 +1201,7 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     awaitingReason: readAwaitingReason(run.awaitingReason),
     checkpointContext: readRunCheckpointContext(run.metadataJson),
     completedAt: run.completedAt,
+    createdAt: run.createdAt,
     expiresAt: run.expiresAt,
     id: run.id,
     kernelLiveViewUrlEncrypted: run.kernelLiveViewUrlEncrypted,

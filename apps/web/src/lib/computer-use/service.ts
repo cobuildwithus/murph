@@ -146,7 +146,6 @@ export class ComputerUseService {
   }
 
   async startRun(input: {
-    legacyProfileKey?: string | null;
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
@@ -160,7 +159,6 @@ export class ComputerUseService {
   }
 
   private async startRunWithStore(input: {
-    legacyProfileKey?: string | null;
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
@@ -220,7 +218,7 @@ export class ComputerUseService {
       runs: profileSnapshotRuns ?? await store.listMemberRuns({ memberId: input.memberId }),
     });
     const kernelProfileName = kernelProfile.name;
-    const legacyProfileKey = kernelProfile.legacyProfileKey ?? input.legacyProfileKey ?? null;
+    const legacyProfileKey = kernelProfile.legacyProfileKey;
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
@@ -1519,7 +1517,7 @@ export class ComputerUseService {
     runs: readonly ComputerRunRecord[];
   }): Promise<{
     fromStoredRun: boolean;
-    legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
+    legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
     name: string;
   }> {
     const namespace = requireKernelProfileNamespace(this.env);
@@ -2730,18 +2728,6 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
   return baseUrl;
 }
 
-function buildKernelProfileNameForNamespace(input: {
-  memberId: string;
-  namespace: string;
-}): string {
-  const namespaceSegment = normalizeKernelNameSegment(
-    input.namespace,
-  );
-  const memberSegment = normalizeKernelNameSegment(input.memberId);
-  const hash = shortHash(`${input.namespace}:${input.memberId}`);
-  return `murph-${namespaceSegment}-${memberSegment}-${hash}`.slice(0, 255);
-}
-
 function findLatestStoredKernelProfileName(
   input: {
     memberId: string;
@@ -2749,14 +2735,10 @@ function findLatestStoredKernelProfileName(
     runs: readonly ComputerRunRecord[];
   },
 ): {
-  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
+  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
   name: string;
 } | null {
-  const allowedProfileNames = new Map<string, (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null>([
-    [buildKernelProfileNameForNamespace({
-      memberId: input.memberId,
-      namespace: input.namespace,
-    }), null],
+  const allowedProfileNames = new Map<string, (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number]>([
     ...LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
       [buildLegacyKernelProfileName({
         memberId: input.memberId,
@@ -2766,29 +2748,37 @@ function findLatestStoredKernelProfileName(
   ]);
   let latestProfile:
     | {
-        legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number] | null;
+        legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
         name: string;
       }
     | null = null;
-  let latestUpdatedAtMs = Number.NEGATIVE_INFINITY;
+  let latestCreatedAtMs = Number.NEGATIVE_INFINITY;
 
   for (const run of input.runs) {
     const profileName = run.kernelProfileName.trim();
     const legacyProfileKey = allowedProfileNames.get(profileName);
-    if (legacyProfileKey === undefined) {
+    if (legacyProfileKey === undefined || !hasKernelProfileSelectionEvidence(run)) {
       continue;
     }
-    const updatedAtMs = run.updatedAt.getTime();
-    if (updatedAtMs >= latestUpdatedAtMs) {
+    const createdAtMs = run.createdAt.getTime();
+    if (createdAtMs >= latestCreatedAtMs) {
       latestProfile = {
         legacyProfileKey,
         name: profileName,
       };
-      latestUpdatedAtMs = updatedAtMs;
+      latestCreatedAtMs = createdAtMs;
     }
   }
 
   return latestProfile;
+}
+
+function hasKernelProfileSelectionEvidence(run: ComputerRunRecord): boolean {
+  return run.status === "completed" ||
+    run.kernelSessionId !== null ||
+    run.kernelLiveViewUrlEncrypted !== null ||
+    run.pausedAt !== null ||
+    run.pendingHandoffId !== null;
 }
 
 function buildLegacyKernelProfileName(input: {

@@ -18,14 +18,6 @@ export const HOSTED_COMPUTER_RUN_STATUSES = [
 ] as const;
 export type HostedComputerRunStatus = (typeof HOSTED_COMPUTER_RUN_STATUSES)[number];
 
-const LEGACY_HOSTED_COMPUTER_PROFILE_KEYS = [
-  "commerce",
-  "appointments",
-  "default",
-] as const;
-type LegacyHostedComputerProfileKey =
-  (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
-
 export const HOSTED_COMPUTER_AWAITING_REASONS = [
   "login_needed",
   "payment_needed",
@@ -251,22 +243,13 @@ function rewriteLegacyHostedComputerProfileKey(value: unknown): unknown {
     return value;
   }
 
-  const legacyProfileKey = readLegacyHostedComputerProfileKey(value.profileKey);
   const {
     legacyProfileKey: _legacyProfileKey,
     memberScopedProfileRequired: _memberScopedProfileRequired,
     profileKey: _profileKey,
     ...request
   } = value;
-  return legacyProfileKey
-    ? { ...request, legacyProfileKey }
-    : request;
-}
-
-function readLegacyHostedComputerProfileKey(
-  value: unknown,
-): LegacyHostedComputerProfileKey | null {
-  return LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.find((key) => key === value) ?? null;
+  return request;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -291,7 +274,6 @@ export const hostedComputerStartRunRequestSchema = z.preprocess(
   rewriteLegacyHostedComputerProfileKey,
   z.object({
     goal: z.string().trim().min(1).max(2_000).optional(),
-    legacyProfileKey: z.enum(LEGACY_HOSTED_COMPUTER_PROFILE_KEYS).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
