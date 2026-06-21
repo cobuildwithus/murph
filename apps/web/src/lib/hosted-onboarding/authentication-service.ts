@@ -1,5 +1,4 @@
 import {
-  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -83,6 +82,7 @@ export async function completeHostedPrivyVerification(input: {
 }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const timeZone = normalizeHostedSignupTimeZone(input.timeZone);
   const timing = startHostedOnboardingTiming("hosted-onboarding.privy.complete", {
     inviteProvided: Boolean(input.inviteCode),
   });
@@ -142,6 +142,11 @@ export async function completeHostedPrivyVerification(input: {
               memberId: reconciledMember.id,
               prisma: tx,
             });
+            await syncHostedMemberPendingActivationTimeZoneTx({
+              memberId: reconciledMember.id,
+              prisma: tx,
+              timeZone,
+            });
             return reconciledMember;
           }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -168,6 +173,11 @@ export async function completeHostedPrivyVerification(input: {
               memberId: memberResolution.member.id,
               prisma: tx,
             });
+            await syncHostedMemberPendingActivationTimeZoneTx({
+              memberId: memberResolution.member.id,
+              prisma: tx,
+              timeZone,
+            });
 
             return {
               initialVisitEligible: memberResolution.created,
@@ -187,12 +197,6 @@ export async function completeHostedPrivyVerification(input: {
       primaryBindingSynced: memberResolution.primaryBindingSynced,
       prisma,
       verifiedPrivyUser: input.verifiedPrivyUser ?? null,
-    });
-    await syncHostedMemberPendingActivationTimeZone({
-      billingStatus: member.billingStatus,
-      memberId: member.id,
-      prisma,
-      timeZone: input.timeZone ?? null,
     });
 
     const messagingSetupState = await readHostedMemberMessagingSetupState({
@@ -246,21 +250,18 @@ export async function completeHostedPrivyVerification(input: {
   }
 }
 
-async function syncHostedMemberPendingActivationTimeZone(input: {
-  billingStatus: HostedBillingStatus;
+async function syncHostedMemberPendingActivationTimeZoneTx(input: {
   memberId: string;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
   timeZone: string | null;
 }): Promise<void> {
-  const timeZone = normalizeHostedSignupTimeZone(input.timeZone);
-
-  if (!timeZone || input.billingStatus === HostedBillingStatus.active) {
+  if (!input.timeZone) {
     return;
   }
 
   await updateHostedMemberPendingActivationTimeZoneIfActivationPending({
     memberId: input.memberId,
-    pendingActivationTimeZone: timeZone,
+    pendingActivationTimeZone: input.timeZone,
     prisma: input.prisma,
   });
 }
