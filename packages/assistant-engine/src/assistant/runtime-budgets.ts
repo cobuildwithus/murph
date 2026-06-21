@@ -43,20 +43,27 @@ export async function maybeRunAssistantRuntimeMaintenance(input: {
   now?: Date
   vault: string
 }): Promise<AssistantRuntimeBudgetSnapshot> {
-  const current = await readAssistantRuntimeBudgetStatus(input.vault)
   const now = input.now ?? new Date()
-  const lastRunAt = current.maintenance.lastRunAt
-  const lastRunMs = lastRunAt ? Date.parse(lastRunAt) : Number.NaN
-  if (
-    Number.isFinite(lastRunMs) &&
-    now.getTime() - lastRunMs < ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS
-  ) {
-    return current
-  }
+  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantRuntimeBudgetStatusAtPaths({
+      paths,
+      vault: input.vault,
+    })
+    const lastRunAt = current.maintenance.lastRunAt
+    const lastRunMs = lastRunAt ? Date.parse(lastRunAt) : Number.NaN
+    if (
+      Number.isFinite(lastRunMs) &&
+      now.getTime() - lastRunMs < ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS
+    ) {
+      return current
+    }
 
-  return await runAssistantRuntimeMaintenance({
-    now,
-    vault: input.vault,
+    return await runAssistantRuntimeMaintenanceAtPaths({
+      now,
+      paths,
+      vault: input.vault,
+    })
   })
 }
 
@@ -66,102 +73,11 @@ export async function runAssistantRuntimeMaintenance(input: {
 }): Promise<AssistantRuntimeBudgetSnapshot> {
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const now = input.now ?? new Date()
-    const nowIso = now.toISOString()
-    const notes: string[] = []
-    const expiredCacheEntries = pruneAssistantRuntimeCaches(now.getTime())
-    if (expiredCacheEntries > 0) {
-      notes.push(
-        `${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`,
-      )
-    }
-    const staleQuarantinePruned = await pruneAssistantQuarantineFiles(paths, now)
-    if (staleQuarantinePruned > 0) {
-      notes.push(
-        `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
-      )
-    }
-    const transcriptRetention = await pruneAssistantTranscriptRetention(paths)
-    if (transcriptRetention.entriesTrimmed > 0) {
-      notes.push(
-        `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,
-      )
-    }
-    const terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
-      now,
+    return await runAssistantRuntimeMaintenanceAtPaths({
+      now: input.now ?? new Date(),
       paths,
       vault: input.vault,
     })
-    if (terminalOutboxPruned > 0) {
-      notes.push(
-        `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
-      )
-    }
-    const cronHistory = await pruneAssistantCronRunHistory({
-      now,
-      paths,
-    })
-    if (cronHistory.responsesRedacted > 0) {
-      notes.push(
-        `${cronHistory.responsesRedacted} older cron response(s) were redacted.`,
-      )
-    }
-    if (cronHistory.runsPruned > 0) {
-      notes.push(
-        `${cronHistory.runsPruned} stale cron run record(s) were pruned.`,
-      )
-    }
-    const staleLocksCleared = await clearStaleAssistantLocks({
-      paths,
-      vault: input.vault,
-    })
-    if (staleLocksCleared > 0) {
-      notes.push(`${staleLocksCleared} stale runtime lock(s) were cleared.`)
-    }
-
-    await appendAssistantRuntimeEventAtPaths(paths, {
-      at: nowIso,
-      component: 'runtime',
-      kind: 'runtime.maintenance',
-      level: 'info',
-      message:
-        notes.length > 0
-          ? notes.join(' ')
-          : 'Assistant runtime maintenance ran with no corrective actions.',
-      data: {
-        cronResponsesRedacted: cronHistory.responsesRedacted,
-        cronRunsPruned: cronHistory.runsPruned,
-        staleQuarantinePruned,
-        staleLocksCleared,
-        terminalOutboxPruned,
-        transcriptEntriesTrimmed: transcriptRetention.entriesTrimmed,
-        transcriptFilesTrimmed: transcriptRetention.transcriptsTrimmed,
-      },
-    }).catch(() => undefined)
-    try {
-      await compactAssistantEventLogsAtPaths({
-        now,
-        paths,
-      })
-    } catch {
-      notes.push(
-        'Assistant event log compaction failed and will be retried by a later maintenance pass.',
-      )
-    }
-
-    const snapshot = assistantRuntimeBudgetSnapshotSchema.parse({
-      schema: ASSISTANT_RUNTIME_BUDGET_SCHEMA,
-      updatedAt: nowIso,
-      caches: listAssistantRuntimeCacheSnapshots(),
-      maintenance: {
-        lastRunAt: nowIso,
-        staleQuarantinePruned,
-        staleLocksCleared,
-        notes,
-      },
-    })
-    await writeJsonFileAtomic(paths.resourceBudgetPath, snapshot)
-    return snapshot
   })
 }
 
@@ -170,15 +86,127 @@ export async function readAssistantRuntimeBudgetStatus(
 ): Promise<AssistantRuntimeBudgetSnapshot> {
   return await withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-    const existing = await readAssistantRuntimeBudgetSnapshotAtPaths({
+    return await readAssistantRuntimeBudgetStatusAtPaths({
       paths,
       vault,
     })
-    return assistantRuntimeBudgetSnapshotSchema.parse({
-      ...existing,
-      updatedAt: existing.updatedAt,
-      caches: listAssistantRuntimeCacheSnapshots(),
+  })
+}
+
+async function runAssistantRuntimeMaintenanceAtPaths(input: {
+  now: Date
+  paths: AssistantStatePaths
+  vault: string
+}): Promise<AssistantRuntimeBudgetSnapshot> {
+  const nowIso = input.now.toISOString()
+  const notes: string[] = []
+  const expiredCacheEntries = pruneAssistantRuntimeCaches(input.now.getTime())
+  if (expiredCacheEntries > 0) {
+    notes.push(
+      `${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`,
+    )
+  }
+  const staleQuarantinePruned = await pruneAssistantQuarantineFiles(
+    input.paths,
+    input.now,
+  )
+  if (staleQuarantinePruned > 0) {
+    notes.push(
+      `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
+    )
+  }
+  const transcriptRetention = await pruneAssistantTranscriptRetention(input.paths)
+  if (transcriptRetention.entriesTrimmed > 0) {
+    notes.push(
+      `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,
+    )
+  }
+  const terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
+    now: input.now,
+    paths: input.paths,
+    vault: input.vault,
+  })
+  if (terminalOutboxPruned > 0) {
+    notes.push(
+      `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
+    )
+  }
+  const cronHistory = await pruneAssistantCronRunHistory({
+    now: input.now,
+    paths: input.paths,
+  })
+  if (cronHistory.responsesRedacted > 0) {
+    notes.push(
+      `${cronHistory.responsesRedacted} older cron response(s) were redacted.`,
+    )
+  }
+  if (cronHistory.runsPruned > 0) {
+    notes.push(
+      `${cronHistory.runsPruned} stale cron run record(s) were pruned.`,
+    )
+  }
+  const staleLocksCleared = await clearStaleAssistantLocks({
+    paths: input.paths,
+    vault: input.vault,
+  })
+  if (staleLocksCleared > 0) {
+    notes.push(`${staleLocksCleared} stale runtime lock(s) were cleared.`)
+  }
+
+  await appendAssistantRuntimeEventAtPaths(input.paths, {
+    at: nowIso,
+    component: 'runtime',
+    kind: 'runtime.maintenance',
+    level: 'info',
+    message:
+      notes.length > 0
+        ? notes.join(' ')
+        : 'Assistant runtime maintenance ran with no corrective actions.',
+    data: {
+      cronResponsesRedacted: cronHistory.responsesRedacted,
+      cronRunsPruned: cronHistory.runsPruned,
+      staleQuarantinePruned,
+      staleLocksCleared,
+      terminalOutboxPruned,
+      transcriptEntriesTrimmed: transcriptRetention.entriesTrimmed,
+      transcriptFilesTrimmed: transcriptRetention.transcriptsTrimmed,
+    },
+  }).catch(() => undefined)
+  try {
+    await compactAssistantEventLogsAtPaths({
+      now: input.now,
+      paths: input.paths,
     })
+  } catch {
+    notes.push(
+      'Assistant event log compaction failed and will be retried by a later maintenance pass.',
+    )
+  }
+
+  const snapshot = assistantRuntimeBudgetSnapshotSchema.parse({
+    schema: ASSISTANT_RUNTIME_BUDGET_SCHEMA,
+    updatedAt: nowIso,
+    caches: listAssistantRuntimeCacheSnapshots(),
+    maintenance: {
+      lastRunAt: nowIso,
+      staleQuarantinePruned,
+      staleLocksCleared,
+      notes,
+    },
+  })
+  await writeJsonFileAtomic(input.paths.resourceBudgetPath, snapshot)
+  return snapshot
+}
+
+async function readAssistantRuntimeBudgetStatusAtPaths(input: {
+  paths: AssistantStatePaths
+  vault: string
+}): Promise<AssistantRuntimeBudgetSnapshot> {
+  const existing = await readAssistantRuntimeBudgetSnapshotAtPaths(input)
+  return assistantRuntimeBudgetSnapshotSchema.parse({
+    ...existing,
+    updatedAt: existing.updatedAt,
+    caches: listAssistantRuntimeCacheSnapshots(),
   })
 }
 
