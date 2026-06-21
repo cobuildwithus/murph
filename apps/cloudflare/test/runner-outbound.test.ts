@@ -46,6 +46,7 @@ import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -3163,8 +3164,8 @@ describe("handleRunnerOutboundRequest", () => {
     }));
     expect(body).not.toHaveProperty("putUrl");
     expect(body.limits).toEqual({
-      maxSinglePartEncryptedBytes: 4 * 1024 * 1024 * 1024,
-      warnEncryptedBytes: 128 * 1024 * 1024,
+      maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
     });
     expect(body.encryption).toEqual(expect.objectContaining({
       aad: expect.objectContaining({
@@ -3271,6 +3272,41 @@ describe("handleRunnerOutboundRequest", () => {
     expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(presignBody.expiresAt).toEqual(expect.stringMatching(/^20/u));
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+  });
+
+  it("rejects direct-R2 workspace snapshot PUT presigns at the single-part limit before session lookup", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const snapshotId = "snapshot_presign_oversized";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        encryptedObjectSha256: "a".repeat(64),
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot exceeds the single-part size limit.",
+    });
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("presigns direct-R2 workspace snapshot PUT URLs with hosted-local dev MinIO env", async () => {

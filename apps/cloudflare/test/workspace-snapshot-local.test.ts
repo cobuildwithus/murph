@@ -1,6 +1,14 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { writeFile, mkdtemp, rm, access, mkdir, readFile, readdir, symlink } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -126,7 +134,6 @@ describe("workspace snapshot local restore", () => {
         encryptedFilePath: encrypted.encryptedFilePath,
         postExtractIntegrityCheck: true,
         ref,
-        scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
       for (const key of [
@@ -355,7 +362,6 @@ async function expectUnsafeTarArchive(input: {
   const durableRoot = path.join(tempRoot, "durable");
   const existingDurableFile = path.join(durableRoot, "existing.txt");
   const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
-  const scratchRoot = path.join(tempRoot, "restore-scratch");
   const snapshotId = "snapshot_unsafe_tar";
   const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
   const userId = "member_123";
@@ -416,10 +422,8 @@ async function expectUnsafeTarArchive(input: {
       durableRoot,
       encryptedFilePath,
       ref,
-      scratchRoot,
     })).rejects.toThrow(input.expectedError);
     await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
-    await expect(readdir(scratchRoot)).resolves.toEqual([]);
     if (input.unwrittenRelativePath) {
       await expect(access(path.join(durableRoot, input.unwrittenRelativePath))).rejects.toThrow();
       await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
@@ -506,5 +510,6 @@ function zstdCompress(bytes: Buffer): Buffer {
     "--stdout",
   ], {
     input: bytes,
+    maxBuffer: 64 * 1024 * 1024,
   });
 }

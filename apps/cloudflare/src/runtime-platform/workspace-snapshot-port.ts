@@ -359,7 +359,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             durableRoot: request.durableRoot,
             encryptedFilePath,
             ref: request.ref,
-            scratchRoot: request.scratchRoot ?? null,
           }),
           step: "archive_restore",
         });
