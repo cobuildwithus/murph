@@ -802,6 +802,12 @@ describe('assistant system prompt cache stability', () => {
       'In user-facing prose, refer to dates with a month name and day',
     )
     expect(layers.threadContextPrompt).toContain(
+      'if the user says "tomorrow" or "tmrw" before they have slept',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'they may mean the upcoming wake-day, which can be the current calendar day',
+    )
+    expect(layers.threadContextPrompt).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(layers.threadContextPrompt).not.toContain(
@@ -826,6 +832,7 @@ Execution context:
 - The automation already exists and is active.
 - Treat the user prompt as the execution instructions for this scheduled run.`)
     expect(layers.dynamicTurnContextPrompt).not.toContain('Asia/Kuala_Lumpur')
+    expect(layers.dynamicTurnContextPrompt).not.toContain('upcoming wake-day')
     expect(layers.dynamicTurnContextPrompt).toContain(
       'Layer partition assistant context snapshot.',
     )
@@ -884,10 +891,14 @@ Execution context:
     expect(prompt).toContain(
       'Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.',
     )
+    expect(prompt).toContain(
+      'if the user says "tomorrow" or "tmrw" before they have slept',
+    )
     expect(prompt).not.toContain('Today\'s date for the user is 2026-04-03.')
     expect(notificationPrompt).toContain(
       'Today\'s date for the user is April 3, 2026.',
     )
+    expect(notificationPrompt).not.toContain('upcoming wake-day')
     expect(notificationPrompt).not.toContain(
       'Today\'s date for the user is 2026-04-03.',
     )
