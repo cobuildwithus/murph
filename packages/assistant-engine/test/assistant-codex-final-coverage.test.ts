@@ -664,6 +664,16 @@ describe('Codex model catalog', () => {
       },
       {
         audience: {
+          bindingDelivery: { kind: 'thread', target: 'linq-thread' },
+          channel: 'linq',
+          explicitTarget: 'linq-thread',
+        },
+        deliverResponse: true,
+        expectedChannel: 'linq',
+        name: 'deliverable Linq current-thread explicit target',
+      },
+      {
+        audience: {
           bindingDelivery: null,
           channel: 'linq',
           explicitTarget: 'linq-thread-explicit',
