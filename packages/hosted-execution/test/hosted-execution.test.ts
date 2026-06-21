@@ -789,6 +789,11 @@ describe("hosted execution coverage gaps", () => {
       selector: "button[type=submit]",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
+      action: "click",
+      locator: { by: "css", selector: "button[type=submit]" },
+      timeoutMs: 15000,
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
       steps: [clickStep],
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({

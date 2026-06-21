@@ -2138,11 +2138,16 @@ describe("ComputerUseService", () => {
   it("generates server-owned Playwright from a browser action without raw user source", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
-      executeResult: {
-        title: "Checkout",
-        url: "https://shop.example.test/cart",
-        visibleText: "Added",
-      },
+      executeResults: [
+        {
+          sensitive: false,
+        },
+        {
+          title: "Checkout",
+          url: "https://shop.example.test/cart",
+          visibleText: "Added",
+        },
+      ],
     });
     const service = new ComputerUseService({
       kernel,
@@ -2292,6 +2297,110 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.executePlaywrightCalls).toBe(1);
     expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-password");
+  });
+
+  it("rejects malformed sensitive preflight results before serializing the input value", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {},
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "fill",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Email",
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      value: "canary-secret-value",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_PREFLIGHT_INVALID",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-value");
+  });
+
+  it("rejects malformed browser action state results as unknown outcomes", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        lastTitle: "Old title",
+        lastUrl: "https://old.example.test",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {},
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Old title",
+      lastUrl: "https://old.example.test",
+      status: "running",
+    });
+  });
+
+  it("rejects browser action state results with malformed URLs", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        lastTitle: "Old title",
+        lastUrl: "https://old.example.test",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Checkout",
+        url: "not a url",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Old title",
+      lastUrl: "https://old.example.test",
+      status: "running",
+    });
   });
 
   it("rejects sensitive select targets before serializing the selected value to Kernel source", async () => {

@@ -2361,8 +2361,6 @@ function buildComputerLocatorExpression(locator: HostedComputerActLocator): stri
       return buildComputerTextLocatorExpression("getByTitle", locator.text, locator.exact);
     case "testId":
       return `page.getByTestId(${JSON.stringify(locator.testId)})`;
-    case "css":
-      return `page.locator(${JSON.stringify(locator.selector)})`;
   }
 }
 
@@ -2523,20 +2521,39 @@ function readRequiredBrowserActionStateResult(value: unknown): {
   title: string | null;
   url: string | null;
 } {
-  return readOptionalBrowserStateResult(value) ?? {
-    title: null,
-    url: null,
-  };
+  const state = readOptionalBrowserStateResult(value);
+  if (!state?.url || !sanitizeComputerDisplayUrl(state.url)) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+      httpStatus: 502,
+      message: "Computer action finished with an invalid browser state result.",
+      retryable: true,
+    });
+  }
+
+  return state;
 }
 
 function readComputerSensitiveInputPreflightResult(value: unknown): {
   sensitive: boolean;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { sensitive: false };
+    throw invalidSensitiveInputPreflightResultError();
   }
   const record = value as Record<string, unknown>;
+  if (typeof record.sensitive !== "boolean") {
+    throw invalidSensitiveInputPreflightResultError();
+  }
   return { sensitive: record.sensitive === true };
+}
+
+function invalidSensitiveInputPreflightResultError(): Error {
+  return computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_PREFLIGHT_INVALID",
+    httpStatus: 502,
+    message: "Computer sensitive-input preflight returned an invalid result.",
+    retryable: true,
+  });
 }
 
 function readVisibleText(value: unknown): string {

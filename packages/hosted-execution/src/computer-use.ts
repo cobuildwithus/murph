@@ -78,7 +78,6 @@ export const HOSTED_COMPUTER_LOCATOR_KINDS = [
   "altText",
   "title",
   "testId",
-  "css",
 ] as const;
 export type HostedComputerLocatorKind =
   (typeof HOSTED_COMPUTER_LOCATOR_KINDS)[number];
@@ -321,12 +320,6 @@ const hostedComputerActLocatorSchema = z.discriminatedUnion("by", [
     .object({
       by: z.literal("testId"),
       testId: hostedComputerActTextSchema.max(300),
-    })
-    .strict(),
-  z
-    .object({
-      by: z.literal("css"),
-      selector: hostedComputerActTextSchema.max(500),
     })
     .strict(),
 ]);

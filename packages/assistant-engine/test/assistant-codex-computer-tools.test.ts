@@ -43,6 +43,8 @@ describe("murph computer dynamic tools", () => {
     expect(actToolSchema).not.toContain("steps");
     expect(actToolSchema).not.toContain("\"code\"");
     expect(actToolSchema).toContain('"const":"goto"');
+    expect(actToolSchema).not.toContain('"const":"css"');
+    expect(actToolSchema).not.toContain('"selector"');
     expect(actToolSchema).toContain('"type":"integer"');
     expect(actToolSchema).toContain('"minimum":1000');
     expect(actToolSchema).toContain(
@@ -474,11 +476,14 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
-  it("treats server-side browser execution failures as unknown outcome", async () => {
+  it.each([
+    "HOSTED_COMPUTER_EVAL_FAILED",
+    "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+  ])("treats server-side browser execution failures as unknown outcome: %s", async (code) => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         error: {
-          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          code,
           message: "Computer browser evaluation failed.",
         },
       }, 502)

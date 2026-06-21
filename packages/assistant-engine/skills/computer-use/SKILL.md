@@ -62,10 +62,9 @@ The service runs the action with server-owned Playwright code, then returns the
 current URL and title. Available actions: `goto`, `click`, `fill`, `type`,
 `select`, `check`, `uncheck`, `press`, `scroll`, `wait`, and `waitFor`.
 
-Prefer user-facing locators in this order: role/name, label, placeholder, text,
-alt/title, test id, then CSS only when the page gives no semantic handle. Do
-not ask for or expose cookies, local storage, passwords, card numbers, raw
-tokens, or other secrets.
+Use user-facing locators in this order: role/name, label, placeholder, text,
+alt/title, then test id. Do not ask for or expose cookies, local storage,
+passwords, card numbers, raw tokens, hidden DOM values, or other secrets.
 
 Common action shapes:
 
