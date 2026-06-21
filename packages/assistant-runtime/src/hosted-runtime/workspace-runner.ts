@@ -119,7 +119,6 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
       reason: "idle_shutdown";
     }
   ) & {
-    conversationImportedSeq?: string | null;
     expectedWorkspaceVersion?: string;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
@@ -406,9 +405,6 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
     attemptId: input.metadata.attemptId,
     ...(Object.hasOwn(input.snapshot, "browserVaultReplicaRef")
       ? { browserVaultReplicaRef: input.snapshot.browserVaultReplicaRef ?? null }
-      : {}),
-    ...(Object.hasOwn(input.requestInput, "conversationImportedSeq")
-      ? { conversationImportedSeq: input.requestInput.conversationImportedSeq ?? null }
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,

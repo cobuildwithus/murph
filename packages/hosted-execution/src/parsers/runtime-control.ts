@@ -1044,14 +1044,6 @@ export function parseHostedWorkspaceCheckpointRequest(
             "Hosted workspace checkpoint request browserVaultReplicaRef",
           ),
         }),
-    ...(record.conversationImportedSeq === undefined
-      ? {}
-      : {
-          conversationImportedSeq: readNullableNonNegativeBigIntString(
-            record.conversationImportedSeq,
-            "Hosted workspace checkpoint request conversationImportedSeq",
-          ),
-        }),
     expectedWorkspaceVersion: requireNonNegativeBigIntString(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",

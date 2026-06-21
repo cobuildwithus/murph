@@ -2305,9 +2305,6 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
 
   input.assertRuntimeNotAborted();
   const checkpointInput = {
-    conversationImportedSeq: readHostedRuntimeCheckpointConversationImportedSeq(
-      input.redactedStatus,
-    ),
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
@@ -2407,17 +2404,6 @@ function assertIdleShutdownCheckpointAccepted(
     }
     throw new HostedMailboxImportCheckpointConflictError(checkpoint);
   }
-}
-
-function readHostedRuntimeCheckpointConversationImportedSeq(
-  redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null,
-): string | null {
-  if (!redactedStatus || typeof redactedStatus !== "object" || Array.isArray(redactedStatus)) {
-    return null;
-  }
-
-  const value = redactedStatus["hostedMailboxConversationImportedSeq"];
-  return typeof value === "string" && /^\d+$/u.test(value) ? value : null;
 }
 
 function raceHostedRuntimeCancellation<T>(

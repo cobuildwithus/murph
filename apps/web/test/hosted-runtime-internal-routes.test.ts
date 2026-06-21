@@ -1310,7 +1310,6 @@ describe("hosted runtime internal web routes", () => {
       "/api/internal/hosted-workspace/checkpoint",
       {
         attemptId: "attempt_1",
-        conversationImportedSeq: "12",
         expectedWorkspaceVersion: "4",
         leaseGeneration: "2",
         nextWakeAt: "2026-04-26T00:05:00.000Z",
@@ -1335,7 +1334,6 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
-      conversationImportedSeq: "12",
       expectedVersion: "4",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
       nextWakeReason: "mailbox",
@@ -1387,10 +1385,12 @@ describe("hosted runtime internal web routes", () => {
       "/api/internal/hosted-workspace/checkpoint",
       {
         attemptId: "attempt_idle_shutdown_foreground_pending",
-        conversationImportedSeq: "1",
         expectedWorkspaceVersion: "4",
         leaseGeneration: "2",
         reason: "idle_shutdown",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "1",
+        },
         snapshotRef: createBundleRef("snapshot_idle_shutdown"),
       },
     ));
@@ -1406,9 +1406,11 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
-      conversationImportedSeq: "1",
       expectedVersion: "4",
       reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+      },
       snapshotRef: createBundleRef("snapshot_idle_shutdown"),
       userId: "member_routes_1",
     });

@@ -1044,7 +1044,6 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
-      conversationImportedSeq: "12",
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1059,7 +1058,6 @@ describe("hosted runtime control contracts", () => {
       snapshotRef: null,
     })).toEqual({
       attemptId: "attempt_1",
-      conversationImportedSeq: "12",
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,

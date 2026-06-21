@@ -4085,7 +4085,9 @@ describe("hosted workspace runtime entrypoint", () => {
         "4",
       ]);
       assert.deepEqual(
-        checkpointRequests.map((request) => request.conversationImportedSeq),
+        checkpointRequests.map(
+          (request) => request.redactedStatus?.hostedMailboxConversationImportedSeq,
+        ),
         ["1", "2"],
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");

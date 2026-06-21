@@ -1112,7 +1112,6 @@ export type HostedWorkspaceCheckpointConflictReason =
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
-  conversationImportedSeq?: string | null;
   expectedWorkspaceVersion: string;
   leaseGeneration: string;
   nextWakeAt?: string | null;

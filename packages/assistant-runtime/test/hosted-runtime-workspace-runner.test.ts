@@ -217,7 +217,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.expectedWorkspaceVersion, "3");
   });
 
-  test("passes imported conversation seq into idle snapshot checkpoint requests", async () => {
+  test("passes imported conversation seq through redacted idle snapshot status", async () => {
     const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       createSnapshot: () => ({
         snapshotRef: null,
@@ -230,14 +230,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     const snapshotRequest = await snapshotBuilder.createRequest({
-      conversationImportedSeq: "12",
       reason: "idle_shutdown",
       redactedStatus: {
         hostedMailboxConversationImportedSeq: "12",
       },
     });
 
-    assert.equal(snapshotRequest.conversationImportedSeq, "12");
+    assert.equal(
+      snapshotRequest.redactedStatus?.hostedMailboxConversationImportedSeq,
+      "12",
+    );
+    assert.equal(
+      Object.hasOwn(snapshotRequest, "conversationImportedSeq"),
+      false,
+    );
   });
 
   test("checkpoint builders advance expected versions after accepted checkpoints", async () => {

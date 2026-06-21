@@ -283,7 +283,6 @@ export async function readHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
-  conversationImportedSeq?: bigint | number | string | null;
   expectedVersion: bigint | number | string;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -303,7 +302,6 @@ export async function checkpointHostedWorkspace(input: {
 
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
-  conversationImportedSeq?: bigint | number | string | null;
   expectedVersion: bigint | number | string;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -352,27 +350,30 @@ export async function checkpointHostedWorkspaceTx(input: {
       ));
   }
 
-  const conversationImportedSeq = resolveCheckpointConversationImportedSeq({
-    conversationImportedSeq: input.conversationImportedSeq,
-    redactedStatusJson: input.redactedStatusJson,
-  });
+  const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
-    const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
-      conversationImportedSeq,
+    await lockHostedWorkspaceForCheckpointTx({
       tx: input.tx,
       userId,
     });
-    if (pendingConversationSeq !== null) {
-      const row = await input.tx.hostedWorkspace.findUnique({
-        where: {
-          userId,
-        },
+    if (!isMailboxContinuationCheckpoint(input)) {
+      const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
+        conversationImportedSeq,
+        tx: input.tx,
+        userId,
       });
+      if (pendingConversationSeq !== null) {
+        const row = await input.tx.hostedWorkspace.findUnique({
+          where: {
+            userId,
+          },
+        });
 
-      return {
-        status: "foreground_pending",
-        workspace: row ? projectHostedWorkspace(row) : null,
-      };
+        return {
+          status: "foreground_pending",
+          workspace: row ? projectHostedWorkspace(row) : null,
+        };
+      }
     }
   }
 
@@ -395,24 +396,37 @@ export async function checkpointHostedWorkspaceTx(input: {
   };
 }
 
-function resolveCheckpointConversationImportedSeq(input: {
-  conversationImportedSeq?: bigint | number | string | null;
-  redactedStatusJson?: Record<string, unknown> | null;
-}): bigint | null {
-  if (input.conversationImportedSeq !== undefined && input.conversationImportedSeq !== null) {
-    return normalizeBigInt(
-      input.conversationImportedSeq,
-      "Hosted workspace checkpoint conversationImportedSeq",
-    );
-  }
-
-  const value = readCheckpointRedactedConversationImportedSeq(input.redactedStatusJson);
+function readCheckpointConversationImportedSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint | null {
+  const value = readCheckpointRedactedConversationImportedSeq(redactedStatusJson);
   return value === null
     ? null
     : normalizeBigInt(
         value,
         "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
       );
+}
+
+function isMailboxContinuationCheckpoint(input: {
+  nextWakeAt?: Date | string | null;
+  nextWakeReason?: string | null;
+}): boolean {
+  return input.nextWakeAt !== undefined
+    && input.nextWakeAt !== null
+    && normalizeNullableString(input.nextWakeReason) === "mailbox";
+}
+
+async function lockHostedWorkspaceForCheckpointTx(input: {
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT user_id
+    FROM hosted_workspace
+    WHERE user_id = ${input.userId}
+    FOR UPDATE
+  `;
 }
 
 function readCheckpointRedactedConversationImportedSeq(
