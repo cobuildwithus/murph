@@ -231,11 +231,14 @@ describe("murph computer dynamic tools", () => {
       jsonResponse({
         runId: "run_123",
         status: "running",
-        title: "Checkout",
+        title: "API key: sk_live_TITLECANARY123456",
         url: "https://shop.example.test/checkout?token=secret#frag",
         visibleText: [
           "Contact shopper@example.test",
           "Cookie: session=secret",
+          "API key: sk_live_VISIBLECANARY123456",
+          "Verification code: 123456",
+          "Loose prefix sk_live_LOOSECANARY123456",
           "Reference 4111 1111 1111 1111",
           "Ready to submit",
         ].join("\n"),
@@ -260,9 +263,14 @@ describe("murph computer dynamic tools", () => {
     expect(text).toContain("[redacted-email]");
     expect(text).toContain("[redacted-sensitive-line]");
     expect(text).toContain("[redacted-number]");
+    expect(text).toContain("[redacted-secret]");
     expect(text).not.toContain("token=secret");
     expect(text).not.toContain("shopper@example.test");
     expect(text).not.toContain("4111");
+    expect(text).not.toContain("TITLECANARY");
+    expect(text).not.toContain("VISIBLECANARY");
+    expect(text).not.toContain("LOOSECANARY");
+    expect(text).not.toContain("123456");
   });
 
   it("runs a browser action and returns a redacted action result summary", async () => {

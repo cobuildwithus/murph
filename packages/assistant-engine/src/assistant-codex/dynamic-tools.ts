@@ -1352,7 +1352,7 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'awaitingReason'),
         ...readStringField(record, 'expiresAt'),
-        ...readStringField(record, 'lastTitle'),
+        ...readRedactedTextField(record, 'lastTitle'),
         ...readSanitizedUrlField(record, 'lastUrl'),
         ...readBooleanField(record, 'reused'),
         ...readStringField(record, 'runId'),
@@ -1362,7 +1362,7 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
-        ...readStringField(record, 'title'),
+        ...readRedactedTextField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
         visibleText: redactSensitiveToolText(
           typeof record.visibleText === 'string' ? record.visibleText : '',
@@ -1371,7 +1371,7 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
-        ...readStringField(record, 'title'),
+        ...readRedactedTextField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
       }
     case 'finish':
@@ -1389,6 +1389,14 @@ function readStringField(
 ): Record<string, string> {
   const value = record[field]
   return typeof value === 'string' ? { [field]: value } : {}
+}
+
+function readRedactedTextField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string> {
+  const value = record[field]
+  return typeof value === 'string' ? { [field]: redactSensitiveToolText(value) } : {}
 }
 
 function readBooleanField(
@@ -1435,12 +1443,18 @@ function isTokenLikeUrlSegment(segment: string): boolean {
 
 function redactSensitiveToolText(value: string): string {
   const bounded = sanitizeToolTextUrls(value.slice(0, 6000))
+  const sensitiveLinePattern =
+    /authorization|bearer|card|cookie|cvv|password|secret|ssn|token|api[-_\s]*key|access[-_\s]*key|private[-_\s]*key|client[-_\s]*secret|one[-_\s]*time[-_\s]*(?:code|password|passcode)|verification[-_\s]*(?:code|token)|recovery[-_\s]*(?:code|key|phrase)|authenticator|security[-_\s]*(?:code|token)|\botp\b|\b2fa\b|\bmfa\b/iu
   return bounded
     .split(/\r?\n/u)
-    .map((line) => /authorization|bearer|card|cookie|cvv|password|secret|ssn|token/iu.test(line)
+    .map((line) => sensitiveLinePattern.test(line)
       ? '[redacted-sensitive-line]'
       : line)
     .join('\n')
+    .replace(/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9_=-]{6,}\b/giu, '[redacted-secret]')
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/giu, '[redacted-secret]')
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]{10,}\b/giu, '[redacted-secret]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/gu, '[redacted-secret]')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
     .replace(/\b(?:\d[ -]?){13,19}\b/gu, '[redacted-number]')
     .replace(/\b\d{3}-\d{2}-\d{4}\b/gu, '[redacted-number]')
