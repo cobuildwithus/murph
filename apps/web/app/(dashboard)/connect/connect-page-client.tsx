@@ -282,8 +282,8 @@ export function ConnectSourcesGrid({
     } catch (error) {
       const message = error instanceof Error ? error.message : `We could not disconnect ${source.name} right now.`;
       setActionError({
-        sourceId: source.id,
         message,
+        sourceId: source.id,
       });
     } finally {
       setPendingDisconnectSourceId(null);
