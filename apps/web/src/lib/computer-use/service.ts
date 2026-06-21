@@ -46,6 +46,7 @@ const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
+const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
@@ -86,6 +87,9 @@ export interface ComputerExpiredRunCleanupResult {
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
+type HostedComputerActLocator = NonNullable<Extract<HostedComputerActRequest, {
+  locator?: unknown;
+}>["locator"]>;
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -383,30 +387,44 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
+  }): Promise<{ title: string | null; url: string | null }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
     const run = await this.requireRunnableRun(input);
-    const url = await this.requirePublicNavigationUrl(input.url);
-    const result = await this.requireKernel().executePlaywright({
-      code: buildComputerActCode({
-        ...input,
-        url,
-      }),
-      sessionId: requireKernelSessionId(run),
-      timeoutMs: input.timeoutMs,
+    if (input.action === "goto") {
+      await this.requirePublicNavigationUrl(input.url);
+    }
+    const kernel = this.requireKernel();
+    const actionDeadline = createComputerActDeadline(input, this.now);
+    const sessionId = requireKernelSessionId(run);
+    await requireNonSensitiveComputerInputTarget({
+      action: input,
+      deadline: actionDeadline,
+      kernel,
+      sessionId,
     });
-    const state = readBrowserStateResult(result.result);
+    const actionKernelTimeoutMs = readComputerActRemainingTimeoutMs(actionDeadline);
+    const actionForExecution = limitComputerActRequestTimeout(
+      input,
+      readComputerActExecutionTimeoutMs(input, actionKernelTimeoutMs),
+    );
+    const result = await kernel.executePlaywright({
+      code: buildComputerActCode(actionForExecution),
+      sessionId,
+      timeoutMs: actionKernelTimeoutMs,
+    });
+    const state = readRequiredBrowserActionStateResult(result.result);
     await this.store.updateRunBrowserState({
       expectedKernelSessionId: run.kernelSessionId,
       lastTitle: state.title,
       lastUrl: sanitizeComputerDisplayUrl(state.url),
       runId: run.id,
+    }).catch(() => {
+      // The browser action already completed; this write is only a display cache.
     });
 
     return {
-      result: result.result,
       title: state.title,
       url: state.url,
     };
@@ -444,16 +462,6 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     }, store);
-
-    if (
-      input.reason === "final_confirmation" &&
-      input.handoffPurpose !== "manual_browser_help"
-    ) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-        message: "Final confirmation requires a manual browser handoff.",
-      });
-    }
 
     if (run.status === "awaiting_user") {
       const refreshed = input.handoffPurpose
@@ -584,7 +592,7 @@ export class ComputerUseService {
         ? "running"
         : null;
     if (expectedRunStatus && run.status !== expectedRunStatus) {
-      throw handoffIncompleteForFinishError(run);
+      throw handoffIncompleteForFinishError();
     }
     const expectedKernelSessionId = run.kernelSessionId;
 
@@ -1344,13 +1352,6 @@ export class ComputerUseService {
     }
     const pausedAt = run.pausedAt;
 
-    if (run.awaitingReason === "final_confirmation") {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-        message: "Final confirmation runs cannot resume automated browser actions.",
-      });
-    }
-
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
         handoffId: run.pendingHandoffId,
@@ -1738,7 +1739,7 @@ export class ComputerUseService {
   ): Promise<string | null> {
     if (!run.pendingHandoffId) {
       if (outcome === "completed" && run.status === "awaiting_user") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return null;
     }
@@ -1749,14 +1750,14 @@ export class ComputerUseService {
     });
     if (!handoff) {
       if (outcome === "completed") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return null;
     }
 
     if (outcome === "completed") {
       if (handoff.status !== "completed") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return handoff.id;
     }
@@ -2012,19 +2013,7 @@ function requireRemainingKernelTimeoutSeconds(run: ComputerRunRecord, now: Date)
   return remainingSeconds;
 }
 
-function finalConfirmationHandoffIncompleteError(): Error {
-  return computerUseConflictError({
-    code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-    message: "Final confirmation handoff is not completed.",
-    retryable: true,
-  });
-}
-
-function handoffIncompleteForFinishError(run: ComputerRunRecord): Error {
-  if (run.awaitingReason === "final_confirmation") {
-    return finalConfirmationHandoffIncompleteError();
-  }
-
+function handoffIncompleteForFinishError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_HANDOFF_NOT_COMPLETED",
     message: "Computer handoff must be completed before finishing the run.",
@@ -2068,17 +2057,132 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 }
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
-  const timeout = input.timeoutMs;
-  const url = requireComputerNavigationUrl(input.url);
-  if (!url) {
+  return [
+    ...buildComputerActActionCode(input),
+    buildComputerActionStateReturnCode(),
+  ].join("\n");
+}
+
+async function requireNonSensitiveComputerInputTarget(input: {
+  action: HostedComputerActRequest;
+  deadline: ComputerActDeadline;
+  kernel: ComputerKernelClient;
+  sessionId: string;
+}): Promise<void> {
+  if (
+    input.action.action !== "fill" &&
+    input.action.action !== "type" &&
+    input.action.action !== "select"
+  ) {
+    return;
+  }
+
+  const requestTimeoutMs = readComputerActRemainingTimeoutMs(input.deadline);
+  const locatorTimeoutMs = Math.min(
+    input.action.timeoutMs,
+    readComputerActActionTimeoutMs(requestTimeoutMs),
+  );
+  const result = await input.kernel.executePlaywright({
+    code: buildComputerSensitiveInputProbeCode(input.action.locator, locatorTimeoutMs),
+    sessionId: input.sessionId,
+    timeoutMs: requestTimeoutMs,
+  });
+  const preflight = readComputerSensitiveInputPreflightResult(result.result);
+  if (!preflight.sensitive) {
+    return;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    httpStatus: 400,
+    message: "Computer input targets a sensitive field. Pause for user handoff instead.",
+  });
+}
+
+type ComputerActDeadline = {
+  deadlineMs: number;
+  nowMs: () => number;
+};
+
+function createComputerActDeadline(
+  input: HostedComputerActRequest,
+  now: () => Date,
+): ComputerActDeadline {
+  return {
+    deadlineMs: now().getTime() + computerActExecutionTimeoutMs(input),
+    nowMs: () => now().getTime(),
+  };
+}
+
+function readComputerActRemainingTimeoutMs(deadline: ComputerActDeadline): number {
+  const remainingMs = Math.floor(deadline.deadlineMs - deadline.nowMs());
+  if (remainingMs <= 0) {
     throw computerUseError({
-      code: "HOSTED_COMPUTER_ACT_URL_REQUIRED",
-      httpStatus: 400,
-      message: "Computer act only supports goto with a URL.",
+      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
+      httpStatus: 504,
+      message: "Computer action timed out before it could complete.",
+      retryable: true,
     });
   }
 
-  return buildComputerNavigationCode({ timeoutMs: timeout, url });
+  return remainingMs;
+}
+
+function readComputerActActionTimeoutMs(kernelTimeoutMs: number): number {
+  const actionTimeoutMs = kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS;
+  if (actionTimeoutMs <= 0) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
+      httpStatus: 504,
+      message: "Computer action timed out before it could complete.",
+      retryable: true,
+    });
+  }
+
+  return actionTimeoutMs;
+}
+
+function readComputerActExecutionTimeoutMs(
+  input: HostedComputerActRequest,
+  kernelTimeoutMs: number,
+): number {
+  if (input.action === "wait") {
+    return Math.max(0, kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS);
+  }
+
+  return readComputerActActionTimeoutMs(kernelTimeoutMs);
+}
+
+function limitComputerActRequestTimeout(
+  input: HostedComputerActRequest,
+  timeoutMs: number,
+): HostedComputerActRequest {
+  switch (input.action) {
+    case "wait":
+      return {
+        ...input,
+        ms: Math.min(input.ms, timeoutMs),
+      };
+    case "goto":
+    case "click":
+    case "fill":
+    case "type":
+    case "select":
+    case "check":
+    case "uncheck":
+    case "press":
+    case "scroll":
+    case "waitFor":
+      return {
+        ...input,
+        timeoutMs: Math.min(input.timeoutMs, timeoutMs),
+      };
+  }
+}
+
+function computerActExecutionTimeoutMs(input: HostedComputerActRequest): number {
+  const actionTimeoutMs = input.action === "wait" ? input.ms : input.timeoutMs;
+  return actionTimeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS;
 }
 
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
@@ -2112,6 +2216,191 @@ function buildComputerNavigationCode(input: {
     "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
     `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
     "return { url: finalUrl, title, visibleText };",
+  ].join("\n");
+}
+
+function buildComputerActActionCode(action: HostedComputerActRequest): string[] {
+  switch (action.action) {
+    case "goto":
+      return buildComputerGotoActionCode(action.url, action.timeoutMs);
+    case "click":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.click({ timeout: ${action.timeoutMs} });`,
+      ];
+    case "fill":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.fill(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
+      ];
+    case "type":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.pressSequentially(${JSON.stringify(action.text)}, { delay: ${action.delayMs}, timeout: ${action.timeoutMs} });`,
+      ];
+    case "select":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.selectOption(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
+      ];
+    case "check":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.check({ timeout: ${action.timeoutMs} });`,
+      ];
+    case "uncheck":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.uncheck({ timeout: ${action.timeoutMs} });`,
+      ];
+    case "press": {
+      if (action.locator) {
+        return [
+          `await ${buildComputerLocatorExpression(action.locator)}.press(${JSON.stringify(action.key)}, { timeout: ${action.timeoutMs} });`,
+        ];
+      }
+      return [
+        `await page.keyboard.press(${JSON.stringify(action.key)});`,
+      ];
+    }
+    case "scroll": {
+      const lines: string[] = [];
+      if (action.locator) {
+        lines.push(
+          `await ${buildComputerLocatorExpression(action.locator)}.scrollIntoViewIfNeeded({ timeout: ${action.timeoutMs} });`,
+        );
+      }
+      lines.push(`await page.mouse.wheel(${action.deltaX}, ${action.deltaY});`);
+      return lines;
+    }
+    case "wait":
+      return [`await page.waitForTimeout(${action.ms});`];
+    case "waitFor":
+      return [
+        `await ${buildComputerLocatorExpression(action.locator)}.waitFor({ state: ${JSON.stringify(action.state)}, timeout: ${action.timeoutMs} });`,
+      ];
+  }
+}
+
+function buildComputerGotoActionCode(url: string, timeoutMs: number): string[] {
+  return [
+    `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
+  ];
+}
+
+function buildComputerSensitiveInputProbeCode(
+  locator: HostedComputerActLocator,
+  timeoutMs: number,
+): string {
+  const locatorHints = readComputerLocatorSensitiveHints(locator);
+  return [
+    `const target = ${buildComputerLocatorExpression(locator)};`,
+    `await target.waitFor({ state: 'attached', timeout: ${timeoutMs} });`,
+    `const locatorHints = ${JSON.stringify(locatorHints)}.map((value) => String(value || "").toLowerCase());`,
+    `const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();`,
+    `const type = await attr("type");`,
+    `const inputMode = await attr("inputmode");`,
+    `const maxLengthRaw = await attr("maxlength");`,
+    `const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;`,
+    `const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);`,
+    `if (type === "password") return { sensitive: true, reason: "password_type" };
+  const lower = (value) => String(value || "").toLowerCase();
+  if (autocompleteTokens.some((token) =>
+    token === "current-password" ||
+    token === "new-password" ||
+    token === "one-time-code" ||
+    token.startsWith("cc-")
+  )) {
+    return { sensitive: true, reason: "sensitive_autocomplete" };
+  }
+  const hints = [
+    type,
+    inputMode,
+    await attr("name"),
+    await attr("id"),
+    await attr("aria-label"),
+    await attr("aria-description"),
+    await attr("aria-describedby"),
+    await attr("aria-labelledby"),
+    await attr("placeholder"),
+    await attr("title"),
+    await attr("data-testid"),
+    await attr("data-test"),
+    await attr("data-qa"),
+    ...locatorHints.map(lower),
+  ].join(" ");
+  const sensitivePatterns = [
+    /\\b(?:password|passcode|passphrase)\\b/u,
+    /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
+    /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b|\\b(?:verification|authentication|security)(?:code|passcode|token)\\b/u,
+    /\\b(?:cvc|cvv|cvn|cid)\\b/u,
+    /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
+    /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
+    /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
+    /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
+  ];
+  if (sensitivePatterns.some((pattern) => pattern.test(hints))) {
+    return { sensitive: true, reason: "sensitive_hint" };
+  }
+  const shortCodeField =
+    /\\bcode\\b/u.test(hints) &&
+    (
+      inputMode === "numeric" ||
+      inputMode === "decimal" ||
+      inputMode === "tel" ||
+      type === "number" ||
+      type === "tel" ||
+      (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
+    );
+  return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
+`,
+  ].join("\n");
+}
+
+function readComputerLocatorSensitiveHints(locator: HostedComputerActLocator): string[] {
+  switch (locator.by) {
+    case "role":
+      return uniqueStrings([locator.role, locator.name]);
+    case "testId":
+      return uniqueStrings([locator.testId]);
+    case "altText":
+    case "label":
+    case "placeholder":
+    case "text":
+    case "title":
+      return uniqueStrings([locator.text]);
+  }
+}
+
+function buildComputerLocatorExpression(locator: HostedComputerActLocator): string {
+  switch (locator.by) {
+    case "role":
+      return `page.getByRole(${JSON.stringify(locator.role)}, ${JSON.stringify({
+        ...(locator.name ? { name: locator.name } : {}),
+        exact: locator.exact,
+      })})`;
+    case "label":
+      return buildComputerTextLocatorExpression("getByLabel", locator.text, locator.exact);
+    case "placeholder":
+      return buildComputerTextLocatorExpression("getByPlaceholder", locator.text, locator.exact);
+    case "text":
+      return buildComputerTextLocatorExpression("getByText", locator.text, locator.exact);
+    case "altText":
+      return buildComputerTextLocatorExpression("getByAltText", locator.text, locator.exact);
+    case "title":
+      return buildComputerTextLocatorExpression("getByTitle", locator.text, locator.exact);
+    case "testId":
+      return `page.getByTestId(${JSON.stringify(locator.testId)})`;
+  }
+}
+
+function buildComputerTextLocatorExpression(
+  method: "getByAltText" | "getByLabel" | "getByPlaceholder" | "getByText" | "getByTitle",
+  text: string,
+  exact: boolean,
+): string {
+  return `page.${method}(${JSON.stringify(text)}, ${JSON.stringify({ exact })})`;
+}
+
+function buildComputerActionStateReturnCode(): string {
+  return [
+    "const title = await page.title().catch(() => null);",
+    "const url = page.url();",
+    "return { url, title };",
   ].join("\n");
 }
 
@@ -2250,6 +2539,45 @@ function readBrowserStateResult(value: unknown): {
     url: partial?.url ?? null,
     visibleText,
   };
+}
+
+function readRequiredBrowserActionStateResult(value: unknown): {
+  title: string | null;
+  url: string | null;
+} {
+  const state = readOptionalBrowserStateResult(value);
+  if (!state?.url || !sanitizeComputerDisplayUrl(state.url)) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+      httpStatus: 502,
+      message: "Computer action finished with an invalid browser state result.",
+      retryable: true,
+    });
+  }
+
+  return state;
+}
+
+function readComputerSensitiveInputPreflightResult(value: unknown): {
+  sensitive: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidSensitiveInputPreflightResultError();
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.sensitive !== "boolean") {
+    throw invalidSensitiveInputPreflightResultError();
+  }
+  return { sensitive: record.sensitive === true };
+}
+
+function invalidSensitiveInputPreflightResultError(): Error {
+  return computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_PREFLIGHT_INVALID",
+    httpStatus: 502,
+    message: "Computer sensitive-input preflight returned an invalid result.",
+    retryable: true,
+  });
 }
 
 function readVisibleText(value: unknown): string {

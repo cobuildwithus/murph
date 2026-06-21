@@ -938,8 +938,19 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
   return input.effect.deliveryPhase === "foreground_current_turn"
+    && !isHostedAssistantReactionOnlyEffect(input.effect)
     && input.outcome.deliveryStatus !== "sent"
     && input.outcome.retryable === true;
+}
+
+function isHostedAssistantReactionOnlyEffect(
+  effect: HostedAssistantDeliveryEffect,
+): boolean {
+  return effect.payload.channel === "telegram"
+    && effect.payload.message.length === 0
+    && effect.payload.media.length === 0
+    && effect.payload.replyToMessageId !== null
+    && effect.payload.transportIdempotent === true;
 }
 
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {
@@ -2187,6 +2198,7 @@ function buildHostedAssistantDeliveryOutcome(input: {
   );
   const messageDelivery =
     input.delivery?.kind === "message-reaction" ? null : input.delivery;
+  const payloadTarget = readHostedAssistantDeliveryPayloadTarget(input.effect.payload);
   const deliveryChannel =
     input.delivery?.channel
     ?? normalizeHostedAssistantDeliveryChannel(input.effect.payload.channel);
@@ -2218,8 +2230,38 @@ function buildHostedAssistantDeliveryOutcome(input: {
       : {}),
     providerThreadId: messageDelivery?.providerThreadId ?? null,
     retryable: input.retryable,
-    target: input.delivery?.target ?? null,
-    targetKind: input.delivery?.targetKind ?? null,
+    target: input.delivery?.target ?? payloadTarget.target,
+    targetKind: input.delivery?.targetKind ?? payloadTarget.targetKind,
+  };
+}
+
+function readHostedAssistantDeliveryPayloadTarget(
+  payload: HostedAssistantDeliveryPayload,
+): { target: string | null; targetKind: string | null } {
+  if (payload.explicitTarget) {
+    return {
+      target: payload.explicitTarget,
+      targetKind: "explicit",
+    };
+  }
+
+  if (payload.bindingDeliveryTarget) {
+    return {
+      target: payload.bindingDeliveryTarget,
+      targetKind: payload.bindingDeliveryKind,
+    };
+  }
+
+  if (payload.threadId) {
+    return {
+      target: payload.threadId,
+      targetKind: "thread",
+    };
+  }
+
+  return {
+    target: null,
+    targetKind: null,
   };
 }
 

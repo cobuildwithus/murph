@@ -196,6 +196,7 @@ function buildStableRouteCapabilityPrompt(
 ): string {
   return joinPromptSections(
     buildAssistantTurnPriorityText(),
+    buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     buildAssistantSupportedExperimentProtocolIndexText(
       input.assistantSupportedExperimentProtocols ?? []
@@ -224,11 +225,11 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantComputerUseGuidanceText(): string {
   return [
     "Computer-use tools:",
-    "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions.",
-    "- Use `murph.computer_observe` before navigating a started or resumed browser run. Use `murph.computer_act` only for URL navigation.",
-    "- When the user must log in, enter payment or card details, solve a challenge, manually inspect a page, or make a final confirmation, call `murph.computer_pause_for_user`. That tool records a durable pause and sends the user message, so end the turn after the pause instead of waiting inside the same tool call.",
-    "- After a later user reply to a non-final computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
-    "- Before placing an order, booking an appointment, authorizing payment, submitting insurance or health information, or taking any irreversible action, pause with `reason=\"final_confirmation\"` and `handoffPurpose=\"manual_browser_help\"` so the user performs the final action in the browser.",
+    "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions. Read `$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md` before non-trivial browser operation.",
+    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` to run one bounded browser action against the current Kernel page, then observe again when page state is needed.",
+    "- Complete the browser task end-to-end when the user has asked you to do it and the needed information is available. Before an irreversible purchase, booking, payment authorization, insurance or health submission, or order placement, continue only if the current user message already authorized the exact final terms shown on the site; otherwise pause with `reason=\"final_confirmation\"` for in-chat confirmation or direct takeover.",
+    "- Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed, such as expired login, CAPTCHA, unavailable payment details, an ambiguous material choice, or unauthorized final terms.",
+    "- After a later user reply to a computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
     "- Do not ask the user to log in again if the relevant browser profile already appears authenticated. If auth is expired, pause for handoff once.",
   ].join("\n");
 }
@@ -588,6 +589,15 @@ function buildAssistantTurnPriorityText(): string {
 7. Use the minimum evidence and tool loops sufficient for a correct answer. Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
 9. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
+}
+
+function buildAssistantMessageReactionGuidanceText(): string {
+  return `Message reactions:
+- Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
+- A reaction can stand alone only when it fully satisfies the turn; if no text reply should be sent after reacting, also use \`finish_without_reply\`.
+- Use \`heart\` when Murph genuinely loves what the user said or finds it really funny.
+- Use \`laugh\` for a dry or mildly funny joke that is worth acknowledging but not big enough for a heart.
+- Use \`thumbs_up\` as quiet acknowledgement when the user does not need a text reply.`;
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {

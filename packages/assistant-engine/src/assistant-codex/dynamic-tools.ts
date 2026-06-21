@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
@@ -53,7 +52,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -239,37 +238,50 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   },
 } as const
 
+type JsonSchemaObject = Record<string, unknown>
+
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
+
+function buildComputerActInputSchema(): JsonSchemaObject {
+  const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
+  const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
+
+  return {
+    oneOf: actionSchemas.map(addRunIdToActionSchema),
+    type: 'object',
+  }
+}
+
+function addRunIdToActionSchema(schema: unknown): JsonSchemaObject {
+  const record = asRecord(schema) ?? {}
+  const properties = asRecord(record.properties) ?? {}
+  const required = Array.isArray(record.required)
+    ? record.required.filter((item): item is string => typeof item === 'string')
+    : []
+
+  return {
+    ...record,
+    properties: {
+      runId: { type: 'string', minLength: 1 },
+      ...properties,
+    },
+    required: ['runId', ...required],
+  }
+}
+
 export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Navigate a computer run to a URL. For clicks, form entry, login, payment, booking, checkout, insurance, health submission, or other page interaction, pause with a manual_browser_help handoff so the user performs it in the browser.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['goto'],
-      },
-      runId: { type: 'string', minLength: 1 },
-      timeoutMs: {
-        type: 'number',
-        minimum: 1000,
-        maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-        default: 15000,
-      },
-      url: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
-    },
-    required: ['runId', 'action'],
-  },
+    'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
+  inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for user input, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end. For final_confirmation, set handoffPurpose to manual_browser_help so the user performs the irreversible final action.',
+    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -418,11 +430,42 @@ const computerObserveArgumentsSchema = z
   })
   .strict()
 
-const computerActArgumentsSchema = hostedComputerActRequestSchema
-  .extend({
-    runId: computerRunIdSchema,
-  })
-  .strict()
+const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
+  const withRunId = z
+    .object({
+      runId: computerRunIdSchema,
+    })
+    .passthrough()
+    .safeParse(value)
+  if (!withRunId.success) {
+    for (const issue of withRunId.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  const { runId, ...body } = withRunId.data
+  const parsedBody = hostedComputerActRequestSchema.safeParse(body)
+  if (!parsedBody.success) {
+    for (const issue of parsedBody.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  return {
+    ...parsedBody.data,
+    runId,
+  }
+})
 
 const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSchema
   .extend({
@@ -700,6 +743,21 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
+        schemaRootKeys: [
+          'runId',
+          'action',
+          'url',
+          'locator',
+          'value',
+          'text',
+          'key',
+          'deltaX',
+          'deltaY',
+          'delayMs',
+          'ms',
+          'state',
+          'timeoutMs',
+        ],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -1295,7 +1353,7 @@ function sanitizeHostedComputerPayload(
         ...readStringField(record, 'awaitingReason'),
         ...readStringField(record, 'expiresAt'),
         ...readStringField(record, 'lastTitle'),
-        ...readSanitizedUrlField(record, 'lastUrl'),
+        ...readStringOrNullField(record, 'lastUrl'),
         ...readBooleanField(record, 'reused'),
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
@@ -1305,17 +1363,13 @@ function sanitizeHostedComputerPayload(
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
         ...readStringField(record, 'title'),
-        ...readSanitizedUrlField(record, 'url'),
-        visibleText: redactSensitiveToolText(
-          typeof record.visibleText === 'string' ? record.visibleText : '',
-        ),
-        visibleTextRedacted: true,
+        ...readStringOrNullField(record, 'url'),
+        visibleText: typeof record.visibleText === 'string' ? record.visibleText : '',
       }
     case 'act':
       return {
-        resultType: readValueType(record.result),
         ...readStringField(record, 'title'),
-        ...readSanitizedUrlField(record, 'url'),
+        ...readStringOrNullField(record, 'url'),
       }
     case 'finish':
       return {
@@ -1334,15 +1388,7 @@ function readStringField(
   return typeof value === 'string' ? { [field]: value } : {}
 }
 
-function readBooleanField(
-  record: Record<string, unknown>,
-  field: string,
-): Record<string, boolean> {
-  const value = record[field]
-  return typeof value === 'boolean' ? { [field]: value } : {}
-}
-
-function readSanitizedUrlField(
+function readStringOrNullField(
   record: Record<string, unknown>,
   field: string,
 ): Record<string, string | null> {
@@ -1350,53 +1396,15 @@ function readSanitizedUrlField(
   if (value === null) {
     return { [field]: null }
   }
-  return typeof value === 'string'
-    ? { [field]: sanitizeToolUrl(value) }
-    : {}
+  return typeof value === 'string' ? { [field]: value } : {}
 }
 
-function readValueType(value: unknown): string {
-  if (value === null) {
-    return 'null'
-  }
-  if (Array.isArray(value)) {
-    return 'array'
-  }
-  return typeof value
-}
-
-function sanitizeToolUrl(value: string): string {
-  try {
-    const url = new URL(value)
-    url.username = ''
-    url.password = ''
-    url.search = ''
-    url.hash = ''
-    url.pathname = url.pathname
-      .split('/')
-      .map((segment) => isTokenLikeUrlSegment(segment) ? '[redacted]' : segment)
-      .join('/')
-    return url.toString()
-  } catch {
-    return '[invalid-url]'
-  }
-}
-
-function isTokenLikeUrlSegment(segment: string): boolean {
-  return segment.length >= 32 && /^[A-Za-z0-9._~-]+$/u.test(segment)
-}
-
-function redactSensitiveToolText(value: string): string {
-  const bounded = value.slice(0, 6000)
-  return bounded
-    .split(/\r?\n/u)
-    .map((line) => /authorization|bearer|card|cookie|cvv|password|secret|ssn|token/iu.test(line)
-      ? '[redacted-sensitive-line]'
-      : line)
-    .join('\n')
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
-    .replace(/\b(?:\d[ -]?){13,19}\b/gu, '[redacted-number]')
-    .replace(/\b\d{3}-\d{2}-\d{4}\b/gu, '[redacted-number]')
+function readBooleanField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, boolean> {
+  const value = record[field]
+  return typeof value === 'boolean' ? { [field]: value } : {}
 }
 
 function safeToolPayloadText(payload: unknown): string {
@@ -1542,8 +1550,9 @@ function parseReactToMessageArguments(
 
 function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
-  schema: z.ZodType<TArgs> & { shape: Record<string, unknown> }
+  schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaRootKeys?: readonly string[]
   toolName: string
 }):
   | { ok: true; args: TArgs }
@@ -1556,7 +1565,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
-        schemaRootKeys: readZodObjectRootKeys(input.schema),
+        schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
     }
@@ -1633,8 +1642,8 @@ function buildDynamicToolValidationDigest(input: {
   })
 }
 
-function readZodObjectRootKeys(schema: { shape: Record<string, unknown> }): string[] {
-  return Object.keys(schema.shape)
+function readZodObjectRootKeys(schema: { shape?: Record<string, unknown> }): string[] {
+  return Object.keys(schema.shape ?? {})
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

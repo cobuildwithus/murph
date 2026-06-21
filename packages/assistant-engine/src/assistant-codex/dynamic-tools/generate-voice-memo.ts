@@ -17,7 +17,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   namespace: 'murph',
   name: 'generate_voice_memo',
   description:
-    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. If the user asks for voice memos only, attach the voice memo and leave the final response text empty. This does not send directly.',
+    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Use it when voice itself adds useful tone, pacing, or presence; otherwise prefer text unless the user clearly prefers voice. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. If the user asks for voice memos only, attach the voice memo and leave the final response text empty. This does not send directly.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

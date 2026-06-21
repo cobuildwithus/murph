@@ -110,28 +110,10 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
 
-    const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+    const firstCompletionStatus = await waitForHostedForegroundIdleOrDeferredProgress({
       expectedConversationSeqEnd: firstSeq,
-      previousWorkspaceVersion: activationWorkspaceVersion,
+      expectedWorkspaceVersion: activationWorkspaceVersion,
     });
-    const postTurnPreCheckpointWorkspaceVersion = requireWorkspaceVersion(
-      postTurnPreCheckpointStatus,
-    );
-    if (postTurnPreCheckpointWorkspaceVersion === activationWorkspaceVersion) {
-      expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
-    } else {
-      expectCommittedIdleCheckpointProgressEvidence(postTurnPreCheckpointStatus, {
-        expectedConversationSeqEnd: firstSeq,
-        expectedWorkspaceVersion: activationWorkspaceVersion,
-      });
-    }
-
-    const firstCompletionStatus = postTurnPreCheckpointWorkspaceVersion === activationWorkspaceVersion
-      ? await waitForHostedForegroundIdleOrDeferredProgress({
-          expectedConversationSeqEnd: firstSeq,
-          expectedWorkspaceVersion: activationWorkspaceVersion,
-        })
-      : postTurnPreCheckpointStatus;
     expect(hasCompletedHostedError(firstCompletionStatus)).toBe(false);
     expectWorkspaceBaseOnly(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
@@ -176,28 +158,10 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
-    const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+    const finalStatus = await waitForHostedForegroundIdleOrDeferredProgress({
       expectedConversationSeqEnd: secondSeq,
-      previousWorkspaceVersion: idleWorkspaceVersion,
+      expectedWorkspaceVersion: idleWorkspaceVersion,
     });
-    const secondPostTurnPreCheckpointWorkspaceVersion = requireWorkspaceVersion(
-      secondPostTurnPreCheckpointStatus,
-    );
-    if (secondPostTurnPreCheckpointWorkspaceVersion === idleWorkspaceVersion) {
-      expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
-    } else {
-      expectCommittedIdleCheckpointProgressEvidence(secondPostTurnPreCheckpointStatus, {
-        expectedConversationSeqEnd: secondSeq,
-        expectedWorkspaceVersion: idleWorkspaceVersion,
-      });
-    }
-
-    const finalStatus = secondPostTurnPreCheckpointWorkspaceVersion === idleWorkspaceVersion
-      ? await waitForHostedForegroundIdleOrDeferredProgress({
-          expectedConversationSeqEnd: secondSeq,
-          expectedWorkspaceVersion: idleWorkspaceVersion,
-        })
-      : secondPostTurnPreCheckpointStatus;
     expect(hasCompletedHostedError(finalStatus)).toBe(false);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
     if (finalWorkspaceVersion === idleWorkspaceVersion) {
@@ -526,47 +490,6 @@ function isIdleCheckpointStatusReady(
             expectedWorkspaceVersion: input.previousWorkspaceVersion,
           })),
   );
-}
-
-async function waitForPostTurnPreIdleCheckpointWindow(input: {
-  expectedConversationSeqEnd: string;
-  previousWorkspaceVersion: string;
-}): Promise<HostedRunnerStatusResponse> {
-  const startedAt = Date.now();
-  let lastStatus: HostedRunnerStatusResponse | null = null;
-
-  while (Date.now() - startedAt < 30_000) {
-    const status = await readHostedRunnerStatusWithLogLimit(100);
-    lastStatus = status;
-
-    if (hasCompletedHostedError(status)) {
-      throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Hosted runner reported terminal error while waiting for post-turn pre-checkpoint window.",
-        `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
-      ]));
-    }
-
-    if (
-      status.workspace
-      && status.workspace.version === input.previousWorkspaceVersion
-      && isWorkspaceBaseOnly(status)
-    ) {
-      return status;
-    }
-
-    if (isIdleCheckpointStatusReady(status, input)) {
-      return status;
-    }
-
-    await sleep(100);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for post-turn pre-checkpoint window.",
-    ...(lastStatus
-      ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`]
-      : []),
-  ]));
 }
 
 async function waitForHostedForegroundIdleOrDeferredProgress(input: {

@@ -29,7 +29,7 @@ Strong triggers:
 - a behavior competing with real life: games, work, travel, sleep drift, pain, boredom, family, social plans, low energy, or missing materials
 - requests for accountability, consistency, motivation, coaching, habit help, or support
 - recurring experiment support where adherence is likely to matter
-- choosing whether support should be private, social, playful, visual, data-driven, or quiet
+- choosing whether support should be private, social, playful, visual, voice-based, data-driven, or quiet
 - group-chat or generated-image support that could make a behavior more alive without exposing sensitive details
 
 Do not use this skill for one-time facts, one-time logs, one-time reminders with user-dictated wording, urgent safety-sensitive answers, medical diagnosis, or protocol selection before the protocol/experiment shape is clear.
@@ -44,7 +44,7 @@ Before scheduling or continuing support for a repeated behavior, Murph should ha
 2. Reason: why the user wants this, in their own words when available.
 3. Anchor: when/where/after what the behavior happens.
 4. Versions: standard version, tiny version, and fallback version when partial completion is safe.
-5. Support style: minimal, direct, playful, visual, social, data-driven, reflective, or quiet.
+5. Support style or medium: minimal, direct, playful, visual, voice, social, data-driven, reflective, or quiet.
 6. Review/repair: when Murph reviews, and what Murph changes after misses.
 
 If the moment is too lightweight for all six, capture only target behavior, tiny version, anchor, and repair policy.
@@ -57,7 +57,7 @@ If the moment is too lightweight for all six, capture only target behavior, tiny
 - Prefer one concrete default the user can edit over a menu of options.
 - Do not increase reminder frequency after non-response.
 - Do not repeat stale reminder copy.
-- Use social or visual support only when it solves a real friction or salience problem.
+- Use social, visual, or voice support only when the medium adds something useful.
 - Protect privacy in shared channels. Do not expose sensitive health details, private struggles, or inferred psychology in group chats unless the user explicitly asked and the content is safe.
 - Do not store sensitive psychological interpretations as facts. Save durable preferences or concrete support details only when useful and clearly grounded.
 - For medication, clinician-directed care, high-risk behaviors, or symptoms, support remembering/logging and safety escalation; do not alter instructions or invent partial-dose fallbacks.
@@ -72,7 +72,7 @@ Diagnose friction through four practical lenses:
 - Capability: Do they know what to do, can they do it safely, and is it easy enough right now?
 - Opportunity: Does it fit a real moment, place, route, and competing context?
 - Motivation: Does it connect to something they care about now, and is the immediate tradeoff tolerable?
-- Support fit: Does Murph's message, channel, tone, social surface, or visual support actually help?
+- Support fit: Does Murph's message, channel, tone, or medium actually help?
 
 Use these lenses privately. Do not turn the reply into a psychology taxonomy.
 
@@ -166,6 +166,7 @@ Choose or infer one support style:
 - direct: plain accountability
 - playful: light humor or challenge
 - visual: image/card/carousel when it reduces uncertainty or increases salience
+- voice: short voice memo when tone, pacing, or presence materially helps
 - social: group accountability or shared ritual
 - data-driven: progress or pattern feedback
 - reflective: curious and conversational
@@ -191,7 +192,7 @@ Automation instructions should include:
 - skip conditions
 - repair-after policy
 - review point
-- whether visual support is allowed and, for shared channels, the explicit shared-support permission
+- whether visual or voice support is welcome, what it should add, and any shared-channel permission
 
 Automation instructions should not include:
 - fixed copy to repeat every time
@@ -256,9 +257,13 @@ Do not keep daily support running by inertia just because it helped at launch. D
 
 For experiments, tiny or fallback versions may keep the behavior loop alive, but do not log them as full protocol adherence when the protocol was only partially completed or materially changed. Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate, and put material modifications in notes, context, confounders, or protocol-specific fields.
 
-## Visual and social support
+## Visual, voice, and social support
 
-Use images and group chats as optional support surfaces, not gimmicks.
+Use images, voice memos, and group chats when the medium adds something useful, not as novelty for its own sake.
+
+Voice should be an event, not a rotation. Use it when tone, pacing, or presence is part of the help—for example, guiding a tiny action, softening a repair, or marking a meaningful transition. Otherwise prefer text, unless the user clearly prefers voice.
+
+Do not use voice merely to make an ignored reminder harder to ignore. Change the loop first.
 
 Use visual support when:
 - the user likes Murph-generated images
@@ -279,7 +284,7 @@ Avoid:
 - daily novelty spam
 - visuals that distract from repairing the loop
 
-Use novelty deliberately. Visuals, jokes, or group rituals are best for launch, repair, milestones, or explicit requests. Do not rotate novelty every day to compensate for a broken loop.
+Use novelty deliberately. Visuals, voice memos, jokes, or group rituals are best for launch, repair, milestones, or explicit requests. Do not rotate novelty every day to compensate for a broken loop.
 
 Use group chat when:
 - the user explicitly opted into this behavior support in the group, or the behavior is already inside a user-authorized group challenge/context

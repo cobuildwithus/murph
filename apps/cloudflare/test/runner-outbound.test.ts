@@ -291,7 +291,12 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       action: "click",
-      selector: "button[type=submit]",
+      locator: {
+        by: "role",
+        exact: false,
+        name: "Submit",
+        role: "button",
+      },
       timeoutMs: 25000,
     },
     name: "hosted computer act",
@@ -749,7 +754,12 @@ describe("handleRunnerOutboundRequest", () => {
       new Request(`http://web-control.worker${path}`, {
         body: JSON.stringify({
           action: "click",
-          selector: "button[type=submit]",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Submit",
+            role: "button",
+          },
           timeoutMs: 25000,
         }),
         headers: createRunnerProxyHeaders({

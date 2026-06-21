@@ -32,6 +32,9 @@ import {
 } from "../src/bundles.ts";
 import {
   buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
@@ -706,14 +709,53 @@ describe("hosted execution coverage gaps", () => {
       outcome: "failed",
     });
 
+    const clickStep = {
+      action: "click" as const,
+      locator: {
+        by: "role" as const,
+        exact: false,
+        name: "Add to cart",
+        role: "button",
+      },
+    };
+    expect(parseHostedComputerActRequest(clickStep)).toEqual({
+      ...clickStep,
+      timeoutMs: 15000,
+    });
+    expect(parseHostedComputerActRequest({
+      ...clickStep,
+      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+    })).toEqual({
+      ...clickStep,
+      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+    });
     expect(parseHostedComputerActRequest({
       action: "goto",
-      url: "https://example.test/checkout",
+      timeoutMs: 15000,
+      url: "https://example.com/checkout",
     })).toEqual({
       action: "goto",
       timeoutMs: 15000,
-      url: "https://example.test/checkout",
+      url: "https://example.com/checkout",
     });
+    for (const key of HOSTED_COMPUTER_PRESS_KEYS) {
+      expect(parseHostedComputerActRequest({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      })).toEqual({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      });
+    }
+    for (const key of ["a", "A", "1", "Space", "Control+V", "Meta+V"]) {
+      expect(() => parseHostedComputerActRequest({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
     for (const unsafeUrl of [
       "javascript:alert(1)",
       "data:text/html,<h1>owned</h1>",
@@ -747,10 +789,21 @@ describe("hosted execution coverage gaps", () => {
       selector: "button[type=submit]",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      action: "goto",
-      selector: "button[type=submit]",
-      url: "https://example.test/checkout",
-      value: "legacy-field",
+      action: "click",
+      locator: { by: "css", selector: "button[type=submit]" },
+      timeoutMs: 15000,
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      steps: [clickStep],
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "fill",
+      locator: { by: "label", text: "Name" },
+      value: "x".repeat(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH + 1),
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      ...clickStep,
+      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
     })).toThrow(/Hosted computer act request is invalid/u);
 
     expect(parseHostedComputerPauseForUserRequest({

@@ -5,6 +5,7 @@ export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
 
 export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
+export const HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH = 2_000;
 
 export const HOSTED_COMPUTER_RUN_STATUSES = [
   "running",
@@ -53,8 +54,54 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
 
-export const HOSTED_COMPUTER_ACT_ACTIONS = ["goto"] as const;
-export type HostedComputerActAction = (typeof HOSTED_COMPUTER_ACT_ACTIONS)[number];
+export const HOSTED_COMPUTER_ACT_STEP_ACTIONS = [
+  "goto",
+  "click",
+  "fill",
+  "type",
+  "select",
+  "check",
+  "uncheck",
+  "press",
+  "scroll",
+  "wait",
+  "waitFor",
+] as const;
+export type HostedComputerActStepAction =
+  (typeof HOSTED_COMPUTER_ACT_STEP_ACTIONS)[number];
+
+export const HOSTED_COMPUTER_LOCATOR_KINDS = [
+  "role",
+  "label",
+  "placeholder",
+  "text",
+  "altText",
+  "title",
+  "testId",
+] as const;
+export type HostedComputerLocatorKind =
+  (typeof HOSTED_COMPUTER_LOCATOR_KINDS)[number];
+
+export const HOSTED_COMPUTER_PRESS_KEYS = [
+  "Enter",
+  "Tab",
+  "Shift+Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Backspace",
+  "Delete",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Control+A",
+  "Meta+A",
+] as const;
+export type HostedComputerPressKey =
+  (typeof HOSTED_COMPUTER_PRESS_KEYS)[number];
 
 export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
   "completed",
@@ -219,13 +266,160 @@ export const hostedComputerStartRunRequestSchema = z
 
 export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
-export const hostedComputerActRequestSchema = z
-  .object({
-    action: z.enum(HOSTED_COMPUTER_ACT_ACTIONS),
-    timeoutMs: z.number().int().min(1_000).max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS).default(15_000),
-    url: hostedComputerNavigationUrlSchema.nullable().default(null),
-  })
-  .strict();
+const hostedComputerActTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH);
+
+const hostedComputerActLocatorSchema = z.discriminatedUnion("by", [
+  z
+    .object({
+      by: z.literal("role"),
+      exact: z.boolean().default(false),
+      name: hostedComputerActTextSchema.max(300).nullable().default(null),
+      role: hostedComputerActTextSchema.max(80),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("label"),
+      exact: z.boolean().default(false),
+      text: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("placeholder"),
+      exact: z.boolean().default(false),
+      text: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("text"),
+      exact: z.boolean().default(false),
+      text: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("altText"),
+      exact: z.boolean().default(false),
+      text: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("title"),
+      exact: z.boolean().default(false),
+      text: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+  z
+    .object({
+      by: z.literal("testId"),
+      testId: hostedComputerActTextSchema.max(300),
+    })
+    .strict(),
+]);
+
+const hostedComputerActTimeoutSchema = z
+  .number()
+  .int()
+  .min(1_000)
+  .max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS)
+  .default(15_000);
+
+export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("goto"),
+      timeoutMs: hostedComputerActTimeoutSchema,
+      url: hostedComputerNavigationUrlSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("click"),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("fill"),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+      value: hostedComputerActTextSchema.max(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("type"),
+      delayMs: z.number().int().min(0).max(250).default(0),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+      text: hostedComputerActTextSchema.max(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("select"),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+      value: z.union([
+        hostedComputerActTextSchema.max(500),
+        z.array(hostedComputerActTextSchema.max(500)).min(1).max(20),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("check"),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("uncheck"),
+      locator: hostedComputerActLocatorSchema,
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("press"),
+      key: z.enum(HOSTED_COMPUTER_PRESS_KEYS),
+      locator: hostedComputerActLocatorSchema.optional(),
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("scroll"),
+      deltaX: z.number().int().min(-20_000).max(20_000).default(0),
+      deltaY: z.number().int().min(-20_000).max(20_000).default(800),
+      locator: hostedComputerActLocatorSchema.optional(),
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("wait"),
+      ms: z.number().int().min(0).max(5_000),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("waitFor"),
+      locator: hostedComputerActLocatorSchema,
+      state: z.enum(["attached", "detached", "hidden", "visible"]).default("visible"),
+      timeoutMs: hostedComputerActTimeoutSchema,
+    })
+    .strict(),
+]);
 
 export const hostedComputerPauseForUserRequestSchema = z
   .object({
