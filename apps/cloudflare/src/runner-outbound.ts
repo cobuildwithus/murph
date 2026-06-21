@@ -1468,6 +1468,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     await retireAfterAmbiguousCheckpoint();
+    if (checkpoint.checkpointConflictReason === "foreground_pending") {
+      return json({
+        checkpoint,
+        ok: true,
+        snapshotRef,
+      });
+    }
     return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
   }
 

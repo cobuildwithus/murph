@@ -574,6 +574,13 @@ checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
+The direct-R2 snapshot-complete bridge must preserve semantic checkpoint
+responses from web. In particular, `checkpointed: false` with
+`checkpointConflictReason: "foreground_pending"` is a successful transport
+response that interrupts idle checkpointing so the same invocation can import
+fresh foreground mailbox input; Cloudflare may retire the upload session as an
+orphan candidate, but it must not collapse that response into a generic HTTP
+conflict before `packages/assistant-runtime` handles it.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
 publishing, inbox projection and audio/video transcript enrichment, provider cleanup and read
 acknowledgement, usage record, telemetry, log export, post-checkpoint
