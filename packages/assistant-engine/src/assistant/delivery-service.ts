@@ -241,6 +241,20 @@ export async function deliverAssistantReaction(input: {
       session: input.session,
     }
   }
+  if (!supportsAssistantCurrentAudienceMessageReaction(input)) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_TARGET_UNAVAILABLE',
+          'Assistant reactions are not available for the current inbound message.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
 
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
     audience: input.sharedPlan.conversationPolicy.audience,
@@ -258,7 +272,6 @@ export async function deliverAssistantReaction(input: {
     ...deliveryFields,
     dedupeToken: reactionDedupeToken,
     deliveryIdempotencyKey: reactionDedupeToken,
-    deliveryTransportIdempotent: true,
     dispatchMode: input.input.deliveryDispatchMode,
     reaction: input.reaction,
     targetMessageId: deliveryFields.replyToMessageId,

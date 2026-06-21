@@ -288,6 +288,7 @@ export async function createAssistantOutboxIntent(
       })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
+            deliveryTransportIdempotent,
             intent: idempotencyUpgradedExisting,
             operation,
             persistedTarget,
@@ -1685,7 +1686,10 @@ function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
   operation?: AssistantOutboxOperation | null
 }): boolean {
   if (input.operation?.kind === 'message-reaction') {
-    return true
+    return resolveAssistantOutboxReactionTransportIdempotent({
+      channel: input.channel ?? null,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    })
   }
   const media = input.media ?? []
   if (input.deliveryTransportIdempotent === undefined) {
@@ -1719,7 +1723,9 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
   const deliveryIdempotencyKey =
     input.intent.deliveryIdempotencyKey ?? input.deliveryIdempotencyKey
   const deliveryTransportIdempotent =
-    input.intent.deliveryTransportIdempotent || input.deliveryTransportIdempotent
+    input.intent.operation?.kind === 'message-reaction'
+      ? input.deliveryTransportIdempotent
+      : input.intent.deliveryTransportIdempotent || input.deliveryTransportIdempotent
 
   if (
     deliveryIdempotencyKey === input.intent.deliveryIdempotencyKey &&
@@ -1782,6 +1788,7 @@ function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
 }
 
 function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
+  deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   operation: AssistantOutboxOperation
   persistedTarget: AssistantOutboxPersistedTarget
@@ -1808,7 +1815,7 @@ function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
       attemptCount: 0,
       delivery: null,
       deliveryConfirmationPending: false,
-      deliveryTransportIdempotent: true,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       lastAttemptAt: null,
       lastError: null,
       media: [],
