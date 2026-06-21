@@ -9,6 +9,7 @@ This folder holds the canonical hosted-web feature tracker for the broad user-st
 - The tracker includes inventory columns and testing-loop columns so testing can proceed in the same artifact.
 - Current rollup: 215 feature rows; 209 inventoried and 6 dead/unreachable; 191 testing-loop rows passed and 24 are blocked by missing automated story tests.
 - `testing-errors.md` summarizes all non-passing story rows and verification-level notes, derived from the tracker.
+- `gap-triage.md` explains why the 24 missing-test rows and 6 dead/unreachable rows are missing, blocked, or unreachable.
 
 ## Columns
 
