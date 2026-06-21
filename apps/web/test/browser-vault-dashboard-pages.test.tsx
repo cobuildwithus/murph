@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -8,7 +9,6 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
-  type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
 
 const mocks = vi.hoisted(() => ({
@@ -25,8 +25,6 @@ import HistoryPage from "../app/(dashboard)/history/page";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPage from "../app/(dashboard)/overview/page";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
-import SignalsPage from "../app/(dashboard)/signals/page";
-import { metadata as signalsMetadata } from "../app/(dashboard)/signals/layout";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
@@ -56,11 +54,6 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     historyMetadata.description,
     "Recent notes, events, assessments, and daily summaries from your vault.",
   );
-  assert.equal(signalsMetadata.title, "Signals — Murph");
-  assert.equal(
-    signalsMetadata.description,
-    "Sleep, recovery, activity, and body metrics from connected health data.",
-  );
   assert.equal(experimentsMetadata.title, "Experiments — Murph");
   assert.equal(
     experimentsMetadata.description,
@@ -70,7 +63,6 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   for (const routeMetadata of [
     overviewMetadata,
     historyMetadata,
-    signalsMetadata,
     experimentsMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
@@ -92,6 +84,17 @@ test("dashboard routes define page-specific metadata with the shared preview ima
       },
     ]);
   }
+});
+
+test("dashboard no longer ships a signals app route", async () => {
+  await assert.rejects(
+    access(new URL("../app/(dashboard)/signals/page.tsx", import.meta.url)),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    access(new URL("../app/(dashboard)/signals/layout.tsx", import.meta.url)),
+    { code: "ENOENT" },
+  );
 });
 
 test("OverviewPage renders the dashboard overview", () => {
@@ -277,13 +280,6 @@ test("OverviewPage preserves stale data when a refresh fails", () => {
   assert.match(markup, /Travel recovery note/);
 });
 
-test("SignalsPage renders the empty signals state", () => {
-  const markup = renderToStaticMarkup(createElement(SignalsPage));
-
-  assert.match(markup, /No wearable signals yet/);
-  assert.match(markup, /Connect a source or sync more recent data/i);
-});
-
 test("dashboard empty pages show preparing copy while a replica refresh is pending", () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
@@ -297,7 +293,6 @@ test("dashboard empty pages show preparing copy while a replica refresh is pendi
 
   const overviewMarkup = renderToStaticMarkup(createElement(OverviewPage));
   const historyMarkup = renderToStaticMarkup(createElement(HistoryPage));
-  const signalsMarkup = renderToStaticMarkup(createElement(SignalsPage));
 
   assert.match(overviewMarkup, /Preparing overview\./);
   assert.match(overviewMarkup, /Preparing your dashboard/);
@@ -312,61 +307,6 @@ test("dashboard empty pages show preparing copy while a replica refresh is pendi
   assert.match(historyMarkup, /aria-live="polite"/);
   assert.doesNotMatch(historyMarkup, /No timeline entries yet/);
   assert.doesNotMatch(historyMarkup, /No history available yet/);
-
-  assert.match(signalsMarkup, /Preparing signals\./);
-  assert.match(signalsMarkup, /Preparing your signals/);
-  assert.match(signalsMarkup, /role="status"/);
-  assert.match(signalsMarkup, /aria-live="polite"/);
-  assert.doesNotMatch(signalsMarkup, /No wearable signals yet/);
-  assert.doesNotMatch(signalsMarkup, /No signals available yet/);
-});
-
-test("SignalsPage renders secondary-only signal days and body-state history", async () => {
-  const signalClient = await createFixtureClient({
-    metricRows: [
-      createMetricRow({
-        confidence: "high",
-        date: "2026-04-20",
-        id: "metric-row:sleep-score:2026-04-20",
-        metricKey: "sleep-score",
-        observedAt: "2026-04-20T08:00:00.000Z",
-        unit: null,
-        value: 86,
-      }),
-      createMetricRow({
-        confidence: "medium",
-        date: "2026-04-20",
-        id: "metric-row:body-weight:2026-04-20",
-        metricKey: "body-weight",
-        observedAt: "2026-04-20T08:00:00.000Z",
-        unit: "lb",
-        value: 170,
-      }),
-      createMetricRow({
-        confidence: "medium",
-        date: "2026-04-20",
-        id: "metric-row:body-fat-percentage:2026-04-20",
-        metricKey: "body-fat-percentage",
-        observedAt: "2026-04-20T08:00:00.000Z",
-        unit: "%",
-        value: 18,
-      }),
-    ],
-  });
-  mocks.useBrowserVault.mockReturnValue({
-    client: signalClient,
-    dataVersion: signalClient.replica.source.dataVersion,
-    error: null,
-    ref: null,
-    refresh: async () => {},
-    status: "ready",
-  });
-
-  const markup = renderToStaticMarkup(createElement(SignalsPage));
-
-  assert.match(markup, /Recent sleep[\s\S]*86/);
-  assert.match(markup, /Recent body state[\s\S]*170 lb/);
-  assert.match(markup, /Body fat 18 %/);
 });
 
 test("OverviewPage renders an error state instead of an empty state when the hosted snapshot is unavailable", () => {
@@ -422,7 +362,6 @@ function createEntity(
 async function createFixtureClient(input: {
   experimentSlug?: string;
   extraEntities?: BrowserVaultEntity[];
-  metricRows?: BrowserVaultMetricRow[];
 } = {}) {
   const replica = await createBrowserVaultReplica({
     metricPoints: [],
@@ -493,39 +432,7 @@ async function createFixtureClient(input: {
     }),
   });
 
-  return createBrowserVaultQueryClient({
-    ...replica,
-    metricRows: [
-      ...replica.metricRows,
-      ...(input.metricRows ?? []),
-    ],
-  });
-}
-
-function createMetricRow(
-  input: Pick<BrowserVaultMetricRow, "date" | "id" | "metricKey" | "observedAt" | "unit" | "value">
-    & Partial<BrowserVaultMetricRow>,
-): BrowserVaultMetricRow {
-  return {
-    biomarkerKey: input.biomarkerKey ?? null,
-    confidence: input.confidence ?? "none",
-    context: input.context ?? {},
-    date: input.date,
-    grain: input.grain ?? "day",
-    id: input.id,
-    metricKey: input.metricKey,
-    observedAt: input.observedAt,
-    pointIds: input.pointIds ?? [],
-    recordIds: input.recordIds ?? [],
-    rowSchema: "murph.browser-vault.metric-row.v1",
-    sourceFamily: input.sourceFamily ?? null,
-    sourceKind: input.sourceKind ?? null,
-    sourceLabel: input.sourceLabel ?? null,
-    statistic: input.statistic ?? "value",
-    unit: input.unit,
-    value: input.value,
-    valueLabel: input.valueLabel ?? null,
-  };
+  return createBrowserVaultQueryClient(replica);
 }
 
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
