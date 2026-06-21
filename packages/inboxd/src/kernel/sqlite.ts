@@ -41,7 +41,7 @@ import {
 import type { SearchRow } from "./sqlite/rows.ts";
 import { createAttachmentParseJobStore } from "./sqlite/parse-jobs.ts";
 
-const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 4;
+const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 5;
 const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const AUTOMATIC_ATTACHMENT_PARSE_KINDS = new Set<StoredAttachment["kind"]>([
@@ -139,6 +139,13 @@ function openInboxRuntimeDatabaseForPath(databasePath: string): DatabaseSync {
         version: 4,
         migrate() {},
       },
+      {
+        version: 5,
+        migrate(candidateDatabase) {
+          ensureCaptureAttachmentContentStatusColumn(candidateDatabase);
+          ensureCaptureAttachmentMutationOnUpdateTrigger(candidateDatabase);
+        },
+      },
     ],
     schemaVersion: INBOX_RUNTIME_SQLITE_SCHEMA_VERSION,
     storeName: 'inbox runtime',
@@ -205,6 +212,7 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
       stored_path text,
       file_name text,
       sha256 text,
+      content_status text,
       size_bytes integer,
       extracted_text text,
       transcript_text text,
@@ -283,6 +291,7 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
       stored_path,
       file_name,
       sha256,
+      content_status,
       size_bytes,
       extracted_text,
       transcript_text,
@@ -312,6 +321,7 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
     end;
   `);
   ensureCaptureMutationOnUpdateTrigger(database);
+  ensureCaptureAttachmentMutationOnUpdateTrigger(database);
   assertCanonicalAttachmentRows(database);
   database.exec(`
     create table if not exists attachment_parse_job (
@@ -336,6 +346,51 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
 
     create index if not exists attachment_parse_job_capture_idx
     on attachment_parse_job (capture_id, attachment_id);
+  `);
+}
+
+function ensureCaptureAttachmentContentStatusColumn(database: DatabaseSync): void {
+  const columns = database.prepare("pragma table_info(capture_attachment)").all() as Array<{
+    name?: string | null;
+  }>;
+  if (columns.some((column) => column.name === "content_status")) {
+    return;
+  }
+
+  database.exec("alter table capture_attachment add column content_status text");
+}
+
+function ensureCaptureAttachmentMutationOnUpdateTrigger(database: DatabaseSync): void {
+  database.exec(`
+    drop trigger if exists capture_attachment_mutation_on_update;
+
+    create trigger capture_attachment_mutation_on_update
+    after update of
+      ordinal,
+      external_id,
+      kind,
+      mime,
+      original_path,
+      stored_path,
+      file_name,
+      sha256,
+      content_status,
+      size_bytes,
+      extracted_text,
+      transcript_text,
+      derived_path,
+      parser_provider_id,
+      parser_state,
+      parse_updated_at
+    on capture_attachment
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = new.capture_id;
+    end;
   `);
 }
 
@@ -604,9 +659,10 @@ function createInboxRuntimeStore(
         stored_path,
         file_name,
         sha256,
+        content_status,
         size_bytes,
         created_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (attachment_id) do update set
         capture_id = excluded.capture_id,
         ordinal = excluded.ordinal,
@@ -617,6 +673,7 @@ function createInboxRuntimeStore(
         stored_path = excluded.stored_path,
         file_name = excluded.file_name,
         sha256 = excluded.sha256,
+        content_status = excluded.content_status,
         size_bytes = excluded.size_bytes
       where
         capture_attachment.capture_id is not excluded.capture_id
@@ -628,6 +685,7 @@ function createInboxRuntimeStore(
         or capture_attachment.stored_path is not excluded.stored_path
         or capture_attachment.file_name is not excluded.file_name
         or capture_attachment.sha256 is not excluded.sha256
+        or capture_attachment.content_status is not excluded.content_status
         or capture_attachment.size_bytes is not excluded.size_bytes
     `,
   );
@@ -842,6 +900,7 @@ function createInboxRuntimeStore(
         normalizeNullable(attachment.storedPath),
         normalizeNullable(attachment.fileName),
         normalizeNullable(attachment.sha256),
+        normalizeAttachmentContentStatus(attachment.contentStatus),
         attachment.byteSize ?? null,
         input.stored.storedAt,
       );
@@ -1161,6 +1220,12 @@ function normalizeRuntimeAttachments(
 
     return attachment;
   });
+}
+
+function normalizeAttachmentContentStatus(
+  value: StoredAttachment["contentStatus"],
+): NonNullable<StoredAttachment["contentStatus"]> {
+  return value === "retention_expired" ? "retention_expired" : "available";
 }
 
 function normalizeCaptureFilters(

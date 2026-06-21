@@ -46,6 +46,7 @@ import {
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
+import { listInboxAttachmentRetentionRecords } from "./retention.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -591,6 +592,10 @@ export async function rebuildRuntimeFromVault(input: {
   runtime: InboxRuntimeStore;
 }): Promise<void> {
   const canonicalRecords = await listCanonicalInboxCaptureRecords(input.vaultRoot);
+  const retainedAttachments = new Map(
+    (await listInboxAttachmentRetentionRecords(input.vaultRoot))
+      .map((record) => [record.attachmentId, record]),
+  );
   const restoredIdentityKeys = new Set<string>();
   const projectionEntries: Array<{
     captureId: string;
@@ -600,7 +605,7 @@ export async function rebuildRuntimeFromVault(input: {
   }> = [];
 
   for (const record of canonicalRecords) {
-    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(record);
+    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(record, retainedAttachments);
     projectionEntries.push({
       captureId: envelope.captureId,
       eventId: envelope.eventId,
@@ -924,7 +929,10 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
   return left.relativePath.localeCompare(right.relativePath);
 }
 
-function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCaptureRecord): StoredCaptureEnvelope {
+function inboxCaptureRecordToStoredCaptureEnvelope(
+  record: CanonicalInboxCaptureRecord,
+  retainedAttachments: ReadonlyMap<string, { storedPath: string }> = new Map(),
+): StoredCaptureEnvelope {
   const input: InboundCapture = {
     source: record.source,
     externalId: record.externalId,
@@ -958,18 +966,24 @@ function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCapture
     storedAt: record.recordedAt,
     sourceDirectory: record.sourceDirectory,
     envelopePath: record.envelopePath,
-    attachments: record.attachments.map((attachment) => ({
-      attachmentId: attachment.attachmentId,
-      ordinal: attachment.ordinal,
-      externalId: attachment.externalId ?? null,
-      kind: attachment.kind,
-      mime: attachment.mime ?? null,
-      originalPath: null,
-      storedPath: attachment.storedPath ?? null,
-      fileName: attachment.fileName ?? null,
-      byteSize: attachment.byteSize ?? null,
-      sha256: attachment.sha256 ?? null,
-    })),
+    attachments: record.attachments.map((attachment) => {
+      const retained = retainedAttachments.get(attachment.attachmentId);
+      const retentionExpired = retained?.storedPath === attachment.storedPath;
+
+      return {
+        attachmentId: attachment.attachmentId,
+        ordinal: attachment.ordinal,
+        externalId: attachment.externalId ?? null,
+        kind: attachment.kind,
+        mime: attachment.mime ?? null,
+        originalPath: null,
+        storedPath: retentionExpired ? null : attachment.storedPath ?? null,
+        fileName: attachment.fileName ?? null,
+        byteSize: attachment.byteSize ?? null,
+        sha256: attachment.sha256 ?? null,
+        contentStatus: retentionExpired ? "retention_expired" : "available",
+      };
+    }),
   };
   return {
     schema: "murph.inbox-envelope.v1",

@@ -10,6 +10,10 @@ const compactWarmCodexThread = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
+const runInboxMediaRetention = vi.fn();
+vi.mock("@murphai/inboxd", () => ({
+  runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
+}));
 
 import {
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
@@ -20,6 +24,7 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 
 beforeEach(() => {
   compactWarmCodexThread.mockReset();
+  runInboxMediaRetention.mockReset();
 });
 
 describe("runHostedIdleCheckpointMaintenance", () => {
@@ -127,6 +132,85 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       usageExtractionSourcePath: null,
       usageExtractionVersion: "legacy",
     });
+  });
+
+  it("runs inbox media retention during idle maintenance and keeps compaction fail-open", async () => {
+    runInboxMediaRetention.mockRejectedValueOnce(new Error("retention unavailable"));
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxMediaRetention).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/vault",
+    });
+    expect(outcome).toEqual({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+  });
+
+  it("aborts inbox media retention on a pending wake and re-notifies the wake signal", async () => {
+    vi.useFakeTimers();
+    const wakeAt = new Date("2026-04-26T00:00:01.000Z");
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const retentionCall: { signal: AbortSignal | null } = { signal: null };
+    runInboxMediaRetention.mockImplementation(async (input: { signal: AbortSignal }) => {
+      retentionCall.signal = input.signal;
+      vi.setSystemTime(wakeAt);
+      wakeSignal.notify();
+      await new Promise<void>((resolve) => {
+        if (input.signal.aborted) {
+          resolve();
+          return;
+        }
+        input.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal,
+      });
+
+      expect(outcome).toEqual({
+        kind: "skipped",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+      });
+      expect(retentionCall.signal?.aborted).toBe(true);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+      expect(wakeSignal.consumePending()).toEqual({
+        notifiedAtEpochMs: wakeAt.getTime(),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("tags estimated compaction usage with explicit estimate provenance", async () => {

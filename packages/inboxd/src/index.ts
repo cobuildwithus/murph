@@ -36,6 +36,12 @@ export type {
   CreateInboundCaptureFromChatMessageInput,
 } from "./connectors/chat/message.ts";
 export {
+  buildInboxAttachmentRetentionLedgerPath,
+  runInboxMediaRetention,
+  type InboxMediaRetentionResult,
+  type RunInboxMediaRetentionInput,
+} from "./indexing/retention.ts";
+export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";

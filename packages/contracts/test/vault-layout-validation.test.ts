@@ -24,6 +24,7 @@ import {
   EXPORT_PACKS_DIRECTORY,
   EXPERIMENTS_DIRECTORY,
   HEALTH_LIBRARY_DIRECTORY,
+  INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY,
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   JOURNAL_DIRECTORY,
   METRIC_SAMPLE_LEDGER_DIRECTORY,
@@ -298,6 +299,7 @@ describe("vault layout exports", () => {
       SAMPLE_LEDGER_DIRECTORY,
       AUDIT_DIRECTORY,
       INBOX_CAPTURE_LEDGER_DIRECTORY,
+      INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY,
       RAW_DIRECTORY,
       RAW_ASSESSMENTS_DIRECTORY,
       RAW_CAPTURES_DIRECTORY,
@@ -367,6 +369,7 @@ describe("vault layout exports", () => {
       metricSampleLedgerDirectory: METRIC_SAMPLE_LEDGER_DIRECTORY,
       sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
       inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
+      inboxAttachmentRetentionLedgerDirectory: INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY,
       rawDirectory: RAW_DIRECTORY,
       rawAssessmentsDirectory: RAW_ASSESSMENTS_DIRECTORY,
       rawCapturesDirectory: RAW_CAPTURES_DIRECTORY,
@@ -393,6 +396,7 @@ describe("vault layout exports", () => {
       samples: "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl",
       audit: "audit/YYYY/YYYY-MM.jsonl",
       inboxCaptures: "ledger/inbox-captures/YYYY/YYYY-MM.jsonl",
+      inboxAttachmentRetention: "ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl",
     });
   });
 
@@ -443,6 +447,7 @@ describe("vault layout exports", () => {
       `${VAULT_LAYOUT.rawCapturesDirectory}/YYYY/MM/<eventId>/manifest.json`,
       `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/envelope.json`,
       `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>`,
+      `${VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.rawMeasurementsDirectory}/YYYY/MM/<eventId>/<filename>`,
       `${VAULT_LAYOUT.rawMeasurementsDirectory}/YYYY/MM/<eventId>/manifest.json`,
       `${VAULT_LAYOUT.rawMealsDirectory}/YYYY/MM/<mealId>/<slot>-<filename>`,

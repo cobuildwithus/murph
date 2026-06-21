@@ -5,6 +5,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   scheduledLogFrontmatter: "murph.frontmatter.scheduled-log.v1",
   event: "murph.event.v1",
   inboxCapture: "murph.inbox-capture.v1",
+  inboxAttachmentRetention: "murph.inbox-attachment-retention.v1",
   allergyFrontmatter: "murph.frontmatter.allergy.v1",
   conditionFrontmatter: "murph.frontmatter.condition.v1",
   experimentFrontmatter: "murph.frontmatter.experiment.v1",

@@ -4,6 +4,8 @@ import {
   rawImportManifestSchema,
   safeParseContract,
   type ContractSchema,
+  inboxAttachmentRetentionRecordSchema,
+  type InboxAttachmentRetentionRecord,
   type RawImportManifest,
   type VaultFamilyId,
   type VaultFrontmatterFamilyDescriptor,
@@ -36,7 +38,7 @@ import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
-import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
+import { normalizeRelativeVaultPath, normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import { safeStatAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
@@ -634,6 +636,9 @@ async function validateExistingVaultFile(
     const resolved = resolveVaultPath(vaultRoot, relativePath);
 
     if (!(await pathExists(resolved.absolutePath))) {
+      if (await hasExpiredInboxRawContentRecord(vaultRoot, relativePath)) {
+        return [];
+      }
       return [validationIssue(code, message, relativePath)];
     }
   } catch (error) {
@@ -647,6 +652,52 @@ async function validateExistingVaultFile(
   }
 
   return [];
+}
+
+async function hasExpiredInboxRawContentRecord(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<boolean> {
+  let normalizedRelativePath: string;
+  try {
+    normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+  } catch {
+    return false;
+  }
+
+  if (!normalizedRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)) {
+    return false;
+  }
+
+  const retentionLedgerPaths = await walkVaultFiles(
+    vaultRoot,
+    VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory,
+    { extension: ".jsonl" },
+  );
+  for (const retentionLedgerPath of retentionLedgerPaths) {
+    let records: UnknownRecord[];
+    try {
+      records = await readJsonlRecords({ vaultRoot, relativePath: retentionLedgerPath });
+    } catch {
+      continue;
+    }
+
+    for (const record of records) {
+      const result = safeParseContract<InboxAttachmentRetentionRecord>(
+        inboxAttachmentRetentionRecordSchema,
+        record,
+      );
+      if (
+        result.success &&
+        result.data.reason === "inbox_media_retention" &&
+        result.data.storedPath === normalizedRelativePath
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 async function validateAssessmentRecordReferences(

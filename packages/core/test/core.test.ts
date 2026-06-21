@@ -2613,6 +2613,7 @@ test("direct and batched writes reject the same invalid vault targets", async ()
     () => deleteBatch.stageDelete(rawPath),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
   );
+  assert.equal(await deleteBatch.stageDelete(rawPath, { allowRaw: true }), rawPath);
   await assert.rejects(
     () => deleteBatch.stageDelete(jsonlPath),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
@@ -3270,6 +3271,55 @@ test("validateVault allows envelope-based inbox raw evidence without manifest si
       title: "Inbox capture",
       note: "Envelope-backed raw inbox evidence.",
       rawRefs: [envelopeRelativePath, attachmentRelativePath],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateVault accepts expired raw inbox media when retention ledger records the deletion", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: "evt_01JQ8PWXP5A68SQM1W0GYM40V5",
+      kind: "note",
+      occurredAt: "2026-07-05T00:00:00.000Z",
+      recordedAt: "2026-07-05T00:00:00.000Z",
+      dayKey: "2026-07-05",
+      source: "manual",
+      title: "Expired inbox media",
+      note: "The raw inbox media bytes were retention-expired.",
+      rawRefs: [storedPath],
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-attachment-retention/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-attachment-retention.v1",
+      captureId: "cap_retention_expired",
+      attachmentId: "att_cap_retention_expired_01",
+      ordinal: 1,
+      kind: "image",
+      mime: "image/jpeg",
+      fileName: "photo.jpg",
+      byteSize: 10,
+      storedPath,
+      sha256: "a".repeat(64),
+      captureOccurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      purgedAt: "2026-07-05T00:00:00.000Z",
+      reason: "inbox_media_retention",
+      retainedDerivative: null,
     },
   });
 

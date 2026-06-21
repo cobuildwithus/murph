@@ -13,6 +13,7 @@ import {
   normalizeHostedAiUsageAllowancePricedModelId,
   resolveHostedAiUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/runtime-control";
+import { runInboxMediaRetention } from "@murphai/inboxd";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 
@@ -49,6 +50,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
+  vaultRoot?: string | null;
   wakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedIdleMaintenanceOutcome> {
   if (input.shutdownSignal?.aborted) {
@@ -60,28 +62,16 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     // work, which is exactly what this feature must never do.
     return { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null };
   }
-  // Without a priced hosted model id the compact call's usage cannot be
-  // accounted against the member's allowance, so do not spend unattributable
-  // tokens. The two reasons are distinct on purpose: missing_model means a
-  // misconfigured runtime; unpriced_model means a deliberate unsupported model.
-  if (!input.model) {
-    return { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null };
-  }
-  const providerName = input.providerName?.trim() || null;
-  if (!providerName) {
-    return { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null };
-  }
-  if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
-    return { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null };
-  }
 
   const abortController = new AbortController();
-  const onShutdownAbort = () => abortController.abort();
+  let wakeInterrupted = false;
+  const onShutdownAbort = () => abortController.abort(input.shutdownSignal?.reason);
   input.shutdownSignal?.addEventListener("abort", onShutdownAbort, { once: true });
   const wakeWatchAbort = new AbortController();
   const wakeWatch = input.wakeSignal
     ?.wait(wakeWatchAbort.signal)
     .then((notification) => {
+      wakeInterrupted = true;
       abortController.abort();
       // Waiting consumed the wake notification; re-notify so the idle loop's
       // pending-wake check after maintenance still observes it.
@@ -90,6 +80,44 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     .catch(() => undefined);
 
   try {
+    if (input.vaultRoot) {
+      try {
+        await runInboxMediaRetention({
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+      } catch {
+        if (abortController.signal.aborted) {
+          return buildInterruptedMaintenanceOutcome({
+            shutdownSignal: input.shutdownSignal,
+            wakeInterrupted,
+          });
+        }
+        // Retention is opportunistic maintenance; a cleanup miss must not block
+        // checkpointing or member-visible wake handling.
+      }
+    }
+    if (abortController.signal.aborted) {
+      return buildInterruptedMaintenanceOutcome({
+        shutdownSignal: input.shutdownSignal,
+        wakeInterrupted,
+      });
+    }
+    // Without a priced hosted model id the compact call's usage cannot be
+    // accounted against the member's allowance, so do not spend unattributable
+    // tokens. The two reasons are distinct on purpose: missing_model means a
+    // misconfigured runtime; unpriced_model means a deliberate unsupported model.
+    if (!input.model) {
+      return { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null };
+    }
+    const providerName = input.providerName?.trim() || null;
+    if (!providerName) {
+      return { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null };
+    }
+    if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
+      return { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null };
+    }
+
     // Structurally fail-open: the runtime seam must not assume the engine
     // helper can never throw — an exception here aborts idle maintenance,
     // never the checkpoint.
@@ -157,4 +185,17 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function buildInterruptedMaintenanceOutcome(input: {
+  shutdownSignal: AbortSignal | null;
+  wakeInterrupted: boolean;
+}): HostedIdleMaintenanceOutcome {
+  return {
+    kind: "skipped",
+    reason: input.shutdownSignal?.aborted && !input.wakeInterrupted
+      ? "shutdown"
+      : "pending_work",
+    threadContextTokensBefore: null,
+  };
 }

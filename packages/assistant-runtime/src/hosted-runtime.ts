@@ -1515,6 +1515,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           resolveAssistantSessionId: (codexThreadId) =>
             findAssistantSessionIdByCodexThreadId(restored.vaultRoot, codexThreadId),
           shutdownSignal: options.shutdownSignal ?? null,
+          vaultRoot: restored.vaultRoot,
           wakeSignal: options.runtimeWakeSignal ?? null,
         });
         emitPhaseLog({
