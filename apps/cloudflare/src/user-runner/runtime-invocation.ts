@@ -63,6 +63,7 @@ type RuntimeAttemptLivenessProbeOutcome =
   | "error"
   | "inactive"
   | "mismatch"
+  | "unsupported"
   | "timeout";
 export type AcceptedRuntimeCompletionRecoveryResult =
   | {
@@ -249,6 +250,32 @@ export class RuntimeInvocationService {
           return committedResult.result;
         }
         if (committedResult.kind === "unknown") {
+          throw error;
+        }
+        if (probeOutcome === "inactive") {
+          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+            error,
+            executionInput,
+            fenceCleared: false,
+            probeOutcome,
+            token,
+            workspaceVersion,
+          });
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+              orchestrationAttemptId: executionInput.orchestrationAttemptId,
+              transportFailureFenceCleared: false,
+              workspaceAttemptId: token.attemptId,
+              workspaceVersion,
+            },
+            level: "warn",
+            message:
+              "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+            phase: "failed",
+            userId: executionInput.userId,
+          });
           throw error;
         }
       }
@@ -656,25 +683,25 @@ export class RuntimeInvocationService {
    * pre-dispatch readiness window. Keeping the fence is correct across that
    * whole window: a live DO invoke either proceeds to run the invocation under
    * the intact fence, or dies and releases the container slot, after which the
-   * pre-existing stale-fence replacement path reclaims the fence. Only
-   * `"active"` keeps the fence; every unconfirmed outcome (inactive, identity
-   * mismatch, probe error, probe timeout) fails toward today's
-   * clear-the-fence behavior. The probe cannot see liveness across a
-   * RunnerContainer DO restart because the active-op record is in-memory; that
-   * mode also falls back to the pre-existing recovery paths.
+   * pre-existing stale-fence replacement path reclaims the fence. Accepted
+   * background invocations also keep the fence when the probe reports inactive
+   * but durable progress is not visible yet; the next ensure command uses the
+   * identity-aware wake endpoint to distinguish a lost local pointer from a
+   * truly missing child. Identity mismatch, unsupported probes, probe error,
+   * and probe timeout still fail toward clear-the-fence behavior.
    */
   private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
   ): Promise<RuntimeAttemptLivenessProbeOutcome> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
-      return "inactive";
+      return "unsupported";
     }
     let probeTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const container = namespace.getByName(prepared.runnerContainerName);
       if (!container.readActiveRuntimeUserFence) {
-        return "inactive";
+        return "unsupported";
       }
       const active = await Promise.race([
         container.readActiveRuntimeUserFence(),
@@ -742,11 +769,13 @@ export class RuntimeInvocationService {
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
     error: unknown;
     executionInput: RuntimeInvocationInput;
+    fenceCleared?: boolean;
     probeOutcome: RuntimeAttemptLivenessProbeOutcome;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<void> {
     const attemptStillActive = input.probeOutcome === "active";
+    const fenceCleared = input.fenceCleared ?? !attemptStillActive;
     const body = {
       entries: [
         {
@@ -762,7 +791,7 @@ export class RuntimeInvocationService {
             ...buildHostedRunnerRedactedErrorJson(input.error),
             attemptLivenessProbeOutcome: input.probeOutcome,
             attemptStillActive,
-            fenceCleared: !attemptStillActive,
+            fenceCleared,
           },
           workspaceVersion: input.workspaceVersion,
         },

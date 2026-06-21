@@ -103,7 +103,56 @@ describe("runtime invocation transport failure fence handling", () => {
     ]);
   });
 
-  it("clears the write fence when no invocation is active in the container", async () => {
+  it("keeps the accepted write fence when the local active pointer is missing but progress is not durable yet", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
+      readHostedRuntimeStatusFromWeb: async (userId) => ({
+        mailboxLag: [
+          {
+            importedSeq: "0",
+            lag: "1",
+            lane: "conversation",
+            maxSeq: "1",
+          },
+        ],
+        userId,
+        workspace: {
+          createdAt: FIXED_NOW,
+          nextWakeAt: null,
+          nextWakeReason: null,
+          redactedStatus: {},
+          snapshotRef: null,
+          updatedAt: FIXED_NOW,
+          userId,
+          version: "0",
+        },
+      }),
+    });
+
+    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "inactive",
+          attemptStillActive: false,
+          fenceCleared: false,
+        }),
+      }),
+    ]);
+  });
+
+  it("clears the write fence for non-accepted attempts when no invocation is active in the container", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => ({
         active: false,
@@ -111,18 +160,12 @@ describe("runtime invocation transport failure fence handling", () => {
       }),
     });
 
-    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+    await expect(
+      harness.invoke({ acceptedProcessingAttempt: false }),
+    ).rejects.toThrow("container transport failed");
 
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
-    expect(harness.loggedFailureEntries()).toEqual([
-      expect.objectContaining({
-        eventCode: "runner.accepted_attempt_failed",
-        redactedJson: expect.objectContaining({
-          attemptStillActive: false,
-          fenceCleared: true,
-        }),
-      }),
-    ]);
+    expect(harness.loggedFailureEntries()).toEqual([]);
   });
 
   it("clears the write fence when the container runs a different attempt", async () => {

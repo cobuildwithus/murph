@@ -488,6 +488,9 @@ export async function startHostedContainerEntrypoint(input: {
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");
         }
+        if (wakeRequest && accepted && !mismatch) {
+          response.setHeader("x-runtime-wake-identity-checked", "1");
+        }
         if (pending) {
           response.setHeader("x-runtime-wake-pending", "1");
         }

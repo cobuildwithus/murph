@@ -558,6 +558,14 @@ describe("startHostedContainerEntrypoint", () => {
 
     await invocationStarted.promise;
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
@@ -581,6 +589,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(secondPendingWake.status).toBe(204);
     expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
@@ -756,10 +765,12 @@ describe("startHostedContainerEntrypoint", () => {
     for (const staleWake of staleWakes) {
       expect(staleWake.status).toBe(204);
       expect(staleWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(staleWake.headers.get("x-runtime-wake-identity-checked")).toBeNull();
       expect(staleWake.headers.get("x-runtime-wake-mismatch")).toBe("1");
     }
     expect(matchingWake.status).toBe(204);
     expect(matchingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(matchingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(matchingWake.headers.get("x-runtime-wake-mismatch")).toBeNull();
     expect(runtimeWakeCount).toBe(1);
     expect(invocationResponse.status).toBe(200);

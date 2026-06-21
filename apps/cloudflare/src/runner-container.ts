@@ -579,33 +579,60 @@ export class RunnerContainer extends Container {
           signal: runtimeWakeSignal,
         },
       );
-      const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      const acceptedHeader = response.headers.get("x-runtime-wake-accepted");
+      const accepted = acceptedHeader === "1";
+      const explicitlyRejected = acceptedHeader === "0";
       const absent = response.headers.get("x-runtime-wake-absent") === "1";
+      const identityChecked =
+        response.headers.get("x-runtime-wake-identity-checked") === "1";
       const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
       const pending = response.headers.get("x-runtime-wake-pending") === "1";
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
       });
-      if (!response.ok || !accepted) {
+      const acceptedWithoutIdentityProof =
+        response.ok && accepted && !active && !identityChecked;
+      let legacyNoActiveChild = false;
+      if (
+        response.ok
+        && !active
+        && explicitlyRejected
+        && !accepted
+        && !absent
+        && !identityChecked
+        && !mismatch
+      ) {
+        try {
+          legacyNoActiveChild = !(await this.readWorkspaceInvocationActiveFromHealth());
+        } catch {
+          legacyNoActiveChild = false;
+        }
+      }
+      if (!response.ok || !accepted || acceptedWithoutIdentityProof) {
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             runtimeWakeAccepted: accepted,
             runtimeWakeAbsent: absent,
+            runtimeWakeIdentityChecked: identityChecked,
+            runtimeWakeLegacyNoActiveChild: legacyNoActiveChild,
             runtimeWakeMismatch: mismatch,
             runtimeWakeStatus: response.status,
             workspaceAttemptId: input.attemptId,
           },
           level: "warn",
-          message: "Hosted execution container runtime wake was not accepted by the active child.",
+          message: "Hosted execution container runtime wake was not accepted by a verified active child.",
           phase: "scheduled",
           userId: input.userId,
         });
       }
+      if (acceptedWithoutIdentityProof) {
+        return { kind: "unknown", reason: "container-rpc-error" };
+      }
       if (response.ok && accepted) {
         return { action: pending ? "already_running" : "woken", kind: "accepted" };
       }
-      if (response.ok && absent) {
+      if (response.ok && (absent || legacyNoActiveChild)) {
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
@@ -1202,7 +1229,14 @@ export class RunnerContainer extends Container {
     if (!response.ok) {
       throw new Error(`Hosted runner container health returned HTTP ${response.status}.`);
     }
-    return typeof payload.activeJobCount === "number" && payload.activeJobCount > 0;
+    if (
+      typeof payload.activeJobCount !== "number"
+      || !Number.isFinite(payload.activeJobCount)
+      || payload.activeJobCount < 0
+    ) {
+      throw new Error("Hosted runner container health did not include a valid active job count.");
+    }
+    return payload.activeJobCount > 0;
   }
 
   private async postWorkspaceInvocationAbort(input: {

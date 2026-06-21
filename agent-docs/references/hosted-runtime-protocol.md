@@ -252,12 +252,15 @@ durably recorded that metadata-only row, it may send a cooldown-throttled,
 payload-free `runtime_recheck_requested` Temporal signal. That row carries the
 fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
 in `redactedJson`, the `attemptLivenessProbeOutcome` enum
-(`active`/`inactive`/`mismatch`/`error`/`timeout`) alongside the derived
+(`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
 `attemptStillActive`/`fenceCleared` flags. The probe outcome is the primary
 diagnostic for distinguishing transport-only failures against a still-live
 invocation (`active`) from real invocation deaths, and for watching the
 documented RunnerContainer DO-restart residual (`inactive` despite a live
-container suggests the in-memory active-op record was lost to a DO restart). That signal only
+container suggests the in-memory active-op record was lost to a DO restart).
+`unsupported` means the liveness probe could not run through the expected
+RunnerContainer method; it is not live-child proof, so it clears unless the
+accepted-attempt durable progress recheck itself is unknown. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
@@ -357,10 +360,23 @@ A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity
 (`attemptId`, `leaseGeneration`, `userId`); a still-active matching attempt
-keeps its fence so wakes keep routing to the live invocation, while a missing,
-mismatched, or unreachable attempt clears the fence exactly as before. This
-prevents orphaned write-fenced invocations that block the runner slot until
-their idle timer expires while no wake can reach them.
+keeps its fence so wakes keep routing to the live invocation. If that accepted
+attempt has no durable committed progress yet and the local active-operation
+pointer is missing, the fence is preserved for the next identity-aware wake
+recheck instead of being cleared from the pointer alone; only the wake path may
+then replace the fence after it explicitly reports no active child. Mismatched,
+unsupported, or unreachable liveness probes still clear the fence exactly as
+before. This prevents duplicate replacement while a live child is still running,
+without leaving unsupported or unprobeable fences to block the runner slot.
+When the outer RunnerContainer active-operation pointer is missing, a container
+wake response must carry explicit identity-checked wake metadata before an
+accepted wake is trusted; identity-blind accepted responses from deploy-skewed
+or legacy bridges are treated as unconfirmed and retried rather than as proof of
+the fenced child. Explicit identity-blind rejected responses from legacy bridges
+(`x-runtime-wake-accepted: 0`) fall back to the container health active-job
+count: a valid numeric zero active-job count is explicit no-active-child proof,
+while missing wake headers and active, missing, malformed, or unavailable health
+remain unconfirmed.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
