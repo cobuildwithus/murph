@@ -255,10 +255,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     memberId: string;
     now: Date;
   }): Promise<ComputerRunRecord | null> {
-    const run = await this.prisma.hostedComputerRun.findFirst({
-      orderBy: {
-        updatedAt: "desc",
-      },
+    const runs = await this.prisma.hostedComputerRun.findMany({
       where: {
         expiresAt: { gt: input.now },
         memberId: input.memberId,
@@ -266,7 +263,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       },
     });
 
-    return run ? mapRun(run) : null;
+    return selectActiveRunForReuse(runs.map(mapRun));
   }
 
   async listStaleActiveRunsForMember(input: {
@@ -373,20 +370,18 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return await this.prisma.$transaction(async (tx) => {
       await lockMemberComputerUseAvailable(tx, input.memberId);
 
-      const activeRun = await tx.hostedComputerRun.findFirst({
-        orderBy: {
-          updatedAt: "desc",
-        },
+      const activeRuns = await tx.hostedComputerRun.findMany({
         where: {
           expiresAt: { gt: input.now },
           memberId: input.memberId,
           status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
         },
       });
+      const activeRun = selectActiveRunForReuse(activeRuns.map(mapRun));
       if (activeRun) {
         return {
           created: false,
-          run: mapRun(activeRun),
+          run: activeRun,
         };
       }
 
@@ -899,6 +894,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
+        ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
         completedAt: input.now,
         lastTitle: null,
         lastUrl: null,
@@ -939,6 +935,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
+        ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
         completedAt: input.now,
         ...(input.terminalBrowserCleanupId
           ? { kernelSessionId: input.terminalBrowserCleanupId }
@@ -980,6 +977,9 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }): Promise<ComputerRunRecord> {
     await this.prisma.hostedComputerRun.updateMany({
       data: {
+        ...(!isDeterministicBrowserCleanupId(input.expectedKernelSessionId)
+          ? { browserAttachedAt: input.now }
+          : {}),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
       },
@@ -1224,6 +1224,46 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
 
 function normalizeLegacyComputerRunProfileKey(value: string | null | undefined): string | null {
   return LEGACY_COMPUTER_RUN_PROFILE_KEYS.find((profileKey) => profileKey === value) ?? null;
+}
+
+function selectActiveRunForReuse(runs: readonly ComputerRunRecord[]): ComputerRunRecord | null {
+  return [...runs].sort(compareActiveRunsForReuse)[0] ?? null;
+}
+
+function compareActiveRunsForReuse(
+  left: ComputerRunRecord,
+  right: ComputerRunRecord,
+): number {
+  const usabilityDelta = activeRunUsabilityRank(left) - activeRunUsabilityRank(right);
+  if (usabilityDelta !== 0) {
+    return usabilityDelta;
+  }
+  const updatedAtDelta = right.updatedAt.getTime() - left.updatedAt.getTime();
+  if (updatedAtDelta !== 0) {
+    return updatedAtDelta;
+  }
+  const createdAtDelta = right.createdAt.getTime() - left.createdAt.getTime();
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+function activeRunUsabilityRank(run: ComputerRunRecord): number {
+  if (
+    (run.status === "running" || run.status === "awaiting_user") &&
+    run.kernelSessionId
+  ) {
+    return 0;
+  }
+  if (run.status === "running" || run.status === "awaiting_user") {
+    return 1;
+  }
+  return 2;
+}
+
+function isDeterministicBrowserCleanupId(value: string): boolean {
+  return value.startsWith("murph-browser-");
 }
 
 function readRunCheckpointContext(

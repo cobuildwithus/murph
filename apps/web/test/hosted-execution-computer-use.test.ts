@@ -1205,7 +1205,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("reconciles pre-migration active profile runs before implicit reuse", async () => {
+  it("selects one pre-migration active profile run before implicit reuse", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const commerceHandoff = createHandoffRecord({
       id: "hch_commerce",
@@ -1250,17 +1250,17 @@ describe("ComputerUseService", () => {
       runId: "hcr_appointments",
       status: "running",
     });
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-commerce"]);
+    expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.memberRuns?.find((run) => run.id === "hcr_commerce")).toMatchObject({
-      kernelSessionId: null,
-      status: "expired",
+      kernelSessionId: "kernel-session-commerce",
+      status: "awaiting_user",
     });
     expect(store.handoffs.find((handoff) => handoff.id === "hch_commerce")).toMatchObject({
-      status: "expired",
+      status: "open",
     });
   });
 
-  it("keeps a usable active browser over newer cleanup debris during reconciliation", async () => {
+  it("selects a usable active browser over newer cleanup debris", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const commerceHandoff = createHandoffRecord({
       id: "hch_commerce",
@@ -1306,18 +1306,16 @@ describe("ComputerUseService", () => {
       runId: "hcr_commerce",
       status: "awaiting_user",
     });
-    expect(kernel.deletedSessionIds).toEqual([
-      expect.stringMatching(/^murph-browser-hcr_cleanup-/u),
-    ]);
+    expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.memberRuns?.find((run) => run.id === "hcr_cleanup")).toMatchObject({
-      status: "expired",
+      status: "cleanup_pending",
     });
     expect(store.handoffs.find((handoff) => handoff.id === "hch_commerce")).toMatchObject({
       status: "open",
     });
   });
 
-  it("keeps an explicit resume target when reconciling pre-migration active profile runs", async () => {
+  it("keeps an explicit resume target without deleting sibling active runs", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const commerceRun = createRunRecord({
       awaitingReason: "login_needed",
@@ -1357,14 +1355,57 @@ describe("ComputerUseService", () => {
       runId: "hcr_commerce",
       status: "running",
     });
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-appointments"]);
+    expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.run).toMatchObject({
       id: "hcr_commerce",
       status: "running",
     });
     expect(store.memberRuns?.find((run) => run.id === "hcr_appointments")).toMatchObject({
-      kernelSessionId: null,
-      status: "expired",
+      kernelSessionId: "kernel-session-appointments",
+      status: "running",
+    });
+  });
+
+  it("does not delete sibling active runs when explicit resume authorization fails", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const commerceRun = createRunRecord({
+      awaitingReason: "login_needed",
+      id: "hcr_commerce",
+      kernelSessionId: "kernel-session-commerce",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      updatedAt: new Date("2026-06-17T12:01:00.000Z"),
+    });
+    const appointmentsRun = createRunRecord({
+      id: "hcr_appointments",
+      kernelSessionId: "kernel-session-appointments",
+      status: "running",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [commerceRun, appointmentsRun],
+      run: commerceRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: null,
+      resumeRunId: "hcr_commerce",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.memberRuns?.find((run) => run.id === "hcr_appointments")).toMatchObject({
+      kernelSessionId: "kernel-session-appointments",
+      status: "running",
     });
   });
 
@@ -5113,6 +5154,7 @@ describe("PrismaComputerUseStore", () => {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
+        browserAttachedAt: now,
         completedAt: now,
         lastTitle: null,
         lastUrl: null,
@@ -5169,6 +5211,7 @@ describe("PrismaComputerUseStore", () => {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
+        browserAttachedAt: now,
         completedAt: now,
         lastTitle: null,
         lastUrl: null,
@@ -5200,9 +5243,9 @@ describe("PrismaComputerUseStore", () => {
             kernelProfileName: "murph-test-member",
           });
         }),
-        findFirst: vi.fn(async () => {
+        findMany: vi.fn(async () => {
           trace.push("find-active-run");
-          return null;
+          return [];
         }),
       },
     };
@@ -5229,7 +5272,7 @@ describe("PrismaComputerUseStore", () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(tx.hostedComputerRun.findFirst).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerRun.findMany).toHaveBeenCalledTimes(1);
     expect(tx.hostedComputerRun.create).toHaveBeenCalledTimes(1);
     expect(tx.hostedComputerRun.create).toHaveBeenCalledWith({
       data: {
@@ -5253,7 +5296,7 @@ describe("PrismaComputerUseStore", () => {
       $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
       hostedComputerRun: {
         create,
-        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
       },
     };
     const prisma = {
@@ -6094,6 +6137,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...run,
       awaitingMessage: null,
       awaitingReason: null,
+      ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
       completedAt: input.now,
       lastTitle: null,
       lastUrl: null,
@@ -6181,6 +6225,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...this.run,
       awaitingMessage: null,
       awaitingReason: null,
+      ...(input.expectedKernelSessionId ? { browserAttachedAt: input.now } : {}),
       completedAt: input.now,
       ...(input.terminalBrowserCleanupId ? { kernelSessionId: input.terminalBrowserCleanupId } : {}),
       lastTitle: null,
@@ -6209,6 +6254,9 @@ class FakeComputerUseStore implements ComputerUseStore {
     ) {
       return this.storeRun({
         ...run,
+        ...(!run.kernelSessionId?.startsWith("murph-browser-")
+          ? { browserAttachedAt: input.now }
+          : {}),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
         updatedAt: input.now,
