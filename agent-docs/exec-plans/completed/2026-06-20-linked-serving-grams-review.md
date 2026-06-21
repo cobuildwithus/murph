@@ -155,11 +155,17 @@ serving masses.
   transaction coupling and fixed each label refresh so the production upsert
   and reviewed overlay run inside one explicit transaction, rolling back the
   source write if the overlay fails.
+- ReviewGPT round 5 found supplement imports had no repo-independent wrapper
+  setting `REVIEWED_SERVING_GRAMS_TSV_PATH`, and the shared overlay could lock
+  both label tables in opposite orders during concurrent food/supplement
+  refreshes. Added small DSLD/DailyMed supplement wrappers that set absolute
+  paths, and made source imports call the reviewed overlay with an explicit
+  food-only or supplement-only scope.
 
 ## Next
 
-- Prove the round 4 transaction fix with rollback DB checks, run verification,
-  commit, push, and run the next PR review loop.
+- Prove the round 5 wrapper and scoped-overlay fixes, run verification, commit,
+  push, and run the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20

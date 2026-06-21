@@ -115,6 +115,8 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsScript).not.toContain("echo \"$labels_db_url\"");
 
     expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_options");
+    expect(applyReviewedServingGramsSql).toContain("reviewed_serving_grams_entity_type");
     expect(applyReviewedServingGramsSql).toContain("DROP TABLE serving_grams_reviewed_overlay_import");
     expect(applyReviewedServingGramsSql).not.toContain("ON COMMIT DROP");
     expect(applyReviewedServingGramsSql).toContain("reviewed-serving-grams.tsv");
@@ -126,6 +128,12 @@ describe("product test contaminant schema", () => {
     );
     expect(applyReviewedServingGramsSql).toContain(
       "supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "options.entity_type IS NULL OR options.entity_type = 'food'",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "options.entity_type IS NULL OR options.entity_type = 'supplement'",
     );
     expect(applyReviewedServingGramsSql).not.toContain("product_tests");
   });
@@ -161,7 +169,9 @@ describe("product test contaminant schema", () => {
     expect(fdcImportSql).toContain("tablets?");
     expect(fdcImportSql).toContain("softgels?");
     expect(fdcImportSql).toContain("serving_grams = EXCLUDED.serving_grams");
+    expect(fdcImportSql).toContain("\\set reviewed_serving_grams_entity_type food");
     expect(fdcImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+    expect(fdcImportSql).toContain("\\unset reviewed_serving_grams_entity_type");
     expect(fdcImportSql).not.toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
     expect(fdcImportSql).not.toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
     expect(fdcImportSql).not.toContain("29.5735");
@@ -169,6 +179,8 @@ describe("product test contaminant schema", () => {
       "serving_grams = EXCLUDED.serving_grams",
     );
     expect(fdcApplyPreparedSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+    expect(fdcApplyPreparedSql).toContain("\\set reviewed_serving_grams_entity_type food");
+    expect(fdcApplyPreparedSql).toContain("\\unset reviewed_serving_grams_entity_type");
     expect(fdcApplyPreparedSql).not.toContain(
       "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
     );
@@ -200,6 +212,8 @@ describe("product test contaminant schema", () => {
         "serving_grams = EXCLUDED.serving_grams",
       );
       expect(supplementImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+      expect(supplementImportSql).toContain("\\set reviewed_serving_grams_entity_type supplement");
+      expect(supplementImportSql).toContain("\\unset reviewed_serving_grams_entity_type");
       expect(supplementImportSql).not.toContain(
         "serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams)",
       );
@@ -416,6 +430,14 @@ describe("product test contaminant schema", () => {
       new URL("../sql/foods/import-fdc.sh", import.meta.url),
       "utf8",
     );
+    const importDsldScript = await readFile(
+      new URL("../sql/supplements/import.sh", import.meta.url),
+      "utf8",
+    );
+    const importDailyMedScript = await readFile(
+      new URL("../sql/supplements/import-dailymed.sh", import.meta.url),
+      "utf8",
+    );
     const buildProductTestRemapReviewScript = await readFile(
       new URL(
         "../sql/product-tests/build-product-test-remap-review.ts",
@@ -547,6 +569,9 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain(".product-tests-work/seed-data/thresholds/");
     expect(readme).toContain("Reviewed Remaps");
     expect(readme).toContain("import-product-test-remaps.sh");
+    expect(readme).toContain("Supplement Label Imports");
+    expect(readme).toContain("apps/web/sql/supplements/import.sh");
+    expect(readme).toContain("apps/web/sql/supplements/import-dailymed.sh");
     expect(readme).toContain("Serving Grams Backfill");
     expect(readme).toContain("backfill-serving-grams.sh");
     expect(readme).toContain("labels already linked by `product_tests`");
@@ -630,6 +655,19 @@ describe("product test contaminant schema", () => {
     expect(importFdcScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importFdcScript).not.toContain("\"$labels_db_url\"");
     expect(importFdcScript).not.toContain("echo \"$labels_db_url\"");
+    for (const supplementImportScript of [importDsldScript, importDailyMedScript]) {
+      expect(supplementImportScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+      expect(supplementImportScript).toContain("reviewed-serving-grams.tsv");
+      expect(supplementImportScript).toContain("labels-db-psql.sh");
+      expect(supplementImportScript).toContain("prepare_labels_db_psql_env");
+      expect(supplementImportScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
+      expect(supplementImportScript).not.toContain("\"$labels_db_url\"");
+      expect(supplementImportScript).not.toContain("echo \"$labels_db_url\"");
+    }
+    expect(importDsldScript).toContain("DSLD_NDJSON_PATH");
+    expect(importDsldScript).toContain("\"$script_dir_abs/import.sql\"");
+    expect(importDailyMedScript).toContain("DAILYMED_NDJSON_PATH");
+    expect(importDailyMedScript).toContain("\"$script_dir_abs/import-dailymed.sql\"");
     expect(supplementBrandSiteLabelsScript).toContain("process.env.MURPH_LABELS_DB_URL");
     expect(supplementBrandSiteLabelsScript).toContain("parseEnvValue(line, \"MURPH_LABELS_DB_URL\")");
     expect(supplementBrandSiteLabelsScript).not.toContain("process.env.MURPH_SUPPLEMENT_DB_URL");
@@ -2101,6 +2139,99 @@ describe("product test contaminant schema", () => {
       expect(renderedSql).toContain("WHERE supplements.serving_grams IS NULL");
       expect(renderedSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
       expect(renderedSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("runs supplement import wrappers with repo-independent reviewed serving grams paths", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-supplement-imports-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempSupplementDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/supplements",
+      );
+      const tempProductTestsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const runDir = path.join(tempRoot, "runner");
+      await mkdir(tempSupplementDir, { recursive: true });
+      await mkdir(tempProductTestsDir, { recursive: true });
+      await mkdir(runDir, { recursive: true });
+
+      const sourceSupplementDir = new URL("../sql/supplements/", import.meta.url);
+      const sourceProductTestsDir = new URL(
+        "../sql/product-tests/",
+        import.meta.url,
+      );
+      for (const file of [
+        "import.sh",
+        "import-dailymed.sh",
+        "schema.sql",
+        "import.sql",
+        "import-dailymed.sql",
+      ]) {
+        const targetPath = path.join(tempSupplementDir, file);
+        await writeFile(targetPath, await readFile(new URL(file, sourceSupplementDir), "utf8"));
+        if (file.endsWith(".sh")) await chmod(targetPath, 0o755);
+      }
+      for (const file of ["labels-db-psql.sh", "reviewed-serving-grams.tsv"]) {
+        await writeFile(
+          path.join(tempProductTestsDir, file),
+          await readFile(new URL(file, sourceProductTestsDir), "utf8"),
+        );
+      }
+
+      await writeFile(path.join(runDir, "dsld.ndjson"), "{}\n");
+      await writeFile(path.join(runDir, "dailymed.ndjson"), "{}\n");
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync, existsSync } from 'node:fs';",
+          "import path from 'node:path';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "for (const envName of ['REVIEWED_SERVING_GRAMS_TSV_PATH', 'DSLD_NDJSON_PATH', 'DAILYMED_NDJSON_PATH']) {",
+          "  const value = process.env[envName];",
+          "  if (!value) continue;",
+          "  if (!path.isAbsolute(value) || !existsSync(value)) {",
+          "    throw new Error(`${envName} was not an existing absolute path`);",
+          "  }",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      for (const [scriptName, sourceEnvName, sourceFileName] of [
+        ["import.sh", "DSLD_NDJSON_PATH", "dsld.ndjson"],
+        ["import-dailymed.sh", "DAILYMED_NDJSON_PATH", "dailymed.ndjson"],
+      ] as const) {
+        await execFileAsync(path.join(tempSupplementDir, scriptName), {
+          cwd: runDir,
+          env: {
+            ...process.env,
+            [sourceEnvName]: sourceFileName,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PSQL_BIN: fakePsqlPath,
+            PSQL_FAKE_LOG: fakePsqlLogPath,
+          },
+        });
+      }
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("supplements/schema.sql");
+      expect(fakePsqlLog).toContain("supplements/import.sql");
+      expect(fakePsqlLog).toContain("supplements/import-dailymed.sql");
+      expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

@@ -499,6 +499,8 @@ SELECT
   count(*) FILTER (WHERE fdc_release_date = :'fdc_release_date'::date) AS current_release_rows
 FROM foods;
 
+\set reviewed_serving_grams_entity_type food
 \ir ../product-tests/apply-reviewed-serving-grams.sql
+\unset reviewed_serving_grams_entity_type
 
 COMMIT;

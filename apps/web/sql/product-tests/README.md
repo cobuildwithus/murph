@@ -236,6 +236,22 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-product-test-remaps.sh
 ```
 
+## Supplement Label Imports
+
+Use the wrapper entrypoints for supplement source refreshes so the shared
+labels DB helper and reviewed serving-grams overlay receive repo-independent
+absolute paths:
+
+```sh
+DSLD_NDJSON_PATH=/path/to/dsld.ndjson \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/supplements/import.sh
+
+DAILYMED_NDJSON_PATH=/path/to/dailymed.ndjson \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/supplements/import-dailymed.sh
+```
+
 ## Serving Grams Backfill
 
 Daily-exposure screening needs a label serving mass. After applying reviewed
@@ -263,7 +279,9 @@ fields from the current source snapshot, then immediately reapply the exact
 reviewed TSV overlay from `apply-reviewed-serving-grams.sql` in the same
 transaction. That keeps source imports convergent without letting a later
 source snapshot erase a reviewed serving mass. The overlay is a transient
-import step, not a database table.
+import step, not a database table. Food refreshes reapply only reviewed food
+rows, and supplement refreshes reapply only reviewed supplement rows, so
+concurrent source refreshes do not lock both label tables in opposite orders.
 
 Dry-run first:
 

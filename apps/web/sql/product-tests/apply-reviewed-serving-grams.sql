@@ -1,6 +1,15 @@
 \set ON_ERROR_STOP on
 
+\if :{?reviewed_serving_grams_entity_type}
+\else
+\set reviewed_serving_grams_entity_type ''
+\endif
+
 DROP TABLE IF EXISTS serving_grams_reviewed_overlay_import;
+DROP TABLE IF EXISTS serving_grams_reviewed_overlay_options;
+
+CREATE TEMP TABLE serving_grams_reviewed_overlay_options AS
+SELECT NULLIF(:'reviewed_serving_grams_entity_type', '') AS entity_type;
 
 CREATE TEMP TABLE serving_grams_reviewed_overlay_import (
   entity_type TEXT NOT NULL,
@@ -27,6 +36,14 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
+    FROM serving_grams_reviewed_overlay_options options
+    WHERE options.entity_type NOT IN ('food', 'supplement')
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams overlay entity scope is invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
     FROM serving_grams_reviewed_overlay_import reviewed
     WHERE
       reviewed.entity_type NOT IN ('food', 'supplement')
@@ -47,7 +64,13 @@ BEGIN
     RAISE EXCEPTION 'duplicate reviewed serving grams overlay label';
   END IF;
 
-  IF to_regclass('public.foods') IS NOT NULL THEN
+  IF to_regclass('public.foods') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM serving_grams_reviewed_overlay_options options
+      WHERE options.entity_type IS NULL OR options.entity_type = 'food'
+    )
+  THEN
     UPDATE foods
     SET serving_grams = reviewed.serving_grams
     FROM serving_grams_reviewed_overlay_import reviewed
@@ -56,7 +79,13 @@ BEGIN
       AND foods.serving_grams IS DISTINCT FROM reviewed.serving_grams;
   END IF;
 
-  IF to_regclass('public.supplements') IS NOT NULL THEN
+  IF to_regclass('public.supplements') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM serving_grams_reviewed_overlay_options options
+      WHERE options.entity_type IS NULL OR options.entity_type = 'supplement'
+    )
+  THEN
     UPDATE supplements
     SET serving_grams = reviewed.serving_grams
     FROM serving_grams_reviewed_overlay_import reviewed
@@ -67,3 +96,4 @@ BEGIN
 END $$;
 
 DROP TABLE serving_grams_reviewed_overlay_import;
+DROP TABLE serving_grams_reviewed_overlay_options;

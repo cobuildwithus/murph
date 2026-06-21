@@ -133,6 +133,8 @@ ON CONFLICT (id) DO UPDATE SET
 
 ANALYZE supplements;
 
+\set reviewed_serving_grams_entity_type supplement
 \ir ../product-tests/apply-reviewed-serving-grams.sql
+\unset reviewed_serving_grams_entity_type
 
 COMMIT;
