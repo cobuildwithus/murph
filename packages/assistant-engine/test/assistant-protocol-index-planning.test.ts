@@ -324,7 +324,7 @@ describe('assistant protocol index planning', () => {
     )
   })
 
-  it('adds the reaction dynamic tool to the route contract only for Telegram reply contexts', async () => {
+  it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -358,6 +358,58 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: true,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const linqReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: true,
+        deliveryReplyToMessageId: 'linq-message-1',
+        deliveryTarget: 'linq-chat-1',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(linqReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: linqReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: true,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const linqSmsReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: false,
+        deliveryReplyToMessageId: 'linq-message-1',
+        deliveryTarget: 'linq-chat-1',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(linqSmsReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: linqSmsReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),

@@ -263,7 +263,10 @@ export async function createAssistantOutboxIntent(
     const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
     const deliveryTransportIdempotent =
       operation
-        ? true
+        ? resolveAssistantOutboxReactionTransportIdempotent({
+            channel: input.channel ?? null,
+            deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+          })
         : resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
             channel: input.channel ?? null,
             deliveryTransportIdempotent: input.deliveryTransportIdempotent,
@@ -929,7 +932,9 @@ export async function deliverAssistantOutboxReaction(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? true,
+    deliveryTransportIdempotent:
+      input.deliveryTransportIdempotent ??
+      isAssistantOutboxReactionTransportIdempotent(input.channel),
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     media: [],
@@ -1131,7 +1136,8 @@ async function sendAssistantOutboxDispatchReaction(input: AssistantOutboxDispatc
   return {
     delivery,
     deliveryDeduplicated: false,
-    deliveryTransportIdempotent: true,
+    deliveryTransportIdempotent:
+      isAssistantOutboxReactionTransportIdempotent(input.channel),
     outboxIntentId: null,
     session: undefined,
   }
@@ -1639,7 +1645,7 @@ function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<
     return true
   }
   if (input.operation?.kind === 'message-reaction') {
-    return true
+    return isAssistantOutboxReactionTransportIdempotent(input.channel ?? null)
   }
 
   const channel = normalizeNullableString(input.channel ?? null)
@@ -1655,6 +1661,20 @@ function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<
     media: input.media ?? [],
     message: input.message ?? '',
   }) ?? adapter.supportsIdempotencyKey === true
+}
+
+function resolveAssistantOutboxReactionTransportIdempotent(input: {
+  channel?: string | null
+  deliveryTransportIdempotent?: boolean
+}): boolean {
+  return input.deliveryTransportIdempotent ??
+    isAssistantOutboxReactionTransportIdempotent(input.channel ?? null)
+}
+
+function isAssistantOutboxReactionTransportIdempotent(
+  channel: string | null | undefined,
+): boolean {
+  return normalizeNullableString(channel)?.toLowerCase() === 'telegram'
 }
 
 function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {

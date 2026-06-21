@@ -62,6 +62,7 @@ import {
 import {
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
+  setHostedProviderLinqMessageReaction,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
@@ -1008,11 +1009,13 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
-  return effect.payload.channel === "telegram"
+  return (
+    effect.payload.channel === "linq"
+      || effect.payload.channel === "telegram"
+  )
     && effect.payload.message.length === 0
     && effect.payload.media.length === 0
-    && effect.payload.replyToMessageId !== null
-    && effect.payload.transportIdempotent === true;
+    && effect.payload.replyToMessageId !== null;
 }
 
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {
@@ -1209,6 +1212,28 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
+        setLinqMessageReaction: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const result = await setHostedProviderLinqMessageReaction(
+            {
+              reaction: request.reaction,
+              targetMessageId: request.targetMessageId,
+            },
+            {
+              env: input.linqEnv,
+              fetchImplementation: input.providerFetch,
+              onProviderDispatchEntered: () => {
+                providerDispatchEntered = true;
+              },
+              ...(input.signal ? { signal: input.signal } : {}),
+            },
+          );
+          await assertHostedDeliveryLiveNow(input);
+          return {
+            ...result,
+            target: request.target,
+          };
+        },
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           const dependencies = requireHostedProviderFetchDependencies({

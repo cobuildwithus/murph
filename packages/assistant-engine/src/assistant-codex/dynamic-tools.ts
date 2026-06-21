@@ -182,7 +182,7 @@ export const MURPH_REACT_TO_MESSAGE_TOOL = {
   namespace: 'murph',
   name: 'react_to_message',
   description:
-    'React to the current inbound Telegram message. This does not send text and does not finish the turn.',
+    'React to the current inbound message when the active channel supports reactions. This does not send text and does not finish the turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

@@ -1220,6 +1220,16 @@ function createHostedConversationAssistantInputSourceMetadata(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return {
+      kind: "linq",
+      partCount: wake.message.linqMessage.parts.length,
+      service: normalizeHostedAssistantInputSourceMetadataToken(
+        wake.message.linqMessage.service ?? null,
+      ),
+    };
+  }
+
   if (isHostedEmailConversationMessageWake(wake)) {
     const promptReady = Boolean(
       normalizeHostedAssistantInputText(wake.message.textPreview ?? ""),
@@ -1264,6 +1274,13 @@ function hashHostedAssistantInputTelegramMediaGroupId(
         `telegram-media-group:${normalized}`,
       )
     : null;
+}
+
+function normalizeHostedAssistantInputSourceMetadataToken(
+  value: string | null | undefined,
+): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function createHostedConversationAssistantInputAttachmentDescriptors(

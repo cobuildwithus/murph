@@ -1142,6 +1142,55 @@ describe('assistant outbox runtime', () => {
     expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
   })
 
+  it('dispatches Linq reaction operations through the channel adapter', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-reaction-')
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      explicitTarget: 'linq-chat-123',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction',
+      targetMessageId: 'linq-message-45',
+      turnId: 'turn-linq-reaction',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'heart',
+    })
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      channel: 'linq',
+      reaction: 'heart',
+      target: 'linq-chat-123',
+      targetKind: 'thread',
+      targetMessageId: 'linq-message-45',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledWith({
+      reaction: 'heart',
+      signal: undefined,
+      target: 'linq-chat-123',
+      targetMessageId: 'linq-message-45',
+    })
+  })
+
   it('updates an unsent deduped reaction intent before dispatching it', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-reaction-update-')
     const setTelegramMessageReaction = vi.fn(async (input: {

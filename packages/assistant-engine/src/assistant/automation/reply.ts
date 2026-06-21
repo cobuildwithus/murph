@@ -122,6 +122,7 @@ export interface AssistantAutoReplyGroupContext {
 
 interface AssistantAutoReplyReplyDecision {
   deliveryTarget: string | null
+  deliveryMessageReactionsAvailable: boolean | null
   deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
@@ -465,6 +466,12 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       executionContext: input.executionContext,
     }),
     deliveryTarget: decision.deliveryTarget,
+    ...(decision.deliveryMessageReactionsAvailable === null
+      ? {}
+      : {
+          deliveryMessageReactionsAvailable:
+            decision.deliveryMessageReactionsAvailable,
+        }),
     deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
     executionContext: input.executionContext,
     providerHeartbeatMs: input.providerHeartbeatMs,
@@ -1074,6 +1081,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   return {
     deliveryTarget,
+    deliveryMessageReactionsAvailable:
+      readAutoReplyDeliveryMessageReactionsAvailable({
+        context: input.group,
+      }),
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
       inputs: promptInputs,
       context: input.group,
@@ -1241,6 +1252,7 @@ async function executeAssistantAutoReply(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey: string | null
   deliveryTarget: string | null
+  deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
   providerHeartbeatMs?: number | null
@@ -1298,6 +1310,13 @@ async function executeAssistantAutoReply(input: {
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      ...(input.deliveryMessageReactionsAvailable === undefined
+        || input.deliveryMessageReactionsAvailable === null
+        ? {}
+        : {
+            deliveryMessageReactionsAvailable:
+              input.deliveryMessageReactionsAvailable,
+          }),
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
@@ -1521,6 +1540,10 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       candidates: lateInputs.inputs,
       expectedChannel: context.firstItem.summary.source,
     })
+    const acceptedInputMessageReactionsAvailable =
+      readAutoReplyDeliveryMessageReactionsAvailable({
+        context: nextContext,
+      })
     const lateItems = [
       ...nextContext.items,
       ...lateCapturelessCandidates.map(
@@ -1577,6 +1600,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...(acceptedInputDeliveryTarget !== null
         ? { deliveryTarget: acceptedInputDeliveryTarget }
         : {}),
+      ...(acceptedInputMessageReactionsAvailable === null
+        ? {}
+        : {
+            deliveryMessageReactionsAvailable:
+              acceptedInputMessageReactionsAvailable,
+          }),
       deliveryReplyToMessageId:
         acceptedInputReplyToMessageId ??
         readAutoReplyDeliveryReplyToMessageId({
@@ -1918,6 +1947,15 @@ function admitCapturelessAssistantInputs(input: {
       ? { deliveryReplyToMessageId }
       : {}),
     ...(deliveryTarget !== null ? { deliveryTarget } : {}),
+    ...(() => {
+      const deliveryMessageReactionsAvailable =
+        readAutoReplyDeliveryMessageReactionsAvailable({
+          context: nextContext,
+        })
+      return deliveryMessageReactionsAvailable === null
+        ? {}
+        : { deliveryMessageReactionsAvailable }
+    })(),
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -2219,6 +2257,59 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
     }
   }
 
+  return null
+}
+
+function readAutoReplyDeliveryMessageReactionsAvailable(input: {
+  context: AssistantAutoReplyGroupContext
+}): boolean | null {
+  const candidates = autoReplyInputCandidatesFromContext(input.context)
+  const replyTarget = readLatestAssistantInputReplyTarget({
+    candidates,
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+  const channel = normalizeNullableString(replyTarget?.channel)
+  if (channel !== 'linq') {
+    return null
+  }
+
+  const messageId = readProviderRouteScalar(replyTarget?.messageId)
+  if (!messageId) {
+    return false
+  }
+
+  const candidate = readLatestAssistantInputCandidateForReplyTarget({
+    candidates,
+    messageId,
+    threadId: readProviderRouteScalar(replyTarget?.threadId),
+  })
+  if (!candidate || readAssistantInputCandidateChannel(candidate) !== 'linq') {
+    return false
+  }
+
+  const metadata = candidate.event.sourceMetadata
+  return metadata?.kind === 'linq'
+    && normalizeNullableString(metadata.service)?.toLowerCase() === 'imessage'
+    && metadata.partCount === 1
+}
+
+function readLatestAssistantInputCandidateForReplyTarget(input: {
+  candidates: readonly AssistantInputCandidate[]
+  messageId: string
+  threadId: string | null
+}): AssistantInputCandidate | null {
+  for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = input.candidates[index]
+    if (
+      readProviderRouteScalar(candidate?.event.replyTarget?.messageId) === input.messageId &&
+      (
+        input.threadId === null ||
+        readProviderRouteScalar(candidate?.event.replyTarget?.threadId) === input.threadId
+      )
+    ) {
+      return candidate ?? null
+    }
+  }
   return null
 }
 

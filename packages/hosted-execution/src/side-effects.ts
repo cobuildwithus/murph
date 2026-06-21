@@ -122,7 +122,7 @@ export interface HostedAssistantMessageDeliveryReceipt {
 
 export interface HostedAssistantMessageReactionDeliveryReceipt {
   kind: "message-reaction";
-  channel: "telegram";
+  channel: "linq" | "telegram";
   idempotencyKey: string;
   reaction: HostedAssistantMessageReaction;
   sentAt: string;
@@ -849,7 +849,7 @@ function parseHostedAssistantDeliveryReceipt(
   if (record.kind === "message-reaction") {
     return {
       kind: "message-reaction",
-      channel: requireHostedAssistantTelegramReactionChannel(
+      channel: requireHostedAssistantReactionChannel(
         record.channel,
         `${label}.channel`,
       ),
@@ -899,13 +899,13 @@ function parseHostedAssistantDeliveryReceipt(
   };
 }
 
-function requireHostedAssistantTelegramReactionChannel(
+function requireHostedAssistantReactionChannel(
   value: unknown,
   label: string,
-): "telegram" {
+): "linq" | "telegram" {
   const channel = requireString(value, label);
-  if (channel !== "telegram") {
-    throw new TypeError(`${label} must be telegram for reactions.`);
+  if (channel !== "telegram" && channel !== "linq") {
+    throw new TypeError(`${label} must be linq or telegram for reactions.`);
   }
 
   return channel;

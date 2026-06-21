@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
@@ -85,6 +86,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
     sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
+    setLinqMessageReaction: mocks.setLinqMessageReaction,
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
@@ -2989,108 +2991,115 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
-  it("does not block the same-turn reply after a retryable reaction-only failure", async () => {
-    const retryAt = "2099-04-08T00:05:00.000Z";
-    const reactionEffect = buildHostedAssistantDeliveryEffect({
-      dedupeKey: "dedupe_reaction",
-      deliveryPhase: "foreground_current_turn",
-      effectId: "intent_reaction",
-      payload: createPayload({
-        idempotencyKey: "assistant-outbox:intent_reaction",
-        message: "",
-        replyToMessageId: "message-one",
-        transportIdempotent: true,
-      }),
-    });
-    const messageEffect = buildHostedAssistantDeliveryEffect({
-      dedupeKey: "dedupe_message",
-      deliveryPhase: "foreground_current_turn",
-      effectId: "intent_message",
-      payload: createPayload({
-        idempotencyKey: "assistant-outbox:intent_message",
-        message: "hello from hosted",
-        replyToMessageId: "message-one",
-      }),
-    });
-    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) => {
-      if (intentId === "intent_reaction") {
-        return createMirrorState({
-          delivery: null,
-          deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
-          deliveryTransportIdempotent: true,
-          intentId: "intent_reaction",
-          lastError: {
-            code: "TELEGRAM_TEMPORARY_FAILURE",
-            message: "temporary provider failure",
-          },
-          nextAttemptAt: retryAt,
-          status: "retryable",
-        });
-      }
-      return createMirrorState({
-        delivery: null,
-        deliveryIdempotencyKey: "assistant-outbox:intent_message",
-        deliveryTransportIdempotent: false,
-        intentId: "intent_message",
-        lastError: null,
-        status: "pending",
+  it.each([
+    { channel: "linq", transportIdempotent: false },
+    { channel: "telegram", transportIdempotent: true },
+  ] as const)(
+    "does not block the same-turn reply after a retryable $channel reaction-only failure",
+    async ({ channel, transportIdempotent }) => {
+      const retryAt = "2099-04-08T00:05:00.000Z";
+      const reactionEffect = buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_reaction",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_reaction",
+        payload: createPayload({
+          channel,
+          idempotencyKey: "assistant-outbox:intent_reaction",
+          message: "",
+          replyToMessageId: "message-one",
+          transportIdempotent,
+        }),
       });
-    });
-    mocks.dispatchAssistantOutboxIntent
-      .mockResolvedValueOnce(
-        createDispatchResult(
-          {
+      const messageEffect = buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_message",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_message",
+        payload: createPayload({
+          channel,
+          idempotencyKey: "assistant-outbox:intent_message",
+          message: "hello from hosted",
+          replyToMessageId: "message-one",
+        }),
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) => {
+        if (intentId === "intent_reaction") {
+          return createMirrorState({
+            delivery: null,
+            deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+            deliveryTransportIdempotent: true,
             intentId: "intent_reaction",
             lastError: {
               code: "TELEGRAM_TEMPORARY_FAILURE",
               message: "temporary provider failure",
             },
+            nextAttemptAt: retryAt,
             status: "retryable",
-          },
-          {
-            code: "TELEGRAM_TEMPORARY_FAILURE",
-            diagnosticContext: {
-              code: "TELEGRAM_TEMPORARY_FAILURE",
-              description: "Too Many Requests: retry later",
-              errorCode: 429,
-              operation: "Telegram Bot API setMessageReaction",
-              retryable: true,
-              status: 429,
-              target: "telegram:chat:123456789",
-            },
-            message: "temporary provider failure",
-          },
-        ),
-      )
-      .mockResolvedValueOnce(
-        createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey: "assistant-outbox:intent_message",
-          }),
+          });
+        }
+        return createMirrorState({
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_message",
+          deliveryTransportIdempotent: false,
           intentId: "intent_message",
-          status: "sent",
-        }),
-      );
+          lastError: null,
+          status: "pending",
+        });
+      });
+      mocks.dispatchAssistantOutboxIntent
+        .mockResolvedValueOnce(
+          createDispatchResult(
+            {
+              intentId: "intent_reaction",
+              lastError: {
+                code: "TELEGRAM_TEMPORARY_FAILURE",
+                message: "temporary provider failure",
+              },
+              status: "retryable",
+            },
+            {
+              code: "TELEGRAM_TEMPORARY_FAILURE",
+              diagnosticContext: {
+                code: "TELEGRAM_TEMPORARY_FAILURE",
+                description: "Too Many Requests: retry later",
+                errorCode: 429,
+                operation: "Telegram Bot API setMessageReaction",
+                retryable: true,
+                status: 429,
+                target: "telegram:chat:123456789",
+              },
+              message: "temporary provider failure",
+            },
+          ),
+        )
+        .mockResolvedValueOnce(
+          createDispatchResult({
+            delivery: createDelivery({
+              idempotencyKey: "assistant-outbox:intent_message",
+            }),
+            intentId: "intent_message",
+            status: "sent",
+          }),
+        );
 
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
-      allowPreparedSending: true,
-      assistantDeliveryEffects: [reactionEffect, messageEffect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
-      providerFetch: vi.fn<typeof fetch>(),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-      wake: HOSTED_WAKE.wake,
-    });
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [reactionEffect, messageEffect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
 
-    expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
-      "intent_reaction",
-      "intent_message",
-    ]);
-    expect(outcomes[0]?.deliveryStatus).toBe("retryable");
-    expect(outcomes[1]?.deliveryStatus).toBe("sent");
-    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
-    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
-  });
-
+      expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
+        "intent_reaction",
+        "intent_message",
+      ]);
+      expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+      expect(outcomes[1]?.deliveryStatus).toBe("sent");
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+    },
+  );
   it("preserves provider diagnostics from persisted mirror failures", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_reaction",
@@ -3772,6 +3781,73 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("routes persisted Linq reaction intents without payload operations", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    expect(effect.payload).not.toHaveProperty("operation");
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_123",
+        targetMessageId: "linq_message_1",
+      });
+
+      return createDispatchResult({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "thread",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(mocks.setLinqMessageReaction).toHaveBeenCalledWith({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
       },
       fetchImplementation: providerFetch,
       signal: undefined,
