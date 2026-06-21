@@ -753,7 +753,7 @@ Otherwise, keep the reply natural and direct.`;
 
   const emphasisGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer. Prefer plain text. Use bold or italic only when it materially improves comprehension or scannability, and keep emphasis to short labels or key phrases.
-When emphasis is truly helpful, use only simple emphasis spans such as \`**key phrase**\` or \`_short aside_\`; do not use emphasis as decoration or on whole paragraphs.`
+When emphasis is truly helpful, use only simple emphasis spans such as \`**key phrase**\` or \`_short aside_\`; use underscore italics only for short multi-word asides, never for exact tokens, identifiers, paths, URLs, codes, or values. Do not use emphasis as decoration or on whole paragraphs.`
     : `Do not wrap words in double asterisks or underscores for bold or italic emphasis; some messaging clients may show those raw markers.`
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.

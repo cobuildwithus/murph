@@ -381,7 +381,7 @@ test('linq runtime converts markdown emphasis to iMessage text decorations', asy
   await sendLinqChatMessage(
     {
       chatId: 'chat-123',
-      message: '  This is **bold** and _italic_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.  ',
+      message: '  This is **bold** and _short aside_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.  ',
     },
     { env, fetchImplementation },
   )
@@ -397,16 +397,63 @@ test('linq runtime converts markdown emphasis to iMessage text decorations', asy
               style: 'bold',
             },
             {
-              range: [17, 23],
+              range: [17, 28],
               style: 'italic',
             },
             {
-              range: [25, 29],
+              range: [30, 34],
               style: 'strikethrough',
             },
           ],
           type: 'text',
-          value: 'This is bold and italic. gone Keep durable/home/*/rollout-*.jsonl intact.',
+          value: 'This is bold and short aside. gone Keep durable/home/*/rollout-*.jsonl intact.',
+        },
+      ],
+    },
+  })
+})
+
+test('linq runtime preserves exact underscore-delimited message text', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{
+    body?: string | Blob
+    method: string
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    seenRequests.push({
+      body: init.body,
+      method: init.method,
+      url,
+    })
+
+    return createJsonResponse({
+      message: {
+        id: 'message-1',
+      },
+    })
+  })
+
+  const message = 'Open https://example.test/download?filename=_report_.pdf and keep token _ABC_ plus 变量_名称_值.'
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message,
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(seenRequests.length, 1)
+  assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
+    message: {
+      parts: [
+        {
+          type: 'text',
+          value: message,
         },
       ],
     },

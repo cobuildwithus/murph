@@ -10,7 +10,7 @@ import {
 test('message formatting renders simple emphasis spans with UTF-16 ranges', () => {
   const smile = '\u{1F600}'
   const rendered = renderMarkdownMessageText(
-    `This is **bo${smile}ld** and _it_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.`,
+    `This is **bo${smile}ld** and _short aside_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.`,
   )
 
   assert.deepEqual(rendered, {
@@ -20,26 +20,26 @@ test('message formatting renders simple emphasis spans with UTF-16 ranges', () =
         style: 'bold',
       },
       {
-        range: [19, 21],
+        range: [19, 30],
         style: 'italic',
       },
       {
-        range: [23, 27],
+        range: [32, 36],
         style: 'strikethrough',
       },
     ],
-    text: `This is bo${smile}ld and it. gone Keep durable/home/*/rollout-*.jsonl intact.`,
+    text: `This is bo${smile}ld and short aside. gone Keep durable/home/*/rollout-*.jsonl intact.`,
   })
 })
 
 test('message formatting leaves ambiguous markdown-like text untouched', () => {
   assert.deepEqual(
     renderMarkdownMessageText(
-      'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
+      'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, 变量_名称_值, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
     ),
     {
       decorations: [],
-      text: 'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
+      text: 'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, 变量_名称_值, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
     },
   )
 })

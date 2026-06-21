@@ -166,6 +166,9 @@ describe('assistant execution prompt contract', () => {
       'Use bold or italic only when it materially improves comprehension or scannability',
     )
     expect(linqPrompt).toContain(
+      'use underscore italics only for short multi-word asides, never for exact tokens, identifiers, paths, URLs, codes, or values',
+    )
+    expect(linqPrompt).toContain(
       'Use Markdown-style emphasis only where later channel guidance explicitly allows native emphasis conversion',
     )
     expect(linqPrompt).toContain('No Markdown tables, Markdown headers, fenced code blocks')

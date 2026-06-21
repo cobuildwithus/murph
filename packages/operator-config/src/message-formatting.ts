@@ -2,7 +2,6 @@ export type MessageTextDecorationStyle =
   | 'bold'
   | 'italic'
   | 'strikethrough'
-  | 'underline'
 
 export interface MessageTextDecoration {
   range: [number, number]
@@ -19,6 +18,10 @@ type MarkdownDecorationToken = {
   style: MessageTextDecorationStyle
 }
 
+type OpenMarkdownDecoration = MarkdownDecorationToken & {
+  content: string
+}
+
 const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
   { marker: '**', style: 'bold' },
   { marker: '~~', style: 'strikethrough' },
@@ -26,7 +29,64 @@ const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
 ]
 
 export function renderMarkdownMessageText(value: string): DecoratedMessageText {
-  return renderMarkdownMessageSegment(value)
+  let text = ''
+  const decorations: MessageTextDecoration[] = []
+  let index = 0
+  let openDecoration: OpenMarkdownDecoration | null = null
+
+  while (index < value.length) {
+    if (openDecoration) {
+      if (
+        value.startsWith(openDecoration.marker, index) &&
+        isMarkdownClosingBoundary(value, index, openDecoration.marker)
+      ) {
+        const rangeStart = text.length
+        const content = openDecoration.content
+        if (isValidDecorationContent(content, openDecoration.marker)) {
+          text += content
+          if (text.length > rangeStart) {
+            decorations.push({
+              range: [rangeStart, text.length],
+              style: openDecoration.style,
+            })
+          }
+        } else {
+          text += `${openDecoration.marker}${content}${openDecoration.marker}`
+        }
+
+        index += openDecoration.marker.length
+        openDecoration = null
+        continue
+      }
+
+      openDecoration.content += value[index]
+      index += 1
+      continue
+    }
+
+    const token = readOpeningMarkdownDecorationToken(value, index)
+    if (token) {
+      openDecoration = {
+        content: '',
+        marker: token.marker,
+        style: token.style,
+      }
+      index += token.marker.length
+      continue
+    }
+
+    text += value[index]
+    index += 1
+  }
+
+  if (openDecoration) {
+    text += `${openDecoration.marker}${openDecoration.content}`
+  }
+
+  return {
+    decorations,
+    text,
+  }
 }
 
 export function splitDecoratedMessageText(
@@ -84,62 +144,10 @@ function clampDecorationToUtf16Range(
   }
 }
 
-function renderMarkdownMessageSegment(value: string): DecoratedMessageText {
-  let text = ''
-  const decorations: MessageTextDecoration[] = []
-  let index = 0
-
-  while (index < value.length) {
-    const token = readPairedMarkdownDecorationToken(value, index)
-
-    if (token) {
-      const inner = renderMarkdownMessageSegment(
-        value.slice(token.contentStart, token.contentEnd),
-      )
-      const rangeStart = text.length
-      text += inner.text
-      const rangeEnd = text.length
-
-      for (const decoration of inner.decorations) {
-        decorations.push({
-          range: [
-            rangeStart + decoration.range[0],
-            rangeStart + decoration.range[1],
-          ],
-          style: decoration.style,
-        })
-      }
-
-      if (rangeEnd > rangeStart) {
-        decorations.push({
-          range: [rangeStart, rangeEnd],
-          style: token.style,
-        })
-      }
-
-      index = token.endIndex
-      continue
-    }
-
-    text += value[index]
-    index += 1
-  }
-
-  return {
-    decorations: normalizeMessageTextDecorations(decorations),
-    text,
-  }
-}
-
-function readPairedMarkdownDecorationToken(
+function readOpeningMarkdownDecorationToken(
   value: string,
   index: number,
-): {
-  contentEnd: number
-  contentStart: number
-  endIndex: number
-  style: MessageTextDecorationStyle
-} | null {
+): MarkdownDecorationToken | null {
   for (const token of MARKDOWN_DECORATION_TOKENS) {
     if (!value.startsWith(token.marker, index)) {
       continue
@@ -149,51 +157,25 @@ function readPairedMarkdownDecorationToken(
       continue
     }
 
-    const contentStart = index + token.marker.length
-    const contentEnd = findClosingMarkdownMarker(value, token.marker, contentStart)
-
-    if (contentEnd === -1) {
-      continue
-    }
-
-    const content = value.slice(contentStart, contentEnd)
-
-    if (!content || content !== content.trim() || content.includes('\n')) {
-      continue
-    }
-
-    return {
-      contentEnd,
-      contentStart,
-      endIndex: contentEnd + token.marker.length,
-      style: token.style,
-    }
+    return token
   }
 
   return null
 }
 
-function findClosingMarkdownMarker(
-  value: string,
+function isValidDecorationContent(
+  content: string,
   marker: string,
-  startIndex: number,
-): number {
-  let index = startIndex
-
-  while (index < value.length) {
-    const candidate = value.indexOf(marker, index)
-    if (candidate === -1) {
-      return -1
-    }
-
-    if (isMarkdownClosingBoundary(value, candidate, marker)) {
-      return candidate
-    }
-
-    index = candidate + marker.length
+): boolean {
+  if (!content || content !== content.trim() || content.includes('\n')) {
+    return false
   }
 
-  return -1
+  if (content.length > 160 || /[/?&=\\`<>]/u.test(content)) {
+    return false
+  }
+
+  return marker !== '_' || isWhitespaceSeparatedPhrase(content)
 }
 
 function isMarkdownOpeningBoundary(
@@ -208,7 +190,11 @@ function isMarkdownOpeningBoundary(
     return false
   }
 
-  if (previous === '/' || previous === '\\') {
+  if (
+    previous &&
+    !isWhitespace(previous) &&
+    !isOpeningPunctuation(previous)
+  ) {
     return false
   }
 
@@ -227,25 +213,29 @@ function isMarkdownClosingBoundary(
     return false
   }
 
+  if (next && !isWhitespace(next) && !isClosingPunctuation(next)) {
+    return false
+  }
+
   return !(isWordCharacter(previous) && isWordCharacter(next))
+}
+
+function isOpeningPunctuation(value: string): boolean {
+  return /[(\[{'"“‘]/u.test(value)
+}
+
+function isClosingPunctuation(value: string): boolean {
+  return /[.,!?;:)\]}'"”’]/u.test(value)
 }
 
 function isWhitespace(value: string): boolean {
   return /\s/u.test(value)
 }
 
-function isWordCharacter(value: string): boolean {
-  return /[A-Za-z0-9]/u.test(value)
+function isWhitespaceSeparatedPhrase(value: string): boolean {
+  return /\s/u.test(value)
 }
 
-function normalizeMessageTextDecorations(
-  decorations: readonly MessageTextDecoration[],
-): MessageTextDecoration[] {
-  return decorations
-    .filter((decoration) => decoration.range[1] > decoration.range[0])
-    .sort((left, right) =>
-      left.range[0] - right.range[0] ||
-      left.range[1] - right.range[1] ||
-      left.style.localeCompare(right.style),
-    )
+function isWordCharacter(value: string): boolean {
+  return value ? /[\p{L}\p{N}_]/u.test(value) : false
 }

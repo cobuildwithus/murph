@@ -246,7 +246,7 @@ describe('assistant channels runtime seam', () => {
 
     await sendTelegramMessage(
       {
-        message: 'This is **bold** and _italic_. ~~gone~~',
+        message: 'This is **bold** and _short aside_. ~~gone~~',
         target: '123',
       },
       {
@@ -263,10 +263,42 @@ describe('assistant channels runtime seam', () => {
       chat_id: '123',
       entities: [
         { offset: 8, length: 4, type: 'bold' },
-        { offset: 17, length: 6, type: 'italic' },
-        { offset: 25, length: 4, type: 'strikethrough' },
+        { offset: 17, length: 11, type: 'italic' },
+        { offset: 30, length: 4, type: 'strikethrough' },
       ],
-      text: 'This is bold and italic. gone',
+      text: 'This is bold and short aside. gone',
+    })
+  })
+
+  it('preserves exact underscore-delimited Telegram text without entities', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 123,
+        },
+      }),
+    ])
+    const message = 'Open https://example.test/download?filename=_report_.pdf and keep token _ABC_ plus 变量_名称_值.'
+
+    await sendTelegramMessage(
+      {
+        message,
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      text: message,
     })
   })
 
