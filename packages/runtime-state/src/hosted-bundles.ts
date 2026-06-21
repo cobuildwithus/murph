@@ -2532,6 +2532,7 @@ function isHostedAssistantRuntimeSnapshotExcludedRelativePath(relativePath: stri
     ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES.some((prefix) =>
       hasWorkspaceSnapshotPathPrefix(relativePath, prefix),
     )
+    || isAssistantRuntimeEventLogRelativePath(relativePath)
   ) {
     return true;
   }
@@ -2565,6 +2566,12 @@ function isHostedAssistantRuntimeSnapshotExcludedRelativePath(relativePath: stri
 
 function isHostedAssistantRuntimeLockTempBasename(basename: string): boolean {
   return /^\.(?:automation-run|runtime-write)\.lock\.(?:cleanup|pending|stale)\./u.test(basename);
+}
+
+function isAssistantRuntimeEventLogRelativePath(relativePath: string): boolean {
+  return ASSISTANT_RUNTIME_EVENT_LOG_PATHS.some((eventLogPath) =>
+    relativePath === eventLogPath || relativePath.startsWith(`${eventLogPath}.`),
+  );
 }
 
 function isDotGitRelativePath(relativePath: string): boolean {
@@ -3095,4 +3102,8 @@ const ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.locks`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.runtime-write.lock`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.automation-run.lock`,
+] as const;
+const ASSISTANT_RUNTIME_EVENT_LOG_PATHS = [
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/diagnostics/events.jsonl`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/journals/runtime-events.jsonl`,
 ] as const;

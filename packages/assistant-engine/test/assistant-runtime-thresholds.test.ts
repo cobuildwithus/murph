@@ -736,9 +736,11 @@ function createMockAssistantPaths(seed: string) {
   const root = path.join('/tmp', seed)
   return {
     assistantStateRoot: root,
+    diagnosticEventsPath: path.join(root, 'diagnostics', 'events.jsonl'),
     outboxQuarantineDirectory: path.join(root, 'outbox-quarantine'),
     quarantineDirectory: path.join(root, 'quarantine'),
     resourceBudgetPath: path.join(root, 'resource-budget.json'),
+    runtimeEventsPath: path.join(root, 'journals', 'runtime-events.jsonl'),
   }
 }
 

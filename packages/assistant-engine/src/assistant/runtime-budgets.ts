@@ -22,6 +22,7 @@ import {
   withAssistantRuntimeWriteLock,
 } from './runtime-write-lock.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
+import { compactAssistantEventLogsAtPaths } from './event-log-retention.js'
 import {
   listAssistantRuntimeCacheSnapshots,
   pruneAssistantRuntimeCaches,
@@ -118,18 +119,6 @@ export async function runAssistantRuntimeMaintenance(input: {
       notes.push(`${staleLocksCleared} stale runtime lock(s) were cleared.`)
     }
 
-    const snapshot = assistantRuntimeBudgetSnapshotSchema.parse({
-      schema: ASSISTANT_RUNTIME_BUDGET_SCHEMA,
-      updatedAt: nowIso,
-      caches: listAssistantRuntimeCacheSnapshots(),
-      maintenance: {
-        lastRunAt: nowIso,
-        staleQuarantinePruned,
-        staleLocksCleared,
-        notes,
-      },
-    })
-    await writeJsonFileAtomic(paths.resourceBudgetPath, snapshot)
     await appendAssistantRuntimeEventAtPaths(paths, {
       at: nowIso,
       component: 'runtime',
@@ -149,6 +138,29 @@ export async function runAssistantRuntimeMaintenance(input: {
         transcriptFilesTrimmed: transcriptRetention.transcriptsTrimmed,
       },
     }).catch(() => undefined)
+    try {
+      await compactAssistantEventLogsAtPaths({
+        now,
+        paths,
+      })
+    } catch {
+      notes.push(
+        'Assistant event log compaction failed and will be retried by a later maintenance pass.',
+      )
+    }
+
+    const snapshot = assistantRuntimeBudgetSnapshotSchema.parse({
+      schema: ASSISTANT_RUNTIME_BUDGET_SCHEMA,
+      updatedAt: nowIso,
+      caches: listAssistantRuntimeCacheSnapshots(),
+      maintenance: {
+        lastRunAt: nowIso,
+        staleQuarantinePruned,
+        staleLocksCleared,
+        notes,
+      },
+    })
+    await writeJsonFileAtomic(paths.resourceBudgetPath, snapshot)
     return snapshot
   })
 }

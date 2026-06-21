@@ -512,9 +512,12 @@ ports, and the local encrypted archive writer.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, and rebuildable projections. Codex provider continuity is the exact
-active rollout JSONL referenced by live assistant session resume state, not the
-whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
+cache/tmp, rebuildable projections, and assistant JSONL event logs. Assistant
+diagnostics snapshots, status snapshots, runtime budgets, pending issue records,
+and the diagnostics snapshot's recent warning/error text remain portable; event
+logs are bounded local observability only and are rewritten by runtime
+maintenance. Codex provider continuity is the exact active rollout JSONL
+referenced by live assistant session resume state, not the whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
 by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
 root. For legacy refs, restore clears local roots and legacy cache markers, then
 applies the base bundle when present and either the working delta or legacy hot
