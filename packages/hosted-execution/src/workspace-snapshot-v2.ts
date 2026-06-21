@@ -15,7 +15,9 @@ export const HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION = "zstd" as const;
 export const HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES =
   128 * 1024 * 1024;
 export const HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES =
-  4 * 1024 * 1024 * 1024;
+  512 * 1024 * 1024;
+export const HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES =
+  512 * 1024 * 1024;
 
 const HOSTED_WORKSPACE_SNAPSHOT_V2_DATA_KEY_WRAP_SALT = new TextEncoder().encode(
   "murph.hosted-workspace-snapshot-data-key-wrap.v1",
