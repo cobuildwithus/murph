@@ -1095,6 +1095,15 @@ describe("hosted runtime control contracts", () => {
       checkpointed: true,
       workspace,
     });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+      workspace,
+    })).toEqual({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+      workspace,
+    });
     expect(parseHostedBrowserVaultReplicaPublishResponse({
       published: false,
       workspace: null,

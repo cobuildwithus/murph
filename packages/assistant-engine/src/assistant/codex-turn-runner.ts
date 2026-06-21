@@ -645,11 +645,13 @@ function resolveAssistantVoiceMemoDeliveryChannel(input: {
   })
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
   if (channel === 'linq') {
-    return (
-      normalizeNullableString(deliveryFields.explicitTarget) === null &&
-      deliveryFields.bindingDelivery?.kind === 'thread' &&
-      normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
-    )
+    const bindingTarget =
+      deliveryFields.bindingDelivery?.kind === 'thread'
+        ? normalizeNullableString(deliveryFields.bindingDelivery.target)
+        : null
+    const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
+    return bindingTarget !== null &&
+      (explicitTarget === null || explicitTarget === bindingTarget)
       ? 'linq'
       : null
   }

@@ -126,10 +126,6 @@ interface HostedAiUsageAllowancePeriod {
   spentUsdMicros: bigint;
 }
 
-interface HostedAiUsageAllowanceLedgerSpend {
-  spentUsdMicros: bigint;
-}
-
 type HostedAiUsageAllowancePeriodResult =
   | ({ kind: "period" } & HostedAiUsageAllowancePeriod)
   | ({
@@ -409,6 +405,8 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       allowanceAccountedAt: now,
       allowanceCostUsdMicros: priced.costUsdMicros,
       allowanceCounted: priced.counted,
+      allowancePeriodEnd: period.periodEnd,
+      allowancePeriodStart: period.periodStart,
       allowancePricingSnapshotJson: priced.pricingSnapshot,
       allowancePricingVersion: priced.pricingVersion,
     },
@@ -417,6 +415,15 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   if (accounted.count !== 1 || !priced.counted) {
     return;
   }
+
+  await accountHostedAiUsageAllowancePeriodSpendTx({
+    costUsdMicros: priced.costUsdMicros,
+    memberId: input.memberId,
+    now,
+    period,
+    recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+    tx: input.tx,
+  });
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -438,6 +445,8 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
       allowanceAccountedAt: input.now,
       allowanceCostUsdMicros: 0n,
       allowanceCounted: false,
+      allowancePeriodEnd: input.period.periodEnd,
+      allowancePeriodStart: input.period.periodStart,
       allowancePricingSnapshotJson: {
         credentialSource: normalizeAssistantUsageCredentialSource(input.record.credentialSource),
         reason: input.period.reason,
@@ -843,18 +852,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingPlanCode: true,
       blockedAt: true,
+      lastUsageAt: true,
+      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
+      spentUsdMicros: true,
     },
   });
 
-  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx({
-    memberId: input.memberId,
-    periodEnd: resolved.periodEnd,
-    periodStart: resolved.periodStart,
-    tx: input.tx,
-  });
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
   const periodMatches =
@@ -865,13 +871,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   if (periodMatches) {
     const metadata = buildHostedAiUsageAllowancePeriodMetadata({
       blockedAt: current.blockedAt,
-      ledgerSpend,
+      limitNoticeSentAt: current.limitNoticeSentAt,
       limitUsdMicros: current.limitUsdMicros,
       now: input.now,
+      spentUsdMicros: current.spentUsdMicros,
     });
 
     if (
-      !sameNullableTime(current.blockedAt, metadata.blockedAt)
+      !sameNullableTime(current.blockedAt, metadata.blockedAt) ||
+      !sameNullableTime(current.limitNoticeSentAt, metadata.limitNoticeSentAt)
     ) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
@@ -882,6 +890,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         },
         data: {
           blockedAt: metadata.blockedAt,
+          limitNoticeSentAt: metadata.limitNoticeSentAt,
           updatedAt: input.now,
         },
       });
@@ -893,16 +902,17 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
-      spentUsdMicros: ledgerSpend.spentUsdMicros,
+      spentUsdMicros: current.spentUsdMicros,
     };
   }
 
   const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
   const metadata = buildHostedAiUsageAllowancePeriodMetadata({
     blockedAt: current.blockedAt,
-    ledgerSpend,
+    limitNoticeSentAt: current.limitNoticeSentAt,
     limitUsdMicros: resolved.limitUsdMicros,
     now: input.now,
+    spentUsdMicros: current.spentUsdMicros,
   });
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
@@ -915,7 +925,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt: metadata.blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
+      limitNoticeSentAt: limitIncreased ? null : metadata.limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
@@ -924,6 +934,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
+      spentUsdMicros: true,
     },
   });
 
@@ -934,7 +945,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: upgraded.limitUsdMicros,
     periodEnd: upgraded.periodEnd,
     periodStart: upgraded.periodStart,
-    spentUsdMicros: ledgerSpend.spentUsdMicros,
+    spentUsdMicros: upgraded.spentUsdMicros,
   };
 }
 
@@ -962,13 +973,6 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx({
-    memberId: input.memberId,
-    periodEnd: resolved.periodEnd,
-    periodStart: resolved.periodStart,
-    tx: input.tx,
-  });
-
   const current = await input.tx.hostedAiUsagePeriod.findUnique({
     where: {
       memberId_periodStart: {
@@ -981,6 +985,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
+      spentUsdMicros: true,
     },
   });
 
@@ -999,7 +1004,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: ledgerSpend.spentUsdMicros,
+      spentUsdMicros: current.spentUsdMicros,
     };
   }
 
@@ -1009,36 +1014,39 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
-    spentUsdMicros: ledgerSpend.spentUsdMicros,
+    spentUsdMicros: 0n,
   };
 }
 
-async function readHostedAiUsageAllowancePeriodLedgerSpendTx(input: {
+async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
+  costUsdMicros: bigint;
   memberId: string;
-  periodEnd: Date;
-  periodStart: Date;
+  now: Date;
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
+  recordOccurredAt: Date;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageAllowanceLedgerSpend> {
-  const aggregate = await input.tx.hostedAiUsage.aggregate({
-    _sum: {
-      allowanceCostUsdMicros: true,
-    },
-    where: {
-      allowanceAccountedAt: {
-        not: null,
-      },
-      allowanceCounted: true,
-      memberId: input.memberId,
-      occurredAt: {
-        gte: input.periodStart,
-        lt: input.periodEnd,
-      },
-    },
-  });
-
-  return {
-    spentUsdMicros: aggregate._sum.allowanceCostUsdMicros ?? 0n,
-  };
+}): Promise<void> {
+  await input.tx.$executeRaw`
+    UPDATE "hosted_ai_usage_period"
+    SET
+      "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
+      "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
+      "limit_notice_sent_at" = CASE
+        WHEN "spent_usd_micros" < "limit_usd_micros" THEN NULL
+        ELSE "limit_notice_sent_at"
+      END,
+      "blocked_at" = CASE
+        WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
+          CASE
+            WHEN "spent_usd_micros" < "limit_usd_micros" OR "blocked_at" IS NULL THEN ${input.now}
+            ELSE "blocked_at"
+          END
+        ELSE NULL
+      END,
+      "updated_at" = ${input.now}
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${input.period.periodStart}
+  `;
 }
 
 function resolveHostedAiUsageAllowancePeriod(input: {
@@ -1168,16 +1176,24 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
 
 function buildHostedAiUsageAllowancePeriodMetadata(input: {
   blockedAt: Date | null;
-  ledgerSpend: HostedAiUsageAllowanceLedgerSpend;
+  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   now: Date;
+  spentUsdMicros: bigint;
 }): {
   blockedAt: Date | null;
+  limitNoticeSentAt: Date | null;
 } {
+  if (input.spentUsdMicros < input.limitUsdMicros) {
+    return {
+      blockedAt: null,
+      limitNoticeSentAt: null,
+    };
+  }
+
   return {
-    blockedAt: input.ledgerSpend.spentUsdMicros >= input.limitUsdMicros
-      ? input.blockedAt ?? input.now
-      : null,
+    blockedAt: input.blockedAt ?? input.now,
+    limitNoticeSentAt: input.limitNoticeSentAt,
   };
 }
 

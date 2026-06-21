@@ -8,6 +8,9 @@ import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contr
 import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.js";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 
 import {
   buildVersionOverrideHeaders,
@@ -469,7 +472,7 @@ describe("runSmokeHostedDeploy", () => {
             liveModelTurn: {
               durationMs: 1_234,
               egressGrantConsumed: true,
-              model: "gpt-5.4-nano",
+              model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -594,7 +597,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: false,
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 2_048,
       }),
       log() {},
@@ -605,7 +608,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: true,
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 0,
       }),
       log() {},

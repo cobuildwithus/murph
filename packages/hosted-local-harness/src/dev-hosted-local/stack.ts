@@ -166,6 +166,8 @@ const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
   name: "Flex",
   description: "Lower-cost flexible processing",
 } as const;
+const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
+const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
 const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   repoRoot,
   "apps",
@@ -1793,7 +1795,7 @@ async function prepareHostedLocalCodexModelCatalog(input: {
     throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
   }
 
-  const catalogText = buildHostedLocalOpenAiFlexCodexModelCatalogText(result.stdout);
+  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(result.stdout);
   await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
   await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
   await chmod(input.catalogPath, 0o644);
@@ -1812,7 +1814,7 @@ function buildHostedLocalCodexCatalogCommandEnv(
   };
 }
 
-function buildHostedLocalOpenAiFlexCodexModelCatalogText(rawCatalog: string): string {
+function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawCatalog);
@@ -1847,6 +1849,29 @@ function buildHostedLocalOpenAiFlexCodexModelCatalogText(rawCatalog: string): st
       ...serviceTiers,
       HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
     ];
+
+  const hasDeploySmokeModel = parsed.models
+    .filter(isRecord)
+    .some((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
+  if (!hasDeploySmokeModel) {
+    const templateModel = parsed.models
+      .filter(isRecord)
+      .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
+    if (!templateModel) {
+      throw new Error(
+        `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG}.`,
+      );
+    }
+
+    parsed.models.push({
+      ...templateModel,
+      description: "Fast, low-cost model for deploy smoke checks.",
+      display_name: "GPT-5.4-Nano",
+      priority: 5,
+      service_tiers: [],
+      slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
+    });
+  }
 
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }

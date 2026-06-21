@@ -7,6 +7,10 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
+  it("uses the nano model for the bounded live deploy smoke", () => {
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-5.4-nano");
+  });
+
   it("reads only the top-level OpenAI Responses model", () => {
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
       JSON.stringify({
@@ -17,7 +21,7 @@ describe("deploy live model turn smoke", () => {
     )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
 
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({ model: "gpt-5.5" }),
+      JSON.stringify({ model: "gpt-smoke-mismatch" }),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
       JSON.stringify({ model: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL} ` }),

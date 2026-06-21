@@ -49,6 +49,7 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
+  dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
   runHostedAlarmInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
@@ -181,6 +182,7 @@ export async function startHostedLocalDevHarness(input: {
         });
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
+      dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
       runHostedAlarmInvocationForTest,
       runHostedManualInvocationForTest,
@@ -490,6 +492,20 @@ export async function startHostedLocalDevHarness(input: {
   async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }> {
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/container-active-operation-drop`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
