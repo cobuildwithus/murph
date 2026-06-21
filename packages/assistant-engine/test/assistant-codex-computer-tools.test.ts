@@ -90,7 +90,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("keeps start-run profile keys off the model surface while marking fresh starts member-scoped", async () => {
+  it("keeps start-run profile keys off the model surface while sending fresh starts", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -98,7 +98,6 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,
@@ -118,7 +117,6 @@ describe("murph computer dynamic tools", () => {
 
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        profileKey: "appointments",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: {
           conversationId: "model-authored-conversation",
@@ -131,7 +129,7 @@ describe("murph computer dynamic tools", () => {
     }));
 
     if (!request || request.kind !== "computer-start-run") {
-      throw new Error("Expected stale profileKey to be stripped from start-run input.");
+      throw new Error("Expected computer_start_run request.");
     }
 
     expect(request.args).toEqual({
@@ -156,6 +154,34 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { profileKey: "appointments" },
+    { legacyProfileKey: "appointments" },
+    { memberScopedProfileRequired: true },
+  ])("rejects stale start-run profile field %# before execution", async (argumentsValue) => {
+    const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue,
+      tool: "computer_start_run",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("adds current hosted mailbox proof only for explicit resume requests", async () => {
     const fetchImpl = vi.fn(async (
       _url: string | URL | Request,
@@ -163,7 +189,6 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
           conversationId: "conversation-123",
@@ -213,7 +238,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("does not retry legacy profile keys when old web rejects a resume mismatch", async () => {
+  it("does not retry when web returns an old profile-mismatch error", async () => {
     const bodies: unknown[] = [];
     const fetchImpl = vi.fn(async (
       _url: string | URL | Request,
@@ -254,7 +279,6 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        memberScopedProfileRequired: true,
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeRunId: "hcr_run123",
       }),

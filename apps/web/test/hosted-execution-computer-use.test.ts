@@ -6,7 +6,6 @@ import type {
 } from "../src/lib/computer-use/crypto";
 import type {
   ComputerKernelClient,
-  KernelProfileMetadata,
 } from "../src/lib/computer-use/kernel-client";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
@@ -692,12 +691,12 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
-  it("resumes an explicit run without deleting an unrelated stale legacy sibling", async () => {
+  it("resumes an explicit run without deleting an unrelated stale sibling", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const appointmentsRun = createRunRecord({
       awaitingReason: "login_needed",
       id: "hcr_appointments",
-      kernelProfileName: "murph-test-member_123-appointments-b6c83d617dd29d666b836502",
+      kernelProfileName: "kernel-profile-appointments",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
       status: "awaiting_user",
       suggestedReply: "done",
@@ -707,7 +706,7 @@ describe("ComputerUseService", () => {
       completedAt: new Date("2026-06-17T11:30:00.000Z"),
       id: "hcr_commerce_failed",
       kernelLiveViewUrlEncrypted: null,
-      kernelProfileName: "murph-test-member_123-commerce-58e8aef26a4ed0371961f090",
+      kernelProfileName: "kernel-profile-commerce",
       kernelSessionId: "kernel-session-commerce",
       status: "failed",
       updatedAt: new Date("2026-06-17T11:30:00.000Z"),
@@ -1259,7 +1258,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("selects one pre-migration active profile run before implicit reuse", async () => {
+  it("selects one active member run before implicit reuse", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const commerceHandoff = createHandoffRecord({
       id: "hch_commerce",
@@ -1656,7 +1655,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("reuses an awaiting member run instead of starting another profile", async () => {
+  it("reuses an awaiting member run instead of starting another run", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -1736,8 +1735,9 @@ describe("ComputerUseService", () => {
       status: "running",
     });
     expect(store.run.kernelProfileName).toMatch(
-      /^murph-staging\.alpha-member_123-default-[0-9a-f]{24}$/u,
+      /^murph-staging\.alpha-[0-9a-f]{24}$/u,
     );
+    expect(store.run.kernelProfileName).not.toContain("member_123");
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
         browserName: expect.stringMatching(/^murph-browser-hcr_[0-9a-f]{32}-[0-9a-f]{24}$/u),
@@ -1756,28 +1756,17 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("reuses the latest Kernel profile metadata when migrating a member to one profile", async () => {
+  it("uses one deterministic member Kernel profile for every new run", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const olderProfileName = "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
-    const latestProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
+    const storedProfileName = "kernel-profile-stored";
     const store = new FakeComputerUseStore({
       memberRuns: [
         createRunRecord({
-          completedAt: new Date("2026-06-17T10:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:00:00.000Z"),
-          id: "hcr_older",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: olderProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T10:05:00.000Z"),
-        }),
-        createRunRecord({
           completedAt: new Date("2026-06-17T11:00:00.000Z"),
           expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_latest",
+          id: "hcr_old",
           kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: latestProfileName,
+          kernelProfileName: storedProfileName,
           kernelSessionId: null,
           status: "completed",
           updatedAt: new Date("2026-06-17T11:05:00.000Z"),
@@ -1786,217 +1775,9 @@ describe("ComputerUseService", () => {
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-        id: "hcr_latest",
+        id: "hcr_old",
         kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: latestProfileName,
-        kernelSessionId: null,
-        status: "completed",
-        updatedAt: new Date("2026-06-17T11:05:00.000Z"),
-      }),
-    });
-    const kernel = createFakeKernel({
-      profiles: {
-        [olderProfileName]: new Date("2026-06-17T10:00:00.000Z"),
-        [latestProfileName]: new Date("2026-06-17T11:00:00.000Z"),
-      },
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
-      },
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).resolves.toMatchObject({
-      reused: false,
-      status: "running",
-    });
-
-    expect(store.run.kernelProfileName).toBe(latestProfileName);
-    expect(store.createRunInputs.at(-1)).toMatchObject({
-      legacyProfileKey: "commerce",
-    });
-    expect(kernel.createdBrowserInputs).toEqual([
-      expect.objectContaining({
-        profileName: latestProfileName,
-        saveChanges: true,
-      }),
-    ]);
-  });
-
-  it("selects a failed terminal profile when Kernel says it was used last", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const appointmentsProfileName =
-      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
-    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
-    const store = new FakeComputerUseStore({
-      memberRuns: [
-        createRunRecord({
-          completedAt: new Date("2026-06-17T10:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:00:00.000Z"),
-          id: "hcr_appointments",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: appointmentsProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T10:05:00.000Z"),
-        }),
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:20:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_commerce_failed",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: commerceProfileName,
-          kernelSessionId: "murph-browser-hcr_commerce_failed-cleanup",
-          status: "failed",
-          updatedAt: new Date("2026-06-17T11:20:00.000Z"),
-        }),
-      ],
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:20:00.000Z"),
-        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-        id: "hcr_commerce_failed",
-        kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: commerceProfileName,
-        kernelSessionId: "murph-browser-hcr_commerce_failed-cleanup",
-        status: "failed",
-        updatedAt: new Date("2026-06-17T11:20:00.000Z"),
-      }),
-    });
-    const kernel = createFakeKernel({
-      profiles: {
-        [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
-        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
-      },
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
-      },
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).resolves.toMatchObject({
-      reused: false,
-      status: "running",
-    });
-
-    expect(store.run.kernelProfileName).toBe(commerceProfileName);
-    expect(store.createRunInputs.at(-1)).toMatchObject({
-      legacyProfileKey: "commerce",
-    });
-  });
-
-  it("selects the Kernel profile most recently used instead of the newest run", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const appointmentsProfileName =
-      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
-    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
-    const store = new FakeComputerUseStore({
-      memberRuns: [
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:20:00.000Z"),
-          createdAt: new Date("2026-06-17T09:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_appointments_resumed",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: appointmentsProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T11:20:00.000Z"),
-        }),
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:00:00.000Z"),
-          createdAt: new Date("2026-06-17T10:30:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_commerce_newer",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: commerceProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T11:00:00.000Z"),
-        }),
-      ],
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:20:00.000Z"),
-        createdAt: new Date("2026-06-17T09:00:00.000Z"),
-        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-        id: "hcr_appointments_resumed",
-        kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: appointmentsProfileName,
-        kernelSessionId: null,
-        status: "completed",
-        updatedAt: new Date("2026-06-17T11:20:00.000Z"),
-      }),
-    });
-    const kernel = createFakeKernel({
-      profiles: {
-        [appointmentsProfileName]: new Date("2026-06-17T11:20:00.000Z"),
-        [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
-      },
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
-      },
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).resolves.toMatchObject({
-      reused: false,
-      status: "running",
-    });
-
-    expect(store.run.kernelProfileName).toBe(appointmentsProfileName);
-    expect(store.createRunInputs.at(-1)).toMatchObject({
-      legacyProfileKey: "appointments",
-    });
-  });
-
-  it("ignores stored Kernel profiles from another namespace", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const productionProfileName =
-      "murph-production-member_123-commerce-a033d2c7b5d9d324e370fbba";
-    const store = new FakeComputerUseStore({
-      memberRuns: [
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_production",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: productionProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T11:05:00.000Z"),
-        }),
-      ],
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:00:00.000Z"),
-        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-        id: "hcr_production",
-        kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: productionProfileName,
+        kernelProfileName: storedProfileName,
         kernelSessionId: null,
         status: "completed",
         updatedAt: new Date("2026-06-17T11:05:00.000Z"),
@@ -2006,7 +1787,7 @@ describe("ComputerUseService", () => {
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "preview",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
       },
       kernel,
       now: () => now,
@@ -2022,157 +1803,51 @@ describe("ComputerUseService", () => {
       status: "running",
     });
 
-    expect(store.run.kernelProfileName).toBe(
-      "murph-preview-member_123-default-35c4dcc37332cb0317fad4fe",
+    expect(store.run.kernelProfileName).toMatch(
+      /^murph-test-[0-9a-f]{24}$/u,
     );
+    expect(store.run.kernelProfileName).not.toContain("member_123");
+    expect(store.run.kernelProfileName).not.toContain("commerce");
+    expect(store.run.kernelProfileName).not.toContain("appointments");
+    expect(store.createRunInputs.at(-1)).toMatchObject({
+      kernelProfileName: store.run.kernelProfileName,
+    });
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
-        profileName: "murph-preview-member_123-default-35c4dcc37332cb0317fad4fe",
+        profileName: store.run.kernelProfileName,
+        saveChanges: true,
       }),
     ]);
-  });
 
-  it("selects the migration profile from Kernel before stale cleanup updates timestamps", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
-    const appointmentsProfileName =
-      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
-    const appointmentsRun = createRunRecord({
-      completedAt: new Date("2026-06-17T10:00:00.000Z"),
-      createdAt: new Date("2026-06-17T09:55:00.000Z"),
-      expiresAt: new Date("2026-06-17T11:00:00.000Z"),
-      id: "hcr_appointments",
-      kernelLiveViewUrlEncrypted: "encrypted-live-view",
-      kernelProfileName: appointmentsProfileName,
-      kernelSessionId: "kernel-session-appointments",
-      status: "completed",
-      updatedAt: new Date("2026-06-17T10:05:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      memberRuns: [
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_commerce",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: commerceProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T11:55:00.000Z"),
-        }),
-        appointmentsRun,
-      ],
-      run: appointmentsRun,
-    });
-    const profiles = {
-      [appointmentsProfileName]: new Date("2026-06-17T10:00:00.000Z"),
-      [commerceProfileName]: new Date("2026-06-17T11:00:00.000Z"),
+    const firstProfileName = store.run.kernelProfileName;
+    const completedFirstRun = {
+      ...store.run,
+      completedAt: new Date("2026-06-17T12:05:00.000Z"),
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      status: "completed" as const,
+      updatedAt: new Date("2026-06-17T12:05:00.000Z"),
     };
-    const kernel = createFakeKernel({
-      onDeleteBrowserByIdOrName(sessionId) {
-        if (sessionId === "kernel-session-appointments") {
-          profiles[appointmentsProfileName] = new Date("2026-06-17T12:00:00.000Z");
-        }
-      },
-      profiles,
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
-      },
-      kernel,
-      now: () => now,
-      store,
-    });
+    store.run = completedFirstRun;
+    store.memberRuns = [
+      ...(store.memberRuns ?? []).filter((run) => run.id !== completedFirstRun.id),
+      completedFirstRun,
+    ];
 
     await expect(service.startRun({
       memberId: "member_123",
       resumeRunId: null,
-      startUrl: "https://dentist.example.test",
+      startUrl: "https://dentist.example.test/follow-up",
     })).resolves.toMatchObject({
       reused: false,
       status: "running",
     });
 
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-appointments"]);
-    expect(store.run.kernelProfileName).toBe(commerceProfileName);
-    expect(store.createRunInputs.at(-1)).toMatchObject({
-      legacyProfileKey: "commerce",
-    });
-  });
-
-  it("does not select a newer browserless failed profile during migration", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const appointmentsProfileName =
-      "murph-test-member_123-appointments-b6c83d617dd29d666b836502";
-    const commerceProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
-    const store = new FakeComputerUseStore({
-      memberRuns: [
-        createRunRecord({
-          completedAt: new Date("2026-06-17T10:30:00.000Z"),
-          createdAt: new Date("2026-06-17T10:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:00:00.000Z"),
-          id: "hcr_appointments",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: appointmentsProfileName,
-          kernelSessionId: null,
-          status: "completed",
-          updatedAt: new Date("2026-06-17T10:30:00.000Z"),
-        }),
-        createRunRecord({
-          completedAt: new Date("2026-06-17T11:30:00.000Z"),
-          createdAt: new Date("2026-06-17T11:00:00.000Z"),
-          expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-          id: "hcr_commerce_failed",
-          kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: commerceProfileName,
-          kernelSessionId: null,
-          status: "failed",
-          updatedAt: new Date("2026-06-17T11:30:00.000Z"),
-        }),
-      ],
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:30:00.000Z"),
-        createdAt: new Date("2026-06-17T11:00:00.000Z"),
-        expiresAt: new Date("2026-06-17T11:30:00.000Z"),
-        id: "hcr_commerce_failed",
-        kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: commerceProfileName,
-        kernelSessionId: null,
-        status: "failed",
-        updatedAt: new Date("2026-06-17T11:30:00.000Z"),
-      }),
-    });
-    const kernel = createFakeKernel({
-      profiles: {
-        [appointmentsProfileName]: new Date("2026-06-17T10:30:00.000Z"),
-        [commerceProfileName]: null,
-      },
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
-      },
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).resolves.toMatchObject({
-      reused: false,
-      status: "running",
-    });
-
-    expect(store.run.kernelProfileName).toBe(appointmentsProfileName);
-    expect(store.createRunInputs.at(-1)).toMatchObject({
-      legacyProfileKey: "appointments",
-    });
+    expect(store.run.kernelProfileName).toBe(firstProfileName);
+    expect(kernel.createdBrowserInputs.at(-1)).toEqual(expect.objectContaining({
+      profileName: firstProfileName,
+      saveChanges: true,
+    }));
   });
 
   it("installs the public-network route guard before storing a blank browser live view", async () => {
@@ -2446,9 +2121,9 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("requires a profile namespace before reusing stored profile history", async () => {
+  it("requires a profile namespace before creating the member profile even with stored runs", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const legacyProfileName = "murph-test-member_123-commerce-58e8aef26a4ed0371961f090";
+    const storedProfileName = "kernel-profile-stored";
     const store = new FakeComputerUseStore({
       memberRuns: [
         createRunRecord({
@@ -2456,7 +2131,7 @@ describe("ComputerUseService", () => {
           expiresAt: new Date("2026-06-17T11:30:00.000Z"),
           id: "hcr_legacy",
           kernelLiveViewUrlEncrypted: null,
-          kernelProfileName: legacyProfileName,
+          kernelProfileName: storedProfileName,
           kernelSessionId: null,
           status: "completed",
           updatedAt: new Date("2026-06-17T11:05:00.000Z"),
@@ -2467,7 +2142,7 @@ describe("ComputerUseService", () => {
         expiresAt: new Date("2026-06-17T11:30:00.000Z"),
         id: "hcr_legacy",
         kernelLiveViewUrlEncrypted: null,
-        kernelProfileName: legacyProfileName,
+        kernelProfileName: storedProfileName,
         kernelSessionId: null,
         status: "completed",
         updatedAt: new Date("2026-06-17T11:05:00.000Z"),
@@ -2545,8 +2220,10 @@ describe("ComputerUseService", () => {
       startUrl: "https://dentist.example.test",
     });
 
-    expect(firstStore.run.kernelProfileName).toMatch(/^murph-prod-foo-member_123-/u);
-    expect(secondStore.run.kernelProfileName).toMatch(/^murph-prod-foo-member_123-/u);
+    expect(firstStore.run.kernelProfileName).toMatch(/^murph-prod-foo-[0-9a-f]{24}$/u);
+    expect(secondStore.run.kernelProfileName).toMatch(/^murph-prod-foo-[0-9a-f]{24}$/u);
+    expect(firstStore.run.kernelProfileName).not.toContain("member_123");
+    expect(secondStore.run.kernelProfileName).not.toContain("member_123");
     expect(firstStore.run.kernelProfileName).not.toBe(secondStore.run.kernelProfileName);
   });
 
@@ -4670,7 +4347,7 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toHaveLength(2);
     expect(kernel.deletedProfileNames).toEqual(expect.arrayContaining([
       "kernel-profile-member",
-      expect.stringMatching(/^murph-test-member_123-default-[0-9a-f]{24}$/u),
+      expect.stringMatching(/^murph-test-[0-9a-f]{24}$/u),
     ]));
   });
 
@@ -5361,46 +5038,9 @@ describe("PrismaComputerUseStore", () => {
         kernelProfileName: "murph-test-member",
         lastUrl: null,
         memberId: "member_123",
-        profileKey: "default",
       },
     });
     expect(trace).toEqual(["lock-member", "find-active-run", "create-run"]);
-  });
-
-  it("preserves a sanitized legacy profile key when creating a run", async () => {
-    const create = vi.fn(async () => createRunRecord({
-      id: "hcr_created",
-      kernelProfileName: "murph-test-member",
-    }));
-    const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
-      hostedComputerRun: {
-        create,
-        findMany: vi.fn(async () => []),
-      },
-    };
-    const prisma = {
-      $transaction: vi.fn(async <TResult>(
-        callback: (transaction: typeof tx) => Promise<TResult>,
-      ) => callback(tx)),
-    };
-    const store = new PrismaComputerUseStore(prisma as never);
-
-    await store.createRun({
-      expiresAt: new Date("2026-06-17T13:00:00.000Z"),
-      id: "hcr_created",
-      kernelProfileName: "murph-test-member",
-      legacyProfileKey: "appointments",
-      memberId: "member_123",
-      now: new Date("2026-06-17T12:00:00.000Z"),
-      startUrl: null,
-    });
-
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        profileKey: "appointments",
-      }),
-    });
   });
 
   it("locks member computer-use availability before attaching a browser to a reserved run", async () => {
@@ -6410,7 +6050,6 @@ function createFakeKernel(input: {
     callIndex: number,
   ) => void;
   onDeleteBrowserByIdOrName?: (sessionId: string) => void;
-  profiles?: Record<string, Date | null>;
 } = {}): ComputerKernelClient & {
   createdBrowserInputs: Parameters<ComputerKernelClient["createBrowser"]>[0][];
   createdSessionIds: string[];
@@ -6418,7 +6057,6 @@ function createFakeKernel(input: {
   deletedSessionIds: string[];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
-  retrievedProfileNames: string[];
 } {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
@@ -6431,7 +6069,6 @@ function createFakeKernel(input: {
     deletedSessionIds: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
-    retrievedProfileNames: [],
     async createBrowser(browserInput) {
       this.createdBrowserInputs.push(browserInput);
       const result = createBrowserResults.shift() ?? "ok";
@@ -6457,16 +6094,6 @@ function createFakeKernel(input: {
       this.deletedProfileNames.push(name);
     },
     async ensureProfile() {},
-    async retrieveProfile(name: string): Promise<KernelProfileMetadata | null> {
-      this.retrievedProfileNames.push(name);
-      if (!Object.hasOwn(input.profiles ?? {}, name)) {
-        return null;
-      }
-      return {
-        lastUsedAt: input.profiles?.[name] ?? null,
-        name,
-      };
-    },
     async executePlaywright(executeInput) {
       const callIndex = this.executePlaywrightCalls;
       this.executePlaywrightCalls += 1;

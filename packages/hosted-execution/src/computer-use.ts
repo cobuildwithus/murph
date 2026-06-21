@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
-export const HOSTED_COMPUTER_CAPABILITIES_PATH = "/api/internal/computer/capabilities";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
 
@@ -232,31 +231,6 @@ function isPublicComputerNavigationIpv6(value: string): boolean {
   return /^[0-9a-f:.]+$/u.test(normalized);
 }
 
-function rewriteLegacyHostedComputerProfileKey(value: unknown): unknown {
-  if (
-    !isRecord(value) ||
-    (
-      !Object.prototype.hasOwnProperty.call(value, "profileKey") &&
-      !Object.prototype.hasOwnProperty.call(value, "legacyProfileKey") &&
-      !Object.prototype.hasOwnProperty.call(value, "memberScopedProfileRequired")
-    )
-  ) {
-    return value;
-  }
-
-  const {
-    legacyProfileKey: _legacyProfileKey,
-    memberScopedProfileRequired: _memberScopedProfileRequired,
-    profileKey: _profileKey,
-    ...request
-  } = value;
-  return request;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 const hostedComputerNavigationUrlSchema = z
   .string()
   .url()
@@ -271,24 +245,16 @@ export const hostedComputerDeliveryContextSchema = z
   })
   .strict();
 
-export const hostedComputerStartRunRequestSchema = z.preprocess(
-  rewriteLegacyHostedComputerProfileKey,
-  z.object({
+export const hostedComputerStartRunRequestSchema = z
+  .object({
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
-    .strict()
-    .transform(({ goal: _goal, ...request }) => request),
-);
-
-export const hostedComputerCapabilitiesResponseSchema = z
-  .object({
-    memberScopedProfileRequired: z.literal(true),
-  })
-  .strict();
+  .strict()
+  .transform(({ goal: _goal, ...request }) => request);
 
 export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
@@ -467,8 +433,6 @@ export const hostedComputerFinishRunRequestSchema = z
 
 export type HostedComputerStartRunRequest =
   z.infer<typeof hostedComputerStartRunRequestSchema>;
-export type HostedComputerCapabilitiesResponse =
-  z.infer<typeof hostedComputerCapabilitiesResponseSchema>;
 export type HostedComputerObserveRequest =
   z.infer<typeof hostedComputerObserveRequestSchema>;
 export type HostedComputerActRequest =
@@ -527,15 +491,6 @@ export function isHostedComputerWebControlRequest(input: {
     || readHostedComputerRunOperationRoute(input.path) !== null;
 }
 
-export function buildHostedComputerCapabilitiesResponse(): HostedComputerCapabilitiesResponse {
-  parseHostedComputerStartRunRequest({
-    memberScopedProfileRequired: true,
-    profileKey: "default",
-  });
-
-  return { memberScopedProfileRequired: true };
-}
-
 export function parseHostedComputerStartRunRequest(
   value: unknown,
 ): HostedComputerStartRunRequest {
@@ -581,16 +536,6 @@ export function parseHostedComputerFinishRunRequest(
     hostedComputerFinishRunRequestSchema,
     value,
     "Hosted computer finish-run request",
-  );
-}
-
-export function parseHostedComputerCapabilitiesResponse(
-  value: unknown,
-): HostedComputerCapabilitiesResponse {
-  return parseHostedComputerRequest(
-    hostedComputerCapabilitiesResponseSchema,
-    value,
-    "Hosted computer capabilities response",
   );
 }
 

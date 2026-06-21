@@ -2,8 +2,6 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { HOSTED_COMPUTER_CAPABILITIES_PATH } from "@murphai/hosted-execution/computer-use";
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -830,21 +828,10 @@ describe("hosted deploy automation helpers", () => {
   });
 
   it("verifies production hosted web computer-use capabilities before Worker deploys", async () => {
-    const keyPair = await crypto.subtle.generateKey(
-      {
-        name: "ECDSA",
-        namedCurve: "P-256",
-      },
-      true,
-      ["sign", "verify"],
-    );
-    const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
     const requests: Request[] = [];
 
     await verifyHostedWebComputerCapabilities({
       env: {
-        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: JSON.stringify(privateJwk),
         HOSTED_WEB_PRODUCTION_BASE_URL: "https://web.example.test",
       },
       fetchImpl: async (input, init) => {
@@ -852,17 +839,64 @@ describe("hosted deploy automation helpers", () => {
         requests.push(request);
 
         return Response.json({
-          memberScopedProfileRequired: true,
+          computerUse: {
+            profileMode: "member",
+          },
+          ok: true,
+          service: "hosted-web",
         });
       },
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.url).toBe(`https://web.example.test${HOSTED_COMPUTER_CAPABILITIES_PATH}`);
+    expect(requests[0]?.url).toBe("https://web.example.test/api/internal/health");
     expect(requests[0]?.method).toBe("GET");
-    expect(requests[0]?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
-      "member_deploy_computer_capability_check",
-    );
+    const headerNames: string[] = [];
+    requests[0]?.headers.forEach((_value, key) => headerNames.push(key));
+    expect(headerNames).toEqual([]);
+  });
+
+  it.each([
+    {
+      expectedError: "Hosted web computer-use capability check is missing computerUse.profileMode=member",
+      name: "missing computer-use capability",
+      response: () => Response.json({
+        ok: true,
+        service: "hosted-web",
+      }),
+    },
+    {
+      expectedError: "Hosted web computer-use capability check is missing computerUse.profileMode=member",
+      name: "old computer capabilities shape",
+      response: () => Response.json({
+        memberScopedProfileRequired: true,
+      }),
+    },
+    {
+      expectedError: "Hosted web computer-use capability check returned invalid JSON",
+      name: "invalid JSON",
+      response: () => new Response("{not json", {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      }),
+    },
+    {
+      expectedError: "Hosted web computer-use capability check failed with HTTP 503",
+      name: "non-2xx health response",
+      response: () => new Response("unavailable", { status: 503 }),
+    },
+  ])("rejects stale hosted web computer-use capabilities: $name", async ({
+    expectedError,
+    response,
+  }) => {
+    await expect(verifyHostedWebComputerCapabilities({
+      env: {
+        HOSTED_WEB_PRODUCTION_BASE_URL: "https://web.example.test",
+      },
+      fetchImpl: async () => response(),
+    })).rejects.toThrow(expectedError);
   });
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {

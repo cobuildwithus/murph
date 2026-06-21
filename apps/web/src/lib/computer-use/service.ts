@@ -26,7 +26,6 @@ import {
 import {
   KernelComputerClient,
   type ComputerKernelClient,
-  type KernelProfileMetadata,
 } from "./kernel-client";
 import {
   PrismaComputerUseStore,
@@ -46,22 +45,11 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
-const LEGACY_HOSTED_COMPUTER_PROFILE_KEYS = [
-  "commerce",
-  "appointments",
-  "default",
-] as const;
-
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
-type ResolvedKernelProfile = {
-  fromUsedProfile: boolean;
-  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
-  name: string;
-};
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -213,11 +201,9 @@ export class ComputerUseService {
 
     const kernel = this.requireKernel();
     this.requireConfiguredLiveViewOrigins();
-    const kernelProfile = await this.resolveKernelProfile({
-      kernel,
+    const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
     });
-    const kernelProfileName = kernelProfile.name;
 
     await this.expireStaleActiveRunsForMember({
       memberId: input.memberId,
@@ -233,12 +219,10 @@ export class ComputerUseService {
     let attachedSessionId: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
-      const legacyProfileKey = kernelProfile.legacyProfileKey;
       const createResult = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
         kernelProfileName,
-        legacyProfileKey,
         memberId: input.memberId,
         now,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
@@ -325,18 +309,9 @@ export class ComputerUseService {
         }
       }
       let browserCleanupFailed = false;
-      let profileCleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? attachedSessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         browserCleanupFailed = true;
-      }
-      if (
-        !skipCompensation &&
-        isMemberSuspendedComputerUseError(error) &&
-        !kernelProfile.fromUsedProfile &&
-        !await this.deleteProfileBestEffort(kernelProfileName)
-      ) {
-        profileCleanupFailed = true;
       }
       if (reservedRun && !skipCompensation) {
         if (browserCleanupFailed) {
@@ -360,7 +335,7 @@ export class ComputerUseService {
           });
         }
       }
-      if (browserCleanupFailed || profileCleanupFailed) {
+      if (browserCleanupFailed) {
         throw browserCleanupFailedError();
       }
       throw error;
@@ -1518,33 +1493,14 @@ export class ComputerUseService {
     return "recovered";
   }
 
-  private async resolveKernelProfile(input: {
-    kernel: ComputerKernelClient;
+  private resolveKernelProfileName(input: {
     memberId: string;
-  }): Promise<ResolvedKernelProfile> {
+  }): string {
     const namespace = requireKernelProfileNamespace(this.env);
-    const latestUsedProfile = await findLatestUsedLegacyKernelProfile({
-      kernel: input.kernel,
+    return buildKernelProfileName({
       memberId: input.memberId,
       namespace,
     });
-    if (latestUsedProfile) {
-      return {
-        fromUsedProfile: true,
-        legacyProfileKey: latestUsedProfile.legacyProfileKey,
-        name: latestUsedProfile.name,
-      };
-    }
-
-    return {
-      fromUsedProfile: false,
-      legacyProfileKey: "default",
-      name: buildLegacyKernelProfileName({
-        memberId: input.memberId,
-        namespace,
-        profileKey: "default",
-      }),
-    };
   }
 
   private async prepareMemberRunsForAccountDeletion(input: {
@@ -2728,75 +2684,13 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
   return baseUrl;
 }
 
-async function findLatestUsedLegacyKernelProfile(input: {
-  kernel: ComputerKernelClient;
+function buildKernelProfileName(input: {
   memberId: string;
   namespace: string;
-}): Promise<{
-  legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
-  name: string;
-} | null> {
-  const candidates = await Promise.all(LEGACY_HOSTED_COMPUTER_PROFILE_KEYS.map(async (profileKey) => {
-    const name = buildLegacyKernelProfileName({
-      memberId: input.memberId,
-      namespace: input.namespace,
-      profileKey,
-    });
-    const profile = await input.kernel.retrieveProfile(name);
-    return {
-      legacyProfileKey: profileKey,
-      name,
-      profile,
-    };
-  }));
-  let latestProfile:
-    | {
-        legacyProfileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
-        lastUsedAtMs: number;
-        name: string;
-      }
-    | null = null;
-
-  for (const candidate of candidates) {
-    const lastUsedAtMs = readKernelProfileLastUsedAtMs(candidate.profile);
-    if (lastUsedAtMs === null) {
-      continue;
-    }
-    if (!latestProfile || lastUsedAtMs > latestProfile.lastUsedAtMs) {
-      latestProfile = {
-        legacyProfileKey: candidate.legacyProfileKey,
-        lastUsedAtMs,
-        name: candidate.name,
-      };
-    }
-  }
-
-  return latestProfile
-    ? {
-        legacyProfileKey: latestProfile.legacyProfileKey,
-        name: latestProfile.name,
-      }
-    : null;
-}
-
-function readKernelProfileLastUsedAtMs(profile: KernelProfileMetadata | null): number | null {
-  if (!profile?.lastUsedAt) {
-    return null;
-  }
-  const value = profile.lastUsedAt.getTime();
-  return Number.isFinite(value) ? value : null;
-}
-
-function buildLegacyKernelProfileName(input: {
-  memberId: string;
-  namespace: string;
-  profileKey: (typeof LEGACY_HOSTED_COMPUTER_PROFILE_KEYS)[number];
 }): string {
   const namespaceSegment = normalizeKernelNameSegment(input.namespace);
-  const memberSegment = normalizeKernelNameSegment(input.memberId);
-  const profileSegment = normalizeKernelNameSegment(input.profileKey);
-  const hash = shortHash(`${input.namespace}:${input.memberId}:${input.profileKey}`);
-  return `murph-${namespaceSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
+  const hash = shortHash(`${input.namespace}:${input.memberId}`);
+  return `murph-${namespaceSegment}-${hash}`.slice(0, 255);
 }
 
 function buildKernelProfileNamesForAccountDeletion(input: {
@@ -2809,10 +2703,9 @@ function buildKernelProfileNamesForAccountDeletion(input: {
       input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
     const namespace = requireKernelProfileNamespace(input.env);
     const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? [buildLegacyKernelProfileName({
+      ? [buildKernelProfileName({
           memberId: input.memberId,
           namespace,
-          profileKey: "default",
         })]
       : [];
 

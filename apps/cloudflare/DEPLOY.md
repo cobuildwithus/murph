@@ -58,10 +58,14 @@ origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
 private-network Worker and hosted web origins, including DNS names
 that resolve to private-network addresses.
-Before deploying the Worker, the GitHub deploy job signs a zero-body
-`GET /api/internal/computer/capabilities` request against
-`HOSTED_WEB_PRODUCTION_BASE_URL` and requires the member-scoped computer profile
-capability. If that check fails, deploy hosted web first.
+Before deploying the Worker, the deploy helper calls
+`GET /api/internal/health` on `HOSTED_WEB_PRODUCTION_BASE_URL` and requires
+`computerUse.profileMode` to be `member`. If that check fails, deploy hosted
+web first. The single member-scoped computer-use profile change is a greenfield
+hard cut, not an old-Web/old-Worker compatibility rollout: keep hosted
+computer-use traffic paused during the Web/Worker skew window and finish the
+Worker deploy immediately after hosted web exposes the member profile health
+capability.
 Normal deploy smoke targets the public Worker banner and health endpoints after deploy, then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
 
 The production smoke also runs one real `gpt-5.4-nano` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.4-nano` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the only otherwise-uncovered boundary (real OpenAI auth, quota, and network on the production egress path) without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one low-cost model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.

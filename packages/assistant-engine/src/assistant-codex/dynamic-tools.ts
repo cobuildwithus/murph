@@ -236,6 +236,12 @@ type JsonSchemaObject = Record<string, unknown>
 
 const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
 function buildComputerActInputSchema(): JsonSchemaObject {
   const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
   const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
@@ -415,16 +421,14 @@ const computerNavigationUrlSchema = z
     message: 'Hosted computer navigation URLs must use http or https.',
   })
 
-const computerStartRunArgumentsSchema = z.preprocess(
-  stripLegacyComputerStartRunProfileKey,
-  z.object({
+const computerStartRunArgumentsSchema = z
+  .object({
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
-    .strict(),
-)
+  .strict()
 
 const computerObserveArgumentsSchema = z
   .object({
@@ -1179,7 +1183,6 @@ function buildHostedComputerStartRunBody(input: {
   const { resumeRunId, startUrl } = input.args
   return {
     goal: 'Hosted computer task.',
-    memberScopedProfileRequired: true,
     resumeAfterMailboxItemId: resumeRunId
       ? currentHostedMailboxItemId(input.progressDelivery)
       : null,
@@ -1675,22 +1678,6 @@ function buildDynamicToolValidationDigest(input: {
 
 function readZodObjectRootKeys(schema: { shape?: Record<string, unknown> }): string[] {
   return Object.keys(schema.shape ?? {})
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function stripLegacyComputerStartRunProfileKey(value: unknown): unknown {
-  const record = asRecord(value)
-  if (!record || !Object.prototype.hasOwnProperty.call(record, 'profileKey')) {
-    return value
-  }
-
-  const { profileKey: _profileKey, ...args } = record
-  return args
 }
 
 function normalizeNullableStringValue(value: unknown): string | null {

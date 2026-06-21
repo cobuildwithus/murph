@@ -1,5 +1,8 @@
 export async function GET(): Promise<Response> {
   return Response.json({
+    computerUse: {
+      profileMode: "member",
+    },
     ok: true,
     service: "hosted-web",
   }, {

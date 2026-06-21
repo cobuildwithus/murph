@@ -379,7 +379,6 @@ model HostedWebSession {
 model HostedComputerRun {
   id                         String                         @id
   memberId                   String                         @map("member_id")
-  profileKey                 String                         @map("profile_key")
   kernelProfileName          String                         @map("kernel_profile_name")
   status                     HostedComputerRunStatus        @default(running)
   kernelSessionId            String?                        @map("kernel_session_id")
@@ -401,7 +400,6 @@ model HostedComputerRun {
 
   @@index([memberId, status, updatedAt])
   @@index([memberId, awaitingReason, updatedAt])
-  @@index([memberId, profileKey, updatedAt])
   @@index([status, expiresAt])
   @@map("hosted_computer_run")
 }

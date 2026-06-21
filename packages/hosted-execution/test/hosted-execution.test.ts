@@ -31,17 +31,14 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
-  buildHostedComputerCapabilitiesResponse,
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-  HOSTED_COMPUTER_CAPABILITIES_PATH,
   HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
-  parseHostedComputerCapabilitiesResponse,
   parseHostedComputerFinishRunRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
@@ -658,12 +655,6 @@ describe("hosted execution coverage gaps", () => {
 
   it("defines hosted computer-use routes and the generic pause checkpoint contract", () => {
     expect(HOSTED_COMPUTER_RUNS_PATH).toBe("/api/internal/computer/runs");
-    expect(HOSTED_COMPUTER_CAPABILITIES_PATH).toBe("/api/internal/computer/capabilities");
-    expect(parseHostedComputerCapabilitiesResponse(
-      buildHostedComputerCapabilitiesResponse(),
-    )).toEqual({
-      memberScopedProfileRequired: true,
-    });
 
     const pausePath = buildHostedComputerRunOperationPath({
       operation: "pause-for-user",
@@ -688,45 +679,20 @@ describe("hosted execution coverage gaps", () => {
       path: pausePath,
     })).toBe(false);
 
-    const legacyStartRequest = parseHostedComputerStartRunRequest({
-      goal: "Legacy runner goal.",
+    expect(() => parseHostedComputerStartRunRequest({
       profileKey: "appointments",
       startUrl: "https://example.test/start",
-    });
-    expect(legacyStartRequest).toMatchObject({
-      startUrl: "https://example.test/start",
-    });
-    expect(legacyStartRequest).not.toHaveProperty("profileKey");
-    expect(parseHostedComputerStartRunRequest({
+    })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
       legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
-    })).toEqual({
-      resumeAfterMailboxItemId: null,
-      resumeDeliveryContext: null,
-      resumeRunId: null,
-      startUrl: "https://example.test/start",
-    });
-    expect(parseHostedComputerStartRunRequest({
-      profileKey: "unknown",
-      startUrl: "https://example.test/start",
-    })).toEqual({
-      resumeAfterMailboxItemId: null,
-      resumeDeliveryContext: null,
-      resumeRunId: null,
-      startUrl: "https://example.test/start",
-    });
-    expect(parseHostedComputerStartRunRequest({
+    })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
       memberScopedProfileRequired: true,
-      profileKey: "default",
       startUrl: "https://example.test/start",
-    })).toEqual({
-      resumeAfterMailboxItemId: null,
-      resumeDeliveryContext: null,
-      resumeRunId: null,
-      startUrl: "https://example.test/start",
-    });
+    })).toThrow(TypeError);
     expect(parseHostedComputerStartRunRequest({
-      goal: "Legacy runner goal.",
+      goal: "Runner goal.",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,

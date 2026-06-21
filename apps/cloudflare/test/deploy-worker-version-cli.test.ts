@@ -153,6 +153,41 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
+  it("stops direct Worker deploys when hosted web lacks the computer-use capability", async () => {
+    hostedWebCapabilityMocks.verifyHostedWebComputerCapabilities.mockRejectedValueOnce(
+      new Error("Hosted web computer-use capability check is missing computerUse.profileMode=member."),
+    );
+
+    await expect(runDeployWorkerVersionCli(
+      ["--config", "./.deploy/wrangler.generated.jsonc"],
+      {
+        deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
+        env: {
+          CF_BUNDLES_BUCKET: "hosted-bundles",
+          CF_WORKER_NAME: "hosted-worker",
+        },
+        log: false,
+        runHostedWorkerDeployment: async ({ dependencies }) => {
+          await dependencies.deployDirect({
+            containerRolloutMode: "gradual",
+            configPath: "/tmp/wrangler.generated.jsonc",
+            deploymentMessage: "manual direct deploy",
+            includeSecrets: false,
+            secretsFilePath: "/tmp/worker-secrets.json",
+            versionTag: "manual-version",
+            workerName: "hosted-worker",
+          });
+
+          return createDeploymentResult();
+        },
+      },
+    )).rejects.toThrow(
+      "Hosted web computer-use capability check is missing computerUse.profileMode=member.",
+    );
+
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+  });
+
   it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
     const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
     const trace: string[] = [];

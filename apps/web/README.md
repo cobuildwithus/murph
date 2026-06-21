@@ -205,7 +205,7 @@ Required when hosted computer-use is enabled:
 - `KERNEL_API_KEY`
 - `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
   boundary. Keep production stable; previews should use a deployment/branch
-  namespace or disable persistent computer-use profiles.
+  namespace or disable the persistent computer-use profile.
 - `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
   list of allowed Kernel live-view origins for handoff iframes
 
@@ -530,6 +530,10 @@ rejects known pooled Postgres ports such as `6432` and `6543`; keep
 migration cannot roll back automatically if a later deploy step fails,
 production migrations must stay backward compatible with the currently deployed
 app and use expand/contract sequencing for breaking changes.
+The `2026062100_hosted_computer_single_member_profile` migration is an explicit
+greenfield computer-use hard cut: deploy it only as part of a coordinated
+hosted web plus Worker cutover with hosted computer-use traffic paused during
+the skew window.
 
 The hosted schema now includes the canonical member slices, hosted email
 authorization, device-sync web ownership models, the anonymized hosted
@@ -622,7 +626,6 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/hosted-runtime/log`
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
-- `GET /api/internal/computer/capabilities`
 - `POST /api/internal/computer/runs`
 - `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`
