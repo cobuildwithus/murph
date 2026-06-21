@@ -519,9 +519,12 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain('select(.slug == "gpt-5.5")');
     expect(finalDockerfile).toContain('slug == "gpt-5.4-nano"');
     expect(finalDockerfile).toContain('first_model("gpt-5.4-mini")');
+    expect(finalDockerfile).toContain(".supports_search_tool = false");
+    expect(finalDockerfile).toContain(".supports_parallel_tool_calls = false");
+    expect(finalDockerfile).toContain(".use_responses_lite = true");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano"))\'',
+      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == true))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -616,6 +619,11 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["auto", "flex"]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
+    });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
 
     const catalogWithDuplicateTemplateModels: CodexModelCatalog = {
@@ -651,6 +659,37 @@ describe("hosted runner container image contract", () => {
       `${duplicateTemplatePatchedCatalogJson}\n${duplicateTemplatePatchedCatalogJson}`,
       { slurp: true },
     ).trim()).toBe("false");
+
+    const catalogWithUnsafeNano: CodexModelCatalog = {
+      models: [
+        {
+          slug: "gpt-5.5",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-nano",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+          supports_parallel_tool_calls: true,
+          supports_search_tool: true,
+        },
+      ],
+    };
+    const normalizedNanoCatalog = parseCodexModelCatalogJson(
+      runJqFilter(patchFilter, catalogWithUnsafeNano),
+    );
+    expect(readCodexModelSlugs(normalizedNanoCatalog).filter((slug) => slug === "gpt-5.4-nano"))
+      .toHaveLength(1);
+    expect(readCodexModelServiceTierIds(normalizedNanoCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(normalizedNanoCatalog, "gpt-5.4-nano")).toMatchObject({
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
+    });
+    expect(runJqFilter(validationFilter, normalizedNanoCatalog, { slurp: true }).trim()).toBe("true");
 
     const alreadyPatchedCatalog: CodexModelCatalog = {
       models: [
@@ -898,7 +937,7 @@ function readLastDockerUser(dockerfile: string): string | null {
 }
 
 type CodexModelCatalog = {
-  models: Array<{
+  models: Array<Record<string, unknown> & {
     slug: string;
     service_tiers?: Array<{
       id: string;
@@ -957,6 +996,14 @@ function parseCodexModelCatalogJson(catalogJson: string): CodexModelCatalog {
 
 function readCodexModelServiceTierIds(catalog: CodexModelCatalog, slug: string): string[] {
   return catalog.models.find((model) => model.slug === slug)?.service_tiers?.map((tier) => tier.id) ?? [];
+}
+
+function readCodexModel(catalog: CodexModelCatalog, slug: string): Record<string, unknown> {
+  const model = catalog.models.find((candidate) => candidate.slug === slug);
+  if (!model) {
+    throw new Error(`Codex model catalog is missing ${slug}`);
+  }
+  return model;
 }
 
 function readCodexModelSlugs(catalog: CodexModelCatalog): string[] {

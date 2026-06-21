@@ -1850,10 +1850,20 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
     ];
 
-  const hasDeploySmokeModel = parsed.models
+  const deploySmokeModel = parsed.models
     .filter(isRecord)
-    .some((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
-  if (!hasDeploySmokeModel) {
+    .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
+  if (deploySmokeModel) {
+    Object.assign(deploySmokeModel, {
+      description: "Fast, low-cost model for deploy smoke checks.",
+      display_name: "GPT-5.4-Nano",
+      priority: 5,
+      service_tiers: [],
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
+    });
+  } else {
     const templateModel = parsed.models
       .filter(isRecord)
       .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
@@ -1870,6 +1880,9 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       priority: 5,
       service_tiers: [],
       slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
     });
   }
 

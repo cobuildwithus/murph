@@ -2272,6 +2272,48 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
+    spawnSync.mockImplementation((command, args) => {
+      if (
+        command === "codex" &&
+        args[0] === "debug" &&
+        args[1] === "models" &&
+        args[2] === "--bundled"
+      ) {
+        return {
+          error: undefined,
+          status: 0,
+          stdout: JSON.stringify({
+            models: [
+              {
+                name: "GPT-5.5",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.5",
+              },
+              {
+                display_name: "GPT-5.4-Mini",
+                priority: 4,
+                service_tiers: [],
+                slug: "gpt-5.4-mini",
+              },
+              {
+                display_name: "Bundled Nano",
+                service_tiers: [{ id: "auto", name: "Auto" }],
+                slug: "gpt-5.4-nano",
+                supports_parallel_tool_calls: true,
+                supports_search_tool: true,
+              },
+            ],
+          }),
+        };
+      }
+
+      return defaultSpawnSyncImplementation(command, args);
+    });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -2340,6 +2382,9 @@ describe("hosted local dev stack", () => {
           display_name: "GPT-5.4-Nano",
           service_tiers: [],
           slug: "gpt-5.4-nano",
+          supports_parallel_tool_calls: false,
+          supports_search_tool: false,
+          use_responses_lite: true,
         },
       ],
     });
