@@ -405,6 +405,8 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       allowanceAccountedAt: now,
       allowanceCostUsdMicros: priced.costUsdMicros,
       allowanceCounted: priced.counted,
+      allowancePeriodEnd: period.periodEnd,
+      allowancePeriodStart: period.periodStart,
       allowancePricingSnapshotJson: priced.pricingSnapshot,
       allowancePricingVersion: priced.pricingVersion,
     },
@@ -443,6 +445,8 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
       allowanceAccountedAt: input.now,
       allowanceCostUsdMicros: 0n,
       allowanceCounted: false,
+      allowancePeriodEnd: input.period.periodEnd,
+      allowancePeriodStart: input.period.periodStart,
       allowancePricingSnapshotJson: {
         credentialSource: normalizeAssistantUsageCredentialSource(input.record.credentialSource),
         reason: input.period.reason,
@@ -849,6 +853,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: true,
       blockedAt: true,
       lastUsageAt: true,
+      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -866,13 +871,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   if (periodMatches) {
     const metadata = buildHostedAiUsageAllowancePeriodMetadata({
       blockedAt: current.blockedAt,
+      limitNoticeSentAt: current.limitNoticeSentAt,
       limitUsdMicros: current.limitUsdMicros,
       now: input.now,
       spentUsdMicros: current.spentUsdMicros,
     });
 
     if (
-      !sameNullableTime(current.blockedAt, metadata.blockedAt)
+      !sameNullableTime(current.blockedAt, metadata.blockedAt) ||
+      !sameNullableTime(current.limitNoticeSentAt, metadata.limitNoticeSentAt)
     ) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
@@ -883,6 +890,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         },
         data: {
           blockedAt: metadata.blockedAt,
+          limitNoticeSentAt: metadata.limitNoticeSentAt,
           updatedAt: input.now,
         },
       });
@@ -901,6 +909,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
   const metadata = buildHostedAiUsageAllowancePeriodMetadata({
     blockedAt: current.blockedAt,
+    limitNoticeSentAt: current.limitNoticeSentAt,
     limitUsdMicros: resolved.limitUsdMicros,
     now: input.now,
     spentUsdMicros: current.spentUsdMicros,
@@ -916,7 +925,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt: metadata.blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
+      limitNoticeSentAt: limitIncreased ? null : metadata.limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
@@ -1022,9 +1031,16 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
       "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
+      "limit_notice_sent_at" = CASE
+        WHEN "spent_usd_micros" < "limit_usd_micros" THEN NULL
+        ELSE "limit_notice_sent_at"
+      END,
       "blocked_at" = CASE
-        WHEN "blocked_at" IS NOT NULL THEN "blocked_at"
-        WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN ${input.now}
+        WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
+          CASE
+            WHEN "spent_usd_micros" < "limit_usd_micros" OR "blocked_at" IS NULL THEN ${input.now}
+            ELSE "blocked_at"
+          END
         ELSE NULL
       END,
       "updated_at" = ${input.now}
@@ -1160,16 +1176,24 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
 
 function buildHostedAiUsageAllowancePeriodMetadata(input: {
   blockedAt: Date | null;
+  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   now: Date;
   spentUsdMicros: bigint;
 }): {
   blockedAt: Date | null;
+  limitNoticeSentAt: Date | null;
 } {
+  if (input.spentUsdMicros < input.limitUsdMicros) {
+    return {
+      blockedAt: null,
+      limitNoticeSentAt: null,
+    };
+  }
+
   return {
-    blockedAt: input.spentUsdMicros >= input.limitUsdMicros
-      ? input.blockedAt ?? input.now
-      : null,
+    blockedAt: input.blockedAt ?? input.now,
+    limitNoticeSentAt: input.limitNoticeSentAt,
   };
 }
 
