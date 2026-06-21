@@ -1151,9 +1151,9 @@ describe("buildWranglerVarArgs", () => {
       "--var",
       "CLOUDFLARE_IMAGES_VARIANT:public",
       "--var",
-      "MURPH_ELEVENLABS_VOICE_ID:voice-murph",
-      "--var",
       "MURPH_ELEVENLABS_MODEL_ID:eleven_multilingual_v2",
+      "--var",
+      "MURPH_ELEVENLABS_VOICE_ID:voice-murph",
     ]);
   });
 

@@ -49,6 +49,9 @@
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
+      "@murphai/hosted-execution/assistant-capabilities": [
+        "packages/hosted-execution/src/assistant-capabilities.ts"
+      ],
       "@murphai/hosted-execution/bundles": [
         "packages/hosted-execution/src/bundles.ts"
       ],
@@ -273,12 +276,6 @@
       ],
       "@murphai/assistant-runtime/hosted-assistant-bootstrap": [
         "packages/assistant-runtime/src/hosted-assistant-bootstrap.ts"
-      ],
-      "@murphai/assistant-runtime/hosted-assistant-env": [
-        "packages/assistant-runtime/src/hosted-assistant-env.ts"
-      ],
-      "@murphai/assistant-runtime/hosted-assistant-env-constants": [
-        "packages/assistant-runtime/src/hosted-assistant-env-constants.ts"
       ],
       "@murphai/assistant-runtime/hosted-email": [
         "packages/assistant-runtime/src/hosted-email.ts"

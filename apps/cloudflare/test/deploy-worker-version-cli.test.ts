@@ -104,6 +104,7 @@ describe("runDeployWorkerVersionCli", () => {
       {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
+          CF_BUNDLES_BUCKET: "hosted-bundles",
           CF_WORKER_NAME: "hosted-worker",
         },
         log: false,
@@ -138,12 +139,85 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
+  it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
+    const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
+
+    await runDeployWorkerVersionCli(
+      ["--config", "./.deploy/wrangler.generated.jsonc"],
+      {
+        deployRoot,
+        env: {
+          CF_BUNDLES_BUCKET: "hosted-bundles",
+          CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+          CF_WORKER_NAME: "hosted-worker",
+        },
+        log: false,
+        runHostedWorkerDeployment: async ({ dependencies }) => {
+          await dependencies.deployDirect({
+            containerRolloutMode: "gradual",
+            configPath: "/tmp/wrangler.generated.jsonc",
+            deploymentMessage: "manual direct deploy",
+            includeSecrets: false,
+            secretsFilePath: "/tmp/worker-secrets.json",
+            versionTag: "manual-version",
+            workerName: "hosted-worker",
+          });
+
+          return createDeploymentResult();
+        },
+      },
+    );
+
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(
+      1,
+      [
+        "r2",
+        "bucket",
+        "lifecycle",
+        "set",
+        "hosted-bundles",
+        "--file",
+        path.join(deployRoot, "r2-bundles-lifecycle.json"),
+      ],
+      {
+        cwd: deployRoot,
+      },
+    );
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(
+      2,
+      [
+        "r2",
+        "bucket",
+        "lifecycle",
+        "set",
+        "hosted-bundles-preview",
+        "--file",
+        path.join(deployRoot, "r2-bundles-lifecycle.json"),
+      ],
+      {
+        cwd: deployRoot,
+      },
+    );
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(3, [
+      "deploy",
+      "--config",
+      "/tmp/wrangler.generated.jsonc",
+      "--message",
+      "manual direct deploy",
+      "--name",
+      "hosted-worker",
+      "--tag",
+      "manual-version",
+    ]);
+  });
+
   it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
+          CF_BUNDLES_BUCKET: "hosted-bundles",
           CF_WORKER_NAME: "hosted-worker",
         },
         log: false,

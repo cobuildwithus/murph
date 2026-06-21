@@ -652,7 +652,10 @@ test('setTelegramMessageReaction includes Telegram error details in failures', a
       error.message ===
         'Telegram Bot API setMessageReaction failed with HTTP 403; Telegram error_code 403; description: Forbidden: bot is not allowed to react to this message.' &&
       error.context?.errorCode === 403 &&
-      error.context?.status === 403,
+      error.context?.operation === 'Telegram Bot API setMessageReaction' &&
+      error.context?.retryable === false &&
+      error.context?.status === 403 &&
+      Object.getOwnPropertyDescriptor(error, 'retryable')?.value === false,
   )
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })

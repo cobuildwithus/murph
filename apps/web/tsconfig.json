@@ -64,6 +64,9 @@
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
+      "@murphai/hosted-execution/assistant-capabilities": [
+        "packages/hosted-execution/src/assistant-capabilities.ts"
+      ],
       "@murphai/hosted-execution/browser-vault": [
         "packages/hosted-execution/src/browser-vault.ts"
       ],

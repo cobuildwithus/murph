@@ -12,6 +12,9 @@ import {
   isHostedLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+} from "@murphai/hosted-execution/assistant-capabilities";
+import {
   markLinqChatRead,
 } from "@murphai/operator-config/linq-runtime";
 
@@ -23,12 +26,6 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
-] as const;
-const HOSTED_TELEGRAM_VOICE_MEMO_ENV_KEYS = [
-  ...HOSTED_TELEGRAM_CHANNEL_ENV_KEYS,
-  "ELEVENLABS_API_KEY",
-  "MURPH_ELEVENLABS_MODEL_ID",
-  "MURPH_ELEVENLABS_VOICE_ID",
 ] as const;
 const HOSTED_WHATSAPP_CHANNEL_ENV_KEYS = [
   "WHATSAPP_ACCESS_TOKEN",
@@ -84,7 +81,10 @@ export function buildHostedTelegramVoiceMemoChannelEnv(input: {
     ...input.forwardedEnv,
     ...(input.platformEnv ?? {}),
   };
-  return pickHostedChannelEnv(source, HOSTED_TELEGRAM_VOICE_MEMO_ENV_KEYS);
+  return {
+    ...pickHostedChannelEnv(source, HOSTED_TELEGRAM_CHANNEL_ENV_KEYS),
+    ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_TTS_ENV_NAMES),
+  };
 }
 
 export function buildHostedWhatsAppChannelEnv(input: {

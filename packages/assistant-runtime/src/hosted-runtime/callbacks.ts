@@ -599,8 +599,8 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
-  return compareHostedAssistantSteeredSegmentOrder(left, right)
-    || compareHostedAssistantDeliveryOperationOrder(left, right)
+  return compareHostedAssistantDeliveryOperationOrder(left, right)
+    || compareHostedAssistantSteeredSegmentOrder(left, right)
     || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
 }
@@ -616,7 +616,9 @@ function compareHostedAssistantDeliveryOperationOrder(
 function readHostedAssistantDeliveryOperationPriority(
   intent: AssistantOutboxIntent,
 ): number {
-  return intent.operation?.kind === "message-reaction" ? 1 : 0;
+  // Reactions are idempotent; send them before same-boundary replies because
+  // non-idempotent replies can pause later work while awaiting confirmation.
+  return intent.operation?.kind === "message-reaction" ? 0 : 1;
 }
 
 function compareHostedAssistantDeliveryCandidateCreatedAt(
@@ -2185,8 +2187,11 @@ function buildHostedAssistantDeliveryOutcome(input: {
   );
   const messageDelivery =
     input.delivery?.kind === "message-reaction" ? null : input.delivery;
+  const deliveryChannel =
+    input.delivery?.channel
+    ?? normalizeHostedAssistantDeliveryChannel(input.effect.payload.channel);
   return {
-    deliveryChannel: input.delivery?.channel ?? null,
+    deliveryChannel,
     deliveryErrorCode: input.deliveryErrorCode ?? null,
     deliveryErrorDetails: input.deliveryErrorDetails ?? null,
     deliveryErrorMessage: input.deliveryErrorMessage ?? null,

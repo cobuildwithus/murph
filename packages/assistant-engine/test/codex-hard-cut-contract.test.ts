@@ -131,6 +131,7 @@ describe('Codex-only assistant hard-cut contracts', () => {
     expect(codexRuntime).toContain("'turn/steer'")
     expect(codexRuntime).toContain("'turn/interrupt'")
   })
+
 })
 
 async function listSourceFiles(roots: readonly string[]): Promise<string[]> {

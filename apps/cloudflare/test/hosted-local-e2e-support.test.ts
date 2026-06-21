@@ -209,19 +209,24 @@ describe("startAssistantProviderStubServer", () => {
 });
 
 describe("expectAdvertisedMurphDynamicTools", () => {
-  it("expects message reactions only when the scenario enables them", () => {
+  it("expects gated tools only when the scenario enables them", () => {
     const allToolNames = listMurphDynamicToolNames();
+    const baseToolNames = allToolNames.filter((name) =>
+      !name.startsWith("murph.computer_") && name !== "murph.react_to_message"
+    );
     expect(allToolNames).toContain("murph.react_to_message");
+    expect(allToolNames).toContain("murph.computer_start_run");
 
     expectAdvertisedMurphDynamicTools([
-      buildResponsesRequest(
-        allToolNames.filter((name) => name !== "murph.react_to_message"),
-      ),
+      buildResponsesRequest(baseToolNames),
     ]);
 
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(allToolNames)],
-      { messageReactionsAvailable: true },
+      {
+        computerToolsAvailable: true,
+        messageReactionsAvailable: true,
+      },
     );
   });
 });

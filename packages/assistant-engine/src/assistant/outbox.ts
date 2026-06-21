@@ -18,6 +18,7 @@ import { mergeAssistantBinding } from './bindings.js'
 import {
   getAssistantChannelAdapter,
   normalizeAssistantDeliverySubject,
+  selectedAssistantEmailDeliveryIsThreadReply,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
 import {
@@ -1044,12 +1045,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
   signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
-  const subject = normalizeAssistantDeliverySubject({
-    bindingDelivery: input.bindingDelivery ?? null,
-    channel: input.channel ?? null,
-    explicitTarget: input.explicitTarget ?? null,
-    subject: input.subject ?? null,
-  })
+  const subject = normalizeAssistantOutboxDispatchSubject(input)
 
   return materializeAssistantOutboxDeliveredSession({
     delivered: await deliverAssistantMessageOverBinding({
@@ -1081,6 +1077,30 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
     }, withAssistantOutboxSignal(input.dependencies, input.signal)),
     dispatch: input,
     vault: input.vault,
+  })
+}
+
+function normalizeAssistantOutboxDispatchSubject(
+  input: Pick<
+    AssistantOutboxDispatchMessage,
+    'bindingDelivery' | 'channel' | 'explicitTarget' | 'subject'
+  >,
+): string | null {
+  if (
+    normalizeNullableString(input.channel) === 'email' &&
+    selectedAssistantEmailDeliveryIsThreadReply({
+      bindingDelivery: input.bindingDelivery ?? null,
+      explicitTarget: input.explicitTarget ?? null,
+    })
+  ) {
+    return null
+  }
+
+  return normalizeAssistantDeliverySubject({
+    bindingDelivery: input.bindingDelivery ?? null,
+    channel: input.channel ?? null,
+    explicitTarget: input.explicitTarget ?? null,
+    subject: input.subject ?? null,
   })
 }
 

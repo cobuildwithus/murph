@@ -188,12 +188,13 @@ export async function setTelegramMessageReaction(
         migrateToChatId: redactTelegramChatIdForDiagnostics(
           errorContext.migrateToChatId,
         ),
-        operation: 'setMessageReaction',
+        operation: 'Telegram Bot API setMessageReaction',
+        retryable,
         status: response.status,
         target: redactTelegramTargetForDiagnostics(target),
       },
     ),
-    retryable ? { retryable: true as const } : {},
+    { retryable },
   )
 }
 
@@ -675,7 +676,8 @@ function formatTelegramBotApiFailureMessage(input: {
   if (input.errorContext.description) {
     parts.push(`description: ${input.errorContext.description}`)
   }
-  return `${parts.join('; ')}.`
+  const message = parts.join('; ')
+  return /[.!?]$/u.test(message) ? message : `${message}.`
 }
 
 function extractTelegramMigrateToChatId(

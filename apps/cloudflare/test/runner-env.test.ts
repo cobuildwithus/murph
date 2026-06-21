@@ -118,6 +118,37 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("maps Worker-owned ElevenLabs credentials to a sentinel and preserves runtime config", () => {
+    const configSource = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      ELEVENLABS_API_KEY: "elevenlabs-token",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+    };
+    const forwardedEnv = buildHostedRunnerContainerEnv(configSource);
+
+    expect(forwardedEnv).toMatchObject({
+      ELEVENLABS_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+    });
+
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv,
+      runnerSecrets: {
+        ELEVENLABS_API_KEY: "member-elevenlabs-token",
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      ELEVENLABS_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+    });
+    expect(runtime.userEnv?.ELEVENLABS_API_KEY).toBeUndefined();
+  });
+
   it("forwards allowlisted env values that are readable by key but not enumerable", () => {
     const source: Record<string, unknown> = {};
     Object.defineProperties(source, {
@@ -1179,7 +1210,7 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("GARMIN_API_BASE_URL");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("JUNCTION_RESOURCE_OVERRIDES");
-    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toContain(
       "LINQ_ATTACHMENT_CDN_BASE_URL",
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("FFMPEG_COMMAND");

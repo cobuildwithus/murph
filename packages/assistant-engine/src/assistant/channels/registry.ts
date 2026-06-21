@@ -7,6 +7,7 @@ import {
   inferBindingDeliveryForChannel,
   normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
+  selectedAssistantEmailDeliveryIsThreadReply,
 } from './helpers.js'
 import { ASSISTANT_CHANNEL_ADAPTERS } from './descriptors.js'
 import type {
@@ -40,6 +41,7 @@ export function getAssistantChannelAdapter(
 export {
   normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
+  selectedAssistantEmailDeliveryIsThreadReply,
 }
 
 export function inferAssistantBindingDelivery(input: {

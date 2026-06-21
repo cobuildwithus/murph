@@ -5,7 +5,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
-} from "@murphai/assistant-runtime/hosted-assistant-env-constants";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,

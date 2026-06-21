@@ -24,9 +24,6 @@ import {
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
-} from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
@@ -73,6 +70,12 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
+  DEFAULT_ELEVENLABS_API_BASE_URL,
+  HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+  isAllowedElevenLabsRequest,
+  parseHostedElevenLabsTtsRequestBody,
+} from "./runner-egress-elevenlabs.ts";
+import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
 
@@ -90,7 +93,6 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
-const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
 const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -267,9 +269,6 @@ const EXA_EGRESS_POLICY = [
     pathname: EXA_RESEARCH_SCOUT_PATH,
   },
 ] as const;
-const HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES = 32 * 1024;
-const HOSTED_ELEVENLABS_TTS_MAX_TEXT_CHARS = 4_000;
-const HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS = 200;
 const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
 
 interface ProviderBaseConfig {
@@ -357,12 +356,6 @@ interface HostedProviderEgressWriteFenceMetadata {
   leaseGeneration: string;
   userId: string;
   workspaceVersion: string | null;
-}
-
-interface HostedElevenLabsTtsRequestBody {
-  characterCount: number;
-  modelId: string;
-  upstreamBody: string;
 }
 
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
@@ -1032,51 +1025,6 @@ function recordHostedTranscribeUsage(input: {
   });
 }
 
-// Failure-isolated hosted_ai_usage recording for Worker-mediated ElevenLabs
-// TTS spend. Delivery retries create new provider requests, and each successful
-// request records one character-count row.
-function recordHostedElevenLabsTtsUsage(input: {
-  characterCount: number;
-  env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
-  model: string;
-}): Promise<void> {
-  return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted ElevenLabs TTS usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
-    const record = buildHostedElevenLabsTtsUsageRecord({
-      characterCount: input.characterCount,
-      memberId: input.memberId,
-      model: input.model,
-    });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
-      record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
-    });
-  })().catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "elevenlabs_tts",
-      },
-      level: "warn",
-      message: "Hosted ElevenLabs TTS usage recording failed; delivery unaffected.",
-      phase: "wake.running",
-    });
-  });
-}
-
 interface HostedTranscribeResponsePayload {
   durationMs: number | null;
   language: string | null;
@@ -1337,7 +1285,10 @@ async function maybeHandleElevenLabsRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const token = readRequiredInterceptSecret(input.env.ELEVENLABS_API_KEY, "ELEVENLABS_API_KEY");
+  const token = readRequiredInterceptSecret(
+    input.env.ELEVENLABS_API_KEY,
+    "ELEVENLABS_API_KEY",
+  );
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("xi-api-key", token);
@@ -1370,6 +1321,48 @@ async function maybeHandleElevenLabsRequest(input: {
     }
   }
   return response;
+}
+
+function recordHostedElevenLabsTtsUsage(input: {
+  characterCount: number;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  model: string;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted ElevenLabs TTS usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedElevenLabsTtsUsageRecord({
+      characterCount: input.characterCount,
+      memberId: input.memberId,
+      model: input.model,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "elevenlabs_tts",
+      },
+      level: "warn",
+      message: "Hosted ElevenLabs TTS usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
 }
 
 function readOpenAiCacheDiagnosticEndpointKind(
@@ -2882,111 +2875,6 @@ function isAllowedExaRequest(method: string, pathname: string): boolean {
   return EXA_EGRESS_POLICY.some((policy) =>
     method === policy.method && pathname === policy.pathname
   );
-}
-
-function isAllowedElevenLabsRequest(
-  request: Request,
-  url: URL,
-  pathnameSuffix: string,
-): boolean {
-  if (
-    request.method !== "POST" ||
-    !/^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)
-  ) {
-    return false;
-  }
-
-  const allowedParams = new Set(["output_format"]);
-  for (const key of url.searchParams.keys()) {
-    if (!allowedParams.has(key)) {
-      return false;
-    }
-  }
-  const outputFormat = url.searchParams.get("output_format");
-  return outputFormat === null || outputFormat === "mp3_44100_128";
-}
-
-function parseHostedElevenLabsTtsRequestBody(input: {
-  body: ArrayBuffer;
-  contentType: string | null;
-  pathnameSuffix: string;
-}): HostedElevenLabsTtsRequestBody | null {
-  if (!isJsonContentType(input.contentType)) {
-    return null;
-  }
-
-  const voiceId = normalizeHostedElevenLabsTtsString(
-    decodeURIComponentSafe(input.pathnameSuffix.replace(/^\/v1\/text-to-speech\//u, "")),
-    HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS,
-  );
-  if (!voiceId) {
-    return null;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(input.body));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return null;
-  }
-
-  const record = parsed as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (keys.length !== 2 || !keys.includes("model_id") || !keys.includes("text")) {
-    return null;
-  }
-
-  const modelId = normalizeHostedElevenLabsTtsString(
-    record.model_id,
-    HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS,
-  );
-  const text = normalizeHostedElevenLabsTtsString(
-    record.text,
-    HOSTED_ELEVENLABS_TTS_MAX_TEXT_CHARS,
-  );
-  const pricedModelId = normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(modelId);
-  if (!pricedModelId || !text) {
-    return null;
-  }
-
-  return {
-    characterCount: text.length,
-    modelId: pricedModelId,
-    upstreamBody: JSON.stringify({
-      model_id: pricedModelId,
-      text,
-    }),
-  };
-}
-
-function isJsonContentType(value: string | null): boolean {
-  return value?.split(";")[0]?.trim().toLowerCase() === "application/json";
-}
-
-function decodeURIComponentSafe(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHostedElevenLabsTtsString(
-  value: unknown,
-  maxChars: number,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  if (!normalized || normalized.length > maxChars) {
-    return null;
-  }
-
-  return normalized;
 }
 
 function hasBearerCredentialSentinel(headers: Headers): boolean {

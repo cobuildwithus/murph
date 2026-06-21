@@ -252,7 +252,10 @@ describe("opaque storage path rotation", () => {
     });
 
     expect(bucket.objects.has(storedEmailKey)).toBe(false);
-    expect(bucket.deleted).toEqual([storedEmailKey]);
+    expect(bucket.deleted).toEqual([
+      storedEmailKey,
+      storedEmailKey.replace(/\.eml$/u, ".recovery.json"),
+    ]);
     expectOpaqueStrings(bucket.deleted, [userId, rawMessageKey]);
     expect(await readHostedEmailRawMessage({
       bucket,

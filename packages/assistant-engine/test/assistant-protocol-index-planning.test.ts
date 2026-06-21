@@ -318,9 +318,7 @@ describe('assistant protocol index planning', () => {
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
-        dynamicTools: resolveMurphDynamicTools({
-          computerToolsAvailable: false,
-        }),
+        dynamicTools: resolveMurphDynamicTools({}),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
@@ -360,7 +358,6 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: true,
-          computerToolsAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -385,7 +382,6 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
-          computerToolsAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -406,7 +402,6 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
-          computerToolsAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -727,9 +722,7 @@ describe('assistant protocol index planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan(),
       })).developerInstructions,
-      dynamicTools: resolveMurphDynamicTools({
-        computerToolsAvailable: false,
-      }).slice(0, 1),
+      dynamicTools: resolveMurphDynamicTools({}).slice(0, 1),
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 

@@ -43,6 +43,9 @@ import {
   buildHostedCodexConfigToml,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
+import {
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
+} from "../src/hosted-runtime/codex-shell-env-policy.ts";
 
 const temporaryPaths: string[] = [];
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
@@ -128,15 +131,15 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
-  assert.match(config, /"ELEVENLABS_API_KEY"/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
-  assert.match(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
-  assert.match(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /\[shell_environment_policy\.set\]/u);
   assert.equal(config.split("\n").includes(`PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`), true);
+  assert.doesNotMatch(config, /"ELEVENLABS_API_KEY"/u);
+  assert.doesNotMatch(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
+  assert.doesNotMatch(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
   assert.doesNotMatch(config, /"PDFTOTEXT_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_MODEL_PATH"/u);
@@ -150,7 +153,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(codexHomeMode, 0o700);
 });
 
-test("hosted Codex shell policy allows provider sentinel env without writing provider values", async () => {
+test("hosted Codex shell policy excludes ElevenLabs runtime env without writing provider values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
@@ -169,10 +172,10 @@ test("hosted Codex shell policy allows provider sentinel env without writing pro
   assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_MODEL_ID, "eleven_multilingual_v2");
   assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_VOICE_ID, "voice_murph");
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /"ELEVENLABS_API_KEY"/u);
   assert.match(config, /"EXA_API_KEY"/u);
-  assert.match(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
-  assert.match(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
+  assert.doesNotMatch(config, /"ELEVENLABS_API_KEY"/u);
+  assert.doesNotMatch(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
+  assert.doesNotMatch(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
   assert.doesNotMatch(config, /fixture-elevenlabs-env-value/u);
   assert.doesNotMatch(config, /fixture-exa-env-value/u);
   assert.doesNotMatch(config, /eleven_multilingual_v2/u);
@@ -1160,12 +1163,21 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "ELEVENLABS_API_KEY", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_ELEVENLABS_MODEL_ID", "MURPH_ELEVENLABS_VOICE_ID", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
       "",
     ].join("\n"),
+  );
+});
+
+test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () => {
+  assert.deepEqual(
+    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.filter((key: string) =>
+      key === "ELEVENLABS_API_KEY" || key.startsWith("MURPH_ELEVENLABS_")
+    ),
+    [],
   );
 });
 

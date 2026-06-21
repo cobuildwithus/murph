@@ -19,7 +19,7 @@ import { readOptionalJsonObject, readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
-const HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES = 16 * 1024;
+const HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES = 64 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const boundedRequest = await readBoundedHostedEmailIngressRequest(request);

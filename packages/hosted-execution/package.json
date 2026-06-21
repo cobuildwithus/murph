@@ -30,6 +30,10 @@
       "types": "./dist/assistant-identifiers.d.ts",
       "default": "./dist/assistant-identifiers.js"
     },
+    "./assistant-capabilities": {
+      "types": "./dist/assistant-capabilities.d.ts",
+      "default": "./dist/assistant-capabilities.js"
+    },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"

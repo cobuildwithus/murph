@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 import {
   readHostedAssistantInputCurrentDeliveryRoute,
@@ -96,6 +97,49 @@ test("unambiguous current route resolves one conversation with disagreeing sende
       identityId: "h1_111111111111111111111111",
       participantId: null,
       threadId: "h1_333333333333333333333333",
+    },
+  );
+});
+
+test("unambiguous current route groups hosted email by stable conversation thread", () => {
+  const firstTarget = serializeHostedEmailThreadTarget({
+    cc: [],
+    lastMessageId: "<first@example.test>",
+    references: ["<first@example.test>"],
+    subject: "Status",
+    to: ["owner@example.test"],
+  });
+  const secondTarget = serializeHostedEmailThreadTarget({
+    cc: [],
+    lastMessageId: "<second@example.test>",
+    references: ["<first@example.test>", "<second@example.test>"],
+    subject: "Status",
+    to: ["owner@example.test"],
+  });
+
+  assert.deepEqual(
+    resolveUnambiguousCurrentDeliveryRoute([
+      {
+        channel: "email",
+        deliveryTarget: firstTarget,
+        identityId: "assistant@example.test",
+        participantId: "owner@example.test",
+        threadId: "stable-email-thread",
+      },
+      {
+        channel: "email",
+        deliveryTarget: secondTarget,
+        identityId: "assistant@example.test",
+        participantId: "owner@example.test",
+        threadId: "stable-email-thread",
+      },
+    ]),
+    {
+      channel: "email",
+      deliveryTarget: secondTarget,
+      identityId: "assistant@example.test",
+      participantId: "owner@example.test",
+      threadId: "stable-email-thread",
     },
   );
 });

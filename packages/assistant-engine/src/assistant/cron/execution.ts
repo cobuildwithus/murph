@@ -17,7 +17,7 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import { errorMessage } from '../shared.js'
+import { errorMessage, normalizeNullableString } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
@@ -60,7 +60,10 @@ import {
   resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
-import { resolveAssistantCronTargetBindingDelivery } from './targets.js'
+import {
+  resolveAssistantCronTargetBindingDelivery,
+  validateAssistantCronDeliveryTarget,
+} from './targets.js'
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
@@ -324,6 +327,10 @@ export async function executeClaimedAssistantCronJob(input: {
         })
         status = 'succeeded'
       } else {
+        validateAssistantCronDeliveryTarget(
+          claimedJob.target,
+          assistantCronExecutionDeliveryTargetProfile(input),
+        )
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
@@ -822,6 +829,15 @@ function resolveStaleAssistantCronNotificationError(input: {
 
   const lateMinutes = Math.floor(ageMs / 60_000)
   return `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
+}
+
+function assistantCronExecutionDeliveryTargetProfile(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
+}): 'hosted' | 'local' {
+  const isHostedExecution =
+    normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
+  return isHostedExecution ? 'hosted' : 'local'
 }
 
 function cryptoRandomRunId(): string {

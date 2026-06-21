@@ -369,12 +369,10 @@ describe('murph.generate_image dynamic tool execution', () => {
   it('advertises and executes react_to_message as a reaction patch', async () => {
     expect(listMurphDynamicToolNames()).toContain('murph.react_to_message')
     expect(resolveMurphDynamicTools({
-      computerToolsAvailable: false,
     }).map((tool) => `${tool.namespace}.${tool.name}`))
       .not.toContain('murph.react_to_message')
     expect(resolveMurphDynamicTools({
       allowMessageReactions: true,
-      computerToolsAvailable: false,
     }).map((tool) => `${tool.namespace}.${tool.name}`))
       .toContain('murph.react_to_message')
 

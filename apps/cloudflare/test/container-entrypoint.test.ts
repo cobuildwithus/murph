@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
+import { HostedAssistantConfigurationError } from "@murphai/operator-config/hosted-assistant-config";
 
 type MockSpawnedProcess = EventEmitter & {
   kill: () => boolean;
