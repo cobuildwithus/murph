@@ -1352,8 +1352,8 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'awaitingReason'),
         ...readStringField(record, 'expiresAt'),
-        ...readRedactedTextField(record, 'lastTitle'),
-        ...readSanitizedUrlField(record, 'lastUrl'),
+        ...readStringField(record, 'lastTitle'),
+        ...readStringOrNullField(record, 'lastUrl'),
         ...readBooleanField(record, 'reused'),
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
@@ -1362,17 +1362,14 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
-        ...readRedactedTextField(record, 'title'),
-        ...readSanitizedUrlField(record, 'url'),
-        visibleText: redactSensitiveToolText(
-          typeof record.visibleText === 'string' ? record.visibleText : '',
-        ),
-        visibleTextRedacted: true,
+        ...readStringField(record, 'title'),
+        ...readStringOrNullField(record, 'url'),
+        visibleText: typeof record.visibleText === 'string' ? record.visibleText : '',
       }
     case 'act':
       return {
-        ...readRedactedTextField(record, 'title'),
-        ...readSanitizedUrlField(record, 'url'),
+        ...readStringField(record, 'title'),
+        ...readStringOrNullField(record, 'url'),
       }
     case 'finish':
       return {
@@ -1391,12 +1388,15 @@ function readStringField(
   return typeof value === 'string' ? { [field]: value } : {}
 }
 
-function readRedactedTextField(
+function readStringOrNullField(
   record: Record<string, unknown>,
   field: string,
-): Record<string, string> {
+): Record<string, string | null> {
   const value = record[field]
-  return typeof value === 'string' ? { [field]: redactSensitiveToolText(value) } : {}
+  if (value === null) {
+    return { [field]: null }
+  }
+  return typeof value === 'string' ? { [field]: value } : {}
 }
 
 function readBooleanField(
@@ -1405,63 +1405,6 @@ function readBooleanField(
 ): Record<string, boolean> {
   const value = record[field]
   return typeof value === 'boolean' ? { [field]: value } : {}
-}
-
-function readSanitizedUrlField(
-  record: Record<string, unknown>,
-  field: string,
-): Record<string, string | null> {
-  const value = record[field]
-  if (value === null) {
-    return { [field]: null }
-  }
-  return typeof value === 'string'
-    ? { [field]: sanitizeToolUrl(value) }
-    : {}
-}
-
-function sanitizeToolUrl(value: string): string {
-  try {
-    const url = new URL(value)
-    url.username = ''
-    url.password = ''
-    url.search = ''
-    url.hash = ''
-    url.pathname = url.pathname
-      .split('/')
-      .map((segment) => isTokenLikeUrlSegment(segment) ? '[redacted]' : segment)
-      .join('/')
-    return url.toString()
-  } catch {
-    return '[invalid-url]'
-  }
-}
-
-function isTokenLikeUrlSegment(segment: string): boolean {
-  return segment.length >= 32 && /^[A-Za-z0-9._~-]+$/u.test(segment)
-}
-
-function redactSensitiveToolText(value: string): string {
-  const bounded = sanitizeToolTextUrls(value.slice(0, 6000))
-  const sensitiveLinePattern =
-    /authorization|bearer|card|cookie|cvv|password|secret|ssn|token|api[-_\s]*key|access[-_\s]*key|private[-_\s]*key|client[-_\s]*secret|one[-_\s]*time[-_\s]*(?:code|password|passcode)|verification[-_\s]*(?:code|token)|recovery[-_\s]*(?:code|key|phrase)|authenticator|security[-_\s]*(?:code|token)|\botp\b|\b2fa\b|\bmfa\b/iu
-  return bounded
-    .split(/\r?\n/u)
-    .map((line) => sensitiveLinePattern.test(line)
-      ? '[redacted-sensitive-line]'
-      : line)
-    .join('\n')
-    .replace(/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9_=-]{6,}\b/giu, '[redacted-secret]')
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/giu, '[redacted-secret]')
-    .replace(/\bxox[abprs]-[A-Za-z0-9-]{10,}\b/giu, '[redacted-secret]')
-    .replace(/\bAKIA[0-9A-Z]{16}\b/gu, '[redacted-secret]')
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
-    .replace(/\b(?:\d[ -]?){13,19}\b/gu, '[redacted-number]')
-    .replace(/\b\d{3}-\d{2}-\d{4}\b/gu, '[redacted-number]')
-}
-
-function sanitizeToolTextUrls(value: string): string {
-  return value.replace(/\bhttps?:\/\/[^\s"'<>\\]+/giu, (url) => sanitizeToolUrl(url))
 }
 
 function safeToolPayloadText(payload: unknown): string {

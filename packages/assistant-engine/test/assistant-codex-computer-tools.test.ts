@@ -226,20 +226,19 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("sanitizes observe output before returning it to Codex", async () => {
+  it("returns observed browser text without content redaction", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         runId: "run_123",
         status: "running",
-        title: "API key: sk_live_TITLECANARY123456",
+        title: "API key: visible-title-canary",
         url: "https://shop.example.test/checkout?token=secret#frag",
         visibleText: [
           "Contact shopper@example.test",
-          "Cookie: session=secret",
-          "API key: sk_live_VISIBLECANARY123456",
+          "Cookie: session=visible-cookie-canary",
+          "API key: visible-api-key-canary",
           "Verification code: 123456",
-          "Loose prefix sk_live_LOOSECANARY123456",
-          "Reference 4111 1111 1111 1111",
+          "Loose secret prefix visible-loose-canary",
           "Ready to submit",
         ].join("\n"),
       })
@@ -260,20 +259,17 @@ describe("murph computer dynamic tools", () => {
     const text = result.rpcResult.contentItems[0]!.text;
     expect(text).toContain("https://shop.example.test/checkout");
     expect(text).toContain("Ready to submit");
-    expect(text).toContain("[redacted-email]");
-    expect(text).toContain("[redacted-sensitive-line]");
-    expect(text).toContain("[redacted-number]");
-    expect(text).toContain("[redacted-secret]");
-    expect(text).not.toContain("token=secret");
-    expect(text).not.toContain("shopper@example.test");
-    expect(text).not.toContain("4111");
-    expect(text).not.toContain("TITLECANARY");
-    expect(text).not.toContain("VISIBLECANARY");
-    expect(text).not.toContain("LOOSECANARY");
-    expect(text).not.toContain("123456");
+    expect(text).toContain("shopper@example.test");
+    expect(text).toContain("Cookie: session=visible-cookie-canary");
+    expect(text).toContain("API key: visible-api-key-canary");
+    expect(text).toContain("Verification code: 123456");
+    expect(text).toContain("Loose secret prefix visible-loose-canary");
+    expect(text).toContain("visible-title-canary");
+    expect(text).toContain("token=secret");
+    expect(text).toContain("#frag");
   });
 
-  it("runs a browser action and returns a redacted action result summary", async () => {
+  it("runs a browser action and returns the current action URL", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -324,9 +320,8 @@ describe("murph computer dynamic tools", () => {
     const payload = JSON.parse(result.rpcResult.contentItems[0]!.text);
     expect(payload).toEqual({
       title: "Checkout",
-      url: "https://shop.example.test/order",
+      url: "https://shop.example.test/order?secret=raw",
     });
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
   });
