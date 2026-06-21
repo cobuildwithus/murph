@@ -73,7 +73,6 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
 ]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
-const DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT = 100;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
@@ -223,7 +222,6 @@ type RunnerContainerDestroyReason =
   | "destroy-instance"
   | "invoke-failure"
   | "readiness-failure"
-  | "success-recycle"
   | "warm-health-failed"
   | "warm-invalidated";
 
@@ -358,7 +356,6 @@ export class RunnerContainer extends Container {
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
-  private successfulWarmInvocationCount = 0;
   private warmShellInvalidatedByUnsettledDestroy = false;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
@@ -936,7 +933,6 @@ export class RunnerContainer extends Container {
     });
     this.stopGeneration += 1;
     this.clearRecentReadinessProof();
-    this.successfulWarmInvocationCount = 0;
     this.warmShellInvalidatedByUnsettledDestroy = false;
     this.resolveStopObservers();
     emitHostedExecutionStructuredLog({
@@ -1166,22 +1162,6 @@ export class RunnerContainer extends Container {
                 reason: "invoke-failure",
               });
             }
-          } else if (this.recordSuccessfulWarmInvocationShouldRecycle()) {
-            emitHostedExecutionStructuredLog({
-              component: "container",
-              details: {
-                recycleAfterSuccessCount:
-                  readRunnerContainerRecycleAfterSuccessCount(this.environment),
-                successfulWarmInvocationCount: this.successfulWarmInvocationCount,
-              },
-              message: "Hosted execution container reached warm success recycle limit.",
-              phase: "container.ready",
-              userId: routeUserId,
-            });
-            await this.stopWarmContainer({
-              failClosed: true,
-              reason: "success-recycle",
-            });
           }
         } else if (cleanupWarmContainerOnFailure) {
           await this.stopWarmContainer({
@@ -1735,15 +1715,12 @@ export class RunnerContainer extends Container {
     try {
       destroyed = await this.destroyIfRunning({ failClosed, reason });
     } catch (error) {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
     }
     if (destroyed) {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = true;
     }
     return destroyed;
@@ -1785,12 +1762,6 @@ export class RunnerContainer extends Container {
     for (const observer of observers) {
       observer();
     }
-  }
-
-  private recordSuccessfulWarmInvocationShouldRecycle(): boolean {
-    this.successfulWarmInvocationCount += 1;
-    return this.successfulWarmInvocationCount
-      >= readRunnerContainerRecycleAfterSuccessCount(this.environment);
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -1879,7 +1850,6 @@ export class RunnerContainer extends Container {
       lastActivityObservedStage: this.lastActivityObservedStage,
       runnerIdleTtlMs,
       sleepAfter: String(this.sleepAfter),
-      successfulWarmInvocationCount: this.successfulWarmInvocationCount,
       warmShellInvalidatedByUnsettledDestroy: this.warmShellInvalidatedByUnsettledDestroy,
     };
   }
@@ -3055,31 +3025,6 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   if (!Number.isSafeInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
     throw new TypeError(
       `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer greater than or equal to ${MIN_RUNNER_IDLE_TTL_MS}.`,
-    );
-  }
-
-  return parsed;
-}
-
-function readRunnerContainerRecycleAfterSuccessCount(
-  source: RunnerContainerEnvironmentSource,
-): number {
-  const raw = source.HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
-
-  if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
-  }
-
-  if (typeof raw !== "string") {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a string when configured.",
-    );
-  }
-
-  const parsed = readStrictPositiveIntegerEnv(raw);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a positive integer.",
     );
   }
 

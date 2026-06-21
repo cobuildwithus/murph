@@ -170,54 +170,14 @@ describe("RunnerContainer", () => {
     expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
-  it("recycles a warm shell after the configured successful invocation count", async () => {
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT: "2",
-      },
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_first"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).not.toHaveBeenCalled();
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_second"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_after_reset"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the default warm shell through 99 clean invocations and recycles on 100", async () => {
+  it("does not recycle a healthy warm shell by successful invocation count", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble();
 
-    for (let index = 1; index <= 99; index += 1) {
+    for (let index = 1; index <= 101; index += 1) {
       await expect(container.invoke({
         job: {
           kind: "workspace-invocation",
-          request: createRunnerRequest(`evt_default_recycle_${index}`),
+          request: createRunnerRequest(`evt_no_success_recycle_${index}`),
         },
         timeoutMs: 60_000,
         userId: "member_123",
@@ -225,16 +185,6 @@ describe("RunnerContainer", () => {
       expect(destroy).not.toHaveBeenCalled();
     }
 
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_default_recycle_100"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(destroy).toHaveBeenCalledTimes(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
