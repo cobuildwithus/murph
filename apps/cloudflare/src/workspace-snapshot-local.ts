@@ -343,10 +343,6 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   if (encryptedStat.size !== input.ref.archive.encryptedByteSize) {
     throw new Error("Hosted workspace snapshot encrypted size does not match its ref.");
   }
-  const encryptedObjectSha256 = await sha256FileHex(encryptedFilePath);
-  if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
-    throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
-  }
   if (encryptedStat.size <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
     throw new Error("Hosted workspace snapshot encrypted object is too small.");
   }
@@ -393,6 +389,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.ref.encryption.aad)));
     decipher.setAuthTag(authTag);
 
+    const encryptedObjectHash = createHash("sha256");
     const plaintextArchiveHash = createHash("sha256");
     const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.zst");
     await pipeline(
@@ -400,11 +397,17 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
         end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
         start: 0,
       }),
+      createHashTransform(encryptedObjectHash),
       decipher,
       createHashTransform(plaintextArchiveHash),
       createWriteStream(plaintextArchivePath, { mode: 0o600 }),
     );
 
+    encryptedObjectHash.update(authTag);
+    const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
+    if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
+      throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
+    }
     const plaintextArchiveSha256 = plaintextArchiveHash.digest("hex");
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
@@ -896,14 +899,6 @@ function createHashTransform(hash: ReturnType<typeof createHash>): Transform {
       callback(null, chunk);
     },
   });
-}
-
-async function sha256FileHex(filePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(filePath)) {
-    hash.update(chunk);
-  }
-  return hash.digest("hex");
 }
 
 async function readHostedWorkspaceSnapshotAuthTag(
