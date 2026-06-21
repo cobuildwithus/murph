@@ -1,6 +1,6 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { writeFile, mkdtemp, rm, access, mkdir, readFile, symlink } from "node:fs/promises";
+import { writeFile, mkdtemp, rm, access, mkdir, readFile, readdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -124,16 +124,23 @@ describe("workspace snapshot local restore", () => {
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: restoredDurableRoot,
         encryptedFilePath: encrypted.encryptedFilePath,
+        postExtractIntegrityCheck: true,
         ref,
         scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
-      expect(typeof restoreTimings.decryptMs).toBe("number");
-      expect(typeof restoreTimings.extractMs).toBe("number");
-      expect(Number.isFinite(restoreTimings.decryptMs)).toBe(true);
-      expect(Number.isFinite(restoreTimings.extractMs)).toBe(true);
-      expect(restoreTimings.decryptMs).toBeGreaterThanOrEqual(0);
-      expect(restoreTimings.extractMs).toBeGreaterThanOrEqual(0);
+      for (const key of [
+        "decryptMs",
+        "archiveExtractMs",
+        "restorePreflightMs",
+        "durableRootReplaceMs",
+        "cleanupMs",
+        "extractMs",
+      ] as const) {
+        expect(typeof restoreTimings[key]).toBe("number");
+        expect(Number.isFinite(restoreTimings[key])).toBe(true);
+        expect(restoreTimings[key]).toBeGreaterThanOrEqual(0);
+      }
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
@@ -148,6 +155,79 @@ describe("workspace snapshot local restore", () => {
       await expect(access(path.join(restoredVaultRoot, ".git", "config"))).rejects.toThrow();
       await expect(access(path.join(restoredOperatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt")))
         .rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects encrypted digest mismatches without replacing durable state", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const existingDurableFile = path.join(restoredDurableRoot, "existing.txt");
+    const scratchRoot = path.join(tempRoot, "restore-scratch");
+    const snapshotId = "snapshot_bad_encrypted_digest";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_bad_encrypted_digest.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await mkdir(sourceVaultRoot, { recursive: true });
+      await writeFile(path.join(sourceVaultRoot, "note.md"), "new workspace\n", "utf8");
+      await mkdir(restoredDurableRoot, { mode: 0o700, recursive: true });
+      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const ref: HostedWorkspaceSnapshotV2Ref = {
+        archive: {
+          compression: encrypted.compression,
+          encryptedByteSize: encrypted.encryptedByteSize,
+          encryptedObjectSha256: "0".repeat(64),
+          fileCount: encrypted.fileCount,
+          format: "tar",
+          plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+          totalPlainBytes: encrypted.totalPlainBytes,
+        },
+        createdAt: "2026-05-20T00:00:00.000Z",
+        encryption: {
+          aad,
+          ivBase64: encrypted.ivBase64,
+          rootKeyId: "root_key_test",
+          scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+          wrappedDataKey: "wrapped_data_key_test",
+        },
+        objectKey,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+        snapshotId,
+        upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+        userId,
+      };
+
+      await expect(restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: encrypted.encryptedFilePath,
+        ref,
+        scratchRoot,
+      })).rejects.toThrow("Hosted workspace snapshot encrypted digest does not match its ref.");
+      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
+      await expect(access(path.join(restoredDurableRoot, "vault", "note.md"))).rejects.toThrow();
+      await expect(readdir(scratchRoot)).resolves.toEqual([]);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -220,6 +300,23 @@ describe("workspace snapshot local restore", () => {
     });
   });
 
+  it("rejects duplicate normalized tar member paths before extraction", async () => {
+    await expectUnsafeTarArchive({
+      entries: [
+        {
+          body: Buffer.from("first\n", "utf8"),
+          name: "safe/inside.txt",
+        },
+        {
+          body: Buffer.from("second\n", "utf8"),
+          name: "./safe//inside.txt",
+        },
+      ],
+      expectedError: "Hosted workspace snapshot tar archive contains duplicate entries.",
+      unwrittenRelativePath: "safe/inside.txt",
+    });
+  });
+
   it.each([
     { name: "symlink", typeFlag: "2" },
     { name: "hardlink", typeFlag: "1" },
@@ -255,7 +352,7 @@ describe("workspace snapshot local restore", () => {
         body: Buffer.from("manifest mismatch\n", "utf8"),
         name: "safe/inside.txt",
       }],
-      expectedError: "Hosted workspace snapshot restored state does not match its ref.",
+      expectedError: "Hosted workspace snapshot archive manifest does not match its ref.",
       unwrittenRelativePath: "safe/inside.txt",
     });
   });
@@ -292,6 +389,17 @@ describe("workspace snapshot local restore", () => {
         typeFlag: "5",
       })),
       expectedError: "Hosted workspace snapshot tar entry count is unsafe.",
+    });
+  });
+
+  it("rejects tar archives containing environment files before extraction", async () => {
+    await expectUnsafeTarArchive({
+      entries: [{
+        body: Buffer.from("PLACEHOLDER=redacted\n", "utf8"),
+        name: "vault/.env",
+      }],
+      expectedError: "Hosted workspace snapshot durable root contains environment files.",
+      unwrittenRelativePath: "vault/.env",
     });
   });
 });

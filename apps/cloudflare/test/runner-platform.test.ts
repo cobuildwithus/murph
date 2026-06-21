@@ -1163,7 +1163,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       });
 
-      await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -1191,6 +1191,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
         scratchRoot,
       });
+      for (const key of [
+        "sizeGuardMs",
+        "dataKeyUnwrapMs",
+        "scratchPrepareMs",
+        "presignGetMs",
+        "objectFetchMs",
+        "decryptMs",
+        "archiveExtractMs",
+        "restorePreflightMs",
+        "durableRootReplaceMs",
+        "cleanupMs",
+        "extractMs",
+      ] as const) {
+        expect(typeof restoreTimings?.[key]).toBe("number");
+        expect(Number.isFinite(restoreTimings?.[key])).toBe(true);
+        expect(restoreTimings?.[key]).toBeGreaterThanOrEqual(0);
+      }
+      expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
+      expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       // The data-key unwrap runs concurrently with the presign/fetch chain,
