@@ -53,7 +53,6 @@ import {
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
   type HostedLocalLinqWebhookSetup,
-  waitForHostedLocalLinqWebhookTarget,
 } from "./linq-webhook-tunnel.ts";
 import {
   cleanupHostedLocalMinioContainerBestEffort,
@@ -1009,9 +1008,6 @@ export async function startHostedLocalDevStack(input: {
         ]);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (linqWebhookSetup?.shouldRegister) {
-          await waitForHostedLocalLinqWebhookTarget({
-            setup: linqWebhookSetup,
-          });
           await registerHostedLocalLinqWebhookSubscription({
             env: runtimeEnv,
             setup: linqWebhookSetup,

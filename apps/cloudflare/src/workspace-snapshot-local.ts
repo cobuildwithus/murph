@@ -421,7 +421,6 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
       throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
     }
-
     const plaintextArchiveSha256 = plaintextArchiveHash.digest("hex");
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");

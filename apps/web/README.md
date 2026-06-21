@@ -655,7 +655,7 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/privy/complete`
 - `POST /api/hosted-onboarding/billing/checkout`
 - `GET /api/hosted-onboarding/billing/success`
-- `GET|POST /api/hosted-onboarding/linq/webhook`
+- `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 
 The onboarding lane is intentionally thin:
