@@ -49,7 +49,6 @@ import {
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence,
-  writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from './evidence.js'
 import {
@@ -101,6 +100,8 @@ const ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE =
   'ASSISTANT_AUTO_REPLY_DELIVERY_FAILED'
 const ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE =
   'ASSISTANT_PROVIDER_EMPTY_RESPONSE'
+const ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON =
+  'assistant provider completed without a reply'
 const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
   'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
@@ -220,11 +221,6 @@ type AssistantAutoReplyOutcomeArtifact =
       kind: 'error'
       error: unknown
       failure: AssistantAutoReplyFailureSnapshot
-      terminalRetryExhausted?: {
-        failedAttempts: number
-        maxFailedAttempts: number
-        reason: string
-      }
     }
   | { kind: 'result'; result: AssistantAutoReplySendResult }
 
@@ -707,16 +703,6 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         failure: input.outcome.artifact.failure,
         vault: input.vault,
       })
-      if (input.outcome.artifact.terminalRetryExhausted) {
-        await writeAssistantAutoReplyRetryExhaustedEvidence({
-          captureIds: input.context.optionalInboxCaptureIds,
-          inputIds: input.context.inputIds,
-          linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
-          vault: input.vault,
-          ...input.outcome.artifact.terminalRetryExhausted,
-        })
-        return { checkpointRequired: true }
-      }
       return { checkpointRequired: false }
   }
 }
@@ -906,7 +892,6 @@ function createFailedGroupOutcome(input: {
   failure?: AssistantAutoReplyFailureSnapshot
   nextWakeAt?: string | null
   stopScanning?: boolean
-  terminalRetryExhausted?: true
 }): AssistantAutoReplyGroupOutcome {
   const failure = input.failure ?? describeAssistantAutoReplyFailure(input.error)
   const failureContext = normalizeAssistantSafeFailureContext(failure.context)
@@ -917,15 +902,6 @@ function createFailedGroupOutcome(input: {
       kind: 'error',
       error: input.error,
       failure,
-      ...(input.terminalRetryExhausted
-        ? {
-            terminalRetryExhausted: {
-              failedAttempts: 1,
-              maxFailedAttempts: 1,
-              reason: failure.safeSummary,
-            },
-          }
-        : {}),
     },
     event: {
       details: failure.message,
@@ -2682,6 +2658,14 @@ function classifyAssistantAutoReplyFailure(input: {
     }
   }
 
+  if (isAssistantProviderEmptyResponseFailure(input.error)) {
+    return createSkippedGroupOutcome({
+      inputCount: input.inputCount,
+      reason: ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON,
+      terminalSuppression: true,
+    })
+  }
+
   if (isAssistantProviderCapacityError(input.error)) {
     return createFailedGroupOutcome({
       advanceCursor: false,
@@ -2700,17 +2684,6 @@ function classifyAssistantAutoReplyFailure(input: {
     })
   }
 
-  const failure = describeAssistantAutoReplyFailure(input.error)
-  if (shouldExhaustAssistantAutoReplyFailure(failure)) {
-    return createFailedGroupOutcome({
-      advanceCursor: false,
-      error: input.error,
-      failure,
-      stopScanning: true,
-      terminalRetryExhausted: true,
-    })
-  }
-
   return createFailedGroupOutcome({
     advanceCursor: false,
     error: input.error,
@@ -2725,10 +2698,8 @@ function shouldAssistantAutoReplyHoldCursorOnFailure(error: unknown): boolean {
   return isAssistantAutoReplyRepairableConfigError(error)
 }
 
-function shouldExhaustAssistantAutoReplyFailure(
-  failure: AssistantAutoReplyFailureSnapshot,
-): boolean {
-  return failure.code === ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE
+function isAssistantProviderEmptyResponseFailure(error: unknown): boolean {
+  return readAssistantAutoReplyErrorCode(error) === ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE
 }
 
 function createAdvancingSkipDecision(

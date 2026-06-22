@@ -108,7 +108,6 @@ const evidenceMocks = vi.hoisted(() => ({
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
-  writeAssistantAutoReplyRetryExhaustedEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
 
@@ -129,8 +128,6 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
-  writeAssistantAutoReplyRetryExhaustedEvidence:
-    evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence:
     evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
 }))
@@ -1137,9 +1134,6 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
-    .mockReset()
-    .mockResolvedValue(undefined)
-  evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplySuppressionEvidence
@@ -2896,7 +2890,7 @@ describe('assistant auto-reply runtime', () => {
     }))
   })
 
-  it('records terminal evidence for empty provider auto-reply results', async () => {
+  it('treats empty provider auto-reply results as terminal no-reply skips', async () => {
     replyMocks.sendAssistantMessage.mockRejectedValue(
       Object.assign(
         new Error(
@@ -2932,28 +2926,21 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
+      advanceCursor: true,
       checkpointRequired: true,
-      failed: 1,
+      failed: 0,
       nextWakeAt: null,
       replied: 0,
-      skipped: 0,
-      stopScanning: true,
+      skipped: 1,
+      stopScanning: false,
     })
-    expect(replyMocks.writeAssistantChatErrorArtifacts).toHaveBeenCalledOnce()
-    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
-      .toHaveBeenCalledOnce()
-    const retryEvidenceInput =
-      evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence.mock.calls[0]?.[0]
-    expect(retryEvidenceInput).toMatchObject({
-      captureIds: ['capture-1'],
-      failedAttempts: 1,
-      maxFailedAttempts: 1,
-      reason: 'safe failure',
-      vault: '/tmp/assistant-automation-vault',
-    })
-    expect(retryEvidenceInput?.inputIds)
-      .toEqual([expect.stringMatching(/^ain_/u)])
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-1'],
+        reason: 'assistant provider completed without a reply',
+        vault: '/tmp/assistant-automation-vault',
+      }))
   })
 
   it('suppresses raw upstream billing exhaustion without storing provider text', async () => {
