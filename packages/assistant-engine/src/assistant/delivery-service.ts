@@ -430,15 +430,19 @@ export async function deliverAssistantProgressUpdate(input: {
     ordinal: input.ordinal,
     turnId: input.turnId,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
 
   await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
-    ...deliveryFields,
+    ...messageDeliveryFields,
     deliveryIdempotencyKey,
     media: [],
     message: input.text,
-    replyToMessageId: deliveryFields.replyToMessageId,
-    subject: deliveryFields.subject,
+    replyToMessageId: messageDeliveryFields.replyToMessageId,
+    subject: messageDeliveryFields.subject,
     turnId: input.turnId,
     vault: input.input.vault,
     signal: input.signal,
@@ -588,6 +592,35 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   return !target?.businessConnectionId
 }
 
+function resolveAssistantCurrentAudienceTextDeliveryFields(input: {
+  deliveryFields: AssistantCurrentAudienceDeliveryFields
+  input: AssistantMessageInput
+}): AssistantCurrentAudienceDeliveryFields {
+  if (
+    !shouldSuppressAssistantNativeTextReplyToMessageId({
+      channel: input.deliveryFields.channel,
+      turnTrigger: input.input.turnTrigger ?? null,
+    })
+  ) {
+    return input.deliveryFields
+  }
+
+  return {
+    ...input.deliveryFields,
+    replyToMessageId: null,
+  }
+}
+
+function shouldSuppressAssistantNativeTextReplyToMessageId(input: {
+  channel: string | null
+  turnTrigger: AssistantMessageInput['turnTrigger'] | null
+}): boolean {
+  return (
+    normalizeNullableString(input.channel)?.toLowerCase() === 'telegram' &&
+    input.turnTrigger === 'automation-auto-reply'
+  )
+}
+
 function resolveAssistantHintedBindingDelivery(input: {
   input: AssistantMessageInput
   inputRoute: AssistantCurrentAudienceRouteFields
@@ -691,8 +724,12 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
   const outcome = await state.outbox.deliverMessage({
-    ...deliveryFields,
+    ...messageDeliveryFields,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

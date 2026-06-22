@@ -114,9 +114,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
     expect(requireTelegramStub().parseObservedJson(sendRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(userId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(userId), 10),
       text: HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
     });
+    expect(requireTelegramStub().parseObservedJson(sendRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -259,9 +260,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
     const replyRequest = replyRequests.at(-1)!;
     expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(reactionUserId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionUserId), 10),
       text: reactionReplyText,
     });
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
   }, 300_000);
 
   it("still sends the Telegram reply when the reaction request fails", async () => {
@@ -326,9 +328,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
     const replyRequest = replyRequests.at(-1)!;
     expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(reactionFailureUserId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionFailureUserId), 10),
       text: reactionReplyText,
     });
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
   }, 300_000);
 });
 
