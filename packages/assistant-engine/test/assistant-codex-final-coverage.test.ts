@@ -280,6 +280,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         effectiveThreadIsDirect: null,
         explicitTarget: null,
         identityId: null,
+        reactionTargetMessageId: null,
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,
@@ -861,9 +862,10 @@ describe('Codex model catalog', () => {
       },
       {
         channel: 'telegram',
-        deliveryReplyToMessageId: 'telegram-message-1',
+        deliveryReactionTargetMessageId: 'telegram-message-1',
+        deliveryReplyToMessageId: null,
         expected: true,
-        name: 'ordinary Telegram reply target',
+        name: 'Telegram reaction target without native reply anchor',
         target: 'telegram-thread-1',
       },
       {
@@ -900,6 +902,12 @@ describe('Codex model catalog', () => {
         ...(scenario.deliveryReplyToMessageId === null
           ? {}
           : { deliveryReplyToMessageId: scenario.deliveryReplyToMessageId }),
+        ...('deliveryReactionTargetMessageId' in scenario
+          ? {
+              deliveryReactionTargetMessageId:
+                scenario.deliveryReactionTargetMessageId,
+            }
+          : {}),
         prompt: `Run ${scenario.name}.`,
         turnTrigger: 'automation-auto-reply',
         vault: '/vaults/test',

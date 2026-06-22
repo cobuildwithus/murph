@@ -6083,6 +6083,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     effectiveThreadIsDirect: false,
     explicitTarget: null,
     identityId: null,
+    reactionTargetMessageId: null,
     replyToMessageId: null,
     threadId: null,
     threadIsDirect: null,
@@ -7697,6 +7698,11 @@ async function loadLocalServiceModule(input?: {
           deliverySource: message.deliverySource ?? null,
           explicitTarget: audience.explicitTarget ?? message.deliveryTarget ?? null,
           identityId,
+          reactionTargetMessageId:
+            audience.reactionTargetMessageId ??
+            message.deliveryReactionTargetMessageId ??
+            message.deliveryReplyToMessageId ??
+            null,
           replyToMessageId:
             audience.replyToMessageId ?? message.deliveryReplyToMessageId ?? null,
           sessionId: input.session.sessionId,
@@ -7970,6 +7976,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         effectiveThreadIsDirect: false,
         explicitTarget: 'thread-1',
         identityId: 'identity-1',
+        reactionTargetMessageId: null,
         replyToMessageId: null,
         threadId: 'thread-1',
         threadIsDirect: false,

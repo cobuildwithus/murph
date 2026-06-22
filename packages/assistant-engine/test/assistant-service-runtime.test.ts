@@ -976,6 +976,7 @@ describe("assistant delivery orchestration seam", () => {
       input: {
         deliverResponse: true,
         deliveryIdempotencyKey: "delivery-final-key",
+        deliveryReactionTargetMessageId: "reaction-only-target",
         prompt: "hello",
         vault: "/vault",
       },
@@ -992,6 +993,9 @@ describe("assistant delivery orchestration seam", () => {
         message: "reply",
         turnId: "turn-final-dedupe",
       }),
+    );
+    expect(runtimeState.outbox.deliverMessage.mock.lastCall?.[0]).not.toHaveProperty(
+      "reactionTargetMessageId",
     );
   });
 
@@ -1025,6 +1029,7 @@ describe("assistant delivery orchestration seam", () => {
           audience: {
             channel: "telegram",
             explicitTarget: "audience-target",
+            reactionTargetMessageId: "reaction-audience",
             replyToMessageId: "reply-audience",
           },
         },
@@ -1048,6 +1053,9 @@ describe("assistant delivery orchestration seam", () => {
       vault: "/vault",
       }),
     );
+    expect(
+      seamMocks.sendAssistantOutboxDispatchMessage.mock.lastCall?.[0],
+    ).not.toHaveProperty("reactionTargetMessageId");
   });
 
   it("passes hosted channel delivery dependencies to progress sends", async () => {
@@ -3465,6 +3473,7 @@ function createSharedPlan(input?: {
       effectiveThreadIsDirect: boolean | null;
       explicitTarget: string | null;
       identityId: string | null;
+      reactionTargetMessageId: string | null;
       replyToMessageId: string | null;
       threadId: string | null;
       threadIsDirect: boolean | null;
@@ -3489,6 +3498,7 @@ function createSharedPlan(input?: {
               effectiveThreadIsDirect: null,
               explicitTarget: null,
               identityId: null,
+              reactionTargetMessageId: null,
               replyToMessageId: null,
               threadId: null,
               threadIsDirect: null,
@@ -3502,6 +3512,7 @@ function createSharedPlan(input?: {
           effectiveThreadIsDirect: null,
           explicitTarget: null,
           identityId: null,
+          reactionTargetMessageId: null,
           replyToMessageId: null,
           threadId: null,
           threadIsDirect: null,

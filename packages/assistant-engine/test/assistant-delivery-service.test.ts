@@ -90,6 +90,30 @@ test('current audience delivery fields keep saved session binding before input f
   })
 })
 
+test('current audience reaction target follows explicit reply target clears', () => {
+  const session = createAssistantSession()
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: {
+      channel: 'telegram',
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      prompt: 'Send without quoting.',
+      vault: '/vaults/test',
+    },
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        channel: 'telegram',
+        reactionTargetMessageId: 'previous-message',
+        replyToMessageId: 'previous-message',
+      },
+    }),
+  })
+
+  expect(fields.replyToMessageId).toBeNull()
+  expect(fields.reactionTargetMessageId).toBeNull()
+})
+
 test('current audience delivery fields do not mix saved route fields with input binding target', () => {
   const session = createAssistantSession({
     binding: {
@@ -504,6 +528,7 @@ function createSharedPlan(input?: {
         effectiveThreadIsDirect: null,
         explicitTarget: null,
         identityId: null,
+        reactionTargetMessageId: null,
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,

@@ -112,11 +112,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
     expect(sendIndex).toBeGreaterThan(typingIndices[0]);
 
-    expect(requireTelegramStub().parseObservedJson(sendRequest.body)).toMatchObject({
+    const sendRequestBody = requireTelegramStub().parseObservedJson(sendRequest.body);
+    expect(sendRequestBody).toMatchObject({
       chat_id: buildTelegramThreadId(userId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(userId), 10),
       text: HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
     });
+    expect("reply_to_message_id" in (sendRequestBody ?? {})).toBe(false);
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -257,11 +258,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: reactionUserId,
     });
     const replyRequest = replyRequests.at(-1)!;
-    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
+    const replyRequestBody = requireTelegramStub().parseObservedJson(replyRequest.body);
+    expect(replyRequestBody).toMatchObject({
       chat_id: buildTelegramThreadId(reactionUserId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionUserId), 10),
       text: reactionReplyText,
     });
+    expect("reply_to_message_id" in (replyRequestBody ?? {})).toBe(false);
   }, 300_000);
 
   it("still sends the Telegram reply when the reaction request fails", async () => {
@@ -324,11 +326,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: reactionFailureUserId,
     });
     const replyRequest = replyRequests.at(-1)!;
-    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
+    const replyRequestBody = requireTelegramStub().parseObservedJson(replyRequest.body);
+    expect(replyRequestBody).toMatchObject({
       chat_id: buildTelegramThreadId(reactionFailureUserId),
-      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionFailureUserId), 10),
       text: reactionReplyText,
     });
+    expect("reply_to_message_id" in (replyRequestBody ?? {})).toBe(false);
   }, 300_000);
 });
 

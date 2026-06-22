@@ -305,8 +305,6 @@ export async function startHostedLocalTelegramStub(input: {
   }
 
   function createTelegramSendMessageMatcher(userId: string): ObservedTelegramRequestMatcher {
-    const expectedMessageIdPrefix = buildTelegramMessageId(userId);
-
     return (request) => {
       const parsed = parseObservedTelegramJson(request.body);
       const replyToMessageId =
@@ -317,11 +315,7 @@ export async function startHostedLocalTelegramStub(input: {
       return Boolean(
         parsed
         && parsed.chat_id === buildTelegramThreadId(userId)
-        && (
-          typeof replyToMessageId === "number"
-            ? String(replyToMessageId).startsWith(expectedMessageIdPrefix)
-            : false
-        )
+        && replyToMessageId == null
         && typeof parsed.text === "string"
         && parsed.text.length > 0,
       );

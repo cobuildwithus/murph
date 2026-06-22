@@ -5,6 +5,7 @@ export type AssistantReplyDeliveryContext = Pick<
   | 'deliveryDispatchMode'
   | 'deliveryIdempotencyKey'
   | 'deliveryMessageReactionsAvailable'
+  | 'deliveryReactionTargetMessageId'
   | 'deliveryReplyToMessageId'
   | 'deliverySource'
   | 'deliverySubject'
@@ -23,6 +24,8 @@ export function pickAssistantReplyDeliveryContext(
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
       input.deliveryMessageReactionsAvailable,
+    deliveryReactionTargetMessageId:
+      input.deliveryReactionTargetMessageId,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject,
@@ -46,6 +49,12 @@ export function pickDefinedAssistantReplyDeliveryContext(
       : {
           deliveryMessageReactionsAvailable:
             input.deliveryMessageReactionsAvailable,
+        }),
+    ...(input.deliveryReactionTargetMessageId === undefined
+      ? {}
+      : {
+          deliveryReactionTargetMessageId:
+            input.deliveryReactionTargetMessageId,
         }),
     ...(input.deliveryReplyToMessageId === undefined
       ? {}
@@ -82,6 +91,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
       second?.deliveryMessageReactionsAvailable === undefined
         ? first.deliveryMessageReactionsAvailable
         : second.deliveryMessageReactionsAvailable,
+    deliveryReactionTargetMessageId:
+      second?.deliveryReactionTargetMessageId === undefined
+        ? first.deliveryReactionTargetMessageId
+        : second.deliveryReactionTargetMessageId,
     deliveryReplyToMessageId:
       second?.deliveryReplyToMessageId === undefined
         ? first.deliveryReplyToMessageId
@@ -119,6 +132,8 @@ export function applyAssistantReplyDeliveryContext(input: {
     deliveryIdempotencyKey: input.context.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
       input.context.deliveryMessageReactionsAvailable,
+    deliveryReactionTargetMessageId:
+      input.context.deliveryReactionTargetMessageId,
     deliveryReplyToMessageId: input.context.deliveryReplyToMessageId,
     deliverySource: input.context.deliverySource,
     deliverySubject: input.context.deliverySubject,

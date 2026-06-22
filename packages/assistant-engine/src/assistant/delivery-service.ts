@@ -227,7 +227,7 @@ export async function deliverAssistantReaction(input: {
       session: input.session,
     }
   }
-  if (!deliveryFields.replyToMessageId) {
+  if (!deliveryFields.reactionTargetMessageId) {
     return {
       kind: 'failed',
       error: normalizeAssistantDeliveryError(
@@ -274,7 +274,7 @@ export async function deliverAssistantReaction(input: {
     deliveryIdempotencyKey: reactionDedupeToken,
     dispatchMode: input.input.deliveryDispatchMode,
     reaction: input.reaction,
-    targetMessageId: deliveryFields.replyToMessageId,
+    targetMessageId: deliveryFields.reactionTargetMessageId,
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,
     vault: input.input.vault,
@@ -433,7 +433,7 @@ export async function deliverAssistantProgressUpdate(input: {
 
   await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
-    ...deliveryFields,
+    ...pickAssistantCurrentAudienceMessageDeliveryFields(deliveryFields),
     deliveryIdempotencyKey,
     media: [],
     message: input.text,
@@ -471,6 +471,7 @@ export interface AssistantCurrentAudienceDeliveryFields {
   >
   explicitTarget: string | null
   identityId: string | null
+  reactionTargetMessageId: string | null
   replyToMessageId: string | null
   sessionId: string
   subject: string | null
@@ -545,6 +546,16 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
           ? audience?.explicitTarget ?? null
           : message.deliveryTarget,
     identityId,
+    reactionTargetMessageId:
+      precedence === 'audience-first'
+        ? audience?.reactionTargetMessageId ??
+          resolveAssistantMessageReactionTargetMessageId(message) ??
+          null
+        : message.deliveryReactionTargetMessageId === undefined
+          ? message.deliveryReplyToMessageId === undefined
+            ? audience?.reactionTargetMessageId ?? null
+            : message.deliveryReplyToMessageId
+          : message.deliveryReactionTargetMessageId,
     replyToMessageId:
       precedence === 'audience-first'
         ? audience?.replyToMessageId ?? message.deliveryReplyToMessageId ?? null
@@ -567,7 +578,7 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
   if (
     !getAssistantChannelAdapter(channel)?.setMessageReaction ||
-    normalizeNullableString(deliveryFields.replyToMessageId) === null
+    normalizeNullableString(deliveryFields.reactionTargetMessageId) === null
   ) {
     return false
   }
@@ -586,6 +597,32 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
 
   const target = parseTelegramThreadTarget(explicitTarget)
   return !target?.businessConnectionId
+}
+
+function resolveAssistantMessageReactionTargetMessageId(
+  input: AssistantMessageInput,
+): string | null | undefined {
+  return input.deliveryReactionTargetMessageId === undefined
+    ? input.deliveryReplyToMessageId
+    : input.deliveryReactionTargetMessageId
+}
+
+function pickAssistantCurrentAudienceMessageDeliveryFields(
+  input: AssistantCurrentAudienceDeliveryFields,
+): Omit<AssistantCurrentAudienceDeliveryFields, 'reactionTargetMessageId'> {
+  return {
+    actorId: input.actorId,
+    bindingDelivery: input.bindingDelivery,
+    channel: input.channel,
+    deliverySource: input.deliverySource,
+    explicitTarget: input.explicitTarget,
+    identityId: input.identityId,
+    replyToMessageId: input.replyToMessageId,
+    sessionId: input.sessionId,
+    subject: input.subject,
+    threadId: input.threadId,
+    threadIsDirect: input.threadIsDirect,
+  }
 }
 
 function resolveAssistantHintedBindingDelivery(input: {
@@ -692,7 +729,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     sharedPlan: input.sharedPlan,
   })
   const outcome = await state.outbox.deliverMessage({
-    ...deliveryFields,
+    ...pickAssistantCurrentAudienceMessageDeliveryFields(deliveryFields),
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

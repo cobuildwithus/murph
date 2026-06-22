@@ -127,6 +127,7 @@ export interface AssistantAutoReplyGroupContext {
 interface AssistantAutoReplyReplyDecision {
   deliveryTarget: string | null
   deliveryMessageReactionsAvailable: boolean | null
+  deliveryReactionTargetMessageId: string | null
   deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
@@ -476,6 +477,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
           deliveryMessageReactionsAvailable:
             decision.deliveryMessageReactionsAvailable,
         }),
+    deliveryReactionTargetMessageId:
+      decision.deliveryReactionTargetMessageId,
     deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
     executionContext: input.executionContext,
     providerHeartbeatMs: input.providerHeartbeatMs,
@@ -1094,6 +1097,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
       inputs: promptInputs,
       context: input.group,
     }),
+    deliveryReactionTargetMessageId:
+      readAutoReplyDeliveryReactionTargetMessageId({
+        inputs: promptInputs,
+        context: input.group,
+      }),
     kind: 'reply',
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
@@ -1258,6 +1266,7 @@ async function executeAssistantAutoReply(input: {
   deliveryIdempotencyKey: string | null
   deliveryTarget: string | null
   deliveryMessageReactionsAvailable?: boolean | null
+  deliveryReactionTargetMessageId: string | null
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
   providerHeartbeatMs?: number | null
@@ -1322,6 +1331,8 @@ async function executeAssistantAutoReply(input: {
             deliveryMessageReactionsAvailable:
               input.deliveryMessageReactionsAvailable,
           }),
+      deliveryReactionTargetMessageId:
+        input.deliveryReactionTargetMessageId,
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
@@ -1537,10 +1548,20 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         candidates: lateInputs.inputs,
         expectedChannel: context.firstItem.summary.source,
       })
-    const acceptedInputReplyToMessageId =
+    const acceptedInputReplyTargetMessageId =
       readAssistantInputCandidateReplyTargetMessageId(
         acceptedInputReplyTargetCandidate,
       )
+    const acceptedInputReplyToMessageId =
+      normalizeAutoReplyDeliveryReplyToMessageId({
+        expectedChannel: context.firstItem.summary.source,
+        replyToMessageId: acceptedInputReplyTargetMessageId,
+      })
+    const acceptedInputReactionTargetMessageId =
+      normalizeAutoReplyDeliveryReactionTargetMessageId({
+        expectedChannel: context.firstItem.summary.source,
+        replyTargetMessageId: acceptedInputReplyTargetMessageId,
+      })
     const acceptedInputDeliveryTarget = readAssistantInputReplyTargetDeliveryTarget(
       acceptedInputReplyTargetCandidate?.event.replyTarget ?? null,
     )
@@ -1618,6 +1639,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
           }),
       ...(acceptedInputReplyToMessageId !== undefined
         ? { deliveryReplyToMessageId: acceptedInputReplyToMessageId }
+        : {}),
+      ...(acceptedInputReactionTargetMessageId !== undefined
+        ? {
+            deliveryReactionTargetMessageId:
+              acceptedInputReactionTargetMessageId,
+          }
         : {}),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
@@ -1934,10 +1961,19 @@ function admitCapturelessAssistantInputs(input: {
     .filter((text): text is string => text !== null)
     .join('\n\n')
 
-  const deliveryReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
+  const deliveryReplyTargetMessageId = readLatestAssistantInputReplyTargetMessageId({
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
   })
+  const deliveryReplyToMessageId = normalizeAutoReplyDeliveryReplyToMessageId({
+    expectedChannel: queuedContext.firstItem.summary.source,
+    replyToMessageId: deliveryReplyTargetMessageId,
+  })
+  const deliveryReactionTargetMessageId =
+    normalizeAutoReplyDeliveryReactionTargetMessageId({
+      expectedChannel: queuedContext.firstItem.summary.source,
+      replyTargetMessageId: deliveryReplyTargetMessageId,
+    })
   const deliveryTarget = readLatestAssistantInputDeliveryTarget({
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
@@ -1952,6 +1988,9 @@ function admitCapturelessAssistantInputs(input: {
     }),
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
+      : {}),
+    ...(deliveryReactionTargetMessageId !== undefined
+      ? { deliveryReactionTargetMessageId }
       : {}),
     ...(deliveryTarget !== null ? { deliveryTarget } : {}),
     ...(() => {
@@ -2225,6 +2264,21 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
   context: AssistantAutoReplyGroupContext
   inputs: readonly AssistantAutoReplyPromptInput[]
 }): string | null {
+  if (
+    shouldSuppressAutoReplyNativeReplyToMessageId(
+      input.context.firstItem.summary.source,
+    )
+  ) {
+    return null
+  }
+
+  return readAutoReplyDeliveryReactionTargetMessageId(input)
+}
+
+function readAutoReplyDeliveryReactionTargetMessageId(input: {
+  context: AssistantAutoReplyGroupContext
+  inputs: readonly AssistantAutoReplyPromptInput[]
+}): string | null {
   const inputReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
     candidates: autoReplyInputCandidatesFromContext(input.context),
     expectedChannel: input.context.firstItem.summary.source,
@@ -2265,6 +2319,32 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
   }
 
   return null
+}
+
+function normalizeAutoReplyDeliveryReplyToMessageId(input: {
+  expectedChannel: string | null
+  replyToMessageId: string | undefined
+}): string | null | undefined {
+  if (shouldSuppressAutoReplyNativeReplyToMessageId(input.expectedChannel)) {
+    return null
+  }
+  return input.replyToMessageId
+}
+
+function normalizeAutoReplyDeliveryReactionTargetMessageId(input: {
+  expectedChannel: string | null
+  replyTargetMessageId: string | undefined
+}): string | null | undefined {
+  if (normalizeNullableString(input.expectedChannel) === 'telegram') {
+    return input.replyTargetMessageId ?? null
+  }
+  return input.replyTargetMessageId
+}
+
+function shouldSuppressAutoReplyNativeReplyToMessageId(
+  channel: string | null,
+): boolean {
+  return normalizeNullableString(channel) === 'telegram'
 }
 
 function readAutoReplyDeliveryMessageReactionsAvailable(input: {
