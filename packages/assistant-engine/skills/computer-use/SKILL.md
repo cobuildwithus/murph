@@ -261,6 +261,15 @@ observe first. If a transport or browser error leaves the outcome unknown,
 observe before retrying so Murph does not double-book, double-submit, or add
 duplicate cart items.
 
+If a control remains unresponsive after a specific wait/observe and one safe
+alternate locator or keyboard path, or the site appears wedged, refresh the
+current page as a last resort. Do this only when no booking, purchase,
+submission, or other side effect is in an unknown state. After refreshing,
+observe again and re-check cart, form, account, appointment, or confirmation
+state before continuing. If refreshing would risk duplicate submission or losing
+important user-entered data, pause for user takeover or finish failed with the
+blocker instead.
+
 ## Locator and control tactics
 
 - Prefer a unique role/name locator. Use `exact: true` when nearby controls have
