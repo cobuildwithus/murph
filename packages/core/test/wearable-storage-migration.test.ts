@@ -401,6 +401,73 @@ test("pruneWearableDenseRawTimeseries tombstones debug temporary ingest raw outs
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
+test("pruneWearableDenseRawTimeseries accepts first-class receipt coverage from manifest provenance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-dense-raw-debug-receipt-provenance");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const denseRole = "junction-timeseries-heartrate";
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-01T00:00:00.000Z",
+    ingestReceipt: {
+      schemaVersion: "wearable.raw_ingest_receipt.v1",
+      id: "wearable_raw_manifest_receipt",
+      provider: "junction",
+      sourceKind: "webhook",
+      deliveryMode: "full_payload",
+      observedAt: "2026-05-01T00:00:00.000Z",
+      payloadHash: "b".repeat(64),
+      rawArtifactRoles: [denseRole],
+      rawArtifactCount: 1,
+    },
+    evidenceParts: [
+      {
+        role: denseRole,
+        fileName: "heart-rate-timeseries.json",
+        mediaType: "application/json",
+        metadata: {
+          artifactClass: "dense_provider_timeseries",
+          resource: "heart_rate",
+          resourceCategory: "timeseries",
+          retentionClass: "debug_temporary",
+        },
+        content: {
+          resource: "heart_rate",
+          sampleValues: Array.from({ length: 512 }, (_, index) => index),
+        },
+      },
+    ],
+  });
+  const densePart = result.evidenceParts.find((part) => part.role === denseRole);
+  assert.ok(densePart);
+  const ingest = await readIntegrationIngestById({
+    id: result.importId,
+    vaultRoot,
+  });
+  assert.ok(ingest);
+  assert.equal(ingest.record.parts.some((part) => part.role === denseRole), false);
+  assert.equal(
+    (await detectWearableStorageMigrationCandidates({
+      now: REPAIR_NOW,
+      vaultRoot,
+    })).retentionEligibleDenseProviderRawTimeseriesCount,
+    1,
+  );
+
+  const prune = await pruneWearableDenseRawTimeseries({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(prune.tombstonedDenseRawArtifactCount, 1);
+  const rawTombstone = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, densePart.relativePath), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
 test("dense raw pruning allows one oversized candidate to avoid no-progress loops", async () => {
   const vaultRoot = await createRawArtifactFixture({
     denseRole: "junction-timeseries-distance",

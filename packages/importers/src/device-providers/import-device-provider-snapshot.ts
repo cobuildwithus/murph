@@ -111,11 +111,10 @@ export async function prepareDeviceProviderSnapshotImport(
     provenance: normalized.provenance,
   });
   const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
-  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(payloadWithRawEvidence);
   const rawReceipt = buildWearableRawIngestReceipt({
     provider: basePayload.provider,
     payloadForHash: rawSnapshot,
-    rawArtifactRoles: (payloadWithLegacyRawRole.evidenceParts ?? []).map((artifact) => artifact.role),
+    rawArtifactRoles: (payloadWithRawEvidence.evidenceParts ?? []).map((artifact) => artifact.role),
     userId: request.userId,
     accountId: basePayload.accountId,
     connectionId: request.connectionId,
@@ -133,10 +132,10 @@ export async function prepareDeviceProviderSnapshotImport(
     signatureVerified: request.signatureVerified,
   });
   return stripUndefined({
-    ...payloadWithLegacyRawRole,
+    ...payloadWithRawEvidence,
     ingestReceipt: rawReceipt,
     provenance: stripUndefined({
-      ...(payloadWithLegacyRawRole.provenance ?? {}),
+      ...(payloadWithRawEvidence.provenance ?? {}),
       wearableRawReceipt: {
         id: rawReceipt.id,
         deliveryMode: rawReceipt.deliveryMode,
@@ -146,24 +145,6 @@ export async function prepareDeviceProviderSnapshotImport(
       normalizerVersion: request.normalizerVersion,
     }),
   });
-}
-
-function attachSingleLegacyRawArtifactRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
-  if ((payload.evidenceParts ?? []).length !== 1) {
-    return payload;
-  }
-
-  const [rawArtifact] = payload.evidenceParts ?? [];
-  if (!rawArtifact) {
-    return payload;
-  }
-
-  return {
-    ...payload,
-    events: (payload.events ?? []).map((event) => event.rawArtifactRoles?.length
-      ? event
-      : { ...event, rawArtifactRoles: [rawArtifact.role] }),
-  };
 }
 
 function ensureProviderRawArtifact(

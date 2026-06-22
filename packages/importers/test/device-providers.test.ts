@@ -1400,7 +1400,6 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
       kind: "observation",
       occurredAt: "2026-03-16T12:00:00.000Z",
       title: "Polar daily steps",
-      rawArtifactRoles: ["provider-snapshot"],
       fields: {
         metric: "daily-steps",
         value: 4321,
@@ -1423,6 +1422,77 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   assert.equal(rawReceipt?.rawArtifactCount, 1);
   assert.equal(rawReceipt?.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
   assert.equal(calls[0]?.vaultRoot, undefined);
+});
+
+test("importDeviceProviderSnapshot lets core ignore a single debug-only evidence artifact", async () => {
+  const registry = createDeviceProviderRegistry();
+  const vaultRoot = await makeTempDirectory("murph-importers-debug-only-raw-");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-03-16T12:00:00.000Z",
+    vaultRoot,
+  });
+
+  registry.register(makeTestDeviceProviderAdapter({
+    provider: "polar",
+    normalizeSnapshot() {
+      return {
+        provider: "polar",
+        accountId: "polar-user-2",
+        events: [
+          {
+            kind: "observation",
+            occurredAt: "2026-03-16T12:00:00.000Z",
+            title: "Polar heart-rate sample",
+            fields: {
+              metric: "heart-rate",
+              value: 72,
+              unit: "bpm",
+            },
+          },
+        ],
+        evidenceParts: [
+          {
+            role: "polar-timeseries-heartrate",
+            fileName: "heart-rate-timeseries.json",
+            metadata: {
+              artifactClass: "dense_provider_timeseries",
+              resource: "heart_rate",
+              resourceCategory: "timeseries",
+              retentionClass: "debug_temporary",
+            },
+            content: {
+              sampleValues: [72, 73],
+            },
+          },
+        ],
+      };
+    },
+  }));
+
+  const result = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+    {
+      provider: "polar",
+      vaultRoot,
+      snapshot: {
+        importedAt: "2026-03-16T12:05:00.000Z",
+      },
+    },
+    {
+      corePort: coreRuntime,
+      providerRegistry: registry,
+    },
+  );
+
+  const ingest = await coreRuntime.readIntegrationIngestById({
+    id: result.importId,
+    vaultRoot,
+  });
+
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0]?.rawRefs, undefined);
+  assert.ok(result.evidenceParts.some((artifact) => artifact.role === "polar-timeseries-heartrate"));
+  assert.ok(ingest);
+  assert.equal(ingest.record.parts.some((part) => part.role === "polar-timeseries-heartrate"), false);
 });
 
 test("importDeviceProviderSnapshot does not let adapters bypass the dense sample guard", async () => {

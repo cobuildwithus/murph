@@ -485,7 +485,7 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
     },
   });
 
-  assert.equal(result.importId, "xfm_K51C3AJ536ZE2H360E65YW1EDB");
+  assert.equal(result.importId, "xfm_AWQTP6BQAYZX1WBAD20TPV6F9Z");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
   assert.equal(result.evidenceParts.length, 2);
@@ -1206,7 +1206,7 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(first.importId, second.importId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
-  assert.equal(first.importId, "xfm_72QPNRC526ADQNDRYATXC10EVD");
+  assert.equal(first.importId, "xfm_6X8J5C5BDPHW8Z4YQG66EX4XBQ");
   assert.equal(first.events[0]?.id, "evt_30XC16ZG27S0ZM4TMPHDKJX7KP");
   assert.equal(first.samples[0]?.id, "smp_VJ3AZR2JBQVE89Z6B84EA60H0G");
   assert.equal(eventRecords.length, 1);
@@ -1216,10 +1216,22 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
 test("importDeviceBatch retries without importedAt reuse the same raw evidence identity", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-retry-no-imported-at");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const receiptPayloadHash = "a".repeat(64);
   const input = {
     vaultRoot,
     provider: "whoop",
     accountId: "whoop-user-1",
+    ingestReceipt: {
+      schemaVersion: "wearable.raw_ingest_receipt.v1",
+      id: "wearable_raw_retry_without_imported_at",
+      provider: "whoop",
+      sourceKind: "webhook",
+      deliveryMode: "full_payload",
+      observedAt: "2026-03-16T09:30:00.000Z",
+      payloadHash: receiptPayloadHash,
+      rawArtifactRoles: ["provider-snapshot"],
+      rawArtifactCount: 1,
+    },
     evidenceParts: [
       {
         role: "provider-snapshot",
@@ -1240,10 +1252,78 @@ test("importDeviceBatch retries without importedAt reuse the same raw evidence i
   })) as IntegrationIngestRecord[];
 
   assert.equal(first.importId, second.importId);
-  assert.equal(first.importedAt, "2026-03-12T12:00:00.000Z");
+  assert.equal(first.importedAt, "2026-03-16T09:30:00.000Z");
   assert.equal(second.importedAt, first.importedAt);
   assert.equal(first.evidenceParts[0]?.relativePath, second.evidenceParts[0]?.relativePath);
   assert.equal(ingestRows.filter((record) => record.id === first.importId).length, 1);
+});
+
+test("importDeviceBatch rejects evidence-only imports without importedAt or stable receipt time", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-evidence-only-no-time");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        evidenceParts: [
+          {
+            role: "provider-snapshot",
+            fileName: "snapshot.json",
+            content: { provider: "whoop", score: 67 },
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_DEVICE_BATCH",
+  );
+});
+
+test("importDeviceBatch identity covers persisted source provenance and evidence metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-identity-provenance");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const buildInput = (override: {
+    metadataResource?: string;
+    normalizerVersion?: string;
+    source?: string;
+  }) => ({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    source: override.source ?? "device",
+    provenance: {
+      normalizerVersion: override.normalizerVersion ?? "whoop-normalizer.v1",
+    },
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        metadata: {
+          artifactClass: "provider_snapshot",
+          resource: override.metadataResource ?? "recovery",
+        },
+        content: {
+          provider: "whoop",
+          score: 67,
+        },
+      },
+    ],
+  } as const);
+
+  const first = await importDeviceBatch(buildInput({}));
+  const changedNormalizer = await importDeviceBatch(buildInput({ normalizerVersion: "whoop-normalizer.v2" }));
+  const changedMetadata = await importDeviceBatch(buildInput({ metadataResource: "recovery-v2" }));
+  const changedSource = await importDeviceBatch(buildInput({ source: "manual" }));
+
+  assert.notEqual(changedNormalizer.importId, first.importId);
+  assert.notEqual(changedMetadata.importId, first.importId);
+  assert.notEqual(changedSource.importId, first.importId);
+  assert.ok(await readIntegrationIngestById({ id: first.importId, vaultRoot }));
+  assert.ok(await readIntegrationIngestById({ id: changedNormalizer.importId, vaultRoot }));
+  assert.ok(await readIntegrationIngestById({ id: changedMetadata.importId, vaultRoot }));
+  assert.ok(await readIntegrationIngestById({ id: changedSource.importId, vaultRoot }));
 });
 
 test("importDeviceBatch rejects event rawRefs to debug temporary dense evidence", async () => {
@@ -1324,7 +1404,7 @@ test("importDeviceBatch falls back to the sole evidence part when events omit ex
   });
   const fallbackRawRef = ingestRecord.parts[0]?.relativePath;
 
-  assert.equal(result.importId, "xfm_1Z08Z92ZENNAM92FY9NK798ZXY");
+  assert.equal(result.importId, "xfm_R1A02EZHG6JEZ9DPER5X45GR7H");
   assert.equal(result.events[0]?.id, "evt_2TSF1SDWFHHSQ8503JWDHCF47K");
   assert.equal(eventRecords[0]?.kind, "note");
   assert.ok(fallbackRawRef);
@@ -1813,7 +1893,7 @@ test("importDeviceBatch supports sample-only batches without evidence parts", as
     relativePath: result.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
-  assert.equal(result.importId, "xfm_KW0X17W8KCMXHBM387WJS1D075");
+  assert.equal(result.importId, "xfm_D095CX5G8BYWK8TJ0DGA6ZC03W");
   assert.equal(result.samples[0]?.id, "smp_Z2ZBJH4EBC7QVGQ5CQ8G95M8R4");
   assert.equal(result.evidenceParts.length, 0);
   assert.equal(result.ingestShardPath, "ledger/integration-ingests/2026/2026-03.jsonl");
@@ -1955,6 +2035,7 @@ test("importDeviceBatch rejects unsupported sample streams and missing sample pa
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
+        importedAt: "2026-03-16T07:30:00.000Z",
         samples: [
           {
             stream: "hrv",
@@ -2028,6 +2109,7 @@ test("importDeviceBatch rejects duplicate evidence roles and missing evidence-ro
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
+        importedAt: "2026-03-16T07:30:00.000Z",
         evidenceParts: [
           { role: "dup", content: { one: true } },
           { role: "dup", content: { two: true } },
@@ -2068,6 +2150,7 @@ test("importDeviceBatch rejects invalid provenance, evidence metadata, and empty
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
+        importedAt: "2026-03-16T07:30:00.000Z",
         provenance: invalidTestValue<Record<string, unknown>>("not-an-object"),
         evidenceParts: [
           { content: { payload: true } },
@@ -2082,6 +2165,7 @@ test("importDeviceBatch rejects invalid provenance, evidence metadata, and empty
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
+        importedAt: "2026-03-16T07:30:00.000Z",
         evidenceParts: [
           {
             content: { payload: true },
@@ -2098,6 +2182,7 @@ test("importDeviceBatch rejects invalid provenance, evidence metadata, and empty
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
+        importedAt: "2026-03-16T07:30:00.000Z",
         evidenceParts: [
           {
             content: invalidTestValue<string>(undefined),

@@ -1163,10 +1163,7 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
       }
     }
 
-    if (
-      receiptArtifacts.length === 0
-      || (input.artifactClass === "derived_canonical_records" && providerEvidenceArtifacts.length === 0)
-    ) {
+    if (input.artifactClass === "derived_canonical_records" && providerEvidenceArtifacts.length === 0) {
       return false;
     }
     for (const artifact of providerEvidenceArtifacts) {
@@ -1181,6 +1178,12 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
       }
     }
     const coveredRoles = new Set<string>();
+    const manifestReceiptRoles = readManifestIngestReceiptCoveredRoles(reference.manifest);
+    if (manifestReceiptRoles) {
+      for (const role of manifestReceiptRoles) {
+        coveredRoles.add(role);
+      }
+    }
     for (const artifact of receiptArtifacts) {
       const receiptRoles = await readReceiptCoveredRoles(input.vaultRoot, artifact, {
         shouldContinue: input.shouldContinue,
@@ -1194,6 +1197,9 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
       for (const role of receiptRoles) {
         coveredRoles.add(role);
       }
+    }
+    if (coveredRoles.size === 0) {
+      return false;
     }
     if (input.artifactClass === "dense_provider_timeseries") {
       if (!coveredRoles.has(reference.artifact.role)) {
@@ -1209,6 +1215,15 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
   }
 
   return true;
+}
+
+function readManifestIngestReceiptCoveredRoles(
+  manifest: RawImportManifest,
+): Set<string> | null {
+  if (!Object.prototype.hasOwnProperty.call(manifest.provenance, "ingestReceipt")) {
+    return null;
+  }
+  return readWearableReceiptCoveredRolesFromRecord(manifest.provenance.ingestReceipt);
 }
 
 async function readReceiptCoveredRoles(
@@ -1233,20 +1248,24 @@ async function readReceiptCoveredRoles(
     if (options.shouldContinue?.() === false) {
       return "interrupted";
     }
-    if (!isPlainRecord(raw)) {
-      return null;
-    }
-    if (!isRecognizedWearableReceipt(raw)) {
-      return null;
-    }
-    const rawArtifactRoles = readStringArray(raw.rawArtifactRoles);
-    if (!rawArtifactRoles || rawArtifactRoles.length === 0) {
-      return null;
-    }
-    return new Set(rawArtifactRoles);
+    return readWearableReceiptCoveredRolesFromRecord(raw);
   } catch {
     return null;
   }
+}
+
+function readWearableReceiptCoveredRolesFromRecord(raw: unknown): Set<string> | null {
+  if (!isPlainRecord(raw)) {
+    return null;
+  }
+  if (!isRecognizedWearableReceipt(raw)) {
+    return null;
+  }
+  const rawArtifactRoles = readStringArray(raw.rawArtifactRoles);
+  if (!rawArtifactRoles || rawArtifactRoles.length === 0) {
+    return null;
+  }
+  return new Set(rawArtifactRoles);
 }
 
 function isRecognizedWearableReceipt(raw: Record<string, unknown>): boolean {

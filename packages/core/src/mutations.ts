@@ -1394,7 +1394,6 @@ function normalizeDeviceBatchInputs({
   provider,
   accountId,
   importedAt,
-  defaultImportedAt,
   defaultTimeZone: fallbackTimeZone,
   source = "device",
   events = [],
@@ -1404,16 +1403,10 @@ function normalizeDeviceBatchInputs({
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
-  defaultImportedAt?: DateInput;
   defaultTimeZone?: string;
 }): NormalizedDeviceBatchInputs {
   const normalizedProvider = sanitizePathSegment(provider, "provider");
   const normalizedAccountId = typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
-  const importedAtWasProvided = importedAt !== undefined;
-  const normalizedImportedAt = toIsoTimestamp(
-    importedAtWasProvided ? importedAt : defaultImportedAt ?? new Date(),
-    "importedAt",
-  );
   const defaultTimeZone = normalizeTimeZone(fallbackTimeZone);
   const normalizedProvenance = normalizeLooseRecord(
     provenance,
@@ -1442,6 +1435,17 @@ function normalizeDeviceBatchInputs({
     itemLabel: "Device evidence part",
   });
   const normalizedIngestReceipt = normalizeDeviceIngestReceipt(ingestReceipt);
+  const importedAtWasProvided = importedAt !== undefined;
+  const normalizedImportedAt = toIsoTimestamp(
+    importedAtWasProvided
+      ? importedAt
+      : deriveOmittedDeviceBatchImportedAt({
+          eventInputs,
+          ingestReceipt: normalizedIngestReceipt,
+          sampleInputs,
+        }),
+    "importedAt",
+  );
 
   if (
     eventInputs.length === 0
@@ -1479,6 +1483,52 @@ function normalizeDeviceBatchInputs({
     evidenceParts: normalizeDeviceEvidencePartInputs(evidencePartInputs, normalizedProvider),
     ingestReceipt: normalizedIngestReceipt,
   };
+}
+
+function deriveOmittedDeviceBatchImportedAt(input: {
+  eventInputs: readonly DeviceEventInput[];
+  ingestReceipt?: IntegrationIngestReceipt;
+  sampleInputs: readonly DeviceSampleInput[];
+}): string {
+  if (input.ingestReceipt?.observedAt) {
+    return toIsoTimestamp(input.ingestReceipt.observedAt, "ingestReceipt.observedAt");
+  }
+
+  const timestamps = [
+    ...input.eventInputs.flatMap((event) => [
+      event.occurredAt,
+      event.recordedAt,
+    ]),
+    ...input.sampleInputs.flatMap((sampleInput) => {
+      const sample = isLooseRecord(sampleInput.sample) ? sampleInput.sample : {};
+      return [
+        sampleInput.recordedAt,
+        sample.recordedAt as DateInput | undefined,
+        sample.occurredAt as DateInput | undefined,
+        sample.startAt as DateInput | undefined,
+        sample.endAt as DateInput | undefined,
+      ];
+    }),
+  ].filter(isDateInput);
+
+  if (timestamps.length > 0) {
+    return timestamps
+      .map((timestamp) => toIsoTimestamp(timestamp, "importedAt"))
+      .sort()[0] as string;
+  }
+
+  throw new VaultError(
+    "VAULT_INVALID_DEVICE_BATCH",
+    "importDeviceBatch requires importedAt, ingestReceipt.observedAt, or at least one explicit event/sample timestamp.",
+  );
+}
+
+function isLooseRecord(value: unknown): value is LooseRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isDateInput(value: unknown): value is DateInput {
+  return typeof value === "string" || typeof value === "number" || value instanceof Date;
 }
 
 function prepareDeviceEvidenceParts(
@@ -2160,7 +2210,6 @@ function prepareDeviceBatchPlan({
   provider,
   accountId,
   importedAt,
-  defaultImportedAt,
   defaultTimeZone: fallbackTimeZone,
   source = "device",
   events = [],
@@ -2170,14 +2219,12 @@ function prepareDeviceBatchPlan({
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
-  defaultImportedAt?: DateInput;
   defaultTimeZone?: string;
 }): DeviceBatchPlan {
   const normalizedInputs = normalizeDeviceBatchInputs({
     provider,
     accountId,
     importedAt,
-    defaultImportedAt,
     defaultTimeZone: fallbackTimeZone,
     source,
     events,
@@ -2202,12 +2249,15 @@ function prepareDeviceBatchPlan({
       provider: normalizedInputs.provider,
       accountId: normalizedInputs.accountId ?? null,
       ...(normalizedInputs.importedAtWasProvided ? { importedAt: normalizedInputs.importedAt } : {}),
+      source: normalizedInputs.source,
+      provenance: normalizedInputs.provenance,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: uniqueSamples.map(({ recordId }) => recordId),
       evidenceParts: normalizedInputs.evidenceParts.map((artifact) => ({
         role: artifact.role,
         fileName: artifact.fileName,
         mediaType: artifact.mediaType ?? null,
+        metadata: artifact.metadata ?? null,
         sha256: artifact.sha256,
       })),
       ingestReceipt: normalizedInputs.ingestReceipt ?? null,
@@ -2734,7 +2784,6 @@ export async function importDeviceBatch({
     provider,
     accountId,
     importedAt,
-    defaultImportedAt: vault.metadata.createdAt,
     defaultTimeZone: vault.metadata.timezone,
     source,
     events,
