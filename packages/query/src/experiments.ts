@@ -695,23 +695,13 @@ function buildAdherenceObservations(
       case "metricPresence":
       case "metricThreshold":
         const metricEvidence = target.evidence;
-        for (const point of context.metricPoints) {
-          if (point.effectiveDate > context.asOf) {
-            continue;
-          }
-          if (!matchesAdherenceMetric(metricEvidence.metricKey, point)) {
-            continue;
-          }
-          const value = point.canonicalValue ?? point.value;
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            continue;
-          }
+        for (const row of selectMetricAdherenceRows(context, metricEvidence.metricKey)) {
           observations.push({
-            evidenceId: point.id,
-            localDate: point.effectiveDate,
+            evidenceId: row.id,
+            localDate: row.date,
             metricKey: metricEvidence.metricKey,
             targetId: target.targetId,
-            value,
+            value: row.value,
           });
         }
         break;
@@ -719,6 +709,28 @@ function buildAdherenceObservations(
   }
 
   return observations;
+}
+
+function selectMetricAdherenceRows(
+  context: ExperimentSummaryContext,
+  metricKey: string,
+): Array<{ date: string; id: string; value: number }> {
+  const points = context.metricPoints.filter((point) =>
+    point.effectiveDate <= context.asOf && matchesAdherenceMetric(metricKey, point)
+  );
+  const selectedMetricKey = points[0]?.metricKey ?? normalizeMetricKey(metricKey);
+  return selectMetricSeries({
+    metricKey: selectedMetricKey,
+    points,
+  }).rows.flatMap((row) =>
+    typeof row.value === "number" && Number.isFinite(row.value)
+      ? [{
+          date: row.date,
+          id: row.id ?? row.pointIds?.[0] ?? `metric-series:${row.metricKey}:${row.date}`,
+          value: row.value,
+        }]
+      : []
+  );
 }
 
 function matchesAdherenceMetric(metricKey: string, point: MetricPoint): boolean {

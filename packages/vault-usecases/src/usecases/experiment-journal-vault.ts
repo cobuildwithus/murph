@@ -2197,19 +2197,28 @@ function buildExperimentAnchorMetricPointDateFilters(
   asOf?: string,
 ): Array<Pick<QueryMetricPointFilters, 'from' | 'to'>> {
   const dates = new Set<string>()
+  let needsHistory = false
   for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
-    if (!anchor.observedOn || (asOf && anchor.observedOn > asOf)) {
-      continue
-    }
     const matchesMetricKey = anchor.biomarkerKeys.some(
       (biomarkerKey) => resolveExperimentBiomarkerMetricKey(query, biomarkerKey) === metricKey,
     )
-    if (matchesMetricKey) {
+    if (!matchesMetricKey) {
+      continue
+    }
+
+    if (!anchor.observedOn) {
+      needsHistory = true
+      continue
+    }
+    if (!asOf || anchor.observedOn <= asOf) {
       dates.add(anchor.observedOn)
     }
   }
 
-  return sortedIsoDates([...dates]).map((date) => ({ from: date, to: date }))
+  return [
+    ...(needsHistory ? [{ ...(asOf ? { to: asOf } : {}) }] : []),
+    ...sortedIsoDates([...dates]).map((date) => ({ from: date, to: date })),
+  ]
 }
 
 function capExperimentMetricEndDate(

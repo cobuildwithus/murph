@@ -542,6 +542,41 @@ analysisPlan:
     "utf8",
   );
 
+  await writeFile(
+    path.join(vaultRoot, "bank/experiments/psyllium-ldl-undated-anchors.md"),
+    `---
+schemaVersion: murph.frontmatter.experiment.v1
+docType: experiment
+experimentId: exp_01JNV4458HYPP53JDQCBP1QJGT
+slug: psyllium-ldl-undated-anchors
+status: completed
+title: Psyllium LDL Undated Anchors
+startedOn: 2026-05-09
+runPlan:
+  baselineStart: 2026-05-02
+  baselineEnd: 2026-05-08
+  interventionStart: 2026-05-09
+  interventionEnd: 2026-08-01
+analysisPlan:
+  primaryBiomarkerKey: biomarker:ldl-c
+  desiredDirection: decrease
+  measurementAnchors:
+    - role: baseline
+      kind: lab_panel
+      recordId: evt_lipid_baseline
+      biomarkerKeys:
+        - biomarker:ldl-c
+    - role: followup
+      kind: lab_panel
+      recordId: evt_lipid_followup
+      biomarkerKeys:
+        - biomarker:ldl-c
+---
+# Psyllium LDL Undated Anchors
+`,
+    "utf8",
+  );
+
   const results = [
     ["evt_lipid_baseline", "2026-04-23", 140],
     ["evt_lipid_followup", "2026-08-02", 120],
@@ -705,6 +740,24 @@ test("experiment progress usecases keep anchored lab metrics outside run windows
   assert.equal(outcome.outcome.metricResults[0]?.baselineMean, 140);
   assert.equal(outcome.outcome.metricResults[0]?.interventionMean, 120);
   assert.equal(outcome.outcome.metricResults[0]?.deltaAbs, -20);
+
+  const undatedAnchorProgress = await showExperimentProgress({
+    vault: vaultRoot,
+    lookup: "psyllium-ldl-undated-anchors",
+    asOf: "2026-08-02",
+  });
+  assert.equal(undatedAnchorProgress.progress.signals[0]?.baselineMean, 140);
+  assert.equal(undatedAnchorProgress.progress.signals[0]?.interventionMean, 120);
+  assert.equal(undatedAnchorProgress.progress.signals[0]?.deltaAbs, -20);
+
+  const undatedAnchorOutcome = await analyzeExperimentOutcomeRecord({
+    vault: vaultRoot,
+    lookup: "psyllium-ldl-undated-anchors",
+    asOf: "2026-08-02",
+  });
+  assert.equal(undatedAnchorOutcome.outcome.metricResults[0]?.baselineMean, 140);
+  assert.equal(undatedAnchorOutcome.outcome.metricResults[0]?.interventionMean, 120);
+  assert.equal(undatedAnchorOutcome.outcome.metricResults[0]?.deltaAbs, -20);
 });
 
 test("experiment outcome usecases keep metric selection policy for run windows", async () => {
