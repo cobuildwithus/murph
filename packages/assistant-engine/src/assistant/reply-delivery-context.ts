@@ -4,6 +4,7 @@ export type AssistantReplyDeliveryContext = Pick<
   AssistantMessageInput,
   | 'deliveryDispatchMode'
   | 'deliveryIdempotencyKey'
+  | 'deliveryMessageReactionsAvailable'
   | 'deliveryReplyToMessageId'
   | 'deliverySource'
   | 'deliverySubject'
@@ -20,6 +21,8 @@ export function pickAssistantReplyDeliveryContext(
   return {
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryMessageReactionsAvailable:
+      input.deliveryMessageReactionsAvailable,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject,
@@ -38,6 +41,12 @@ export function pickDefinedAssistantReplyDeliveryContext(
     ...(input.deliveryIdempotencyKey === undefined
       ? {}
       : { deliveryIdempotencyKey: input.deliveryIdempotencyKey }),
+    ...(input.deliveryMessageReactionsAvailable === undefined
+      ? {}
+      : {
+          deliveryMessageReactionsAvailable:
+            input.deliveryMessageReactionsAvailable,
+        }),
     ...(input.deliveryReplyToMessageId === undefined
       ? {}
       : { deliveryReplyToMessageId: input.deliveryReplyToMessageId }),
@@ -69,6 +78,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
       second?.deliveryIdempotencyKey === undefined
         ? first.deliveryIdempotencyKey
         : second.deliveryIdempotencyKey,
+    deliveryMessageReactionsAvailable:
+      second?.deliveryMessageReactionsAvailable === undefined
+        ? first.deliveryMessageReactionsAvailable
+        : second.deliveryMessageReactionsAvailable,
     deliveryReplyToMessageId:
       second?.deliveryReplyToMessageId === undefined
         ? first.deliveryReplyToMessageId
@@ -104,6 +117,8 @@ export function applyAssistantReplyDeliveryContext(input: {
     ...input.input,
     deliveryDispatchMode: input.context.deliveryDispatchMode,
     deliveryIdempotencyKey: input.context.deliveryIdempotencyKey,
+    deliveryMessageReactionsAvailable:
+      input.context.deliveryMessageReactionsAvailable,
     deliveryReplyToMessageId: input.context.deliveryReplyToMessageId,
     deliverySource: input.context.deliverySource,
     deliverySubject: input.context.deliverySubject,

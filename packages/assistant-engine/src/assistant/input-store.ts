@@ -345,6 +345,15 @@ const assistantInputTelegramSourceMetadataSchema = z
   })
   .strict()
 
+const assistantInputLinqSourceMetadataSchema = z
+  .object({
+    kind: z.literal('linq'),
+    partCount: z.number().int().min(0).max(64),
+    reactionEligible: z.boolean().optional().default(false),
+    service: safeNullableAssistantInputTokenSchema('sourceMetadata.service'),
+  })
+  .strict()
+
 const assistantInputEmailSourceMetadataSchema = z
   .object({
     kind: z.literal('email'),
@@ -356,6 +365,7 @@ const assistantInputEmailSourceMetadataSchema = z
 const assistantInputSourceMetadataSchema = z
   .discriminatedUnion('kind', [
     assistantInputEmailSourceMetadataSchema,
+    assistantInputLinqSourceMetadataSchema,
     assistantInputTelegramSourceMetadataSchema,
   ])
   .nullable()

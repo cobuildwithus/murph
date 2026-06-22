@@ -4326,6 +4326,15 @@ describe("hostedRunnerIntercept", () => {
       path: "/chats/chat_1/voicememo",
     },
     {
+      body: {
+        operation: "add",
+        type: "love",
+      },
+      method: "POST",
+      name: "message reaction",
+      path: "/messages/message_1/reactions",
+    },
+    {
       method: "POST",
       name: "typing start",
       path: "/chats/chat_1/typing",

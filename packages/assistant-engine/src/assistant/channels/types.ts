@@ -84,6 +84,20 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  setLinqMessageReaction?: (input: {
+    reaction: AssistantMessageReaction
+    signal?: AbortSignal
+    target: string
+    targetMessageId: string
+  }) => Promise<
+    | {
+        reaction?: AssistantMessageReaction | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+        targetMessageId?: string | null
+      }
+    | void
+  >
   telegramVoiceMemoRuntime?: TelegramRuntimeDependencies
   sendLinq?: (input: {
     directRecipientPhoneNumber?: string | null

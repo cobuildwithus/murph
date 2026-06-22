@@ -12,6 +12,7 @@ import {
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
+  setLinqMessageReaction as setLinqApiMessageReaction,
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
@@ -51,6 +52,7 @@ import type {
   WhatsAppRuntimeDependencies,
 } from './types.js'
 import type {
+  AssistantMessageReaction,
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeOptionalText } from './helpers.js'
@@ -431,6 +433,43 @@ export async function sendLinqVoiceMemoMessage(
     providerMessageId: normalizeOptionalText(delivered.providerMessageId),
     providerThreadId: normalizeOptionalText(delivered.providerThreadId),
     target: normalizeOptionalText(delivered.target),
+  }
+}
+
+export async function setLinqMessageReaction(
+  input: {
+    reaction: AssistantMessageReaction
+    targetMessageId: string
+  },
+  dependencies: LinqRuntimeDependencies = {},
+): Promise<{
+  reaction: AssistantMessageReaction
+  targetMessageId: string
+}> {
+  const env = dependencies.env ?? process.env
+  const token = resolveLinqApiToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
+      'Outbound iMessage delivery requires LINQ_API_TOKEN.',
+    )
+  }
+
+  const delivered = await setLinqApiMessageReaction(
+    {
+      reaction: input.reaction,
+      targetMessageId: input.targetMessageId,
+    },
+    {
+      env,
+      fetchImplementation: dependencies.fetchImplementation,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    },
+  )
+
+  return {
+    reaction: delivered.reaction,
+    targetMessageId: delivered.targetMessageId,
   }
 }
 

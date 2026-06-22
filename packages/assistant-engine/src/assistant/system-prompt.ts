@@ -382,6 +382,9 @@ function stableStringifyAssistantPromptCacheValue(value: unknown): string {
 const ASSISTANT_DATE_STYLE_GUIDANCE_TEXT =
   'In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.';
 
+const ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT =
+  'For relative dates, be careful around late-night or after-midnight messages: if the user says "tomorrow" or "tmrw" before they have slept, or before the current night has a sleep record, they may mean the upcoming wake-day, which can be the current calendar day. Clarify before writing dates, scheduling, or logging when this changes the outcome.';
+
 function buildAssistantTimezoneLineText(currentTimeZone: string): string {
   return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
 }
@@ -408,6 +411,7 @@ function buildAssistantTimeStyleContextText(input: {
     [
       buildAssistantTimezoneLineText(input.currentTimeZone),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
+      ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
     ].join("\n"),
     buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
   );

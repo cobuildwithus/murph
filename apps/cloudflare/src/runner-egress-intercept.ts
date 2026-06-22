@@ -2904,6 +2904,9 @@ function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
   if (method === "POST" && pathnameSuffix === "/chats") {
     return true;
   }
+  if (method === "POST" && /^\/messages\/[^/]+\/reactions$/u.test(pathnameSuffix)) {
+    return true;
+  }
   if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
     return true;
   }
