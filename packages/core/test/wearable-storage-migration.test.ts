@@ -256,12 +256,12 @@ test("integration ingest migration bounds legacy bundle processing per pass", as
   const firstResult = await runIntegrationIngestMigration({
     vaultRoot,
     apply: true,
-    finalize: false,
     maxBundles: 1,
   });
 
   assert.equal(firstResult.appendedBundleCount, 1);
   assert.equal(firstResult.deletedFileCount, 2);
+  assert.equal(firstResult.finalized, false);
   assert.ok(await readIntegrationIngestById(vaultRoot, firstBundle.importId));
   assert.equal(await fileExists(path.join(vaultRoot, firstBundle.artifactPath)), false);
   assert.equal(await fileExists(path.join(vaultRoot, secondBundle.artifactPath)), true);
@@ -278,6 +278,81 @@ test("integration ingest migration bounds legacy bundle processing per pass", as
   assert.equal(secondResult.finalized, true);
   assert.ok(await readIntegrationIngestById(vaultRoot, secondBundle.importId));
   assert.equal((await readVaultMetadataFormatVersion(vaultRoot)), CURRENT_VAULT_FORMAT_VERSION);
+});
+
+test("integration ingest migration finalizes empty legacy vaults and is idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-empty-finalize");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+  await fs.rm(path.join(vaultRoot, "ledger/integration-ingests"), { recursive: true, force: true });
+
+  const result = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+  });
+
+  assert.equal(result.mode, "apply");
+  assert.equal(result.mutated, true);
+  assert.equal(result.appendedBundleCount, 0);
+  assert.equal(result.deletedFileCount, 0);
+  assert.equal(result.finalized, true);
+  assert.equal(result.storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(await fileExists(path.join(vaultRoot, "ledger/integration-ingests")), true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+
+  const rerun = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+  });
+
+  assert.equal(rerun.mode, "apply");
+  assert.equal(rerun.mutated, false);
+  assert.equal(rerun.finalized, false);
+  assert.equal(rerun.hasWork, false);
+  assert.equal(rerun.storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
+  assert.deepEqual(rerun.auditPaths, []);
+});
+
+test("integration ingest migration restores legacy metadata when final validation fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-finalize-rollback");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+  await fs.rm(path.join(vaultRoot, "ledger/integration-ingests"), { recursive: true, force: true });
+  await fs.mkdir(path.join(vaultRoot, "raw/documents/bad-raw"), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, "raw/documents/bad-raw/payload.json"), "{}\n", "utf8");
+
+  await assert.rejects(
+    () =>
+      runIntegrationIngestMigration({
+        vaultRoot,
+        apply: true,
+      }),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "INTEGRATION_INGEST_MIGRATION_INVALID_VAULT");
+      return true;
+    },
+  );
+
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), LEGACY_VAULT_FORMAT_VERSION);
+});
+
+test("integration ingest migration no-ops current vaults without reading event shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-v2-noop");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await fs.mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl"), "not-json\n", "utf8");
+
+  const result = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+  });
+
+  assert.equal(result.mode, "apply");
+  assert.equal(result.storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(result.mutated, false);
+  assert.equal(result.finalized, false);
+  assert.equal(result.hasWork, false);
 });
 
 test("integration ingest migration rewrites event rawRefs before deleting legacy files and finalizing", async () => {

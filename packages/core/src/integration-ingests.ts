@@ -11,8 +11,9 @@ import {
 
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { walkVaultFiles } from "./fs.ts";
+import { pathExists, walkVaultFiles } from "./fs.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { resolveVaultPath } from "./path-safety.ts";
 
 export const MAX_INTEGRATION_INGEST_PARTS = 10_000;
 export const MAX_INTEGRATION_EVIDENCE_PART_BYTES = 100 * 1024 * 1024;
@@ -216,10 +217,21 @@ export async function readIntegrationIngestEntries(
   const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
     extension: ".jsonl",
   });
+  return readIntegrationIngestEntriesFromPaths(vaultRoot, paths.sort());
+}
+
+async function readIntegrationIngestEntriesFromPaths(
+  vaultRoot: string,
+  paths: readonly string[],
+): Promise<StoredIntegrationIngestEntry[]> {
   const entries: StoredIntegrationIngestEntry[] = [];
   const seen = new Map<string, string>();
 
-  for (const relativePath of paths.sort()) {
+  for (const relativePath of [...paths].sort()) {
+    const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
+    if (!(await pathExists(absolutePath))) {
+      continue;
+    }
     for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
       const parsed = integrationIngestRecordSchema.safeParse(raw);
       if (!parsed.success) {
@@ -257,13 +269,17 @@ export async function buildIntegrationIngestAppendPlan(
   vaultRoot: string,
   records: readonly IntegrationIngestRecord[],
 ): Promise<IntegrationIngestAppendPlan> {
+  const targetShardPaths = [
+    ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
+  ].sort();
   const existingById = new Map(
-    (await readIntegrationIngestEntries(vaultRoot)).map((entry) => [entry.record.id, entry.record] as const),
+    (await readIntegrationIngestEntriesFromPaths(vaultRoot, targetShardPaths)).map((entry) =>
+      [entry.record.id, entry.record] as const,
+    ),
   );
   const pendingById = new Map<string, IntegrationIngestRecord>();
   const payloads = new Map<string, string>();
   const appendedIds: string[] = [];
-  const targetShardPaths = [...new Set(records.map((record) => integrationIngestShardPath(record.importedAt)))].sort();
 
   for (const record of records) {
     assertIntegrationIngestRecordIntegrity(record);

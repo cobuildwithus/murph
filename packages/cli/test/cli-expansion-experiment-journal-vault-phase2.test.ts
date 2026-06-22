@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -3034,6 +3034,94 @@ test.sequential(
 )
 
 test.sequential(
+  'vault repair-integration-ingests finalizes empty legacy vaults and no-ops current vaults',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-integration-ingest-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await rewriteVaultMetadataWithFormatVersion(vaultRoot, 1)
+      await rm(path.join(vaultRoot, 'ledger/integration-ingests'), { recursive: true, force: true })
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        storedFormatVersion: number
+        hasWork: boolean
+        blockerCount: number
+        mutated: boolean
+        finalized: boolean
+      }>([
+        'vault',
+        'repair-integration-ingests',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault repair-integration-ingests')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).storedFormatVersion, 1)
+      assert.equal(requireData(dryRun).hasWork, false)
+      assert.equal(requireData(dryRun).blockerCount, 0)
+      assert.equal(requireData(dryRun).mutated, false)
+      assert.equal(requireData(dryRun).finalized, false)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        storedFormatVersion: number
+        mutated: boolean
+        finalized: boolean
+        auditPaths: string[]
+      }>([
+        'vault',
+        'repair-integration-ingests',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION)
+      assert.equal(requireData(applied).mutated, true)
+      assert.equal(requireData(applied).finalized, true)
+      assert.equal(requireData(applied).auditPaths.length, 1)
+      await access(path.join(vaultRoot, 'ledger/integration-ingests'))
+
+      const metadata = JSON.parse(await readFile(path.join(vaultRoot, 'vault.json'), 'utf8')) as {
+        formatVersion: number
+      }
+      assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION)
+
+      const rerun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        storedFormatVersion: number
+        hasWork: boolean
+        mutated: boolean
+        finalized: boolean
+        auditPaths: string[]
+      }>([
+        'vault',
+        'repair-integration-ingests',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(rerun.ok, true)
+      assert.equal(requireData(rerun).mode, 'apply')
+      assert.equal(requireData(rerun).storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION)
+      assert.equal(requireData(rerun).hasWork, false)
+      assert.equal(requireData(rerun).mutated, false)
+      assert.equal(requireData(rerun).finalized, false)
+      assert.deepEqual(requireData(rerun).auditPaths, [])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'vault repair-wearable-storage exposes dry-run and explicit dense raw apply controls',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-'))
@@ -3353,6 +3441,52 @@ test.sequential(
       const result = await runSliceCli([
         'vault',
         'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+        '--config',
+        configPath,
+      ], { config: true })
+
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--apply/u)
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-integration-ingests rejects apply loaded only from config',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-integration-ingest-repair-config-'))
+    const configPath = path.join(vaultRoot, 'config.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await writeFile(
+        configPath,
+        `${JSON.stringify({
+          commands: {
+            vault: {
+              commands: {
+                'repair-integration-ingests': {
+                  options: {
+                    apply: true,
+                  },
+                },
+              },
+            },
+          },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'vault',
+        'repair-integration-ingests',
         '--vault',
         vaultRoot,
         '--config',

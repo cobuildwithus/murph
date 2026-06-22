@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 
 import {
   CURRENT_VAULT_FORMAT_VERSION,
@@ -15,9 +16,9 @@ import {
 } from "@murphai/contracts";
 
 import { emitAuditRecord } from "./audit.ts";
-import { VAULT_LAYOUT } from "./constants.ts";
+import { REQUIRED_DIRECTORIES, VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { pathExists, walkVaultFiles } from "./fs.ts";
+import { ensureVaultDirectory, pathExists, walkVaultFiles } from "./fs.ts";
 import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
@@ -27,7 +28,6 @@ import {
   stableSerializeIntegrationIngest,
   stageIntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
-import { readJsonlRecords } from "./jsonl.ts";
 import {
   isRawManifestFileName,
   parseRawImportManifest,
@@ -139,6 +139,19 @@ interface EventShardSnapshot {
   records: EventRecord[];
 }
 
+interface EventShardMigrationScanInput {
+  allLegacyFileSet: ReadonlySet<string>;
+  rawRefBundleByPath: ReadonlyMap<string, LegacyIntegrationBundle>;
+  state: MutableDetectionState;
+  vaultRoot: string;
+}
+
+interface EventShardMigrationScanResult {
+  eventShards: EventShardSnapshot[];
+  outputRolesByBundle: Map<string, Map<string, Set<string>>>;
+  referencedRowsByBundle: Map<string, Set<string>>;
+}
+
 interface DetectionDetails {
   public: IntegrationIngestMigrationDetection;
   bundles: LegacyIntegrationBundle[];
@@ -165,6 +178,18 @@ export async function runIntegrationIngestMigration(
 ): Promise<IntegrationIngestMigrationResult> {
   const apply = input.apply === true;
   const initial = await detectIntegrationIngestMigrationDetails(input);
+  if (initial.public.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
+    return {
+      ...initial.public,
+      mode: apply ? "apply" : "dry-run",
+      mutated: false,
+      appendedBundleCount: 0,
+      detachedEventRowCount: 0,
+      deletedFileCount: 0,
+      finalized: false,
+      auditPaths: [],
+    };
+  }
   if (!apply || initial.public.blockerCount > 0) {
     return {
       ...initial.public,
@@ -299,46 +324,11 @@ export async function runIntegrationIngestMigration(
 
   let finalized = false;
   if (input.finalize !== false) {
-    const beforeFinalize = await detectIntegrationIngestMigrationDetails(input);
-    if (
-      beforeFinalize.public.blockerCount === 0
-      && beforeFinalize.bundles.length === 0
-      && !(await hasLegacyIntegrationFiles(input.vaultRoot))
-      && !(await hasLegacyIntegrationEventReferences(input.vaultRoot))
-    ) {
-      const metadata = await readLegacyVaultMetadata(input.vaultRoot);
-      const summary = "Finalize integration ingest journal migration and advance vault format to v2.";
-      const finalizeResult = await runCanonicalWrite({
-        vaultRoot: input.vaultRoot,
-        operationType: "integration_ingest_migration_finalize",
-        summary,
-        hostedCanonicalWritePort: null,
-        hostedCanonicalWriteReceiptDirectory: null,
-        mutate: async ({ batch }) => {
-          await batch.stageTextWrite(
-            VAULT_LAYOUT.metadata,
-            `${JSON.stringify({ ...metadata, formatVersion: CURRENT_VAULT_FORMAT_VERSION }, null, 2)}\n`,
-            { overwrite: true },
-          );
-          const audit = await emitAuditRecord({
-            vaultRoot: input.vaultRoot,
-            batch,
-            action: "vault_repair",
-            commandName: "core.runIntegrationIngestMigration.finalize",
-            summary,
-            files: [VAULT_LAYOUT.metadata],
-          });
-          return { auditPath: audit.relativePath };
-        },
-      });
+    const finalizeResult = await finalizeIntegrationIngestMigration(input.vaultRoot);
+    if (finalizeResult) {
       auditPaths.push(finalizeResult.auditPath);
       finalized = true;
       mutated = true;
-      await assertValidVault({
-        vaultRoot: input.vaultRoot,
-        errorCode: "INTEGRATION_INGEST_MIGRATION_INVALID_VAULT",
-        message: "Integration ingest migration produced an invalid v2 vault.",
-      });
     }
   }
 
@@ -358,6 +348,111 @@ export async function runIntegrationIngestMigration(
   };
 }
 
+async function finalizeIntegrationIngestMigration(vaultRoot: string): Promise<{ auditPath: string } | null> {
+  return withMigrationLock(vaultRoot, async () => {
+    const beforeFinalize = await detectIntegrationIngestMigrationDetails({ vaultRoot });
+    if (
+      beforeFinalize.public.blockerCount !== 0
+      || beforeFinalize.bundles.length !== 0
+      || (await hasLegacyIntegrationFiles(vaultRoot))
+      || (await hasLegacyIntegrationEventReferences(vaultRoot))
+    ) {
+      return null;
+    }
+
+    const metadata = await readLegacyVaultMetadata(vaultRoot);
+    const createdDirectories = await ensureMissingRequiredDirectories(vaultRoot);
+    const summary = "Finalize integration ingest journal migration and advance vault format to v2.";
+    try {
+      const finalizeResult = await runCanonicalWrite({
+        vaultRoot,
+        operationType: "integration_ingest_migration_finalize",
+        summary,
+        hostedCanonicalWritePort: null,
+        hostedCanonicalWriteReceiptDirectory: null,
+        mutate: async ({ batch }) => {
+          await batch.stageTextWrite(
+            VAULT_LAYOUT.metadata,
+            `${JSON.stringify({ ...metadata, formatVersion: CURRENT_VAULT_FORMAT_VERSION }, null, 2)}\n`,
+            { overwrite: true },
+          );
+          const audit = await emitAuditRecord({
+            vaultRoot,
+            batch,
+            action: "vault_repair",
+            commandName: "core.runIntegrationIngestMigration.finalize",
+            summary,
+            files: [VAULT_LAYOUT.metadata, ...createdDirectories],
+          });
+          return { auditPath: audit.relativePath };
+        },
+      });
+
+      await assertValidVault({
+        vaultRoot,
+        errorCode: "INTEGRATION_INGEST_MIGRATION_INVALID_VAULT",
+        message: "Integration ingest migration produced an invalid v2 vault.",
+      });
+      return finalizeResult;
+    } catch (error) {
+      await restoreLegacyVaultMetadataAfterFailedFinalization(vaultRoot, metadata, error);
+      throw error;
+    }
+  });
+}
+
+async function restoreLegacyVaultMetadataAfterFailedFinalization(
+  vaultRoot: string,
+  metadata: Record<string, unknown> & { formatVersion: 1 },
+  finalizeError: unknown,
+): Promise<void> {
+  const current = await readMigrationVaultMetadata(vaultRoot).catch(() => null);
+  if (current?.formatVersion !== CURRENT_VAULT_FORMAT_VERSION) {
+    return;
+  }
+
+  try {
+    await runCanonicalWrite({
+      vaultRoot,
+      operationType: "integration_ingest_migration_finalize_rollback",
+      summary: "Restore legacy vault metadata after failed integration ingest migration finalization.",
+      hostedCanonicalWritePort: null,
+      hostedCanonicalWriteReceiptDirectory: null,
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          VAULT_LAYOUT.metadata,
+          `${JSON.stringify(metadata, null, 2)}\n`,
+          { overwrite: true },
+        );
+        await emitAuditRecord({
+          vaultRoot,
+          batch,
+          action: "vault_repair",
+          commandName: "core.runIntegrationIngestMigration.finalize.rollback",
+          summary: "Restored legacy vault metadata after failed integration ingest migration finalization.",
+          files: [VAULT_LAYOUT.metadata],
+        });
+      },
+    });
+  } catch (rollbackError) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_MIGRATION_FINALIZE_ROLLBACK_FAILED",
+      "Integration ingest migration finalization failed, and restoring legacy vault metadata also failed.",
+      {
+        finalizeError: summarizeMigrationError(finalizeError),
+        rollbackError: summarizeMigrationError(rollbackError),
+      },
+    );
+  }
+}
+
+function summarizeMigrationError(error: unknown): string {
+  if (error instanceof VaultError) {
+    return `${error.code}: ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function detectIntegrationIngestMigrationDetails(
   input: DetectIntegrationIngestMigrationInput,
 ): Promise<DetectionDetails> {
@@ -366,7 +461,7 @@ async function detectIntegrationIngestMigrationDetails(
     return {
       public: emptyFinalizedDetection(),
       bundles: [],
-      eventShards: await readEventShards(input.vaultRoot),
+      eventShards: [],
       rawRefBundleByPath: new Map(),
     };
   }
@@ -436,53 +531,16 @@ async function detectIntegrationIngestMigrationDetails(
       rawRefBundleByPath.set(relativePath, bundle);
     }
   }
-  const eventShards = await readEventShards(input.vaultRoot);
-  const outputRolesByBundle = new Map<string, Map<string, Set<string>>>();
-  const referencedRowsByBundle = new Map<string, Set<string>>();
-  for (const shard of eventShards) {
-    shard.records.forEach((record, index) => {
-      const integrationRefs = (record.rawRefs ?? []).filter((rawRef) => rawRef.startsWith(`${LEGACY_INTEGRATION_ROOT}/`));
-      if (integrationRefs.length === 0) return;
-      const bundlesForRow = new Set<LegacyIntegrationBundle>();
-      for (const rawRef of integrationRefs) {
-        const bundle = rawRefBundleByPath.get(rawRef);
-        if (!bundle) {
-          if (allLegacyFileSet.has(rawRef)) {
-            continue;
-          }
-          addBlocker(state, {
-            code: "LEGACY_REFERENCE_UNRESOLVED",
-            relativePath: rawRef,
-            message: `Historical event "${record.id}" references an unverified integration file.`,
-          });
-          continue;
-        }
-        bundlesForRow.add(bundle);
-        const artifact = bundle.artifacts.find((candidate) => candidate.artifact.relativePath === rawRef);
-        if (!artifact || artifact.artifact.role.startsWith("wearable-raw-receipt:")) {
-          addBlocker(state, {
-            code: "LEGACY_REFERENCE_UNRESOLVED",
-            relativePath: rawRef,
-            message: `Historical event "${record.id}" references a legacy integration file that is not preserved as evidence.`,
-          });
-          continue;
-        }
-        const eventRoles = outputRolesByBundle.get(bundle.importId) ?? new Map<string, Set<string>>();
-        const roles = eventRoles.get(record.id) ?? new Set<string>();
-        roles.add(artifact.artifact.role);
-        eventRoles.set(record.id, roles);
-        outputRolesByBundle.set(bundle.importId, eventRoles);
-      }
-      for (const bundle of bundlesForRow) {
-        const eventRoles = outputRolesByBundle.get(bundle.importId) ?? new Map<string, Set<string>>();
-        if (!eventRoles.has(record.id)) eventRoles.set(record.id, new Set<string>());
-        outputRolesByBundle.set(bundle.importId, eventRoles);
-        const rows = referencedRowsByBundle.get(bundle.importId) ?? new Set<string>();
-        rows.add(`${shard.relativePath}:${index}`);
-        referencedRowsByBundle.set(bundle.importId, rows);
-      }
-    });
-  }
+  const {
+    eventShards,
+    outputRolesByBundle,
+    referencedRowsByBundle,
+  } = await scanEventShardsForMigration({
+    allLegacyFileSet,
+    rawRefBundleByPath,
+    state,
+    vaultRoot: input.vaultRoot,
+  });
 
   for (const bundle of bundles) {
     const eventRoles = outputRolesByBundle.get(bundle.importId) ?? new Map();
@@ -900,25 +958,115 @@ async function reverifyLegacyBundle(vaultRoot: string, bundle: LegacyIntegration
   }
 }
 
-async function readEventShards(vaultRoot: string): Promise<EventShardSnapshot[]> {
+async function scanEventShardsForMigration({
+  allLegacyFileSet,
+  rawRefBundleByPath,
+  state,
+  vaultRoot,
+}: EventShardMigrationScanInput): Promise<EventShardMigrationScanResult> {
   const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, { extension: ".jsonl" });
-  const shards: EventShardSnapshot[] = [];
+  const eventShards: EventShardSnapshot[] = [];
+  const outputRolesByBundle = new Map<string, Map<string, Set<string>>>();
+  const referencedRowsByBundle = new Map<string, Set<string>>();
+
   for (const relativePath of relativePaths.sort()) {
     const records: EventRecord[] = [];
-    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
-      const parsed = eventRecordSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new VaultError(
-          "EVENT_INVALID",
-          `Stored event in "${relativePath}" failed validation during migration.`,
-          { errors: parsed.error.issues.map((issue) => issue.message) },
-        );
+    let retainShard = false;
+
+    for await (const { index, record } of readEventRecordsFromShard(vaultRoot, relativePath)) {
+      records.push(record);
+      const integrationRefs = (record.rawRefs ?? []).filter((rawRef) => rawRef.startsWith(`${LEGACY_INTEGRATION_ROOT}/`));
+      if (integrationRefs.length === 0) continue;
+
+      const bundlesForRow = new Set<LegacyIntegrationBundle>();
+      for (const rawRef of integrationRefs) {
+        const bundle = rawRefBundleByPath.get(rawRef);
+        if (!bundle) {
+          if (allLegacyFileSet.has(rawRef)) {
+            continue;
+          }
+          addBlocker(state, {
+            code: "LEGACY_REFERENCE_UNRESOLVED",
+            relativePath: rawRef,
+            message: `Historical event "${record.id}" references an unverified integration file.`,
+          });
+          continue;
+        }
+
+        retainShard = true;
+        bundlesForRow.add(bundle);
+        const artifact = bundle.artifacts.find((candidate) => candidate.artifact.relativePath === rawRef);
+        if (!artifact || artifact.artifact.role.startsWith("wearable-raw-receipt:")) {
+          addBlocker(state, {
+            code: "LEGACY_REFERENCE_UNRESOLVED",
+            relativePath: rawRef,
+            message: `Historical event "${record.id}" references a legacy integration file that is not preserved as evidence.`,
+          });
+          continue;
+        }
+        const eventRoles = outputRolesByBundle.get(bundle.importId) ?? new Map<string, Set<string>>();
+        const roles = eventRoles.get(record.id) ?? new Set<string>();
+        roles.add(artifact.artifact.role);
+        eventRoles.set(record.id, roles);
+        outputRolesByBundle.set(bundle.importId, eventRoles);
       }
-      records.push(parsed.data);
+
+      for (const bundle of bundlesForRow) {
+        const eventRoles = outputRolesByBundle.get(bundle.importId) ?? new Map<string, Set<string>>();
+        if (!eventRoles.has(record.id)) eventRoles.set(record.id, new Set<string>());
+        outputRolesByBundle.set(bundle.importId, eventRoles);
+        const rows = referencedRowsByBundle.get(bundle.importId) ?? new Set<string>();
+        rows.add(`${relativePath}:${index}`);
+        referencedRowsByBundle.set(bundle.importId, rows);
+      }
     }
-    shards.push({ relativePath, records });
+
+    if (retainShard) {
+      eventShards.push({ relativePath, records });
+    }
   }
-  return shards;
+
+  return { eventShards, outputRolesByBundle, referencedRowsByBundle };
+}
+
+async function* readEventRecordsFromShard(
+  vaultRoot: string,
+  relativePath: string,
+): AsyncGenerator<{ index: number; record: EventRecord }> {
+  const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
+  const lines = createInterface({
+    crlfDelay: Infinity,
+    input: createReadStream(absolutePath, { encoding: "utf8" }),
+  });
+  let index = 0;
+
+  for await (const line of lines) {
+    if (!line) {
+      continue;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch (error) {
+      throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${index + 1}.`, {
+        relativePath,
+        lineNumber: index + 1,
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const parsed = eventRecordSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new VaultError(
+        "EVENT_INVALID",
+        `Stored event in "${relativePath}" failed validation during migration.`,
+        { errors: parsed.error.issues.map((issue) => issue.message) },
+      );
+    }
+    yield { index, record: parsed.data };
+    index += 1;
+  }
 }
 
 function serializeEventShard(records: readonly EventRecord[]): string {
@@ -1026,14 +1174,29 @@ async function readLegacyVaultMetadata(vaultRoot: string): Promise<Record<string
   return metadata as Record<string, unknown> & { formatVersion: 1 };
 }
 
+async function ensureMissingRequiredDirectories(vaultRoot: string): Promise<string[]> {
+  const createdDirectories: string[] = [];
+  for (const relativeDirectory of REQUIRED_DIRECTORIES) {
+    const directoryPath = resolveVaultPath(vaultRoot, relativeDirectory);
+    if (await pathExists(directoryPath.absolutePath)) {
+      continue;
+    }
+    createdDirectories.push(await ensureVaultDirectory(vaultRoot, relativeDirectory));
+  }
+  return createdDirectories;
+}
+
 async function hasLegacyIntegrationFiles(vaultRoot: string): Promise<boolean> {
   return (await walkVaultFiles(vaultRoot, LEGACY_INTEGRATION_ROOT)).length > 0;
 }
 
 async function hasLegacyIntegrationEventReferences(vaultRoot: string): Promise<boolean> {
-  for (const shard of await readEventShards(vaultRoot)) {
-    if (shard.records.some((record) => record.rawRefs?.some((rawRef) => rawRef.startsWith(`${LEGACY_INTEGRATION_ROOT}/`)))) {
-      return true;
+  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, { extension: ".jsonl" });
+  for (const relativePath of relativePaths.sort()) {
+    for await (const { record } of readEventRecordsFromShard(vaultRoot, relativePath)) {
+      if (record.rawRefs?.some((rawRef) => rawRef.startsWith(`${LEGACY_INTEGRATION_ROOT}/`))) {
+        return true;
+      }
     }
   }
   return false;

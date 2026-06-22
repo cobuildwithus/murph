@@ -23,6 +23,27 @@ function createCoreRuntimeStub() {
     validateVault: vi.fn(async () => ({ valid: true, issues: [] })),
     repairVault: vi.fn(async () => ({ updated: false, createdDirectories: [] })),
     repairJunctionWorkoutHeartRateZones: vi.fn(async () => ({ mutated: false })),
+    runIntegrationIngestMigration: vi.fn(async () => ({
+      mode: "dry-run",
+      storedFormatVersion: 2,
+      hasWork: false,
+      hasMore: false,
+      candidateBundleCount: 0,
+      copiedBundleCount: 0,
+      detachedBundleCount: 0,
+      deletableFileCount: 0,
+      sourceBytes: 0,
+      journalBytes: 0,
+      blockerCount: 0,
+      blockersByCode: {},
+      blockerExamples: [],
+      mutated: false,
+      appendedBundleCount: 0,
+      detachedEventRowCount: 0,
+      deletedFileCount: 0,
+      finalized: false,
+      auditPaths: [],
+    })),
     detectWearableStorageMigrationCandidates: vi.fn(async () => ({ hasWork: false })),
     runWearableStorageMigrationPass: vi.fn(async () => ({ mutated: false })),
     addMeal: vi.fn(async () => undefined),
@@ -168,6 +189,69 @@ test("repairWearableStorage dry-run scopes dense raw hasMore to selected work", 
 
   assert.equal(denseDryRun.hasWork, true);
   assert.equal(denseDryRun.hasMore, true);
+});
+
+test("repairIntegrationIngests delegates to the core migration primitive", async () => {
+  const runIntegrationIngestMigration = vi.fn(async (_input: unknown) => ({
+    mode: "apply",
+    storedFormatVersion: 2,
+    hasWork: false,
+    hasMore: false,
+    candidateBundleCount: 0,
+    copiedBundleCount: 0,
+    detachedBundleCount: 0,
+    deletableFileCount: 0,
+    sourceBytes: 0,
+    journalBytes: 0,
+    blockerCount: 0,
+    blockersByCode: {},
+    blockerExamples: [],
+    mutated: false,
+    appendedBundleCount: 0,
+    detachedEventRowCount: 0,
+    deletedFileCount: 0,
+    finalized: false,
+    auditPaths: [],
+  }));
+  const coreRuntime = {
+    ...createCoreRuntimeStub(),
+    runIntegrationIngestMigration,
+  };
+  const runtimeModule = {
+    createUnwiredMethod,
+    loadCoreRuntime: vi.fn(async () => coreRuntime),
+    loadImporterRuntime: vi.fn(async () => {
+      throw new Error("loadImporterRuntime should not be called");
+    }),
+    loadQueryRuntime: vi.fn(async () => {
+      throw new Error("loadQueryRuntime should not be called");
+    }),
+  };
+  const integratedServicesModule = await importWithMocks<typeof import("../src/usecases/integrated-services.ts")>(
+    "../src/usecases/integrated-services.ts",
+    {
+      "../src/usecases/runtime.js": () => runtimeModule,
+    },
+  );
+  const services = integratedServicesModule.createIntegratedVaultServices();
+
+  const result = await services.core.repairIntegrationIngests({
+    apply: true,
+    finalize: false,
+    maxBundles: 2,
+    maxBytes: 1024,
+    requestId: "repair-integration",
+    vault: "fixture-vault",
+  });
+
+  assert.equal(result.mode, "apply");
+  assert.deepEqual(runIntegrationIngestMigration.mock.calls[0]?.[0], {
+    apply: true,
+    finalize: false,
+    maxBundles: 2,
+    maxBytes: 1024,
+    vaultRoot: "fixture-vault",
+  });
 });
 
 test("repairWearableStorage apply surfaces dense raw byte metrics", async () => {

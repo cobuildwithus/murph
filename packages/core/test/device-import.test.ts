@@ -579,6 +579,32 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
   });
 });
 
+test("importDeviceBatch validates only target integration ingest shards while appending", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-target-ingest-shard");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const unrelatedShard = path.join(vaultRoot, "ledger/integration-ingests/2025/2025-12.jsonl");
+  await fs.mkdir(path.dirname(unrelatedShard), { recursive: true });
+  await fs.writeFile(unrelatedShard, "{\"not\":\"an integration ingest\"}\n", "utf8");
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "oura",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    evidenceParts: [
+      {
+        role: "daily-summary:2026-03-16",
+        fileName: "daily-summary-2026-03-16.json",
+        content: { steps: 4321 },
+      },
+    ],
+  });
+
+  assert.equal(result.ingestShardPath, "ledger/integration-ingests/2026/2026-03.jsonl");
+  const targetRows = await readJsonlRecords({ vaultRoot, relativePath: result.ingestShardPath });
+  assert.equal(targetRows.length, 1);
+  assert.equal((targetRows[0] as { id?: string }).id, result.ingestId);
+});
+
 test("importDeviceBatch accepts high-cardinality evidence within the total byte cap", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-many-evidence-parts");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
