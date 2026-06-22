@@ -49,6 +49,7 @@ export interface ExperimentAdherenceCalendarResult {
   targets: Array<{
     targetId: string;
     label: string;
+    rollup?: ExperimentAdherenceTarget["rollup"];
     plannedCount: number;
     satisfiedCount: number;
     partialCount: number;
@@ -232,6 +233,26 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
   }
 
   return [];
+}
+
+export function resolveExperimentAdherenceRollupTarget<
+  Target extends {
+    rollup?: ExperimentAdherenceTarget["rollup"] | null;
+    targetId: string;
+  },
+>(targets: readonly Target[]): Target | null {
+  const rollupTargets = targets.filter((target) =>
+    target.rollup !== undefined && target.rollup !== null
+  );
+  if (rollupTargets.length === 1) {
+    return rollupTargets[0] ?? null;
+  }
+
+  if (rollupTargets.length > 1) {
+    return null;
+  }
+
+  return targets.length === 1 ? targets[0] ?? null : null;
 }
 
 function evaluateExperimentAdherenceExpectation(input: {
@@ -469,6 +490,7 @@ function summarizeTargetCells(
   return {
     targetId: target.targetId,
     label: target.label,
+    ...(target.rollup ? { rollup: target.rollup } : {}),
     ...countCellStatuses(cells),
     score: scoreCells(cells),
   };

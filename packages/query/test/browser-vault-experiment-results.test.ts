@@ -1199,24 +1199,40 @@ test("uses adherence target rollups for browser progress targets", () => {
             baselineEnd: "2026-04-07",
             interventionStart: "2026-04-08",
             interventionEnd: "2026-04-10",
-            adherenceTargets: [{
-              targetId: "sauna",
-              label: "Sauna",
-              phase: "intervention",
-              calendar: {
-                kind: "daily",
-                timeZone: "America/New_York",
+            adherenceTargets: [
+              {
+                targetId: "session-marker",
+                label: "Session marker",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
               },
-              evidence: {
-                kind: "linkedEventCount",
-                eventKind: "intervention_session",
-                missing: "missed_after_grace",
+              {
+                targetId: "sauna",
+                label: "Sauna",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                rollup: {
+                  targetCompletions: 2,
+                  minimumUsefulCompletions: 1,
+                },
               },
-              rollup: {
-                targetCompletions: 2,
-                minimumUsefulCompletions: 1,
-              },
-            }],
+            ],
           },
         }),
         sessionEvent("2026-04-08", "completed"),
@@ -1231,6 +1247,10 @@ test("uses adherence target rollups for browser progress targets", () => {
   assert.equal(result.progress?.adherence.targetSessions, 2);
   assert.equal(result.progress?.adherence.minimumUsefulSessions, 1);
   assert.equal(result.progress?.adherence.status, "met_target");
+  assert.equal(result.schedule?.completedSessions, 2);
+  assert.equal(result.schedule?.plannedSessions, 3);
+  assert.equal(result.schedule?.cells.length, 6);
+  assert.equal(result.schedule?.cells.filter((cell) => cell.targetId === "sauna").length, 3);
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {

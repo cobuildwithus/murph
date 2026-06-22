@@ -12,6 +12,7 @@ import type {
   ExperimentAdherenceCalendarResult,
   ExperimentAdherenceCellStatus,
 } from "./experiment-adherence.ts";
+import { resolveExperimentAdherenceRollupTarget } from "./experiment-adherence.ts";
 import {
   collectExperimentAdherenceCalendar,
   summarizeExperimentProgress,
@@ -126,9 +127,14 @@ function buildCardWeeks(input: {
   windows: ExperimentProgressSummary["windows"];
 }): Array<{ start: string; cells: string }> {
   const statusesByDate = new Map<string, ExperimentAdherenceCellStatus[]>();
-  const rollupTargetId = input.calendar?.targets[0]?.targetId ?? null;
+  const targets = input.calendar?.targets ?? [];
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
+  if (hasAmbiguousTargets) {
+    input.warnings.push("calendar omitted because multiple adherence targets define no single rollup");
+  }
   for (const cell of input.calendar?.cells ?? []) {
-    if (rollupTargetId && cell.targetId !== rollupTargetId) {
+    if (hasAmbiguousTargets || (rollupTarget && cell.targetId !== rollupTarget.targetId)) {
       continue;
     }
     const statuses = statusesByDate.get(cell.localDate) ?? [];

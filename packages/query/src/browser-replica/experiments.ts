@@ -7,6 +7,7 @@ import {
 
 import {
   buildExperimentAdherenceCalendar,
+  resolveExperimentAdherenceRollupTarget,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceCellStatus,
@@ -1162,7 +1163,9 @@ function buildScheduleResult(
     return null;
   }
 
-  return summarizeScheduleCells(adherence.timeZone, adherence.cells.map((cell) => ({
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(adherence.targets);
+  const hasAmbiguousTargets = adherence.targets.length > 1 && !rollupTarget;
+  const cells: BrowserVaultExperimentScheduleCell[] = adherence.cells.map((cell) => ({
     evidenceIds: cell.evidenceIds,
     kind: mapAdherenceCellStatus(cell.status),
     label: cell.label,
@@ -1173,7 +1176,14 @@ function buildScheduleResult(
     source: cell.evidenceIds.length > 0 ? "event" : "planned",
     targetId: cell.targetId,
     timeZone: adherence.timeZone,
-  })));
+  }));
+  const countedCells = hasAmbiguousTargets
+    ? []
+    : rollupTarget
+    ? cells.filter((cell) => cell.targetId === rollupTarget.targetId)
+    : cells;
+
+  return summarizeScheduleCells(adherence.timeZone, cells, countedCells);
 }
 
 function buildAdherenceObservations(
@@ -1251,15 +1261,16 @@ function mapAdherenceCellStatus(
 function summarizeScheduleCells(
   timeZone: string,
   cells: readonly BrowserVaultExperimentScheduleCell[],
+  countedCells: readonly BrowserVaultExperimentScheduleCell[] = cells,
 ): BrowserVaultExperimentScheduleResult {
   return {
     cells: cells.slice(),
-    completedSessions: countCells(cells, "completed"),
-    failedSessions: countCells(cells, "failed"),
-    missedSessions: countCells(cells, "missed"),
-    unknownSessions: countCells(cells, "unknown"),
-    partialSessions: countCells(cells, "partial"),
-    plannedSessions: cells.filter((cell) => cell.planned).length,
+    completedSessions: countCells(countedCells, "completed"),
+    failedSessions: countCells(countedCells, "failed"),
+    missedSessions: countCells(countedCells, "missed"),
+    unknownSessions: countCells(countedCells, "unknown"),
+    partialSessions: countCells(countedCells, "partial"),
+    plannedSessions: countedCells.filter((cell) => cell.planned).length,
     skippedSessions: 0,
     timeZone,
   };
@@ -1375,23 +1386,39 @@ function buildProgressResult(
   biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
   schedule: BrowserVaultExperimentScheduleResult | null,
 ): BrowserVaultExperimentProgressResult {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
+  const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
   const targetSessions =
-    context.adherenceTargets[0]?.rollup?.targetCompletions ??
-    context.run.runPlan.targetSessions;
+    rollupTarget?.rollup?.targetCompletions ??
+    (hasAmbiguousTargets ? null : context.run.runPlan.targetSessions);
   const minimumUsefulSessions =
-    context.adherenceTargets[0]?.rollup?.minimumUsefulCompletions ??
-    context.run.runPlan.minimumUsefulSessions;
-  const completedSessions = schedule?.completedSessions ?? countSessionEvents(context.events, "completed");
-  const partialSessions = schedule?.partialSessions ?? countSessionEvents(context.events, "partial");
-  const missedSessions = schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
-  const skippedSessions = schedule?.skippedSessions ?? 0;
+    rollupTarget?.rollup?.minimumUsefulCompletions ??
+    (hasAmbiguousTargets ? null : context.run.runPlan.minimumUsefulSessions);
+  const completedSessions = hasAmbiguousTargets
+    ? 0
+    : schedule?.completedSessions ?? countSessionEvents(context.events, "completed");
+  const partialSessions = hasAmbiguousTargets
+    ? 0
+    : schedule?.partialSessions ?? countSessionEvents(context.events, "partial");
+  const missedSessions = hasAmbiguousTargets
+    ? 0
+    : schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
+  const skippedSessions = hasAmbiguousTargets ? 0 : schedule?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
-  const expectedSessionsByNow = computeExpectedSessionsByNow(
-    context.run,
-    context.asOfDate,
-    targetSessions,
-    schedule,
-  );
+  const progressSchedule = rollupTarget && schedule
+    ? {
+        ...schedule,
+        cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
+      }
+    : schedule;
+  const expectedSessionsByNow = hasAmbiguousTargets
+    ? null
+    : computeExpectedSessionsByNow(
+        context.run,
+        context.asOfDate,
+        targetSessions,
+        progressSchedule,
+      );
   const primary = biomarkers[0] ?? null;
   const primaryBaselineDays = primary?.baseline.daysWithData ?? 0;
   const primaryInterventionDays = primary?.intervention.daysWithData ?? 0;
@@ -1405,12 +1432,14 @@ function buildProgressResult(
       missedSessions,
       partialSessions,
       skippedSessions,
-      status: classifyAdherenceStatus({
-        expectedSessionsByNow,
-        loggedSessions,
-        minimumUsefulSessions,
-        targetSessions,
-      }),
+      status: hasAmbiguousTargets
+        ? "unknown"
+        : classifyAdherenceStatus({
+            expectedSessionsByNow,
+            loggedSessions,
+            minimumUsefulSessions,
+            targetSessions,
+          }),
       targetSessions,
     },
     dataCoverage: {

@@ -178,6 +178,62 @@ analysisPlan:
     "utf8",
   );
 
+  await writeFile(
+    path.join(vaultRoot, "bank/experiments/sleep-efficiency-mixed-reordered.md"),
+    `---
+schemaVersion: murph.frontmatter.experiment.v1
+docType: experiment
+experimentId: exp_01JNV4458HYPP53JDQCBP1QJFQ
+slug: sleep-efficiency-mixed-reordered
+status: active
+title: Sleep Efficiency Mixed Reordered
+startedOn: 2026-06-01
+runPlan:
+  baselineStart: 2026-06-01
+  baselineEnd: 2026-06-03
+  interventionStart: 2026-06-04
+  interventionEnd: 2026-06-06
+  targetSessions: 3
+  minimumUsefulSessions: 2
+  adherenceTargets:
+    - targetId: sleep-efficiency-threshold
+      label: Sleep efficiency threshold
+      phase: intervention
+      calendar:
+        kind: daily
+        timeZone: UTC
+      evidence:
+        kind: metricThreshold
+        metricKey: biomarker:sleep-efficiency
+        op: ">="
+        value: 90
+        missing: unknown
+    - targetId: meditation-session
+      label: Meditation session
+      phase: intervention
+      calendar:
+        kind: daily
+        timeZone: UTC
+      evidence:
+        kind: linkedEventCount
+        eventKind: intervention_session
+        missing: missed_after_grace
+      rollup:
+        targetCompletions: 3
+        minimumUsefulCompletions: 2
+analysisPlan:
+  primaryBiomarkerKey: biomarker:sleep-onset-latency
+  secondaryBiomarkerKeys:
+    - biomarker:sleep-efficiency
+  expectedDirections:
+    - biomarkerKey: biomarker:sleep-efficiency
+      direction: increase
+---
+# Sleep Efficiency Mixed Reordered
+`,
+    "utf8",
+  );
+
   const values = [
     ["2026-06-01", 90],
     ["2026-06-02", 91],
@@ -739,6 +795,23 @@ test("experiment progress usecases read metrics from the query metric projection
   });
   assert.equal(mixedCard.card.sessions.logged, 0);
   assert.equal(mixedCard.card.weeks[0]?.cells, "MSSOOOO");
+
+  const reorderedMixedProgress = await showExperimentProgress({
+    vault: vaultRoot,
+    lookup: "sleep-efficiency-mixed-reordered",
+    asOf: "2026-06-06",
+  });
+  assert.equal(reorderedMixedProgress.progress.adherence.completedSessions, 0);
+  assert.equal(reorderedMixedProgress.progress.adherence.expectedSessionsByNow, 1);
+  assert.equal(reorderedMixedProgress.progress.adherence.status, "not_started");
+
+  const reorderedMixedCard = await showExperimentProgressCard({
+    vault: vaultRoot,
+    lookup: "sleep-efficiency-mixed-reordered",
+    asOf: "2026-06-06",
+  });
+  assert.equal(reorderedMixedCard.card.sessions.logged, 0);
+  assert.equal(reorderedMixedCard.card.weeks[0]?.cells, "MSSOOOO");
 
   const adherenceOnlyProgress = await showExperimentProgress({
     vault: vaultRoot,

@@ -15,6 +15,7 @@ import {
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
+  resolveExperimentAdherenceRollupTarget,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
@@ -615,23 +616,26 @@ function buildAdherenceCalendarFromContext(
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
   const targets = resolveAdherenceTargets(context);
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
   const targetSessions =
-    targets[0]?.rollup?.targetCompletions ??
-    context.frontmatter.runPlan?.targetSessions ??
-    null;
+    rollupTarget?.rollup?.targetCompletions ??
+    (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.targetSessions ?? null);
   const minimumUsefulSessions =
-    targets[0]?.rollup?.minimumUsefulCompletions ??
-    context.frontmatter.runPlan?.minimumUsefulSessions ??
-    null;
+    rollupTarget?.rollup?.minimumUsefulCompletions ??
+    (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const rollupTargetId = targets[0]?.targetId ?? null;
-  const rollupCells = rollupTargetId && adherenceCalendar
-    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTargetId)
+  const rollupCells = rollupTarget && adherenceCalendar
+    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
     : null;
-  const completedSessions = rollupCells
+  const completedSessions = hasAmbiguousTargets
+    ? 0
+    : rollupCells
     ? rollupCells.filter((cell) => cell.status === "satisfied").length
     : context.completedSessions;
-  const expectedSessionsByNow = adherenceCalendar
+  const expectedSessionsByNow = hasAmbiguousTargets
+    ? null
+    : adherenceCalendar
     ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
     : computeExpectedSessionsByNow(
         context.frontmatter,
@@ -640,7 +644,9 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
       );
 
   let status: ExperimentAdherenceStatus = "unknown";
-  if (completedSessions === 0) {
+  if (hasAmbiguousTargets) {
+    status = "unknown";
+  } else if (completedSessions === 0) {
     status = "not_started";
   } else if (targetSessions !== null && completedSessions >= targetSessions) {
     status = "met_target";
