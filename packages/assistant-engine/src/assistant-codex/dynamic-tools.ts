@@ -23,6 +23,9 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from '../assistant/execution-context.js'
 import type {
+  AssistantHostedToolContext,
+} from '../assistant/hosted-tool-context.js'
+import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
@@ -834,22 +837,22 @@ function isExecutableComputerDynamicToolRequest(
 }
 
 function canExecuteComputerDynamicTools(
-  progressDelivery: AssistantProgressDelivery | null,
+  hostedToolContext: AssistantHostedToolContext | null,
 ): boolean {
-  return progressDelivery?.hostedComputerToolsAvailable === true
+  return hostedToolContext?.computerToolsAvailable === true
 }
 
 function currentHostedMailboxItemId(
-  progressDelivery: AssistantProgressDelivery | null,
+  hostedToolContext: AssistantHostedToolContext | null,
 ): string | null {
-  const itemIds = progressDelivery?.currentHostedMailboxItemIds?.() ?? []
+  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
   return itemIds[itemIds.length - 1] ?? null
 }
 
 function currentHostedDeliveryContext(
-  progressDelivery: AssistantProgressDelivery | null,
+  hostedToolContext: AssistantHostedToolContext | null,
 ): HostedComputerDeliveryContext | null {
-  return progressDelivery?.currentHostedDeliveryContext?.() ?? null
+  return hostedToolContext?.currentHostedDeliveryContext() ?? null
 }
 
 export async function executeMurphDynamicToolRequest(input: {
@@ -858,6 +861,7 @@ export async function executeMurphDynamicToolRequest(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  hostedToolContext?: AssistantHostedToolContext | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   nextUsageOrdinal: () => number
   progressDelivery: AssistantProgressDelivery | null
@@ -868,7 +872,7 @@ export async function executeMurphDynamicToolRequest(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
-    !canExecuteComputerDynamicTools(input.progressDelivery)
+    !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
   ) {
     return toolTextResult(
       false,
@@ -975,7 +979,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         fetchImpl: input.fetchImpl,
-        progressDelivery: input.progressDelivery,
+        hostedToolContext: input.hostedToolContext ?? null,
       })
     }
     case 'computer-observe':
@@ -1010,18 +1014,20 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         body: {
           ...body,
-          pauseDeliveryContext: currentHostedDeliveryContext(input.progressDelivery),
+          pauseDeliveryContext: currentHostedDeliveryContext(
+            input.hostedToolContext ?? null,
+          ),
         } satisfies HostedComputerPauseForUserRequest,
         fetchImpl: input.fetchImpl,
         finishPath: buildHostedComputerRunOperationPath({
           operation: 'finish',
           runId,
         }),
+        hostedToolContext: input.hostedToolContext ?? null,
         path: buildHostedComputerRunOperationPath({
           operation: 'pause-for-user',
           runId,
         }),
-        progressDelivery: input.progressDelivery,
       })
     }
     case 'computer-finish-run': {
@@ -1082,8 +1088,8 @@ async function executeHostedComputerPauseForUserTool(input: {
   body: HostedComputerPauseForUserRequest
   fetchImpl: typeof fetch
   finishPath: string
+  hostedToolContext: AssistantHostedToolContext | null
   path: string
-  progressDelivery: AssistantProgressDelivery | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi({
     ...input,
@@ -1107,7 +1113,7 @@ async function executeHostedComputerPauseForUserTool(input: {
     })
   }
 
-  if (!input.progressDelivery) {
+  if (!input.hostedToolContext?.requiredUserMessageDeliveryAvailable) {
     return savedComputerPauseDeliveryFailureResult({
       payload: apiResult.payload,
       reason: 'computer pause saved but channel delivery is not available',
@@ -1115,10 +1121,7 @@ async function executeHostedComputerPauseForUserTool(input: {
   }
 
   try {
-    const delivery = await input.progressDelivery.send(message, {
-      required: true,
-      source: 'model',
-    })
+    const delivery = await input.hostedToolContext.sendRequiredUserMessage(message)
     if (delivery.kind !== 'sent') {
       return savedComputerPauseDeliveryFailureResult({
         payload: apiResult.payload,
@@ -1161,13 +1164,13 @@ async function executeHostedComputerStartRunTool(input: {
   abortSignal: AbortSignal | null
   args: ComputerStartRunToolArgs
   fetchImpl: typeof fetch
-  progressDelivery: AssistantProgressDelivery | null
+  hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
   return await executeHostedComputerApiTool({
     abortSignal: input.abortSignal,
     body: buildHostedComputerStartRunBody({
       args: input.args,
-      progressDelivery: input.progressDelivery,
+      hostedToolContext: input.hostedToolContext,
     }),
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
@@ -1178,16 +1181,16 @@ async function executeHostedComputerStartRunTool(input: {
 
 function buildHostedComputerStartRunBody(input: {
   args: ComputerStartRunToolArgs
-  progressDelivery: AssistantProgressDelivery | null
+  hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { resumeRunId, startUrl } = input.args
   return {
     goal: 'Hosted computer task.',
     resumeAfterMailboxItemId: resumeRunId
-      ? currentHostedMailboxItemId(input.progressDelivery)
+      ? currentHostedMailboxItemId(input.hostedToolContext)
       : null,
     resumeDeliveryContext: resumeRunId
-      ? currentHostedDeliveryContext(input.progressDelivery)
+      ? currentHostedDeliveryContext(input.hostedToolContext)
       : null,
     resumeRunId,
     startUrl,

@@ -62,6 +62,9 @@ import type {
 import type {
   AssistantProgressDelivery,
 } from './turn-progress.js'
+import type {
+  AssistantHostedToolContext,
+} from './hosted-tool-context.js'
 import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -171,6 +174,7 @@ export async function executeCodexTurnWithRecovery(input: {
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnRecoveryOutcome> {
@@ -453,6 +457,7 @@ async function executeAssistantCodexAttempt(input: {
       voiceMemoDeliveryChannel,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+      hostedToolContext: executionPlan.hostedToolContext ?? null,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
       developerInstructions: attemptPlan.routePlan.developerInstructions,

@@ -4761,7 +4761,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal does not expose progress delivery for hosted auto-replies', async () => {
+test('sendAssistantMessageLocal exposes hosted progress and computer context for auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4794,6 +4794,7 @@ test('sendAssistantMessageLocal does not expose progress delivery for hosted aut
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
         userEnvKeys: [],
       },
     },
@@ -4807,8 +4808,14 @@ test('sendAssistantMessageLocal does not expose progress delivery for hosted aut
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
-  assert.equal(progressDelivery, null)
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.ok(progressDelivery)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
+  await progressDelivery.send('Checking the iMessage thread.')
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
   assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
@@ -4849,9 +4856,12 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
@@ -4902,9 +4912,12 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
   assert.deepEqual(result, {
@@ -4952,9 +4965,12 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
   await progressDelivery.send('Checking the Telegram thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
@@ -5005,9 +5021,12 @@ test('sendAssistantMessageLocal does not mark required hosted progress delivery 
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
   const result = await progressDelivery.send('Checking the WhatsApp thread.')
 
   assert.deepEqual(result, {
@@ -5232,9 +5251,12 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
   assert.deepEqual(result, {
@@ -5284,9 +5306,12 @@ test('sendAssistantMessageLocal routes hosted email model progress through progr
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the email thread.')
 
   assert.deepEqual(result, {

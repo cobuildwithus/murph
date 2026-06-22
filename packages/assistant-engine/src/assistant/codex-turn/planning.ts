@@ -60,6 +60,9 @@ import type {
 import type {
   AssistantProgressDelivery,
 } from '../turn-progress.js'
+import type {
+  AssistantHostedToolContext,
+} from '../hosted-tool-context.js'
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -240,6 +243,7 @@ export interface AssistantCodexTurnExecutionPlan {
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnId: string
 }
 
@@ -302,6 +306,7 @@ export async function buildCodexTurnExecutionPlan(input: {
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
@@ -321,6 +326,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     route: input.route,
     sharedPlan: input.plan,
     progressDelivery: input.progressDelivery ?? null,
+    hostedToolContext: input.hostedToolContext ?? null,
     turnId: input.turnId,
   }
 }
@@ -343,6 +349,7 @@ export async function buildCodexTurnAttemptPlan(input: {
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
       progressDelivery: input.executionPlan.progressDelivery ?? null,
+      hostedToolContext: input.executionPlan.hostedToolContext ?? null,
     }),
     session: input.session,
   }
@@ -357,6 +364,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
@@ -513,7 +521,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
     allowMessageReactions: messageReactionsAvailable,
     computerToolsAvailable:
-      input.progressDelivery?.hostedComputerToolsAvailable === true,
+      input.hostedToolContext?.computerToolsAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

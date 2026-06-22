@@ -66,6 +66,7 @@ import {
 } from '../src/assistant/turn-finalizer.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
@@ -460,6 +461,56 @@ describe('assistant protocol index planning', () => {
     )
     expect(telegramNoReplyPlan.assistantContractFingerprint).not.toBe(
       telegramReplyPlan.assistantContractFingerprint,
+    )
+  })
+
+  it('keeps hosted computer tools in the auto-reply route contract', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const route = createRoute()
+    const profile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: createHostedToolContext(),
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        deliverResponse: true,
+        turnTrigger: 'automation-auto-reply',
+      },
+      profile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: plan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          computerToolsAvailable: true,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
     )
   })
 
@@ -1619,6 +1670,19 @@ function createRoute(): CodexThreadIdentity {
     ),
     routeFingerprint: 'route-test',
     routeId: 'route-test',
+  }
+}
+
+function createHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    requiredUserMessageDeliveryAvailable: true,
+    sendRequiredUserMessage: vi.fn(async () => ({
+      kind: 'sent' as const,
+      source: 'model' as const,
+    })),
   }
 }
 

@@ -106,7 +106,7 @@ function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
     allowFinishWithoutReply: input.allowFinishWithoutReply,
     allowMessageReactions: input.allowMessageReactions,
     computerToolsAvailable:
-      input.progressDelivery?.hostedComputerToolsAvailable === true,
+      input.hostedToolContext?.computerToolsAvailable === true,
   })
 }
 

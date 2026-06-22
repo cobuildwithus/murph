@@ -103,6 +103,9 @@ import {
   shouldCreateAssistantProgressDelivery,
   type AssistantProgressDelivery,
 } from './turn-progress.js'
+import {
+  createAssistantHostedToolContext,
+} from './hosted-tool-context.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantAcceptedTurnInputJournal,
@@ -432,6 +435,7 @@ export async function sendAssistantMessageLocal(
             sharedPlan,
           })
         const hostedComputerToolsAvailable =
+          input.deliverResponse === true &&
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && requiredUserMessageDeliveryAvailable
@@ -471,11 +475,31 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
-              hostedComputerToolsAvailable,
-              requiredUserMessageDeliveryAvailable,
               session: resolved.session,
               sharedPlan,
               turnId: currentUserTurn.turnId,
+            })
+          : null
+        const hostedToolContext = executionContext.hosted
+          ? createAssistantHostedToolContext({
+              computerToolsAvailable: hostedComputerToolsAvailable,
+              getDeliveryContext: () => ({
+                messageInput: currentInput,
+                session: currentSession,
+              }),
+              messageInput: input,
+              requiredUserMessageDeliveryAvailable,
+              sendRequiredUserMessage: async (text) =>
+                progressDelivery
+                  ? await progressDelivery.send(text, {
+                      required: true,
+                      source: 'model',
+                    })
+                  : {
+                      kind: 'failed',
+                      source: 'model',
+                    },
+              session: resolved.session,
             })
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
@@ -806,6 +830,7 @@ export async function sendAssistantMessageLocal(
           resolvedSession: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           progressDelivery,
+          hostedToolContext,
           turnId: currentUserTurn.turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {

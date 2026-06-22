@@ -23,6 +23,9 @@ import type { AssistantCodexContinuation } from '../active-turn-input-journal.js
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 import type { AssistantProgressDelivery } from '../turn-progress.js'
 import type {
+  AssistantHostedToolContext,
+} from '../hosted-tool-context.js'
+import type {
   AssistantHostedGeneratedImageUploader,
 } from '../execution-context.js'
 import type {
@@ -119,6 +122,7 @@ export interface AssistantProviderTurnInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
@@ -178,6 +182,7 @@ export interface AssistantProviderTurnExecutionInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

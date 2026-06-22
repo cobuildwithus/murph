@@ -18,13 +18,6 @@ import type {
 
 export interface AssistantProgressDelivery {
   close?(): void
-  currentHostedDeliveryContext?(): {
-    conversationId: string | null
-    recipientKey: string | null
-  } | null
-  currentHostedMailboxItemIds?(): readonly string[]
-  readonly hostedComputerToolsAvailable?: boolean
-  readonly requiredUserMessageDeliveryAvailable?: boolean
   send(
     text: string,
     options?: AssistantProgressDeliverySendOptions,
@@ -62,7 +55,6 @@ export function shouldCreateAssistantProgressDelivery(
   } | null,
 ): boolean {
   return input.deliverResponse === true &&
-    input.turnTrigger !== 'automation-auto-reply' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }
@@ -70,9 +62,7 @@ export function shouldCreateAssistantProgressDelivery(
 export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
-  hostedComputerToolsAvailable?: boolean
   messageInput: AssistantMessageInput
-  requiredUserMessageDeliveryAvailable?: boolean
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -84,29 +74,6 @@ export function createAssistantProgressDelivery(input: {
   let deliveryOrdinal = 0
 
   return {
-    currentHostedDeliveryContext: () => {
-      const deliveryContext = input.getDeliveryContext?.() ?? {
-        messageInput: input.messageInput,
-        session: input.session,
-      }
-      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
-      const conversationId = context?.conversationId ?? null
-      const recipientKey = context?.recipientKey ?? null
-      return conversationId || recipientKey
-        ? { conversationId, recipientKey }
-        : null
-    },
-    currentHostedMailboxItemIds: () => {
-      const deliveryContext = input.getDeliveryContext?.() ?? {
-        messageInput: input.messageInput,
-        session: input.session,
-      }
-      return deliveryContext.messageInput.hostedDeliveryIdempotency
-        ?.inboundMailboxItemIds ?? []
-    },
-    hostedComputerToolsAvailable: input.hostedComputerToolsAvailable === true,
-    requiredUserMessageDeliveryAvailable:
-      input.requiredUserMessageDeliveryAvailable ?? true,
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
       const source = options?.source ?? 'model'
       const required = options?.required === true
