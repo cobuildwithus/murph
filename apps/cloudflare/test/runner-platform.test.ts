@@ -1,5 +1,5 @@
 import { createCipheriv, createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -367,7 +367,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref: createWorkspaceSnapshotV2Ref({
         encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
       }),
-      scratchRoot: "unused-scratch-root",
     })).rejects.toThrow("Hosted workspace snapshot restore exceeds the single-part size guard.");
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -386,7 +385,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         encryptedByteSize: 128,
         totalPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
       }),
-      scratchRoot: "unused-scratch-root",
     })).rejects.toThrow("Hosted workspace snapshot restore exceeds the total plain size guard.");
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -418,13 +416,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     try {
-      // The malformed unwrap is preferred over any concurrent presign/fetch
+      // The malformed unwrap is preferred over any concurrent presign
       // failure, and nothing is extracted into the durable root.
       const durableRoot = path.join(tempRoot, "durable");
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref,
-        scratchRoot: path.join(tempRoot, "scratch"),
       })).rejects.toThrow("Invalid character");
 
       const unwrapRequest = fetchMock.mock.calls
@@ -439,17 +436,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("aborts the in-flight snapshot object download when the data-key unwrap fails", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-abort-"));
+  it("does not open the snapshot object body when the data-key unwrap fails", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-no-body-before-unwrap-"));
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
     const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
-    let objectGetSignalAborted = false;
+    let objectFetchCount = 0;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-      const request = requireFetchRequest(args, "workspace snapshot unwrap abort fetch");
+      const request = requireFetchRequest(args, "workspace snapshot unwrap body fetch");
       if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
-        // Give the object leg time to issue the GET before the unwrap fails.
         await delayWithAbort(50, request.signal);
         return new Response("unwrap denied", { status: 403 });
       }
@@ -465,16 +461,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (request.url === getUrl) {
-        // Held open far beyond the test budget: only the unwrap-failure abort
-        // can settle this leg. A sequential or signal-less regression times
-        // the test out instead of passing slowly.
-        try {
-          await delayWithAbort(30_000, request.signal);
-        } catch (error) {
-          objectGetSignalAborted = true;
-          throw error;
-        }
-        return new Response("unreachable", { status: 500 });
+        objectFetchCount += 1;
+        return new Response("unexpected object fetch", { status: 500 });
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -487,10 +475,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot: path.join(tempRoot, "durable"),
         ref,
-        scratchRoot: path.join(tempRoot, "scratch"),
-      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/);
+      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/u);
 
-      expect(objectGetSignalAborted).toBe(true);
+      expect(objectFetchCount).toBe(0);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -530,11 +517,157 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot: path.join(tempRoot, "durable"),
         ref,
-        scratchRoot: path.join(tempRoot, "scratch"),
-      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/);
+      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/u);
 
       expect(presignSignalAborted).toBe(true);
     } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  }, 15_000);
+
+  it("aborts and cancels stalled v2 workspace snapshot unwrap response bodies", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-body-abort-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
+    const abortController = new AbortController();
+    let objectFetchCount = 0;
+    let unwrapBodyCanceled = false;
+    let resolveUnwrapBodyOpened: (() => void) | null = null;
+    const unwrapBodyOpened = new Promise<void>((resolve) => {
+      resolveUnwrapBodyOpened = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot stalled unwrap body fetch");
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            unwrapBodyCanceled = true;
+          },
+          start: () => {
+            resolveUnwrapBodyOpened?.();
+            resolveUnwrapBodyOpened = null;
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+        return new Response(JSON.stringify({
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          getUrl,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url === getUrl) {
+        objectFetchCount += 1;
+        return new Response("unexpected object fetch", { status: 500 });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      const restore = platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        signal: abortController.signal,
+      });
+      await unwrapBodyOpened;
+      abortController.abort(new Error("restore aborted while reading unwrap response"));
+
+      await expect(restore).rejects.toThrow("restore aborted while reading unwrap response");
+      expect(unwrapBodyCanceled).toBe(true);
+      expect(objectFetchCount).toBe(0);
+      await expect(access(durableRoot)).rejects.toThrow();
+      expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot restore read step failed; retrying."
+      )).toHaveLength(0);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  }, 15_000);
+
+  it("aborts and cancels stalled v2 workspace snapshot presign response bodies", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-presign-body-abort-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    const abortController = new AbortController();
+    let presignBodyCanceled = false;
+    let objectFetchCount = 0;
+    let resolvePresignBodyOpened: (() => void) | null = null;
+    const presignBodyOpened = new Promise<void>((resolve) => {
+      resolvePresignBodyOpened = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot stalled presign body fetch");
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+        return new Response(JSON.stringify({ dataKey: dataKeyBase64 }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+        await delayWithAbort(50, request.signal);
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            presignBodyCanceled = true;
+          },
+          start: () => {
+            resolvePresignBodyOpened?.();
+            resolvePresignBodyOpened = null;
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      objectFetchCount += 1;
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      const restore = platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        signal: abortController.signal,
+      });
+      await presignBodyOpened;
+      abortController.abort(new Error("restore aborted while reading presign response"));
+
+      await expect(restore).rejects.toThrow("restore aborted while reading presign response");
+      expect(presignBodyCanceled).toBe(true);
+      expect(objectFetchCount).toBe(0);
+      await expect(access(durableRoot)).rejects.toThrow();
+      expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot restore read step failed; retrying."
+      )).toHaveLength(0);
+    } finally {
+      dataKey.fill(0);
       await rm(tempRoot, { force: true, recursive: true });
     }
   }, 15_000);
@@ -1102,7 +1235,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
     const sourceRoot = path.join(tempRoot, "source");
-    const scratchRoot = path.join(tempRoot, "scratch");
+    const snapshotScratchRoot = path.join(tempRoot, "snapshot-scratch");
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
@@ -1132,10 +1265,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
         maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-        outputDir: scratchRoot,
+        outputDir: snapshotScratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      await rm(scratchRoot, { force: true, recursive: true });
+      await rm(snapshotScratchRoot, { force: true, recursive: true });
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
@@ -1216,12 +1349,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
           userId: "member_123",
         },
-        scratchRoot,
       });
       for (const key of [
         "sizeGuardMs",
         "dataKeyUnwrapMs",
-        "scratchPrepareMs",
         "presignGetMs",
         "objectFetchMs",
         "decryptMs",
@@ -1238,7 +1369,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
-      // The data-key unwrap runs concurrently with the presign/fetch chain,
+      // The data-key unwrap runs concurrently with presign,
       // so look requests up by URL instead of call order.
       const restoreRequests = fetchMock.mock.calls.map((call) =>
         requireFetchRequest(call, "workspace snapshot restore request"),
@@ -1267,24 +1398,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
-      await expect(readdir(scratchRoot)).resolves.toEqual([]);
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
         .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
         .map((log) => log.details?.workspaceSnapshotRestoreStep);
-      // data_key_unwrap completes concurrently with the fetch chain; assert
+      // data_key_unwrap completes concurrently with presign; assert
       // the deterministic orderings only.
       expect([...completedSteps].sort()).toEqual([
-        "archive_restore",
         "data_key_unwrap",
         "object_fetch",
         "presign_get",
-        "scratch_prepare",
         "size_guard",
       ]);
       expect(completedSteps[0]).toBe("size_guard");
-      expect(completedSteps.at(-1)).toBe("archive_restore");
-      expect(completedSteps.indexOf("scratch_prepare")).toBeLessThan(completedSteps.indexOf("presign_get"));
+      expect(completedSteps.at(-1)).toBe("object_fetch");
       expect(completedSteps.indexOf("presign_get")).toBeLessThan(completedSteps.indexOf("object_fetch"));
       expect(workspaceSnapshotLogs[0]?.details).toEqual(expect.objectContaining({
         archiveEncryptedByteSize: encrypted.encryptedByteSize,
@@ -1301,7 +1428,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(sourceRoot);
       expect(serializedLogs).not.toContain(durableRoot);
-      expect(serializedLogs).not.toContain(scratchRoot);
+      expect(serializedLogs).not.toContain(snapshotScratchRoot);
       expect(serializedLogs).not.toContain("note.md");
       expect(serializedLogs).not.toContain("restored through direct r2");
     } finally {
@@ -1458,7 +1585,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
           userId: "member_123",
         },
-        scratchRoot,
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -1533,7 +1659,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         if (request.url === getUrl) {
           objectFetchCount += 1;
           if (objectFetchCount === 1) {
-            throw new TypeError(`fetch failed for ${getUrl} with hidden retry detail`);
+            let prefixSent = false;
+            return new Response(new ReadableStream<Uint8Array>({
+              pull(controller) {
+                if (!prefixSent) {
+                  prefixSent = true;
+                  controller.enqueue(encryptedBytes.subarray(0, 32));
+                  return;
+                }
+                controller.error(new TypeError("connection reset"));
+              },
+            }), {
+              headers: {
+                "content-length": String(encrypted.encryptedByteSize),
+                "content-type": "application/octet-stream",
+              },
+              status: 200,
+            });
           }
           return new Response(encryptedBytes, {
             headers: {
@@ -1576,18 +1718,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
           userId: "member_123",
         },
-        scratchRoot,
       });
 
       expect(objectFetchCount).toBe(2);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
+      await expect(
+        readdir(tempRoot).then((entries) =>
+          entries.filter((entry) => entry.startsWith(".workspace-snapshot-restore-")),
+        ),
+      ).resolves.toEqual([]);
       const retryLogs = readWorkspaceSnapshotDiagnosticLogs()
         .filter((log) =>
           log.message === "Hosted workspace snapshot restore read step failed; retrying."
         );
       expect(retryLogs).toHaveLength(1);
       expect(retryLogs[0]?.details).toEqual(expect.objectContaining({
-        fetchCauseKind: "fetch_failed",
+        fetchCauseKind: "network",
         retrying: true,
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
@@ -1596,9 +1742,97 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
       expect(serializedLogs).not.toContain(getUrl);
-      expect(serializedLogs).toContain("hidden retry detail");
+      expect(serializedLogs).toContain("connection reset");
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("aborts and cancels stalled v2 workspace snapshot object body reads", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-body-abort-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
+    const abortController = new AbortController();
+    let objectFetchCount = 0;
+    let objectBodyCanceled = false;
+    let resolveObjectBodyOpened: (() => void) | null = null;
+    const objectBodyOpened = new Promise<void>((resolve) => {
+      resolveObjectBodyOpened = resolve;
+    });
+
+    try {
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot stalled body fetch");
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+          return new Response(JSON.stringify({ dataKey: dataKeyBase64 }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+          return new Response(JSON.stringify({
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            getUrl,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (request.url === getUrl) {
+          objectFetchCount += 1;
+          return new Response(new ReadableStream<Uint8Array>({
+            cancel: () => {
+              objectBodyCanceled = true;
+            },
+            start: () => {
+              resolveObjectBodyOpened?.();
+              resolveObjectBodyOpened = null;
+            },
+          }), {
+            headers: {
+              "content-length": String(ref.archive.encryptedByteSize),
+              "content-type": "application/octet-stream",
+            },
+            status: 200,
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const restore = platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        signal: abortController.signal,
+      });
+      await objectBodyOpened;
+      abortController.abort(new Error("restore aborted while reading snapshot body"));
+
+      await expect(restore).rejects.toThrow("restore aborted while reading snapshot body");
+      expect(objectFetchCount).toBe(1);
+      expect(objectBodyCanceled).toBe(true);
+      await expect(access(durableRoot)).rejects.toThrow();
+      expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot restore read step failed; retrying."
+      )).toHaveLength(0);
     } finally {
       dataKey.fill(0);
       await rm(tempRoot, {
@@ -1611,7 +1845,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("does not retry v2 workspace snapshot byte-count mismatches", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-byte-count-"));
     const durableRoot = path.join(tempRoot, "durable");
-    const scratchRoot = path.join(tempRoot, "scratch");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
     const ref = createWorkspaceSnapshotV2Ref({
@@ -1661,7 +1894,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref,
-        scratchRoot,
       })).rejects.toThrow("Hosted workspace snapshot fetch byte count does not match its ref.");
 
       expect(objectFetchCount).toBe(1);
@@ -1680,7 +1912,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("logs the failing v2 workspace snapshot restore step without object identifiers", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-fail-"));
     const durableRoot = path.join(tempRoot, "durable");
-    const scratchRoot = path.join(tempRoot, "scratch");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
     const ref = createWorkspaceSnapshotV2Ref({
@@ -1729,9 +1960,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref,
-        scratchRoot,
       })).rejects.toThrow("Hosted workspace snapshot encrypted object is unavailable.");
-      await expect(readdir(scratchRoot)).resolves.toEqual([]);
 
       const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
         .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
@@ -1769,7 +1998,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("logs v2 workspace snapshot unwrap response failures without snapshot path material", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-fail-"));
     const durableRoot = path.join(tempRoot, "durable");
-    const scratchRoot = path.join(tempRoot, "scratch");
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 1024,
     });
@@ -1797,10 +2025,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref,
-        scratchRoot,
       })).rejects.toThrow("Hosted workspace snapshot data key unwrap failed with HTTP 500.");
 
-      // The concurrent presign/fetch leg may log its own failure; assert on
+      // The concurrent presign leg may log its own failure; assert on
       // the unwrap step's failure specifically.
       const failedUnwrapLogs = readWorkspaceSnapshotDiagnosticLogs()
         .filter((log) => log.message === "Hosted workspace snapshot restore step failed.")
@@ -1848,6 +2075,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ...readWorkspaceSnapshotDiagnosticLogs(),
         ...upstreamNonOkLogs,
       ]);
+      const serializedAllStructuredLogs = JSON.stringify(
+        mocks.emitHostedExecutionStructuredLog.mock.calls,
+      );
       expect(serializedLogs).not.toContain(ref.objectKey);
       expect(serializedLogs).not.toContain(ref.snapshotId);
       expect(serializedLogs).not.toContain("body-presigned");
@@ -1855,6 +2085,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("root_key_test");
       expect(serializedLogs).not.toContain("wrapped_data_key_test");
       expect(serializedLogs).not.toContain(tempRoot);
+      expect(serializedAllStructuredLogs).not.toContain(responseDetail);
+      expect(serializedAllStructuredLogs).not.toContain(ref.objectKey);
+      expect(serializedAllStructuredLogs).not.toContain("body-presigned");
+      expect(serializedAllStructuredLogs).not.toContain("root_key_test");
+      expect(serializedAllStructuredLogs).not.toContain("wrapped_data_key_test");
+      expect(serializedAllStructuredLogs).not.toContain(tempRoot);
     } finally {
       await rm(tempRoot, {
         force: true,
@@ -1866,7 +2102,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("logs v2 workspace snapshot direct object transport errors without R2 path or query material", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-transport-fail-"));
     const durableRoot = path.join(tempRoot, "durable");
-    const scratchRoot = path.join(tempRoot, "scratch");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
     const ref = createWorkspaceSnapshotV2Ref({
@@ -1917,7 +2152,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
           durableRoot,
           ref,
-          scratchRoot,
         });
       } catch (error) {
         thrown = error;
@@ -2010,7 +2244,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("logs archive restore tar/zstd process failures without stderr text", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-archive-process-fail-"));
     const durableRoot = path.join(tempRoot, "durable");
-    const scratchRoot = path.join(tempRoot, "scratch");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
     const snapshotId = "snapshot_runner_platform_archive_process_fail";
@@ -2097,7 +2330,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
           userId: "member_123",
         },
-        scratchRoot,
       })).rejects.toThrow(/^Hosted workspace snapshot zstd command failed with /u);
 
       const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
@@ -2112,7 +2344,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           workspaceSnapshotProcessStderrBytes: expect.any(Number),
           workspaceSnapshotProcessStderrLineCount: expect.any(Number),
           workspaceSnapshotProcessStderrTruncated: false,
-          workspaceSnapshotRestoreStep: "archive_restore",
+          workspaceSnapshotRestoreStep: "object_fetch",
         }),
         level: "warn",
         phase: "runtime.starting",

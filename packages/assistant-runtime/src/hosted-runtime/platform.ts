@@ -302,7 +302,6 @@ export interface HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
 export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   sizeGuardMs?: number;
   dataKeyUnwrapMs?: number;
-  scratchPrepareMs?: number;
   presignGetMs?: number;
   objectFetchMs?: number;
   decryptMs?: number;
@@ -333,7 +332,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
   restoreWorkspaceSnapshot(input: {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
-    scratchRoot?: string | null;
+    signal?: AbortSignal | null;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;

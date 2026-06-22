@@ -4,6 +4,7 @@ import { parseHostedRunnerProviderEffectErrorResponse } from "../runner-effects-
 import {
   HostedRuntimeControlPlaneFetchError,
   combineAbortSignalsWithCleanup,
+  isRetryableHostedRuntimeReplaySafeReadTransportError,
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
@@ -68,6 +69,7 @@ export async function fetchHostedJson(input: {
   allowNotFound?: boolean;
   body?: unknown;
   description: string;
+  exposeResponseBodyInError?: boolean;
   fetchImpl: typeof fetch;
   headers?: Headers;
   redactedLogPath?: string;
@@ -102,9 +104,15 @@ export async function fetchHostedJson(input: {
   }
 
   if (!response.ok) {
-    const detail = (await response.text()).trim();
+    const detail = (await readHostedResponseText({
+      description: input.description,
+      response,
+      signal: input.signal ?? null,
+      timeoutMs: input.timeoutMs,
+    })).trim();
+    const exposeResponseBodyInError = input.exposeResponseBodyInError !== false;
     const error = new Error(
-      detail.length > 0
+      exposeResponseBodyInError && detail.length > 0
         ? `${input.description} failed with HTTP ${response.status}. ${detail}`
         : `${input.description} failed with HTTP ${response.status}.`,
     ) as Error & {
@@ -141,7 +149,12 @@ export async function fetchHostedJson(input: {
     throw error;
   }
 
-  const text = await response.text();
+  const text = await readHostedResponseText({
+    description: input.description,
+    response,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
+  });
   if (!text.trim()) {
     return null;
   }
@@ -151,6 +164,101 @@ export async function fetchHostedJson(input: {
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+}
+
+async function readHostedResponseText(input: {
+  description: string;
+  response: Response;
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+}): Promise<string> {
+  if (!input.response.body) {
+    return "";
+  }
+
+  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+  const readSignal = combineAbortSignalsWithCleanup(input.signal ?? null, timeoutSignal);
+  const reader = input.response.body.getReader();
+  const decoder = new TextDecoder();
+  let streamDone = false;
+  try {
+    let text = "";
+    while (true) {
+      const result = await readHostedResponseBodyChunk({
+        reader,
+        signal: readSignal.signal,
+      });
+      if (result.done) {
+        streamDone = true;
+        break;
+      }
+      text += decoder.decode(result.value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } catch (error) {
+    if (shouldPreserveHostedRuntimeFetchError(error)) {
+      throw error;
+    }
+
+    const wrappedError = new HostedRuntimeControlPlaneFetchError({
+      cause: error,
+      description: `${input.description} response body read`,
+      signalState: {
+        callerSignalAborted: input.signal?.aborted ?? false,
+        requestSignalAborted: readSignal.signal.aborted,
+        timeoutMs: input.timeoutMs,
+        timeoutSignalAborted: timeoutSignal.aborted,
+      },
+    });
+
+    if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
+      throw wrappedError;
+    }
+
+    throw error;
+  } finally {
+    if (!streamDone) {
+      await reader.cancel().catch(() => undefined);
+    }
+    reader.releaseLock();
+    readSignal.dispose();
+  }
+}
+
+function readHostedResponseBodyChunk(input: {
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  signal: AbortSignal;
+}): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (input.signal.aborted) {
+    return Promise.reject(readHostedResponseAbortReason(input.signal));
+  }
+
+  return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    let settled = false;
+    const settle = (run: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      input.signal.removeEventListener("abort", abort);
+      run();
+    };
+    const abort = () => {
+      settle(() => reject(readHostedResponseAbortReason(input.signal)));
+    };
+    input.signal.addEventListener("abort", abort, { once: true });
+    input.reader.read().then(
+      (result) => settle(() => resolve(result)),
+      (error) => settle(() => reject(error)),
+    );
+  });
+}
+
+function readHostedResponseAbortReason(signal: AbortSignal): unknown {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 }
 
 export async function fetchHostedProviderEffectJson(input: {
