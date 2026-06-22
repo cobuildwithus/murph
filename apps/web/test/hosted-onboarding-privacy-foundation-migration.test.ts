@@ -126,6 +126,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedProductFeedback",
   "HostedWebSession",
   "HostedMailboxItem",
   "HostedMailboxLaneCounter",
@@ -366,6 +367,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026062100_hosted_computer_single_member_profile",
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
+      "20260622190000_add_hosted_product_feedback",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');

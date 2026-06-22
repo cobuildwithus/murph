@@ -132,6 +132,7 @@ import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
   AssistantProgressDeliverySource,
+  AssistantTurnProductFeedbackRecorder,
 } from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
@@ -435,6 +436,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -2818,6 +2820,7 @@ async function runCodexAppServerTurnOnProcess(
       hostedToolContext: resolveCodexAppServerHostedToolContext(input),
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       progressDelivery:
         dynamicToolRequest.kind === 'send-progress-update'
           ? dynamicToolProgressDelivery
@@ -3703,6 +3706,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
+      | 'invalid-product-feedback-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
@@ -3713,6 +3717,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
+    request.kind === 'invalid-product-feedback-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }
@@ -3723,6 +3728,7 @@ function isSerializedDynamicToolRequest(
   return request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
 }
 

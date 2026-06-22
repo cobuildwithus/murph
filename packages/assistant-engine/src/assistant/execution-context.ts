@@ -5,6 +5,10 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+  HostedRuntimeProductFeedbackRecordResponse,
+} from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { normalizeNullableString } from './shared.js'
 
@@ -38,6 +42,12 @@ export interface AssistantHostedDeviceConnectRequest {
 
 export interface AssistantUsageRecorder {
   recordUsage(record: AssistantUsageRecord): Promise<void>
+}
+
+export interface AssistantHostedProductFeedbackRecorder {
+  recordProductFeedback(
+    feedback: HostedRuntimeProductFeedbackRecord,
+  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
 }
 
 export type AssistantGeneratedImageContentType =
@@ -82,6 +92,7 @@ export interface AssistantHostedExecutionContext {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
+  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
   providerFetch?: typeof fetch | null
   publicInternetFetch?: typeof fetch | null
   usageRecorder?: AssistantUsageRecorder | null
@@ -109,6 +120,9 @@ export function normalizeAssistantExecutionContext(
   )
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
+  )
+  const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
+    hosted?.productFeedbackRecorder,
   )
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
@@ -151,6 +165,7 @@ export function normalizeAssistantExecutionContext(
             deviceConnectProviders,
           }
         : {}),
+      ...(productFeedbackRecorder ? { productFeedbackRecorder } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies
@@ -169,6 +184,18 @@ export function normalizeAssistantExecutionContext(
           .map((key) => normalizeNullableString(key))
           .filter((key): key is string => key !== null) ?? [],
     },
+  }
+}
+
+function normalizeAssistantProductFeedbackRecorder(
+  input: AssistantHostedExecutionContext['productFeedbackRecorder'] | undefined,
+): AssistantHostedProductFeedbackRecorder | undefined {
+  if (!input || typeof input.recordProductFeedback !== 'function') {
+    return undefined
+  }
+
+  return {
+    recordProductFeedback: input.recordProductFeedback,
   }
 }
 

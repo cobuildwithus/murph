@@ -247,6 +247,7 @@ export async function executeCodexAssistantTurnAttempt(
     onTraceEvent: input.onTraceEvent,
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
+    productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
@@ -507,6 +508,8 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
       input.input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.input.progressDelivery != null,
     connectedAppsAvailable: input.input.connectedAppsAvailable === true,
+    productFeedbackAvailable:
+      typeof input.input.productFeedbackRecorder?.recordProductFeedback === 'function',
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
