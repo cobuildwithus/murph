@@ -666,6 +666,129 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
   assert.equal(validation.valid, true);
 });
 
+test("importDeviceBatch accepts legacy rawArtifacts as evidence parts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-legacy-raw-artifacts");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    source: "device",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-03-16T07:30:00.000Z",
+        title: "WHOOP summary",
+        fields: {
+          metric: "recovery-score",
+          value: 67,
+          unit: "%",
+        },
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "provider-snapshot",
+        fileName: "whoop-snapshot.json",
+        mediaType: "application/json",
+        content: {
+          provider: "whoop",
+          score: 67,
+        },
+      },
+    ],
+  } as unknown as Parameters<typeof importDeviceBatch>[0]);
+
+  assert.equal(result.evidencePartCount, 1);
+  assert.equal(result.evidenceParts[0]?.role, "provider-snapshot");
+  assert.equal(result.evidenceParts[0]?.fileName, "whoop-snapshot.json");
+  const { record: ingestRecord } = await readRequiredIntegrationIngest({
+    vaultRoot,
+    id: result.importId,
+  });
+  const rawRef = ingestRecord.parts[0]?.relativePath;
+  assert.ok(rawRef);
+  assert.deepEqual(result.events[0]?.rawRefs, [rawRef]);
+  assert.deepEqual(ingestRecord.outputs?.events, [
+    { id: result.events[0]?.id, roles: ["provider-snapshot"] },
+  ]);
+  assert.equal(await readVaultUtf8(vaultRoot, rawRef), '{"provider":"whoop","score":67}\n');
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("importDeviceBatch rejects ambiguous evidenceParts and legacy rawArtifacts payloads", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-ambiguous-raw-artifacts");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        importedAt: "2026-03-16T09:30:00.000Z",
+        evidenceParts: [
+          {
+            role: "snapshot",
+            fileName: "snapshot.json",
+            content: { source: "evidenceParts" },
+          },
+        ],
+        rawArtifacts: [
+          {
+            role: "legacy-snapshot",
+            fileName: "legacy-snapshot.json",
+            content: { source: "rawArtifacts" },
+          },
+        ],
+      } as unknown as Parameters<typeof importDeviceBatch>[0]),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_DEVICE_BATCH",
+  );
+});
+
+test("importDeviceBatch normalizes evidence filenames before ingest validation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-evidence-filename");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "custom provider",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "Provider Export 2026.json",
+        mediaType: "application/json",
+        content: {
+          provider: "custom provider",
+        },
+      },
+    ],
+  });
+
+  const evidencePart = result.evidenceParts[0];
+  assert.ok(evidencePart);
+  assert.equal(evidencePart.fileName, "provider-export-2026.json");
+  assert.equal(
+    evidencePart.relativePath,
+    `raw/integrations/custom-provider/2026/03/${result.importId}/001-provider-export-2026.json`,
+  );
+  const { record: ingestRecord } = await readRequiredIntegrationIngest({
+    vaultRoot,
+    id: result.importId,
+  });
+  assert.equal(ingestRecord.parts[0]?.fileName, evidencePart.fileName);
+  assert.equal(ingestRecord.parts[0]?.relativePath, evidencePart.relativePath);
+
+  const { manifest } = await readRequiredRawManifest({
+    vaultRoot,
+    rawDirectory: path.posix.dirname(evidencePart.relativePath),
+  });
+  assert.equal(manifest.artifacts[0]?.relativePath, evidencePart.relativePath);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
 test("validateVault accepts literal v1 compact integration ingest references", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-v1-compact");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

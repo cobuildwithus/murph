@@ -292,6 +292,7 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   evidenceParts?: readonly DeviceEvidencePartInput[];
+  rawArtifacts?: readonly DeviceEvidencePartInput[];
   ingestReceipt?: unknown;
   provenance?: Record<string, unknown>;
 }
@@ -1293,6 +1294,7 @@ function normalizeDeviceEvidencePartInputs(
   const seenRoles = new Set<string>();
 
   return evidencePartInputs.map((artifactInput, index) => {
+    const fallbackFileName = `${provider}-${String(index + 1).padStart(2, "0")}.json`;
     const role = normalizeRequiredRole(
       artifactInput.role ?? `artifact-${index + 1}`,
       `evidence part ${index + 1} role`,
@@ -1307,13 +1309,16 @@ function normalizeDeviceEvidencePartInputs(
 
     seenRoles.add(role);
     const content = normalizeInlineEvidenceContent(artifactInput.content);
+    const fileName = sanitizeFileName(
+      typeof artifactInput.fileName === "string" && artifactInput.fileName.trim()
+        ? artifactInput.fileName.trim()
+        : fallbackFileName,
+      fallbackFileName,
+    );
 
     return {
       role,
-      fileName:
-        typeof artifactInput.fileName === "string" && artifactInput.fileName.trim()
-          ? artifactInput.fileName.trim()
-          : `${provider}-${String(index + 1).padStart(2, "0")}.json`,
+      fileName,
       mediaType:
         typeof artifactInput.mediaType === "string" && artifactInput.mediaType.trim()
           ? artifactInput.mediaType.trim()
@@ -1343,6 +1348,20 @@ function normalizeDeviceIngestReceipt(value: unknown): IntegrationIngestReceipt 
     "Device ingest receipt failed contract validation.",
   );
   return value;
+}
+
+function selectDeviceEvidencePartInputs(input: {
+  evidenceParts?: readonly DeviceEvidencePartInput[];
+  rawArtifacts?: readonly DeviceEvidencePartInput[];
+}): readonly DeviceEvidencePartInput[] | undefined {
+  if (input.evidenceParts !== undefined && input.rawArtifacts !== undefined) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_BATCH",
+      "importDeviceBatch accepts either evidenceParts or legacy rawArtifacts, not both.",
+    );
+  }
+
+  return input.rawArtifacts ?? input.evidenceParts;
 }
 
 function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
@@ -1377,7 +1396,8 @@ function normalizeDeviceBatchInputs({
   source = "device",
   events = [],
   samples = [],
-  evidenceParts = [],
+  evidenceParts,
+  rawArtifacts,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -1407,7 +1427,7 @@ function normalizeDeviceBatchInputs({
     itemLabel: "Device sample",
   });
   const evidencePartInputs = normalizeDeviceBatchObjectArray<DeviceEvidencePartInput>({
-    value: evidenceParts,
+    value: selectDeviceEvidencePartInputs({ evidenceParts, rawArtifacts }),
     code: "VAULT_INVALID_DEVICE_EVIDENCE_PARTS",
     message: "Device batch evidenceParts must be an array when provided.",
     itemCode: "VAULT_INVALID_EVIDENCE_PART",
@@ -1465,7 +1485,7 @@ function prepareDeviceEvidenceParts(
     relativePath: normalizeRelativeVaultPath(
       path.posix.join(
         rawDirectory,
-        `${String(artifact.index + 1).padStart(3, "0")}-${sanitizeFileName(artifact.fileName, "evidence.json")}`,
+        `${String(artifact.index + 1).padStart(3, "0")}-${artifact.fileName}`,
       ),
     ),
     byteSize: artifact.byteSize,
@@ -2127,7 +2147,8 @@ function prepareDeviceBatchPlan({
   source = "device",
   events = [],
   samples = [],
-  evidenceParts = [],
+  evidenceParts,
+  rawArtifacts,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -2142,6 +2163,7 @@ function prepareDeviceBatchPlan({
     events,
     samples,
     evidenceParts,
+    rawArtifacts,
     ingestReceipt,
     provenance,
   });
@@ -2677,7 +2699,8 @@ export async function importDeviceBatch({
   source = "device",
   events = [],
   samples = [],
-  evidenceParts = [],
+  evidenceParts,
+  rawArtifacts,
   ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
@@ -2692,6 +2715,7 @@ export async function importDeviceBatch({
     events,
     samples,
     evidenceParts,
+    rawArtifacts,
     ingestReceipt,
     provenance,
   });
