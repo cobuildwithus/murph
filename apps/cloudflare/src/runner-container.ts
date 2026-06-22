@@ -459,14 +459,10 @@ export class RunnerContainer extends Container {
     ) {
       return;
     }
-    let abortPostStatus: RunnerWorkspaceInvocationAbortPostStatus = "failed";
     if (this.workspaceInvocationAbortEndpointReady) {
-      abortPostStatus = await this.postWorkspaceInvocationAbort(input);
+      await this.postWorkspaceInvocationAbort(input);
     }
-    if (
-      this.workspaceInvocationActiveOperationPreservedAfterTransportFailure
-      && abortPostStatus !== "accepted"
-    ) {
+    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
       if (!abortController.signal.aborted) {
         abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
       }

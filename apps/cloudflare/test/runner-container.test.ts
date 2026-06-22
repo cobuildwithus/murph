@@ -3527,6 +3527,66 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("destroys and clears preserved liveness after explicit abort is accepted", async () => {
+    let abortPosted = false;
+    let runnerResponseLost = false;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: runnerResponseLost ? 1 : 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        abortPosted = true;
+        return new Response(null, { status: 204 });
+      }
+
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      runnerResponseLost = true;
+      throw new Error("Network connection lost");
+    });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_abort_after_accepted_response_lost");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    expect(abortPosted).toBe(true);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
   it("keeps active liveness when an accepted workspace response body is lost", async () => {
     let runnerBodyLost = false;
     const containerFetch = vi.fn(async (url: string) => {

@@ -120,6 +120,7 @@ export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
@@ -159,7 +160,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
       durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
-      scratchRoot: resolveHostedWorkspaceScratchRoot(restored.vaultRoot),
+      signal: input.signal ?? null,
     });
     await Promise.all([
       createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
@@ -1466,14 +1467,6 @@ function resolveHostedWorkspaceDurableRoot(vaultRoot: string): string {
     return path.dirname(resolvedVaultRoot);
   }
   return resolvedVaultRoot;
-}
-
-function resolveHostedWorkspaceScratchRoot(vaultRoot: string): string {
-  const durableRoot = resolveHostedWorkspaceDurableRoot(vaultRoot);
-  if (path.basename(durableRoot) === "durable") {
-    return path.join(path.dirname(durableRoot), "scratch");
-  }
-  return path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
 }
 
 function resolveHostedWorkspaceOperatorHomeRoot(vaultRoot: string): string {

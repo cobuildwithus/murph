@@ -24,6 +24,7 @@ import {
   createEncryptedWorkspaceSnapshotFile,
   type EncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
+  restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
 } from "../src/workspace-snapshot-local.js";
 
 const execFileAsync = promisify(execFile);
@@ -113,7 +114,6 @@ describe("workspace snapshot local restore", () => {
         durableRoot: restoredDurableRoot,
         encryptedFilePath: encrypted.encryptedFilePath,
         ref,
-        scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
       for (const key of [
@@ -201,7 +201,6 @@ describe("workspace snapshot local restore", () => {
         durableRoot: restoredDurableRoot,
         encryptedFilePath: encrypted.encryptedFilePath,
         ref,
-        scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
       await expect(readFile(
@@ -362,6 +361,137 @@ describe("workspace snapshot local restore", () => {
         outputDir,
       })).rejects.toThrow("Hosted workspace snapshot exceeds the total plain size limit.");
       await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("restores encrypted snapshots from an encrypted byte stream", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const sourceOperatorHomeRoot = path.join(sourceDurableRoot, "home");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const snapshotId = "snapshot_stream_restore";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_stream_restore.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await mkdir(sourceVaultRoot, { recursive: true });
+      await mkdir(sourceOperatorHomeRoot, { recursive: true });
+      await writeFile(path.join(sourceVaultRoot, "note.md"), "stream restored\n", "utf8");
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        operatorHomeRoot: sourceOperatorHomeRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePlan.entries,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      const ref = createHostedWorkspaceSnapshotTestRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      const restoreTimings = await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedStream: streamEncryptedChunks(splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
+        ref,
+      });
+
+      expect(typeof restoreTimings.decryptMs).toBe("number");
+      expect(Number.isFinite(restoreTimings.decryptMs)).toBe(true);
+      await expect(readFile(path.join(restoredDurableRoot, "vault", "note.md"), "utf8"))
+        .resolves.toBe("stream restored\n");
+      await expect(readdir(path.dirname(restoredDurableRoot))).resolves.toEqual(["durable"]);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects encrypted stream auth failures without replacing durable state", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-auth-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const sourceOperatorHomeRoot = path.join(sourceDurableRoot, "home");
+    const durableRoot = path.join(tempRoot, "durable");
+    const existingDurableFile = path.join(durableRoot, "existing.txt");
+    const snapshotId = "snapshot_stream_auth_fail";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_stream_auth_fail.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await mkdir(sourceVaultRoot, { recursive: true });
+      await mkdir(sourceOperatorHomeRoot, { recursive: true });
+      await writeFile(path.join(sourceVaultRoot, "note.md"), "should not restore\n", "utf8");
+      await mkdir(durableRoot, { mode: 0o700, recursive: true });
+      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        operatorHomeRoot: sourceOperatorHomeRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePlan.entries,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      const tamperedEncryptedBytes = Buffer.from(encryptedBytes);
+      tamperedEncryptedBytes[tamperedEncryptedBytes.byteLength - 1] ^= 0xff;
+      const ref = createHostedWorkspaceSnapshotTestRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        encryptedStream: streamEncryptedChunks([
+          tamperedEncryptedBytes.subarray(0, tamperedEncryptedBytes.byteLength - 2),
+          tamperedEncryptedBytes.subarray(tamperedEncryptedBytes.byteLength - 2),
+        ]),
+        ref,
+      })).rejects.toThrow();
+
+      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
+      await expect(access(path.join(durableRoot, "vault", "note.md"))).rejects.toThrow();
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -612,7 +742,6 @@ exec "$REAL_TAR" "$@"
             ...archivePatch,
           },
         },
-        scratchRoot: path.join(tempRoot, "restore-scratch"),
       })).rejects.toThrow(expectedError);
 
       await expect(readFile(path.join(restoredDurableRoot, "existing.txt"), "utf8"))
@@ -657,4 +786,25 @@ function createHostedWorkspaceSnapshotTestRef(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: input.userId,
   };
+}
+
+async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
+
+const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
+
+function splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes: Buffer): Uint8Array[] {
+  const ciphertextEnd =
+    encryptedBytes.byteLength - TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES;
+  const nearAuthTag = Math.max(1, ciphertextEnd - 3);
+  return [
+    encryptedBytes.subarray(0, 1),
+    encryptedBytes.subarray(1, nearAuthTag),
+    encryptedBytes.subarray(nearAuthTag, ciphertextEnd + 1),
+    encryptedBytes.subarray(ciphertextEnd + 1, ciphertextEnd + 8),
+    encryptedBytes.subarray(ciphertextEnd + 8),
+  ].filter((chunk) => chunk.byteLength > 0);
 }
