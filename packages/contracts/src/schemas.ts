@@ -17,6 +17,7 @@ import {
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
+  integrationIngestRecordSchema as integrationIngestRecordContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
   regimenFrontmatterSchema as regimenFrontmatterContract,
@@ -69,6 +70,7 @@ export const conditionImportPayloadSchema = toInputJsonSchema(conditionImportPay
 export const bloodTestImportPayloadSchema = toInputJsonSchema(bloodTestImportPayloadContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const metricSampleRecordSchema = toJsonSchema(metricSampleRecordContract);
+export const integrationIngestRecordSchema = toJsonSchema(integrationIngestRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
 export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract);
 export const automationFrontmatterSchema = toJsonSchema(automationFrontmatterContract);
@@ -105,6 +107,7 @@ export const schemaCatalog = Object.freeze({
   "condition-import-payload": conditionImportPayloadSchema,
   "event-record": eventRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
+  "integration-ingest-record": integrationIngestRecordSchema,
   "metric-sample-record": metricSampleRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,
   "frontmatter-automation": automationFrontmatterSchema,

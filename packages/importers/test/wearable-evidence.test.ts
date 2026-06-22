@@ -37,11 +37,12 @@ function makeTestDeviceProviderAdapter<TSnapshot>(
 }
 
 function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
-  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
-  assert.ok(artifact);
-  const receipt = artifact.content as WearableRawIngestReceipt;
-  assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
-  assert.equal(artifact.mediaType, "application/json");
+  const receipt = payload.ingestReceipt as WearableRawIngestReceipt | undefined;
+  assert.ok(receipt);
+  assert.equal(
+    payload.evidenceParts?.some((entry) => entry.role.startsWith("wearable-raw-receipt:")),
+    false,
+  );
   return receipt;
 }
 
@@ -111,7 +112,7 @@ test("prepareDeviceProviderSnapshotImport emits raw receipt artifacts without si
               value: 8123,
             },
           }],
-          rawArtifacts: [{
+          evidenceParts: [{
             role: "daily-summary",
             fileName: "daily-summary.json",
             content: snapshot,
@@ -195,7 +196,7 @@ test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics o
               value: 82.4,
             },
           }],
-          rawArtifacts: [{
+          evidenceParts: [{
             role: "body-summary",
             fileName: "body-summary.json",
             content: snapshot,
@@ -260,7 +261,7 @@ test("prepareDeviceProviderSnapshotImport keeps raw receipt identity stable acro
               value: 8123,
             },
           }],
-          rawArtifacts: [{
+          evidenceParts: [{
             role: "daily-summary",
             fileName: "daily-summary.json",
             content: snapshot,
@@ -293,18 +294,18 @@ test("prepareDeviceProviderSnapshotImport keeps raw receipt identity stable acro
   assert.equal(firstReceipt.payloadHash, secondReceipt.payloadHash);
   assert.equal(first.importedAt, second.importedAt);
   assert.deepEqual(
-    first.rawArtifacts?.map((artifact) => artifact.fileName),
-    second.rawArtifacts?.map((artifact) => artifact.fileName),
+    first.evidenceParts?.map((artifact) => artifact.fileName),
+    second.evidenceParts?.map((artifact) => artifact.fileName),
   );
 });
 
 test("pushDeletionObservation bounds deletion artifact names while preserving event content", () => {
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: NonNullable<NormalizedDeviceBatch["rawArtifacts"]> = [];
+  const evidenceParts: NonNullable<NormalizedDeviceBatch["evidenceParts"]> = [];
   const longResourceType = `${"activity_".repeat(16)}end`;
   const longSourceEventType = `${"webhook.delete.".repeat(12)}end`;
 
-  pushDeletionObservation(events, rawArtifacts, {
+  pushDeletionObservation(events, evidenceParts, {
     makeExternalRef: (resourceType, resourceId, occurredAt, facet) => ({
       facet,
       observedAt: occurredAt,
@@ -320,11 +321,11 @@ test("pushDeletionObservation bounds deletion artifact names while preserving ev
     sourceEventType: longSourceEventType,
   });
 
-  assert.equal(rawArtifacts.length, 1);
-  assert.ok((rawArtifacts[0]?.fileName.length ?? 0) < 160);
-  assert.match(rawArtifacts[0]?.fileName ?? "", /^deletion-/u);
+  assert.equal(evidenceParts.length, 1);
+  assert.ok((evidenceParts[0]?.fileName.length ?? 0) < 160);
+  assert.match(evidenceParts[0]?.fileName ?? "", /^deletion-/u);
   assert.equal(
-    (rawArtifacts[0]?.content as { resourceType?: string } | undefined)?.resourceType,
+    (evidenceParts[0]?.content as { resourceType?: string } | undefined)?.resourceType,
     longResourceType,
   );
   assert.equal(

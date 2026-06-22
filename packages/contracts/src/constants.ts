@@ -5,6 +5,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   scheduledLogFrontmatter: "murph.frontmatter.scheduled-log.v1",
   event: "murph.event.v1",
   inboxCapture: "murph.inbox-capture.v1",
+  integrationIngest: "murph.integration-ingest.v1",
   allergyFrontmatter: "murph.frontmatter.allergy.v1",
   conditionFrontmatter: "murph.frontmatter.condition.v1",
   experimentFrontmatter: "murph.frontmatter.experiment.v1",
@@ -26,7 +27,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   vault: "murph.vault.v1",
 } as const);
 
-export const CURRENT_VAULT_FORMAT_VERSION = 1 as const;
+export const CURRENT_VAULT_FORMAT_VERSION = 2 as const;
 
 /**
  * Canonical production web origin for user-facing app links. Runtime env
@@ -322,6 +323,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "show",
   "validate",
   "vault_init",
+  "vault_migration",
   "vault_repair",
   "vault_summary_update",
   "workout_format_save",

@@ -20,7 +20,7 @@ import {
 
 import type {
   DeviceEventPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
@@ -177,7 +177,7 @@ function makeExternalRef(
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  rawArtifacts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -218,7 +218,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
   const deletions = asObjectArray(request.deletions);
   const sourceWindow = asPlainObject(request.sourceWindow);
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const rawArtifacts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
     stringId(athlete?.id ?? athlete?.athlete_id ?? athlete?.athleteId);

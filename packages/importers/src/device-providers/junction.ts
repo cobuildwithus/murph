@@ -83,7 +83,7 @@ import type {
   DeviceDataOrigin,
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
   DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
@@ -136,7 +136,7 @@ interface NormalizationContext {
   windowStart?: string;
   windowEnd?: string;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
-  rawArtifacts: DeviceRawArtifactPayload[];
+  rawArtifacts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
 }
@@ -646,7 +646,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
   const importedAt = normalizeTimestamp(snapshot.importedAt);
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const rawArtifacts: DeviceEvidencePartPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
   const connections = asArray(snapshot.connections).flatMap((connection) => {
@@ -1244,9 +1244,9 @@ function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefi
 
 function withJunctionCompactTimeseriesMetadata(
   resource: string,
-  artifact: DeviceRawArtifactPayload | null,
+  artifact: DeviceEvidencePartPayload | null,
   resourceCategory: "timeseries_daily_aggregate" | "timeseries_reading" = "timeseries_daily_aggregate",
-): DeviceRawArtifactPayload | null {
+): DeviceEvidencePartPayload | null {
   if (!artifact) {
     return null;
   }

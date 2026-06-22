@@ -187,6 +187,39 @@
                     }
                   }
                 },
+                "migrate-integration-storage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show planned migration work without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply the migration after verification succeeds.",
+                          "type": "boolean"
+                        },
+                        "skipValidation": {
+                          "default": false,
+                          "description": "Skip post-migration vault validation after apply.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "repair-junction-hr-zones": {
                   "type": "object",
                   "additionalProperties": false,

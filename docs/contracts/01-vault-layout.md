@@ -42,11 +42,10 @@ Status: frozen current contract plus health extension fence
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
   raw/workouts/YYYY/MM/<eventId>/<filename>
   raw/workouts/YYYY/MM/<eventId>/manifest.json
-  raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>
-  raw/integrations/<provider>/YYYY/MM/<transformId>/manifest.json
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
+  ledger/integration-ingests/YYYY/YYYY-MM.jsonl
   ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
   audit/YYYY/YYYY-MM.jsonl
@@ -81,10 +80,12 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment bytes.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
-- `raw/integrations/<provider>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from normalized device/provider imports and keeps provider API snapshots immutable alongside a manifest.
+- Current normalized device/provider imports keep exact provider evidence in `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`; they do not write `raw/integrations/**` files or event `rawRefs` to integration raw paths.
+- Legacy `raw/integrations/<provider>/YYYY/MM/<transformId>/` directories are v1 vault data only. They are accepted only by the explicit integration-storage migration path, which verifies manifest bytes and hashes before appending journal rows, deleting legacy files, and flipping `vault.json` to the current format.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
+- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`. These shards are explicit import/debug ledgers; default query/read/browser paths use sparse entities and compact metric rows instead.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
@@ -114,7 +115,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
 - Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
-- Device/provider API snapshot imports use `raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>`, where `transformId` is the returned device-batch id.
+- Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Each row stores the returned device-batch id, provider/account/source/importedAt, exact UTF-8 evidence part content with byte size and SHA-256, folded ingest receipt metadata, and output event/sample references.
 - Each raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
 - `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars.
 - File names are slug-safe ASCII and preserve the original extension.
@@ -126,3 +127,4 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Published version strings are immutable.
 - Any incompatible change must mint a new version string and either ship an explicit core migration or fail closed until one exists.
 - `packages/core` owns the future migration seam and versioned write behavior. Current older-format vaults fail closed until an explicit upgrade step is registered, and query/CLI paths must not keep legacy reads alive by silently rewriting stored records during reads.
+- The v1-to-v2 integration-storage upgrade is explicit: `murph vault migrate-integration-storage` dry-runs by default, and `--apply` verifies legacy `raw/integrations/**` manifests/artifacts before appending integration-ingest rows, removing integration raw references from event rows, deleting verified legacy raw files, validating, and updating `vault.json`.

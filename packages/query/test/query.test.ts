@@ -3211,7 +3211,7 @@ async function createFixtureVault(): Promise<string> {
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
       {
-        formatVersion: 1,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
         createdAt: "2026-03-10T06:00:00Z",
         title: "Murph Vault",

@@ -71,7 +71,7 @@ Assistant runtime is for sessions, transcripts, receipts, outbox state, diagnost
 ### Add a new device/provider connector
 
 1. Model the provider behind a small adapter in `@murphai/importers` that normalizes upstream payloads into shared device-batch payloads.
-2. Preserve immutable provider snapshots under `raw/integrations/<provider>/**` through `@murphai/core`; do not write those files directly from importer code.
+2. Preserve useful provider evidence as `evidenceParts` on the shared device-batch payload; `@murphai/core` writes the exact bytes into `ledger/integration-ingests/**`. Do not write provider evidence files directly from importer code.
 3. Attach upstream provenance with shared `externalRef` fields on canonical events and compact metrics so retries dedupe by provider resource id, version, and optional facet.
 4. Keep provider secrets, OAuth tokens, and background sync state outside the vault; only immutable payload evidence and canonical normalized records belong in the vault.
 5. Avoid inventing unsupported time series. If the upstream API only exposes summaries, normalize summaries into current observations or compact metric facts instead of fabricating minute-level streams.
@@ -124,7 +124,7 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 - Contract docs still describe the new behavior truthfully.
 - Package ownership remains one-way, with canonical writes only through core-owned mutation seams.
-- New paths under the vault root preserve Markdown truth, append-only JSONL, and immutable `raw/`, including provider snapshots under `raw/integrations/**`.
+- New paths under the vault root preserve Markdown truth, append-only JSONL, immutable non-device `raw/`, and current provider evidence in `ledger/integration-ingests/**`.
 - New runtime stores live only under documented `.runtime/operations/**` or `.runtime/projections/**` owners and are registered through `@murphai/runtime-state`.
 - Health-extension changes keep Markdown for curated current state and JSONL for append-only assessments, event-ledger health records, samples, and audit.
 - Device/provider connectors keep upstream provenance on canonical records via shared `externalRef` metadata rather than implicit importer-only state.

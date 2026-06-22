@@ -24,7 +24,7 @@ import {
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -394,7 +394,7 @@ function buildOuraWorkoutMetrics(workout: PlainObject): WorkoutSessionMetrics | 
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  rawArtifacts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -464,7 +464,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     .map((entry) => asPlainObject(entry))
     .filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const rawArtifacts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ?? stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
 

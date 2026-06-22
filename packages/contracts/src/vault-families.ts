@@ -30,6 +30,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   inboxCaptureRecordSchema,
+  integrationIngestRecordSchema,
   journalDayFrontmatterSchema,
   metricSampleRecordSchema,
   protocolFrontmatterSchema,
@@ -57,6 +58,7 @@ export const METRIC_SAMPLE_LEDGER_DIRECTORY = "ledger/metric-samples" as const;
 export const SAMPLE_LEDGER_DIRECTORY = "ledger/samples" as const;
 export const AUDIT_DIRECTORY = "audit" as const;
 export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures" as const;
+export const INTEGRATION_INGEST_LEDGER_DIRECTORY = "ledger/integration-ingests" as const;
 export const RAW_INBOX_DIRECTORY = "raw/inbox" as const;
 export const RAW_INTEGRATIONS_DIRECTORY = "raw/integrations" as const;
 export const RAW_ASSESSMENTS_DIRECTORY = "raw/assessments" as const;
@@ -99,11 +101,11 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   samples: "samples",
   audits: "audits",
   inboxCaptures: "inboxCaptures",
+  integrationIngests: "integrationIngests",
   rawAssessments: "rawAssessments",
   rawCaptures: "rawCaptures",
   rawDocuments: "rawDocuments",
   rawInbox: "rawInbox",
-  rawIntegrations: "rawIntegrations",
   rawMeasurements: "rawMeasurements",
   rawMeals: "rawMeals",
   rawSamples: "rawSamples",
@@ -584,6 +586,21 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    id: VAULT_FAMILY_IDS.integrationIngests,
+    description: "Append-only device-provider integration ingest evidence journals.",
+    owner: "core",
+    storageKind: "jsonl-directory",
+    directory: INTEGRATION_INGEST_LEDGER_DIRECTORY,
+    fileExtension: ".jsonl",
+    shardPattern: "ledger/integration-ingests/YYYY/YYYY-MM.jsonl",
+    querySource: "none",
+    validation: {
+      kind: "jsonl",
+      issueCode: "INTEGRATION_INGEST_INVALID",
+      schema: integrationIngestRecordSchema,
+    },
+  },
+  {
     id: VAULT_FAMILY_IDS.rawAssessments,
     description: "Immutable raw assessment imports.",
     owner: "core",
@@ -613,14 +630,6 @@ const vaultFamilyDescriptors = [
     owner: "inboxd",
     storageKind: "directory",
     directory: RAW_INBOX_DIRECTORY,
-    querySource: "none",
-  },
-  {
-    id: VAULT_FAMILY_IDS.rawIntegrations,
-    description: "Immutable raw provider integration snapshots.",
-    owner: "core",
-    storageKind: "directory",
-    directory: RAW_INTEGRATIONS_DIRECTORY,
     querySource: "none",
   },
   {
@@ -918,6 +927,7 @@ export const VAULT_LAYOUT = Object.freeze({
   metricSampleLedgerDirectory: METRIC_SAMPLE_LEDGER_DIRECTORY,
   sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
   inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
+  integrationIngestLedgerDirectory: INTEGRATION_INGEST_LEDGER_DIRECTORY,
   rawDirectory: RAW_DIRECTORY,
   rawAssessmentsDirectory: RAW_ASSESSMENTS_DIRECTORY,
   rawCapturesDirectory: RAW_CAPTURES_DIRECTORY,
@@ -944,4 +954,5 @@ export const VAULT_SHARDS = Object.freeze({
   samples: getVaultShardPattern(VAULT_FAMILY_IDS.samples),
   audit: getVaultShardPattern(VAULT_FAMILY_IDS.audits),
   inboxCaptures: getVaultShardPattern(VAULT_FAMILY_IDS.inboxCaptures),
+  integrationIngests: getVaultShardPattern(VAULT_FAMILY_IDS.integrationIngests),
 });

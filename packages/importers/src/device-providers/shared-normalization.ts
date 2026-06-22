@@ -4,7 +4,7 @@ import { normalizeTimestamp, stripUndefined } from "../shared.ts";
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type { NormalizedDeviceBatch } from "./types.ts";
 
@@ -245,7 +245,7 @@ export function makeNormalizedDeviceBatch(
     source: "device",
     events: options.events,
     samples: options.samples,
-    rawArtifacts: options.rawArtifacts,
+    evidenceParts: options.evidenceParts ?? options.rawArtifacts,
     provenance: options.provenance,
   });
 }
@@ -254,7 +254,7 @@ export function createRawArtifact(
   role: string,
   fileName: string,
   content: unknown,
-): DeviceRawArtifactPayload | null {
+): DeviceEvidencePartPayload | null {
   if (content === undefined || content === null) {
     return null;
   }
@@ -273,15 +273,23 @@ export function createRawArtifact(
 
   return {
     role,
-    fileName,
+    fileName: sanitizeEvidencePartFileName(fileName),
     mediaType: "application/json",
     content,
   };
 }
 
+function sanitizeEvidencePartFileName(fileName: string): string {
+  const sanitized = fileName
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return (sanitized || "evidence.json").slice(0, 255);
+}
+
 export function pushRawArtifact(
-  rawArtifacts: DeviceRawArtifactPayload[],
-  artifact: DeviceRawArtifactPayload | null,
+  rawArtifacts: DeviceEvidencePartPayload[],
+  artifact: DeviceEvidencePartPayload | null,
 ): void {
   if (!artifact) {
     return;
@@ -419,7 +427,7 @@ export function emitObservationMetrics<T>(
 
 export function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  rawArtifacts: DeviceEvidencePartPayload[],
   options: DeletionObservationOptions,
 ): void {
   const deletionArtifact = buildDeletionArtifactDescriptor(options);

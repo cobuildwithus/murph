@@ -70,7 +70,7 @@ test("runWearableStorageMigrationPass tombstones derived canonical raw artifacts
   await assertManifestArtifactMatchesFile(vaultRoot, "03-canonical-wearable-records.json");
   const afterDetection = await detectWearableStorageMigrationCandidates({ vaultRoot });
   assert.equal(afterDetection.legacyCanonicalArtifactCount, 0);
-  assert.equal((await validateVault({ vaultRoot })).valid, true);
+  assert.equal((await validateVault({ vaultRoot, allowLegacyIntegrationRaw: true })).valid, true);
 });
 
 test("dense raw timeseries tombstoning requires explicit prune flag", async () => {
@@ -1106,7 +1106,7 @@ test("detectWearableStorageMigrationCandidates reports dense sample-debug shards
 
   assert.equal(result.mutated, false);
   assert.equal(await fs.readFile(path.join(vaultRoot, sampleShardPath), "utf8"), before);
-  assert.equal((await validateVault({ vaultRoot })).valid, true);
+  assert.equal((await validateVault({ vaultRoot, allowLegacyIntegrationRaw: true })).valid, true);
 });
 
 test("runWearableStorageMigrationPass leaves manual sample shards untouched", async () => {

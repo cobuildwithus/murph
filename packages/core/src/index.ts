@@ -76,6 +76,30 @@ export type {
   PreparedEventAttachment,
 } from "./event-attachments.ts";
 export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+export {
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestAppendPlan,
+  buildIntegrationIngestRecord,
+  listIntegrationIngestsForEvent,
+  parseIntegrationEvidencePartJson,
+  readIntegrationEvidencePart,
+  readIntegrationIngestById,
+  stableSerializeIntegrationIngestRecord,
+  stageIntegrationIngestAppendPlan,
+  toIntegrationIngestShardPath,
+  validateIntegrationIngestRecordForShard,
+} from "./integration-ingests.ts";
+export type {
+  BuildIntegrationIngestRecordInput,
+  IntegrationEvidencePartSeed,
+  IntegrationIngestAppendPlan,
+  IntegrationIngestEventSummary,
+  IntegrationIngestOutputSeed,
+  IntegrationIngestPartSummary,
+} from "./integration-ingests.ts";
+export type {
+  IntegrationStorageMigrationResult,
+} from "./integration-ingest-migration.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
 export {
@@ -107,6 +131,7 @@ export {
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
+  migrateIntegrationStorage,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairJunctionWorkoutHeartRateZones,

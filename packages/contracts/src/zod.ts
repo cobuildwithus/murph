@@ -2584,6 +2584,169 @@ export const rawImportManifestSchema = z
   })
   .strict();
 
+const integrationEvidencePartSchema = z
+  .object({
+    role: boundedString(1, 160),
+    fileName: patternedString(SINGLE_PATH_SEGMENT_PATTERN, 1, 255),
+    mediaType: boundedString(1, 255),
+    content: z.string(),
+    byteSize: integerSchema(0),
+    sha256: patternedString(SHA256_HEX_PATTERN, 64, 64),
+    metadata: jsonObjectSchema.optional(),
+  })
+  .strict()
+  .superRefine((part, context) => {
+    if (new TextEncoder().encode(part.content).byteLength !== part.byteSize) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Integration evidence part byteSize must equal UTF-8 content bytes.",
+        path: ["byteSize"],
+      });
+    }
+  });
+
+export const integrationIngestReceiptSchema = z
+  .object({
+    schemaVersion: z.literal("wearable.raw_ingest_receipt.v1"),
+    id: boundedString(1, 160),
+    provider: boundedString(1, 160),
+    userId: boundedString(1, 240).optional(),
+    accountId: boundedString(1, 240).optional(),
+    connectionId: boundedString(1, 240).optional(),
+    sourceKind: z.enum(["poll", "webhook", "sdk", "xml", "manual"]),
+    deliveryMode: z.enum(["full_payload", "notification_only", "scheduled_reconcile"]),
+    resourceType: boundedString(1, 160).optional(),
+    resourceId: boundedString(1, 240).optional(),
+    providerEventId: boundedString(1, 240).optional(),
+    eventType: z.enum(["create", "update", "delete", "deauthorize"]).optional(),
+    observedAt: isoDateTimeString(),
+    occurredAt: isoDateTimeString().optional(),
+    windowStart: isoDateTimeString().optional(),
+    windowEnd: isoDateTimeString().optional(),
+    cursor: boundedString(1, 2000).optional(),
+    signatureVerified: z.boolean().optional(),
+    payloadHash: patternedString(SHA256_HEX_PATTERN, 64, 64),
+    rawArtifactRoles: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
+    rawArtifactCount: integerSchema(0).optional(),
+  })
+  .strict()
+  .superRefine((receipt, context) => {
+    if (
+      receipt.rawArtifactRoles !== undefined &&
+      receipt.rawArtifactCount !== undefined &&
+      receipt.rawArtifactRoles.length !== receipt.rawArtifactCount
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Receipt rawArtifactCount must match rawArtifactRoles length.",
+        path: ["rawArtifactCount"],
+      });
+    }
+  });
+
+const integrationIngestEventOutputSchema = z
+  .object({
+    id: idSchema(ID_PREFIXES.event),
+    roles: uniqueArray(boundedString(1, 160), { uniqueItems: true }),
+  })
+  .strict();
+
+const integrationIngestOutputsSchema = z
+  .object({
+    events: uniqueArray(integrationIngestEventOutputSchema, { uniqueItems: true }).optional(),
+    sampleIds: uniqueArray(idSchema(ID_PREFIXES.sample), { uniqueItems: true }).optional(),
+    sampleIdsComplete: z.boolean().optional(),
+  })
+  .strict();
+
+export const integrationIngestRecordSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.integrationIngest),
+      id: idSchema(ID_PREFIXES.transform),
+      provider: patternedString(SINGLE_PATH_SEGMENT_PATTERN, 1, 160),
+      accountId: boundedString(1, 240).optional(),
+      source: boundedString(1, 160),
+      importedAt: isoDateTimeString(),
+      receipt: integrationIngestReceiptSchema.optional(),
+      parts: uniqueArray(integrationEvidencePartSchema, {
+        maxItems: 64,
+        uniqueItems: true,
+      }),
+      outputs: integrationIngestOutputsSchema.optional(),
+      counts: z
+        .object({
+          eventCount: integerSchema(0),
+          sampleCount: integerSchema(0),
+        })
+        .strict(),
+      provenance: jsonObjectSchema.optional(),
+    })
+    .strict()
+    .superRefine((record, context) => {
+      if (record.receipt && record.receipt.provider !== record.provider) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Integration ingest receipt provider must match row provider.",
+          path: ["receipt", "provider"],
+        });
+      }
+
+      const partRoles = new Set<string>();
+      for (const [index, part] of record.parts.entries()) {
+        if (partRoles.has(part.role)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Integration evidence part role "${part.role}" may only appear once.`,
+            path: ["parts", index, "role"],
+          });
+        }
+        partRoles.add(part.role);
+      }
+
+      const eventIds = new Set<string>();
+      for (const [index, eventOutput] of (record.outputs?.events ?? []).entries()) {
+        if (eventIds.has(eventOutput.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Integration ingest event output "${eventOutput.id}" may only appear once.`,
+            path: ["outputs", "events", index, "id"],
+          });
+        }
+        eventIds.add(eventOutput.id);
+
+        for (const [roleIndex, role] of eventOutput.roles.entries()) {
+          if (!partRoles.has(role)) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Integration ingest event output role "${role}" does not match a retained part.`,
+              path: ["outputs", "events", index, "roles", roleIndex],
+            });
+          }
+        }
+      }
+
+      const sampleIds = record.outputs?.sampleIds;
+      if (record.outputs?.sampleIdsComplete === true && (sampleIds?.length ?? 0) !== record.counts.sampleCount) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Complete integration ingest sampleIds must match counts.sampleCount.",
+          path: ["outputs", "sampleIds"],
+        });
+      }
+
+      if ((record.outputs?.events?.length ?? 0) > record.counts.eventCount) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Integration ingest event outputs must not exceed counts.eventCount.",
+          path: ["outputs", "events"],
+        });
+      }
+    }),
+  "@murphai/contracts/integration-ingest-record.schema.json",
+  "Murph Integration Ingest Record",
+);
+
 export const goalFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -2847,6 +3010,10 @@ export type MetricSampleRecord = z.infer<typeof metricSampleRecordSchema>;
 export type AuditRecord = z.infer<typeof auditRecordSchema>;
 export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachmentSchema>;
 export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
+export type IntegrationEvidencePart = z.infer<typeof integrationEvidencePartSchema>;
+export type IntegrationIngestReceipt = z.infer<typeof integrationIngestReceiptSchema>;
+export type IntegrationIngestEventOutput = z.infer<typeof integrationIngestEventOutputSchema>;
+export type IntegrationIngestRecord = z.infer<typeof integrationIngestRecordSchema>;
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;

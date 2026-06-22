@@ -1,7 +1,9 @@
 import path from "node:path";
 
 import {
+  eventRecordSchema,
   rawImportManifestSchema,
+  sampleRecordSchema,
   safeParseContract,
   type ContractSchema,
   type RawImportManifest,
@@ -33,6 +35,7 @@ import {
 import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
+import { validateIntegrationIngestRecordForShard } from "./integration-ingests.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
@@ -64,6 +67,10 @@ interface InitializeVaultInput {
 
 interface LoadVaultInput {
   vaultRoot?: string;
+}
+
+interface ValidateVaultInput extends LoadVaultInput {
+  allowLegacyIntegrationRaw?: boolean;
 }
 
 interface RepairVaultResult {
@@ -133,6 +140,7 @@ interface AssertValidVaultInput {
   vaultRoot?: string;
   errorCode?: string;
   message?: string;
+  allowLegacyIntegrationRaw?: boolean;
 }
 
 function assertContractShape<T>(
@@ -514,19 +522,13 @@ async function validateJsonlValidationFamily(
   vaultRoot: string,
   family: VaultJsonlValidationFamilyDescriptor,
 ): Promise<ValidationIssue[]> {
+  const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
   return validateJsonlFamily({
     vaultRoot,
     relativeDirectory: family.directory,
     schema: family.validation.schema,
     code: family.validation.issueCode,
-    postValidateRecord: async (record, context) =>
-      validateJsonlRecordAgainstVault({
-        familyId: family.id,
-        index: context.index,
-        record,
-        relativePath: context.relativePath,
-        vaultRoot,
-      }),
+    postValidateRecord,
   });
 }
 
@@ -561,13 +563,161 @@ function resolveJsonlFamilyPostValidator(
         );
     case "events":
       return async (record) => validateEventRecordReferences(vaultRoot, record);
+    case "integrationIngests": {
+      const seenIngestIds = new Map<string, string>();
+      let eventIdsPromise: Promise<Set<string>> | null = null;
+      let sampleIdsPromise: Promise<Set<string>> | null = null;
+
+      return async (record, context) => {
+        eventIdsPromise ??= collectEventLedgerIds(vaultRoot);
+        sampleIdsPromise ??= collectSampleLedgerIds(vaultRoot);
+        return validateIntegrationIngestRecordAgainstVault({
+          eventIds: await eventIdsPromise,
+          record,
+          relativePath: context.relativePath,
+          sampleIds: await sampleIdsPromise,
+          seenIngestIds,
+        });
+      };
+    }
     default:
       return undefined;
   }
 }
 
+async function collectEventLedgerIds(vaultRoot: string): Promise<Set<string>> {
+  const eventIds = new Set<string>();
+  const eventShardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+
+  for (const relativePath of eventShardPaths) {
+    let records: UnknownRecord[];
+    try {
+      records = await readJsonlRecords({
+        vaultRoot,
+        relativePath,
+      });
+    } catch {
+      continue;
+    }
+
+    for (const record of records) {
+      const result = safeParseContract(eventRecordSchema, record);
+      if (result.success) {
+        eventIds.add(result.data.id);
+      }
+    }
+  }
+
+  return eventIds;
+}
+
+async function collectSampleLedgerIds(vaultRoot: string): Promise<Set<string>> {
+  const sampleIds = new Set<string>();
+  const sampleShardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.sampleLedgerDirectory, {
+    extension: ".jsonl",
+  });
+
+  for (const relativePath of sampleShardPaths) {
+    let records: UnknownRecord[];
+    try {
+      records = await readJsonlRecords({
+        vaultRoot,
+        relativePath,
+      });
+    } catch {
+      continue;
+    }
+
+    for (const record of records) {
+      const result = safeParseContract(sampleRecordSchema, record);
+      if (result.success) {
+        sampleIds.add(result.data.id);
+      }
+    }
+  }
+
+  return sampleIds;
+}
+
+function validateIntegrationIngestRecordAgainstVault(input: {
+  eventIds: ReadonlySet<string>;
+  record: UnknownRecord;
+  relativePath: string;
+  sampleIds: ReadonlySet<string>;
+  seenIngestIds: Map<string, string>;
+}): ValidationIssue[] {
+  const issues = validateIntegrationIngestRecordForShard({
+    record: input.record,
+    relativePath: input.relativePath,
+  }).map((message) =>
+    validationIssue("INTEGRATION_INGEST_INVALID", message, input.relativePath)
+  );
+
+  const id = typeof input.record.id === "string" ? input.record.id : null;
+  if (id) {
+    const priorPath = input.seenIngestIds.get(id);
+    if (priorPath) {
+      issues.push(
+        validationIssue(
+          "INTEGRATION_INGEST_DUPLICATE",
+          `Integration ingest id "${id}" already appeared in "${priorPath}".`,
+          input.relativePath,
+        ),
+      );
+    } else {
+      input.seenIngestIds.set(id, input.relativePath);
+    }
+  }
+
+  const outputs = isPlainRecord(input.record.outputs) ? input.record.outputs : null;
+  const events = outputs && Array.isArray(outputs.events) ? outputs.events : [];
+  for (const [index, event] of events.entries()) {
+    if (!isPlainRecord(event) || typeof event.id !== "string") {
+      continue;
+    }
+
+    if (!input.eventIds.has(event.id)) {
+      issues.push(
+        validationIssue(
+          "INTEGRATION_INGEST_EVENT_MISSING",
+          `Integration ingest output event ${index + 1} references missing event "${event.id}".`,
+          input.relativePath,
+        ),
+      );
+    }
+  }
+
+  if (outputs?.sampleIdsComplete === true) {
+    const sampleIds = Array.isArray(outputs.sampleIds) ? outputs.sampleIds : [];
+    for (const [index, sampleId] of sampleIds.entries()) {
+      if (typeof sampleId !== "string") {
+        continue;
+      }
+
+      if (!input.sampleIds.has(sampleId)) {
+        issues.push(
+          validationIssue(
+            "INTEGRATION_INGEST_SAMPLE_MISSING",
+            `Integration ingest output sample ${index + 1} references missing sample "${sampleId}".`,
+            input.relativePath,
+          ),
+        );
+      }
+    }
+  }
+
+  return issues;
+}
+
 function rawManifestDirectoryForArtifact(relativePath: string): string {
   return path.posix.dirname(relativePath);
+}
+
+function isLegacyIntegrationRawPath(relativePath: string): boolean {
+  return relativePath === VAULT_LAYOUT.rawIntegrationsDirectory
+    || relativePath.startsWith(`${VAULT_LAYOUT.rawIntegrationsDirectory}/`);
 }
 
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
@@ -714,6 +864,17 @@ async function validateEventRecordReferences(
   const manifestDirectories = new Set<string>();
 
   for (const referencedPath of [...referencedPaths].sort()) {
+    if (isLegacyIntegrationRawPath(referencedPath)) {
+      issues.push(
+        validationIssue(
+          "INTEGRATION_RAW_REF_FORBIDDEN",
+          `Event raw reference "${referencedPath}" uses legacy integration raw storage.`,
+          referencedPath,
+        ),
+      );
+      continue;
+    }
+
     issues.push(
       ...(await validateExistingVaultFile(
         vaultRoot,
@@ -889,7 +1050,10 @@ async function validateRawManifestFile(
   return issues;
 }
 
-async function validateRawImportManifests(vaultRoot: string): Promise<ValidationIssue[]> {
+async function validateRawImportManifests(
+  vaultRoot: string,
+  options: { allowLegacyIntegrationRaw?: boolean } = {},
+): Promise<ValidationIssue[]> {
   const rawFiles = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawDirectory);
   const artifactDirectories = new Set<string>();
   const inboxCaptureDirectories = new Set<string>();
@@ -898,6 +1062,22 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   const manifestDirectories = new Set<string>();
 
   for (const relativePath of rawFiles) {
+    if (isLegacyIntegrationRawPath(relativePath)) {
+      if (!options.allowLegacyIntegrationRaw) {
+        manifestFiles.push(relativePath);
+        continue;
+      }
+
+      if (isRawManifestFileName(path.posix.basename(relativePath))) {
+        manifestFiles.push(relativePath);
+        manifestDirectories.add(path.posix.dirname(relativePath));
+        continue;
+      }
+
+      artifactDirectories.add(path.posix.dirname(relativePath));
+      continue;
+    }
+
     const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
 
     if (inboxCaptureDirectory !== null) {
@@ -928,6 +1108,23 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   }
 
   const issues: ValidationIssue[] = [];
+
+  const legacyIntegrationManifestFiles = manifestFiles.filter((entry) => isLegacyIntegrationRawPath(entry));
+  if (!options.allowLegacyIntegrationRaw) {
+    for (const relativePath of legacyIntegrationManifestFiles.sort()) {
+      issues.push(
+        validationIssue(
+          "RAW_INTEGRATIONS_LEGACY_FORBIDDEN",
+          `Legacy integration raw file "${relativePath}" must be migrated to ${VAULT_LAYOUT.integrationIngestLedgerDirectory}.`,
+          relativePath,
+        ),
+      );
+    }
+  }
+
+  const currentManifestFiles = options.allowLegacyIntegrationRaw
+    ? manifestFiles
+    : manifestFiles.filter((entry) => !isLegacyIntegrationRawPath(entry));
 
   for (const captureDirectory of [...inboxCaptureDirectories].sort()) {
     const envelopePath = path.posix.join(captureDirectory, "envelope.json");
@@ -961,7 +1158,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
     }
   }
 
-  for (const manifestPath of manifestFiles.sort()) {
+  for (const manifestPath of currentManifestFiles.sort()) {
     issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
   }
 
@@ -1006,7 +1203,10 @@ async function validateWriteOperations(vaultRoot: string): Promise<ValidationIss
   return issues;
 }
 
-export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise<ValidateVaultResult> {
+export async function validateVault({
+  vaultRoot,
+  allowLegacyIntegrationRaw = false,
+}: ValidateVaultInput = {}): Promise<ValidateVaultResult> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const issues: ValidationIssue[] = [];
   let metadata: VaultMetadata | null = null;
@@ -1064,7 +1264,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
     issues.push(...(await validateJsonlValidationFamily(absoluteRoot, family)));
   }
 
-  issues.push(...(await validateRawImportManifests(absoluteRoot)));
+  issues.push(...(await validateRawImportManifests(absoluteRoot, { allowLegacyIntegrationRaw })));
   issues.push(...(await validateWriteOperations(absoluteRoot)));
 
   return {
@@ -1078,8 +1278,9 @@ export async function assertValidVault({
   vaultRoot,
   errorCode = "VAULT_VALIDATION_FAILED",
   message = "Vault failed canonical validation.",
+  allowLegacyIntegrationRaw = false,
 }: AssertValidVaultInput = {}): Promise<ValidateVaultResult> {
-  const result = await validateVault({ vaultRoot });
+  const result = await validateVault({ vaultRoot, allowLegacyIntegrationRaw });
 
   if (!result.valid) {
     throw new VaultError(errorCode, message, {

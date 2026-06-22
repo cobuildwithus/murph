@@ -14,6 +14,10 @@ import {
   selectLatestEventSpineEntry,
   type EventSpineEntry,
 } from "./history/event-spine.ts";
+import {
+  listIntegrationIngestsForEvent,
+  parseIntegrationEvidencePartJson,
+} from "./integration-ingests.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
@@ -227,7 +231,7 @@ async function collectJunctionHrZoneRepairCandidates(
     if (!isJunctionHrZoneRepairShapeCandidate(latestActivity)) {
       continue;
     }
-    if (!await hasRawPrimitiveNumericHrZoneEvidence(vaultRoot, latestActivity)) {
+    if (!await hasPrimitiveNumericHrZoneEvidence(vaultRoot, latestActivity)) {
       unverifiedCandidateCount += 1;
       continue;
     }
@@ -284,45 +288,114 @@ function isJunctionWorkoutExternalRef(record: ActivitySessionEventRecord): boole
     && JUNCTION_WORKOUT_RESOURCE_TYPE_PATTERN.test(externalRef.resourceType);
 }
 
-async function hasRawPrimitiveNumericHrZoneEvidence(
+async function hasPrimitiveNumericHrZoneEvidence(
   vaultRoot: string,
   record: ActivitySessionEventRecord,
 ): Promise<boolean> {
   const sourceWorkoutId = record.workout?.sourceWorkoutId;
   const expectedProviderSlug = slugifyProvider(record.workout?.sourceApp);
-  const rawRefs = record.rawRefs;
   const storedZones = record.workout?.heartRateZones;
 
   if (
     !sourceWorkoutId
     || !expectedProviderSlug
-    || !Array.isArray(rawRefs)
-    || rawRefs.length === 0
     || !storedZones
     || storedZones.length !== 6
   ) {
     return false;
   }
 
-  // Collect same-id raw rows across every rawRef and decide once. Deciding
-  // per-rawRef would let one matching artifact mask contradictory evidence
-  // (different provider, mismatched primitive durations, etc.) in another
-  // rawRef, and would also let the providerless uniqueness rule be satisfied
-  // independently in two artifacts that together carry duplicates.
+  const sameIdRows = await collectSameIdWorkoutRowsFromIntegrationIngests({
+    eventId: record.id,
+    sourceWorkoutId,
+    vaultRoot,
+  });
+  if (sameIdRows) {
+    return rawEvidenceVerifiesStoredRow(sameIdRows, expectedProviderSlug, storedZones);
+  }
+
+  return rawEvidenceVerifiesStoredRow(
+    await collectSameIdWorkoutRowsFromLegacyRawRefs({
+      rawRefs: record.rawRefs,
+      sourceWorkoutId,
+      vaultRoot,
+    }),
+    expectedProviderSlug,
+    storedZones,
+  );
+}
+
+async function collectSameIdWorkoutRowsFromIntegrationIngests(input: {
+  eventId: string;
+  sourceWorkoutId: string;
+  vaultRoot: string;
+}): Promise<RawSameIdWorkoutRow[] | null> {
+  let ingests: Awaited<ReturnType<typeof listIntegrationIngestsForEvent>>;
+  try {
+    ingests = await listIntegrationIngestsForEvent({
+      eventId: input.eventId,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch {
+    return [];
+  }
+
+  if (ingests.length === 0) {
+    return null;
+  }
+
+  const sameIdRows: RawSameIdWorkoutRow[] = [];
+  for (const ingest of ingests) {
+    for (const part of ingest.parts) {
+      let payload: unknown | null;
+      try {
+        payload = await parseIntegrationEvidencePartJson({
+          ingestId: ingest.id,
+          role: part.role,
+          vaultRoot: input.vaultRoot,
+        });
+      } catch {
+        return [];
+      }
+
+      if (payload === null) {
+        return [];
+      }
+      sameIdRows.push(...collectRawSameIdWorkoutRows(payload, input.sourceWorkoutId));
+    }
+  }
+
+  return sameIdRows;
+}
+
+async function collectSameIdWorkoutRowsFromLegacyRawRefs(input: {
+  rawRefs: readonly string[] | undefined;
+  sourceWorkoutId: string;
+  vaultRoot: string;
+}): Promise<RawSameIdWorkoutRow[]> {
+  if (!Array.isArray(input.rawRefs) || input.rawRefs.length === 0) {
+    return [];
+  }
+
+  // Collect same-id raw rows across every legacy rawRef and decide once.
+  // Deciding per-rawRef would let one matching artifact mask contradictory
+  // evidence in another rawRef, and would also let the providerless
+  // uniqueness rule be satisfied independently in two artifacts that
+  // together carry duplicates.
   //
   // Any rawRef that fails to read or parse means we cannot complete the
   // joint check — fail closed and let the candidate be reported as
   // unverified rather than risk repairing on partial evidence.
   const sameIdRows: RawSameIdWorkoutRow[] = [];
-  for (const rawRef of rawRefs) {
-    const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
+  for (const rawRef of input.rawRefs) {
+    const rawPayload = await readVaultRawJson(input.vaultRoot, rawRef);
     if (rawPayload === undefined) {
-      return false;
+      return [];
     }
-    sameIdRows.push(...collectRawSameIdWorkoutRows(rawPayload, sourceWorkoutId));
+    sameIdRows.push(...collectRawSameIdWorkoutRows(rawPayload, input.sourceWorkoutId));
   }
 
-  return rawEvidenceVerifiesStoredRow(sameIdRows, expectedProviderSlug, storedZones);
+  return sameIdRows;
 }
 
 function rawEvidenceVerifiesStoredRow(

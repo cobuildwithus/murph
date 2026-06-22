@@ -12,6 +12,7 @@ Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
+- `vault migrate-integration-storage` dry-runs by default and mutates only with explicit `--apply`. It upgrades v1 device/provider evidence from `raw/integrations/**` into `ledger/integration-ingests/**` after verifying legacy manifest byte sizes and SHA-256 hashes, rewrites event rows only to remove legacy integration `rawRefs`, deletes verified legacy integration raw files, and updates `vault.json` after post-migration validation. `--skip-validation` is valid only with explicit `--apply`.
 - `vault repair-junction-hr-zones` dry-runs by default and mutates only with explicit `--apply`. It repairs Junction workout rows from any source provider only when the candidate's rawRefs contain a Junction record whose heart-rate zones are a dense six-element primitive numeric array (numbers or numeric strings) whose seconds-to-minutes conversion equals each stored `durationMinutes`, AND that record either carries the same source provider inline OR is the only duration-matching same-id record with no inline provider — the latter exists for legacy connection-resolved imports whose `connectionId`/`sourceId` was stripped during raw sanitization. Any same-id raw record with a different inline provider, with non-primitive `hr_zones`, or with primitive zones whose durations do not match the stored row counts as ambiguity and disqualifies the repair. Candidate ids that also appear on schema-invalid ledger rows are refused, since a rejected row may be the actual latest revision and shadowing it would append over stale state. Normalized `1..6` rows without that proof are reported as `unverifiedCandidateCount` and skipped. Sparse legacy imports (six-slot arrays with `null` entries that were compacted into fewer-than-six stored zones) are intentionally out of scope: re-importing the affected workout is the supported recovery path.
 
 ## Command Groups
@@ -22,6 +23,7 @@ vault-cli validate --vault <path> [--request-id <id>]
 vault-cli vault show --vault <path> [--request-id <id>]
 vault-cli vault stats --vault <path> [--request-id <id>]
 vault-cli vault repair --vault <path> [--request-id <id>]
+vault-cli vault migrate-integration-storage --vault <path> [--dry-run] [--apply] [--skip-validation] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
@@ -306,7 +308,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `samples` exposes `add | import-json | import-csv | csv profile | csv import | summarize | show | list | batch show | batch list`.
 - `experiment` is a lifecycle noun.
 - `journal` is a date-addressed document noun.
-- `vault` exposes `show | stats | repair | update`.
+- `vault` exposes `show | stats | repair | migrate-integration-storage | repair-junction-hr-zones | update`.
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
 - `assistant` is a Codex App Server-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
@@ -366,7 +368,7 @@ Read surfaces intentionally separate summary from detail:
 - Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids. `event show` remains the explicit provenance-oriented follow-up surface when the caller needs the internal event id path, while `document manifest` and `meal manifest` expose immutable import artifacts.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` is the first-class follow-up surface for immutable assessment import evidence under `raw/assessments/**`.
-- `audit show|list|tail` and `vault show|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
+- `audit show|list|tail` and `vault show|stats|repair|migrate-integration-storage|repair-junction-hr-zones|update` are first-class vault noun commands layered on top of the read model and core metadata write/migration paths.
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
 - A successful `show` response surfaces the canonical read id in `entity.id`.

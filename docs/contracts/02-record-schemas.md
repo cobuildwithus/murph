@@ -18,7 +18,7 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 | audit | `aud` | canonical audit record id |
 | automation | `automation` | automation frontmatter id |
 | scheduled log | `slog` | scheduled-log frontmatter id |
-| transform batch | `xfm` | import-batch id returned from sample-import and normalized device/provider import flows and used in raw paths |
+| transform batch | `xfm` | import-batch id returned from sample-import raw paths and normalized device/provider integration-ingest rows |
 | document | `doc` | related id stored on document events |
 | meal | `meal` | related id stored on meal events |
 | experiment | `exp` | experiment page id and related event id |
@@ -71,7 +71,7 @@ The canonical event-kind list is `EVENT_KINDS` in
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
 
-Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `evidence[]`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `evidence[]` stores bounded source pointers for imported clinical facts. Every evidence ref must include a canonical `sourceDocumentId` or vault-relative `rawRef`; it may also include `sourceLabel`, `page`, `chunkId`, text spans, a short excerpt, and confidence. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
+Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `evidence[]`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. Device/provider imports must not use `rawRefs` under `raw/integrations/**`; integration-ingest rows link events to retained evidence parts by role. `evidence[]` stores bounded source pointers for imported clinical facts. Every evidence ref must include a canonical `sourceDocumentId` or vault-relative `rawRef`; it may also include `sourceLabel`, `page`, `chunkId`, text spans, a short excerpt, and confidence. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 

@@ -25,7 +25,7 @@ import {
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -343,7 +343,7 @@ function buildWhoopWorkoutMetrics(
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  rawArtifacts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -387,7 +387,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const workouts = asArray(request.workouts).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const deletions = asArray(request.deletions).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const rawArtifacts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
     stringId(profile?.user_id ?? profile?.userId ?? profile?.id);

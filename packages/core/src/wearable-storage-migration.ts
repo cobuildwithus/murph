@@ -442,6 +442,7 @@ export async function runWearableStorageMigrationPass({
       errorCode: "WEARABLE_STORAGE_MIGRATION_INVALID_VAULT",
       message: "Wearable storage migration produced an invalid vault.",
       vaultRoot,
+      allowLegacyIntegrationRaw: true,
     });
   }
 

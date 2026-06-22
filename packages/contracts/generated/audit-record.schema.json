@@ -61,6 +61,7 @@
         "show",
         "validate",
         "vault_init",
+        "vault_migration",
         "vault_repair",
         "vault_summary_update",
         "workout_format_save",

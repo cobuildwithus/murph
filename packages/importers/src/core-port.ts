@@ -1,4 +1,9 @@
-import type { DeviceDataOrigin as ContractDeviceDataOrigin, EventSource, MealNutrition } from "@murphai/contracts";
+import type {
+  DeviceDataOrigin as ContractDeviceDataOrigin,
+  EventSource,
+  IntegrationIngestReceipt,
+  MealNutrition,
+} from "@murphai/contracts";
 
 export interface DocumentImportPayload {
   vaultRoot?: string;
@@ -113,7 +118,7 @@ export interface DeviceSamplePayload {
   sample: DeviceSampleValuePayload;
 }
 
-export interface DeviceRawArtifactPayload {
+export interface DeviceEvidencePartPayload {
   role: string;
   fileName: string;
   mediaType?: string;
@@ -130,7 +135,8 @@ export interface DeviceBatchImportPayload {
   dataOrigin?: DeviceDataOrigin;
   events?: DeviceEventPayload[];
   samples?: DeviceSamplePayload[];
-  rawArtifacts?: DeviceRawArtifactPayload[];
+  evidenceParts?: DeviceEvidencePartPayload[];
+  ingestReceipt?: IntegrationIngestReceipt;
   provenance?: Record<string, unknown>;
 }
 

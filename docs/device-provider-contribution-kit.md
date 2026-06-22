@@ -59,7 +59,7 @@ challenge behavior.
 
 Importer adapters own:
 - snapshot validation and parsing
-- raw-evidence retention under `raw/integrations/**`
+- evidence retention through device-batch `evidenceParts`, persisted by core under `ledger/integration-ingests/**`
 - conversion into `DeviceBatchImportPayload`
 - canonical event, sample, and provenance shaping
 
@@ -81,7 +81,7 @@ That split is the main guardrail for provider contributions. Treat shared metada
 
 - Keep provider credentials outside the canonical vault.
 - Keep stored runtime metadata shallow and sanitized; do not persist large nested profile payloads into account metadata.
-- Preserve useful upstream evidence as raw artifacts when it helps replay, audit, or future re-normalization.
+- Preserve useful upstream evidence as device-batch evidence parts when it helps replay, audit, or future re-normalization; core owns the integration-ingest journal write.
 - Reuse existing canonical event kinds and metric names before inventing new ones. Treat generic sample streams as explicit CSV/import/debug ledgers, not provider firehose output.
 - If a provider supports webhooks, treat them as routing or freshness hints that enqueue work; normalization still happens through importer snapshots.
 - Reuse the shared descriptor and shared registry helper; do not reintroduce provider metadata drift between `device-syncd` and `importers`.
@@ -150,7 +150,7 @@ Questions to answer first:
 - Which lifecycle metadata belongs in the shared descriptor?
 - Which collections need true backfill versus a short rolling reconcile window?
 - Which metric families fit Murph's current canonical shapes today?
-- Which unsupported sections should still be retained as raw artifacts?
+- Which unsupported sections should still be retained as evidence parts?
 
 ### 2. Add the shared descriptor first
 
@@ -204,14 +204,14 @@ Use the template in [`./templates/device-provider-adapter.template.md`](./templa
 The adapter should:
 - import and spread the shared descriptor
 - validate the upstream snapshot at the boundary, ideally with `zod`
-- preserve useful raw upstream payloads
-- emit normalized events, compact display-grade metrics, raw artifacts, and provenance
+- preserve useful upstream payload evidence
+- emit normalized events, compact display-grade metrics, evidence parts, and provenance
 - create stable provider-specific `externalRef` values
 - avoid synthesizing precision the provider did not actually send
 
 Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
-- Retain unsupported-but-useful upstream sections as `snapshot-section:*` raw artifacts instead of silently discarding them.
+- Retain unsupported-but-useful upstream sections as `snapshot-section:*` evidence parts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
 - Do not retain high-frequency provider timeseries as full raw sample arrays by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence artifacts unless an explicit debug/deep-inspection feature proves the need for raw retention. Core rejects oversized provider sample batches; do the reduction in the adapter before canonical import.
 - Do not set `queryVisibility`, `visibility`, or `canonicalFact` from provider adapter fields. Device imports keep provider observations out of default query/search promotion unless a separate read/projector path intentionally promotes a derived product fact.
@@ -328,10 +328,10 @@ of quietly branching generic code.
 ### Normalization and evidence
 
 - [ ] Snapshot parsing validates the provider boundary.
-- [ ] Raw upstream evidence is retained when it supports replay or future re-normalization.
+- [ ] Upstream evidence is retained when it supports replay or future re-normalization.
 - [ ] Canonical event kinds and compact metric names reuse existing Murph names whenever possible.
 - [ ] `externalRef` values are stable and provider-specific.
-- [ ] Unsupported-but-useful sections are retained as raw artifacts instead of silently discarded.
+- [ ] Unsupported-but-useful sections are retained as evidence parts instead of silently discarded.
 - [ ] Profile or account metadata does not copy large nested provider payloads into runtime metadata.
 
 ### Wiring and docs

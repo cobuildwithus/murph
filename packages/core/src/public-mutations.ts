@@ -74,6 +74,9 @@ import {
   repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
 } from "./junction-hr-zone-repair.ts";
 import {
+  migrateIntegrationStorage as migrateIntegrationStorageInternal,
+} from "./integration-ingest-migration.ts";
+import {
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
@@ -608,6 +611,12 @@ export async function dedupeDeviceEventsByExternalRef(
   input: Parameters<typeof dedupeDeviceEventsByExternalRefInternal>[0],
 ): ReturnType<typeof dedupeDeviceEventsByExternalRefInternal> {
   return withCanonicalInputWriteLock(input, dedupeDeviceEventsByExternalRefInternal);
+}
+
+export async function migrateIntegrationStorage(
+  input: Parameters<typeof migrateIntegrationStorageInternal>[0],
+): ReturnType<typeof migrateIntegrationStorageInternal> {
+  return withCanonicalInputWriteLock(input, migrateIntegrationStorageInternal);
 }
 
 export async function importEventBatch(

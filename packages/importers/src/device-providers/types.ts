@@ -1,4 +1,4 @@
-import type { DeviceBatchImportPayload } from "../core-port.ts";
+import type { DeviceBatchImportPayload, DeviceEvidencePartPayload } from "../core-port.ts";
 import type { DeviceProviderDescriptor } from "./provider-descriptors.ts";
 import type {
   WearableRawIngestDeliveryMode,
@@ -6,7 +6,10 @@ import type {
   WearableRawIngestSourceKind,
 } from "./raw-ingest-receipt.ts";
 
-export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {}
+export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot" | "evidenceParts"> {
+  evidenceParts?: DeviceEvidencePartPayload[];
+  rawArtifacts?: DeviceEvidencePartPayload[];
+}
 
 export interface DeviceProviderAdapter<TSnapshot = unknown> extends DeviceProviderDescriptor {
   parseSnapshot?(snapshot: unknown): TSnapshot;

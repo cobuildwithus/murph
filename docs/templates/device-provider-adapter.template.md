@@ -69,24 +69,24 @@ export function normalizeAcmeSnapshot(
   const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
   const accountId = stringId(request.accountId);
   const events = [];
-  const rawArtifacts = [];
+  const evidenceParts = [];
   const dailySummaries = asArray(request.dailySummaries)
     .map((entry) => asPlainObject(entry))
     .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 
   pushRawArtifact(
-    rawArtifacts,
+    evidenceParts,
     createRawArtifact("profile", "profile.json", request.profile),
   );
 
   for (const summary of dailySummaries) {
-    const summaryId = stringId(summary.id) ?? `daily-${rawArtifacts.length + 1}`;
+    const summaryId = stringId(summary.id) ?? `daily-${evidenceParts.length + 1}`;
     const dayKey = typeof summary.day === "string" ? summary.day : undefined;
     const recordedAt = toIso(summary.recordedAt) ?? importedAt;
     const rawArtifactRole = `daily-summary:${summaryId}`;
 
     pushRawArtifact(
-      rawArtifacts,
+      evidenceParts,
       createRawArtifact(rawArtifactRole, `daily-summary-${summaryId}.json`, summary),
     );
 
@@ -133,7 +133,7 @@ export function normalizeAcmeSnapshot(
     accountId,
     importedAt,
     events,
-    rawArtifacts,
+    evidenceParts,
     provenance: {
       importedSections: {
         profile: Boolean(request.profile),
@@ -160,7 +160,7 @@ Do not stop at the adapter file. Wire the provider into:
 - the compatibility matrix when the provider introduces a new family or naming surface
 
 Keep the normalization conservative:
-- retain useful raw artifacts
+- retain useful evidence parts
 - reuse existing canonical names before creating new ones
 - do not manufacture precision the upstream provider never supplied
 - keep the adapter on the shared descriptor instead of carrying a second metadata surface

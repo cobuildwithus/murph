@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -7,7 +7,6 @@ import { test } from "vitest";
 import * as coreRuntime from "@murphai/core";
 import {
   workoutSessionSchema,
-  type RawImportManifest,
   type WorkoutSessionMetrics,
 } from "@murphai/contracts";
 
@@ -47,9 +46,10 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
 type CoreDeviceImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>;
 type CoreDeviceImportEvent = CoreDeviceImportResult["events"][number];
 
-interface RawArtifactProvenanceEntry {
+interface EvidencePartProvenanceEntry {
+  content: string;
+  fileName: string;
   role: string;
-  relativePath: string;
   metadata: unknown;
 }
 
@@ -85,10 +85,12 @@ function makeTestDeviceProviderAdapter<TSnapshot>(
 }
 
 function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
-  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
-  assert.ok(artifact);
-  const receipt = artifact.content as WearableRawIngestReceipt;
-  assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
+  const receipt = payload.ingestReceipt as WearableRawIngestReceipt | undefined;
+  assert.ok(receipt);
+  assert.equal(
+    payload.evidenceParts?.some((entry) => entry.role.startsWith("wearable-raw-receipt:")),
+    false,
+  );
   return receipt;
 }
 
@@ -119,32 +121,22 @@ async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
 }
 
-function readRawArtifactProvenanceEntries(
-  manifest: RawImportManifest,
-): RawArtifactProvenanceEntry[] {
-  const rawArtifacts = manifest.provenance.rawArtifacts;
-  assert.ok(Array.isArray(rawArtifacts));
-
-  return rawArtifacts.map((entry) => {
-    assert.ok(isRecord(entry));
-    const role = entry.role;
-    const relativePath = entry.relativePath;
-    if (typeof role !== "string") {
-      assert.fail("Raw artifact provenance role should be a string.");
-    }
-    if (typeof relativePath !== "string") {
-      assert.fail("Raw artifact provenance relativePath should be a string.");
-    }
-    return {
-      metadata: entry.metadata,
-      relativePath,
-      role,
-    };
+async function readEvidencePartProvenanceEntries(input: {
+  importId: string;
+  vaultRoot: string;
+}): Promise<EvidencePartProvenanceEntry[]> {
+  const ingest = await coreRuntime.readIntegrationIngestById({
+    id: input.importId,
+    vaultRoot: input.vaultRoot,
   });
-}
+  assert.ok(ingest);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return ingest.record.parts.map((part) => ({
+    content: part.content,
+    fileName: part.fileName,
+    metadata: part.metadata,
+    role: part.role,
+  }));
 }
 
 function hasCoreEventKind(events: readonly CoreDeviceImportEvent[], kind: string): boolean {
@@ -327,7 +319,7 @@ test("default provider contract fixtures round-trip canonical records through re
 
       assert.ok(result.events.length > 0, `${fixture.label} should write at least one canonical event`);
       assert.equal(result.samples.length, 0, `${fixture.label} should not write generic sample telemetry`);
-      assert.ok(result.rawArtifacts.length > 0, `${fixture.label} should retain raw evidence`);
+      assert.ok(result.evidenceParts.length > 0, `${fixture.label} should retain raw evidence`);
 
       for (const eventKind of fixture.expectedEventKinds ?? []) {
         assert.ok(
@@ -459,10 +451,10 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "hrv"));
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "temperature"));
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "profile"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "profile"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "body-measurement"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "sleep:sleep-1"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "workout:workout-1"));
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
@@ -645,13 +637,13 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
   assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "personal-info"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "session:session-1"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
-  assert.equal(payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate").length, 0);
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "personal-info"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "sleep:sleep-1"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "session:session-1"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "workout:workout-1"));
+  assert.equal(payload.evidenceParts?.filter((artifact) => artifact.role === "heartrate").length, 0);
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
+    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
@@ -871,7 +863,7 @@ test("prepareDeviceProviderSnapshotImport handles Oura string numerics through s
   );
   assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
   assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "heartrate"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
@@ -892,7 +884,7 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
   });
 
   const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
-  const deletionArtifact = payload.rawArtifacts?.find((artifact) =>
+  const deletionArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role.startsWith("deletion:session:session.deleted:"),
   );
 
@@ -931,7 +923,7 @@ test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions
   assert.equal(deletionEvent?.fields?.resourceType, "daily-readiness");
   assert.equal(deletionEvent?.fields?.sourceEventType, "daily_readiness.deleted");
   assert.ok(
-    payload.rawArtifacts?.some(
+    payload.evidenceParts?.some(
       (artifact) => artifact.role.startsWith("deletion:daily-readiness:daily_readiness.deleted:"),
     ),
   );
@@ -1023,7 +1015,7 @@ test("importDeviceProviderSnapshot ignores legacy Oura heart-rate raw samples", 
   );
 
   assert.equal(
-    result.rawArtifacts.filter((artifact) => artifact.relativePath.endsWith("/01-heartrate.json")).length,
+    result.evidenceParts.filter((artifact) => artifact.fileName === "heartrate.json").length,
     0,
   );
 });
@@ -1049,13 +1041,13 @@ test("prepareDeviceProviderSnapshotImport does not retain legacy Oura heartrate-
     },
   });
 
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts ?? []);
+  const evidencePartText = JSON.stringify(payload.evidenceParts ?? []);
 
   assert.deepEqual(payload.events ?? [], []);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
-  assert.equal(rawArtifactText.includes("\"bpm\":62"), false);
-  assert.equal(rawArtifactText.includes("\"bpm\":63"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "heartrate"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.equal(evidencePartText.includes("\"bpm\":62"), false);
+  assert.equal(evidencePartText.includes("\"bpm\":63"), false);
 });
 
 test("prepareDeviceProviderSnapshotImport drops Junction floating raw-only timeseries entries", async () => {
@@ -1083,14 +1075,14 @@ test("prepareDeviceProviderSnapshotImport drops Junction floating raw-only times
   });
 
   const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
-  const weightArtifact = payload.rawArtifacts?.find((artifact) =>
+  const weightArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-timeseries-weight"
   );
 
   assert.equal(weightEvent, undefined);
   assert.equal(weightArtifact, undefined);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
-  assert.doesNotMatch(JSON.stringify(payload.rawArtifacts ?? []), /72\.4|apple-health|device-1/u);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts ?? []), /72\.4|apple-health|device-1/u);
 });
 
 test("prepareDeviceProviderSnapshotImport strips direct Junction identities from configured summaries", async () => {
@@ -1175,14 +1167,14 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
     },
   });
 
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-meal"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-meal"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
   const mealEvents = payload.events?.filter((event) => event.kind === "meal") ?? [];
   assert.equal(mealEvents.length, 1);
   assert.equal(mealEvents[0]?.title, "Greek yogurt bowl");
   assert.equal(payload.samples?.length ?? 0, 0);
 
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const evidencePartText = JSON.stringify(payload.evidenceParts);
   const rawReceiptText = JSON.stringify(readRawReceiptArtifact(payload));
   for (const sentinel of [
     "raw-meal-user-id-sentinel",
@@ -1218,12 +1210,12 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
     "raw-cycle-client-sentinel",
     "raw-cycle-member-sentinel",
   ]) {
-    assert.doesNotMatch(rawArtifactText, new RegExp(sentinel, "u"), sentinel);
+    assert.doesNotMatch(evidencePartText, new RegExp(sentinel, "u"), sentinel);
     assert.doesNotMatch(rawReceiptText, new RegExp(sentinel, "u"), sentinel);
   }
-  assert.match(rawArtifactText, /breakfast/u);
-  assert.match(rawArtifactText, /Greek yogurt bowl/u);
-  assert.match(rawArtifactText, /cycleDay/u);
+  assert.match(evidencePartText, /breakfast/u);
+  assert.match(evidencePartText, /Greek yogurt bowl/u);
+  assert.match(evidencePartText, /cycleDay/u);
 });
 
 test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of dense retention", async () => {
@@ -1272,10 +1264,10 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
     },
   );
 
-  const manifest = JSON.parse(
-    await readFile(join(vaultRoot, result.manifestPath), "utf8"),
-  ) as RawImportManifest;
-  const rawManifestArtifacts = readRawArtifactProvenanceEntries(manifest);
+  const rawManifestArtifacts = await readEvidencePartProvenanceEntries({
+    importId: result.importId,
+    vaultRoot,
+  });
   const compactBloodOxygenArtifact = rawManifestArtifacts.find(
     (artifact) => artifact.role.startsWith("junction-timeseries-daily-blood-oxygen:"),
   );
@@ -1311,7 +1303,7 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
   });
   assert.equal(pruneResult.tombstonedDenseRawArtifactCount, 0);
 
-  const compactRawText = await readFile(join(vaultRoot, compactBloodOxygenArtifact.relativePath), "utf8");
+  const compactRawText = compactBloodOxygenArtifact.content;
   assert.match(compactRawText, /"meanValue":96/u);
   assert.doesNotMatch(compactRawText, /dense_provider_timeseries_pruned|70|72\.4/u);
 });
@@ -1349,7 +1341,7 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.provider, "whoop");
   assert.ok(calls[0]?.events?.some((event) => event.kind === "observation"));
-  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "recovery:sleep-2"));
+  assert.ok(calls[0]?.evidenceParts?.some((artifact) => artifact.role === "recovery:sleep-2"));
 });
 
 test("importDeviceProviderSnapshot strips snapshot input fields before delegating to core and omits blank vaultRoot", async () => {
@@ -1417,11 +1409,11 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   assert.equal(Object.hasOwn(calls[0] ?? {}, "snapshot"), false);
   assert.equal(Object.hasOwn(calls[0] ?? {}, "rawIngestReceipts"), false);
   assert.equal(Object.hasOwn(calls[0] ?? {}, "canonicalWearableRecords"), false);
-  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"));
-  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
-  const fallbackRawArtifact = calls[0]?.rawArtifacts?.find((artifact) => artifact.role === "provider-snapshot");
+  assert.ok(calls[0]?.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"));
+  assert.equal(calls[0]?.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")), false);
+  const fallbackEvidencePart = calls[0]?.evidenceParts?.find((artifact) => artifact.role === "provider-snapshot");
   const rawReceipt = readRawReceiptArtifact(calls[0] as DeviceBatchImportPayload);
-  assert.deepEqual(fallbackRawArtifact?.content, {
+  assert.deepEqual(fallbackEvidencePart?.content, {
     importedAt: "2026-03-16T12:05:00.000Z",
   });
   assert.equal(rawReceipt?.schemaVersion, "wearable.raw_ingest_receipt.v1");
@@ -1517,7 +1509,7 @@ test("createImporters composes custom device providers behind the same core seam
             },
           },
         ],
-        rawArtifacts: [
+        evidenceParts: [
           {
             role: "daily-summary",
             fileName: "daily-summary.json",
@@ -1582,7 +1574,7 @@ test("prepareDeviceProviderSnapshotImport records WHOOP deletions as append-only
   });
 
   const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
-  const deletionArtifact = payload.rawArtifacts?.find((artifact) =>
+  const deletionArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role.startsWith("deletion:sleep:sleep.deleted:"),
   );
 
@@ -1725,9 +1717,9 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
   });
 
   assert.equal(payload.accountId, "101");
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "cycle:12"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:9"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "body-measurement"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "cycle:12"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "workout:9"));
   assert.ok(
     payload.events?.some(
       (event) => event.kind === "observation" && event.fields?.metric === "weight" && event.fields?.value === 72.8,
@@ -1833,10 +1825,10 @@ test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission
     (event) => event.externalRef?.resourceId === "whoop-deleted-1",
   );
 
-  assert.equal(ouraPayload.rawArtifacts?.some((artifact) => artifact.role === "personal-info"), false);
-  assert.equal(ouraPayload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
-  assert.equal(whoopPayload.rawArtifacts?.some((artifact) => artifact.role === "profile"), false);
-  assert.equal(whoopPayload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"), false);
+  assert.equal(ouraPayload.evidenceParts?.some((artifact) => artifact.role === "personal-info"), false);
+  assert.equal(ouraPayload.evidenceParts?.some((artifact) => artifact.role === "heartrate"), false);
+  assert.equal(whoopPayload.evidenceParts?.some((artifact) => artifact.role === "profile"), false);
+  assert.equal(whoopPayload.evidenceParts?.some((artifact) => artifact.role === "body-measurement"), false);
   assert.equal(ouraDeletion?.title?.length, 160);
   assert.equal(ouraDeletion?.note?.length, 4000);
   assert.equal(whoopDeletion?.title?.length, 160);
@@ -1919,8 +1911,8 @@ test("prepareDeviceProviderSnapshotImport covers WHOOP fallback ids and workout 
     payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "sleep-awake-minutes"),
     false,
   );
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("sleep:sleep-")));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "recovery:cycle-77"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("cycle:cycle-")));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("workout:workout-")));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("sleep:sleep-")));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "recovery:cycle-77"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("cycle:cycle-")));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("workout:workout-")));
 });

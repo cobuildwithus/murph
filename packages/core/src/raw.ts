@@ -5,6 +5,7 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
+import { VaultError } from "./errors.ts";
 import { copyImmutableFileIntoVaultRaw } from "./fs.ts";
 import {
   basenameFromFilePath,
@@ -64,7 +65,6 @@ const MEDIA_TYPES = new Map<string, string>([
 ]);
 
 const RAW_ASSET_OWNER_PARTITION_KINDS = new Set<RawAssetOwnerKind>([
-  "device_batch",
   "sample_batch",
   "workout_batch",
 ]);
@@ -73,7 +73,7 @@ function resolveDefaultFileName({ originalFileName, targetName }: { originalFile
   return sanitizeFileName(targetName || originalFileName, "artifact");
 }
 
-const RAW_ASSET_OWNER_DEFINITIONS = Object.freeze<Record<RawAssetOwnerKind, RawAssetOwnerDefinition>>({
+const RAW_ASSET_OWNER_DEFINITIONS = Object.freeze<Partial<Record<RawAssetOwnerKind, RawAssetOwnerDefinition>>>({
   assessment: {
     rootDirectory: VAULT_LAYOUT.rawAssessmentsDirectory,
     resolveFileName: () => "source.json",
@@ -85,10 +85,6 @@ const RAW_ASSET_OWNER_DEFINITIONS = Object.freeze<Record<RawAssetOwnerKind, RawA
       const safeRole = sanitizePathSegment(role, "media");
       return `${safeRole}-${safeFileName}`;
     },
-  },
-  device_batch: {
-    rootDirectory: VAULT_LAYOUT.rawIntegrationsDirectory,
-    resolveFileName: resolveDefaultFileName,
   },
   document: {
     rootDirectory: VAULT_LAYOUT.rawDocumentsDirectory,
@@ -134,7 +130,14 @@ function normalizeRawAssetOwner(owner: RawAssetOwner): RawAssetOwner {
 }
 
 function resolveRawAssetOwnerDefinition(owner: RawAssetOwner): RawAssetOwnerDefinition {
-  return RAW_ASSET_OWNER_DEFINITIONS[owner.kind];
+  const definition = RAW_ASSET_OWNER_DEFINITIONS[owner.kind];
+  if (!definition) {
+    throw new VaultError(
+      "VAULT_RAW_OWNER_UNSUPPORTED",
+      `Raw owner kind "${owner.kind}" is not supported for new raw writes.`,
+    );
+  }
+  return definition;
 }
 
 function resolveRawAssetOwnerPrefixSegments(owner: RawAssetOwner): string[] {
