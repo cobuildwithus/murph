@@ -7,6 +7,9 @@ import {
   type AssistantTurnReceipt,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assertAssistantStatePathHasNoSymlinks,
+} from '@murphai/runtime-state/node'
+import {
   assistantAcceptedTurnInputJournalSchema,
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
@@ -120,31 +123,31 @@ export async function pruneAssistantRuntimeResidueAtPaths(input: {
   })
 
   for (const filePath of plan.journalPaths) {
-    await rm(filePath, { force: true })
+    await removeAssistantStateFile(filePath)
   }
   for (const filePath of plan.inputEventPaths) {
-    await rm(filePath, { force: true })
+    await removeAssistantStateFile(filePath)
   }
   for (const filePath of plan.receiptPaths) {
-    await rm(filePath, { force: true })
+    await removeAssistantStateFile(filePath)
   }
 
   let evidenceFilesPruned = 0
   for (const group of plan.evidenceGroups) {
     for (const filePath of group.filePaths) {
-      await rm(filePath, { force: true })
+      await removeAssistantStateFile(filePath)
       evidenceFilesPruned += 1
     }
   }
   for (const filePath of plan.provenancePaths) {
-    await rm(filePath, { force: true })
+    await removeAssistantStateFile(filePath)
   }
 
   await Promise.all([
-    removeDirectoryIfEmpty(directories.acceptedTurnInputs),
-    removeDirectoryIfEmpty(directories.evidence),
-    removeDirectoryIfEmpty(directories.inputEvents),
-    removeDirectoryIfEmpty(directories.provenance),
+    removeAssistantStateDirectoryIfEmpty(directories.acceptedTurnInputs),
+    removeAssistantStateDirectoryIfEmpty(directories.evidence),
+    removeAssistantStateDirectoryIfEmpty(directories.inputEvents),
+    removeAssistantStateDirectoryIfEmpty(directories.provenance),
   ])
 
   return {
@@ -744,6 +747,7 @@ function resolveAssistantRuntimeResidueDirectories(paths: AssistantStatePaths) {
 
 async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
   try {
+    await assertAssistantStatePathHasNoSymlinks(directory)
     return await readdir(directory, { withFileTypes: true })
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -753,8 +757,14 @@ async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
   }
 }
 
-async function removeDirectoryIfEmpty(directory: string): Promise<void> {
+async function removeAssistantStateFile(filePath: string): Promise<void> {
+  await assertAssistantStatePathHasNoSymlinks(filePath)
+  await rm(filePath, { force: true })
+}
+
+async function removeAssistantStateDirectoryIfEmpty(directory: string): Promise<void> {
   try {
+    await assertAssistantStatePathHasNoSymlinks(directory)
     if ((await readdir(directory)).length === 0) {
       await rmdir(directory)
     }

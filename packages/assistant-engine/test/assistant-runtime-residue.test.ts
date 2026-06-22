@@ -1,4 +1,4 @@
-import { access, rm } from 'node:fs/promises'
+import { access, mkdir, rm, symlink } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -363,6 +363,47 @@ describe('assistant runtime residue pruning', () => {
 
     expect(result.autoReplyIntentProvenancePruned).toBe(1)
     await expectPathMissing(resolveIntentProvenancePath(paths, intentId))
+  })
+
+  it('rejects nested symlink residue directories without deleting target vault files', async () => {
+    const source = await createAssistantVault(
+      'assistant-runtime-residue-symlink-source-',
+    )
+    const target = await createAssistantVault(
+      'assistant-runtime-residue-symlink-target-',
+    )
+    const intentId = 'intent_symlink_target'
+    await writeAssistantAutoReplyIntentProvenance({
+      intentId,
+      recordedAt: OLD_RECORD_AT,
+      turnId: createTurnId('7'),
+      vault: target.vaultRoot,
+    })
+    const sourceProvenanceDirectory = path.join(
+      source.paths.assistantStateRoot,
+      'auto-reply',
+      'intent-provenance',
+    )
+    const targetProvenanceDirectory = path.join(
+      target.paths.assistantStateRoot,
+      'auto-reply',
+      'intent-provenance',
+    )
+    await rm(sourceProvenanceDirectory, {
+      force: true,
+      recursive: true,
+    })
+    await mkdir(path.dirname(sourceProvenanceDirectory), {
+      recursive: true,
+    })
+    await symlink(targetProvenanceDirectory, sourceProvenanceDirectory, 'dir')
+
+    await expect(pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: null,
+      vault: source.vaultRoot,
+    })).rejects.toThrow('Assistant state path must not contain symlinks')
+    await expectPathExists(resolveIntentProvenancePath(target.paths, intentId))
   })
 })
 
