@@ -17,6 +17,7 @@ import {
   exampleSampleRecords,
   exampleVaultMetadata,
 } from "../src/examples.ts";
+import { CONTRACT_SCHEMA_VERSION } from "../src/constants.ts";
 import { automationFrontmatterSchema as automationFrontmatterContract } from "../src/automation.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
@@ -324,6 +325,38 @@ describe("schema catalog and example seam", () => {
         expectValidExample(contract, example);
       }
     }
+  });
+
+  it("allows integration ingest records with more than 64 evidence parts", () => {
+    const record = {
+      schemaVersion: CONTRACT_SCHEMA_VERSION.integrationIngest,
+      id: "xfm_0123456789ABCDEFGHJKMNPQRS",
+      provider: "oura",
+      source: "device",
+      importedAt: "2026-03-12T12:00:00.000Z",
+      parts: Array.from({ length: 65 }, (_, index) => ({
+        role: `daily-activity-${String(index).padStart(3, "0")}`,
+        fileName: `daily-activity-${String(index).padStart(3, "0")}.json`,
+        mediaType: "application/json",
+        content: `{"day":${index}}`,
+        byteSize: Buffer.byteLength(`{"day":${index}}`),
+        sha256: "a".repeat(64),
+      })),
+      outputs: {
+        events: [],
+        sampleIds: [],
+        sampleIdsComplete: true,
+      },
+      counts: {
+        eventCount: 0,
+        sampleCount: 0,
+      },
+    };
+
+    expect(safeParseContract(integrationIngestRecordContract, record)).toEqual({
+      success: true,
+      data: record,
+    });
   });
 
   it("accepts inbox capture ids as audit metadata targets", () => {

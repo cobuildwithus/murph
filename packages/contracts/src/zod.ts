@@ -2670,7 +2670,6 @@ export const integrationIngestRecordSchema = withContractMetadata(
       importedAt: isoDateTimeString(),
       receipt: integrationIngestReceiptSchema.optional(),
       parts: uniqueArray(integrationEvidencePartSchema, {
-        maxItems: 64,
         uniqueItems: true,
       }),
       outputs: integrationIngestOutputsSchema.optional(),

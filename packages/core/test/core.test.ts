@@ -2901,6 +2901,7 @@ test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata
         stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
         overwrite: true,
         allowExistingMatch: false,
+        allowAppendOnlyJsonl: false,
         allowRaw: false,
         effect: undefined,
         existedBefore: undefined,

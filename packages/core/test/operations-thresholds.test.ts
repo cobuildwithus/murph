@@ -618,6 +618,80 @@ test("write batches emit exact hosted canonical write receipts", async () => {
   });
 });
 
+test("hosted canonical receipt replay carries integration migration event rewrite authorization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-migration-event-rewrite");
+  const replayVaultRoot = await makeTempDirectory("murph-core-hosted-migration-event-rewrite-replay");
+  const rejectedVaultRoot = await makeTempDirectory("murph-core-hosted-migration-event-rewrite-reject");
+  const receiptRoot = await makeTempDirectory("murph-core-hosted-migration-event-rewrite-out");
+  const targetRelativePath = "ledger/events/2026/2026-05.jsonl";
+  const targetBefore = "{\"id\":\"evt_1\",\"rawRefs\":[\"raw/integrations/whoop/old.json\"]}\n";
+  const targetAfter = "{\"id\":\"evt_1\"}\n";
+
+  await initializeVault({ vaultRoot });
+  await initializeVault({ vaultRoot: replayVaultRoot });
+  await initializeVault({ vaultRoot: rejectedVaultRoot });
+  await fs.mkdir(path.join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await fs.mkdir(path.join(replayVaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await fs.mkdir(path.join(rejectedVaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, targetRelativePath), targetBefore, "utf8");
+  await fs.writeFile(path.join(replayVaultRoot, targetRelativePath), targetBefore, "utf8");
+  await fs.writeFile(path.join(rejectedVaultRoot, targetRelativePath), targetBefore, "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "integration_storage_migration",
+    summary: "rewrite legacy integration refs",
+    hostedCanonicalWriteReceiptDirectory: receiptRoot,
+  });
+  await batch.stageTextWrite(targetRelativePath, targetAfter, {
+    allowAppendOnlyJsonl: true,
+  });
+
+  const receipt = await batch.commit();
+  assert.ok(receipt);
+  const action = receipt.actions[0];
+  if (action?.kind !== "text_upsert") {
+    throw new Error("Expected text_upsert hosted receipt action.");
+  }
+  assert.equal(action.targetRelativePath, targetRelativePath);
+  assert.equal(action.allowAppendOnlyJsonl, true);
+
+  const readPayload = async (ref: { sha256: string }) =>
+    await fs.readFile(resolveHostedCanonicalWritePayloadFilePath({
+      receiptRoot,
+      sha256: ref.sha256,
+    }));
+
+  await applyHostedCanonicalWriteReceipt({
+    readPayload,
+    receipt,
+    vaultRoot: replayVaultRoot,
+  });
+  assert.equal(await fs.readFile(path.join(replayVaultRoot, targetRelativePath), "utf8"), targetAfter);
+
+  await applyHostedCanonicalWriteReceipt({
+    readPayload,
+    receipt,
+    vaultRoot: replayVaultRoot,
+  });
+  assert.equal(await fs.readFile(path.join(replayVaultRoot, targetRelativePath), "utf8"), targetAfter);
+
+  await assert.rejects(
+    () =>
+      applyHostedCanonicalWriteReceipt({
+        readPayload,
+        receipt: {
+          ...receipt,
+          operationId: "op_rejected_append_only_text_replay",
+          operationType: "unscoped_text_replay",
+        },
+        vaultRoot: rejectedVaultRoot,
+      }),
+    /may only rewrite event ledger shards/u,
+  );
+  assert.equal(await fs.readFile(path.join(rejectedVaultRoot, targetRelativePath), "utf8"), targetBefore);
+});
+
 test("WriteBatch reserves unique stage artifacts under concurrent raw staging", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-concurrent-raw-stage");
   await initializeVault({ vaultRoot });

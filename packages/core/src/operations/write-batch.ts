@@ -73,6 +73,7 @@ export type HostedCanonicalWriteReceiptAction =
       targetRelativePath: string;
       sha256: string;
       byteLength: number;
+      allowAppendOnlyJsonl?: boolean;
       effect: "create" | "update" | "reuse";
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
@@ -225,6 +226,7 @@ type StoredWriteAction =
       stageRelativePath: string;
       overwrite: boolean;
       allowExistingMatch: boolean;
+      allowAppendOnlyJsonl: boolean;
       allowRaw: boolean;
       effect?: "create" | "update" | "reuse";
       existedBefore?: boolean;
@@ -487,7 +489,9 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalTextReceiptAction({
+          allowAppendOnlyJsonl: action.allowAppendOnlyJsonl === true,
           bytes,
+          operationType: input.receipt.operationType,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -573,15 +577,28 @@ async function readHostedCanonicalWriteReceiptPayload(input: {
 }
 
 async function applyHostedCanonicalTextReceiptAction(input: {
+  allowAppendOnlyJsonl: boolean;
   bytes: Uint8Array;
+  operationType: string;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
+  if (
+    input.allowAppendOnlyJsonl &&
+    !isHostedCanonicalAppendOnlyTextReplayAllowed(input.operationType, input.targetRelativePath)
+  ) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_APPEND_ONLY_SCOPE",
+      "Hosted canonical text replay may only rewrite event ledger shards during integration storage migration.",
+      { operationType: input.operationType, targetRelativePath: input.targetRelativePath },
+    );
+  }
   const isRawTarget = isRawRelativePath(input.targetRelativePath, {
     caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot),
   });
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "text",
+    allowAppendOnlyJsonl: input.allowAppendOnlyJsonl,
     allowRaw: isRawTarget,
   });
   if (await targetMatchesBytes(target.absolutePath, input.bytes)) {
@@ -594,6 +611,29 @@ async function applyHostedCanonicalTextReceiptAction(input: {
     );
   }
   await writeTextFileAtomic(target.absolutePath, Buffer.from(input.bytes).toString("utf8"));
+}
+
+function isHostedCanonicalAppendOnlyTextReplayAllowed(
+  operationType: string,
+  relativePath: string,
+): boolean {
+  if (operationType !== "integration_storage_migration") {
+    return false;
+  }
+
+  let normalizedRelativePath: string;
+  try {
+    normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+  } catch {
+    return false;
+  }
+
+  const eventLedgerDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.eventLedgerDirectory,
+  );
+  const comparisonRelativePath = normalizeRelativeVaultPathForComparison(normalizedRelativePath);
+  return comparisonRelativePath.startsWith(`${eventLedgerDirectory}/`) &&
+    isJsonlRelativePath(normalizedRelativePath);
 }
 
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
@@ -887,6 +927,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         kind: "text_write",
         ...base,
         allowExistingMatch: record.allowExistingMatch === true,
+        allowAppendOnlyJsonl: record.allowAppendOnlyJsonl === true,
         allowRaw: record.allowRaw === true,
         backupRelativePath,
         committedPayloadReceipt,
@@ -1427,6 +1468,7 @@ export class WriteBatch {
       stageRelativePath,
       overwrite: options.overwrite ?? true,
       allowExistingMatch: options.allowExistingMatch ?? false,
+      allowAppendOnlyJsonl: options.allowAppendOnlyJsonl ?? false,
       allowRaw: options.allowRaw ?? false,
     });
     await this.persist();
@@ -1814,11 +1856,22 @@ export class WriteBatch {
     switch (action.kind) {
       case "text_write": {
         const payloadReceipt = await this.requireActionPayloadReceipt(action);
+        if (
+          action.allowAppendOnlyJsonl &&
+          !isHostedCanonicalAppendOnlyTextReplayAllowed(this.record.operationType, action.targetRelativePath)
+        ) {
+          throw new VaultError(
+            "CANONICAL_WRITE_APPEND_ONLY_TEXT_SCOPE",
+            "Append-only JSONL text receipts are restricted to integration storage migration event rewrites.",
+            { operationType: this.record.operationType, targetRelativePath: action.targetRelativePath },
+          );
+        }
         return {
           kind: "text_upsert",
           targetRelativePath: action.targetRelativePath,
           sha256: payloadReceipt.sha256,
           byteLength: payloadReceipt.byteLength,
+          ...(action.allowAppendOnlyJsonl ? { allowAppendOnlyJsonl: true } : {}),
           effect: action.effect ?? "update",
           contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
         };

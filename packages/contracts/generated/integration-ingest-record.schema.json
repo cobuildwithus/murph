@@ -160,7 +160,6 @@
       "additionalProperties": false
     },
     "parts": {
-      "maxItems": 64,
       "type": "array",
       "items": {
         "type": "object",
