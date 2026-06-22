@@ -124,6 +124,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
     )
+    expect(raw).toContain('exact quoted phrase such as "place order"')
+    expect(raw).toMatch(/ordinary\s+confirmations like "yes", "go\s+ahead", or "you're good" are enough/u)
     expect((playbook.match(/^### \d+\./gmu) ?? []).length).toBe(25)
     expect(playbook).toContain('Connected-app preflight for browser tasks')
     expect(playbook).toContain('another dentist appointment')
