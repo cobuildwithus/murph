@@ -25,9 +25,41 @@ import {
   type EncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
   restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
+  waitForHostedWorkspaceSnapshotProcessPipe,
 } from "../src/workspace-snapshot-local.js";
 
 const execFileAsync = promisify(execFile);
+
+describe("workspace snapshot process pipes", () => {
+  it("ignores premature stream closes when the child commands exit cleanly", async () => {
+    await expect(waitForHostedWorkspaceSnapshotProcessPipe(
+      Promise.reject(Object.assign(new Error("Premature close"), {
+        code: "ERR_STREAM_PREMATURE_CLOSE",
+      })),
+      [Promise.resolve(), Promise.resolve()],
+    )).resolves.toBeUndefined();
+  });
+
+  it("keeps the child command failure when a premature stream close accompanies it", async () => {
+    const processError = new Error("Hosted workspace snapshot zstd command failed with exit code 1.");
+    const processExit = Promise.reject(processError);
+    processExit.catch(() => undefined);
+
+    await expect(waitForHostedWorkspaceSnapshotProcessPipe(
+      Promise.reject(Object.assign(new Error("Premature close"), {
+        code: "ERR_STREAM_PREMATURE_CLOSE",
+      })),
+      [Promise.resolve(), processExit],
+    )).rejects.toBe(processError);
+  });
+
+  it("does not hide ordinary stream errors", async () => {
+    await expect(waitForHostedWorkspaceSnapshotProcessPipe(
+      Promise.reject(new Error("snapshot stream transform failed")),
+      [Promise.resolve(), Promise.resolve()],
+    )).rejects.toThrow("snapshot stream transform failed");
+  });
+});
 
 describe("workspace snapshot local restore", () => {
   it("round-trips selected portable workspace state and Codex continuity", async () => {

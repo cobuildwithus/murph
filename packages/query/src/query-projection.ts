@@ -60,6 +60,7 @@ import {
 } from "./projection/wearable-summary-compose.ts";
 import {
   listStoredMetricPoints,
+  listStoredMetricPointsBatch,
   listStoredMetricTargets,
   metricPointFiltersForGoalTarget,
   normalizeMetricPointFilters,
@@ -145,6 +146,21 @@ export async function listMetricPointsRuntime(
 ): Promise<MetricPoint[]> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   return listStoredMetricPoints(location, normalizeMetricPointFilters(filters));
+}
+
+export async function listMetricPointsBatchRuntime(
+  vaultRoot: string,
+  filtersList: readonly QueryMetricPointFilters[],
+): Promise<MetricPoint[]> {
+  if (filtersList.length === 0) {
+    return [];
+  }
+
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  return listStoredMetricPointsBatch(
+    location,
+    filtersList.map(normalizeMetricPointFilters),
+  );
 }
 
 export async function summarizeWearableDayRuntime(

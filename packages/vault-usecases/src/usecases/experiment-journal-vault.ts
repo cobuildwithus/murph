@@ -17,6 +17,7 @@ import {
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type ExperimentFrontmatter,
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
@@ -25,6 +26,7 @@ import { z } from 'zod'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
+  type QueryMetricPointFilters,
   type QueryRuntimeModule,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -1428,9 +1430,16 @@ export async function showExperimentProgress(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const progress = query.summarizeExperimentProgress(readModel, slug, {
     asOf: input.asOf,
+    metricPoints,
   })
 
   return {
@@ -1454,10 +1463,17 @@ export async function showExperimentProgressCard(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
     confounders: input.confounders,
+    metricPoints,
   })
 
   return {
@@ -1508,9 +1524,16 @@ export async function analyzeExperimentOutcomeRecord(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const outcome = query.analyzeExperimentOutcome(readModel, slug, {
     asOf: input.asOf,
+    metricPoints,
   })
 
   return {
@@ -2000,6 +2023,187 @@ async function readExperimentJournalVault(vault: string) {
   } catch (error) {
     throw toVaultMetadataCliError(error)
   }
+}
+
+async function readExperimentJournalMetricPoints(input: {
+  asOf?: string
+  frontmatter: ExperimentFrontmatter
+  query: QueryRuntimeModule
+  vault: string
+}) {
+  const filters = buildExperimentMetricPointFilters(input.query, input.frontmatter, input.asOf)
+  if (filters.length === 0) {
+    return []
+  }
+
+  try {
+    return await input.query.listMetricPointsBatch(input.vault, filters)
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
+}
+
+function buildExperimentMetricPointFilters(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+  asOf?: string,
+): QueryMetricPointFilters[] {
+  const metricKeys = collectExperimentMetricKeys(query, frontmatter)
+  if (metricKeys.length === 0) {
+    return []
+  }
+
+  const dateFilter = buildExperimentMetricPointDateFilter(frontmatter, asOf)
+  const anchorMetricKeys = collectExperimentAnchorMetricKeys(query, frontmatter)
+  return metricKeys.flatMap((metricKey) => {
+    const filters = anchorMetricKeys.has(metricKey)
+      ? [buildExperimentAnchorMetricPointDateFilter(asOf)]
+      : [dateFilter]
+    return filters.map((filter) => ({
+      ...filter,
+      limit: null,
+      metricKey,
+    }))
+  })
+}
+
+function collectExperimentMetricKeys(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+): string[] {
+  const metricKeys = new Set<string>()
+  const analysisPlan = frontmatter.analysisPlan
+  for (const biomarkerKey of [
+    analysisPlan?.primaryBiomarkerKey,
+    ...(analysisPlan?.secondaryBiomarkerKeys ?? []),
+  ]) {
+    const metricKey = resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
+    if (metricKey) {
+      metricKeys.add(metricKey)
+    }
+  }
+
+  for (const target of frontmatter.runPlan?.adherenceTargets ?? []) {
+    if (
+      target.evidence.kind !== 'metricPresence' &&
+      target.evidence.kind !== 'metricThreshold'
+    ) {
+      continue
+    }
+
+    const metricKey = resolveExperimentMetricKey(query, target.evidence.metricKey)
+    if (metricKey.length > 0) {
+      metricKeys.add(metricKey)
+    }
+  }
+
+  return [...metricKeys].sort((left, right) => left.localeCompare(right))
+}
+
+function collectExperimentAnchorMetricKeys(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+): Set<string> {
+  const metricKeys = new Set<string>()
+  for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
+    for (const biomarkerKey of anchor.biomarkerKeys) {
+      const metricKey = resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
+      if (metricKey) {
+        metricKeys.add(metricKey)
+      }
+    }
+  }
+
+  return metricKeys
+}
+
+function resolveExperimentBiomarkerMetricKey(
+  query: QueryRuntimeModule,
+  biomarkerKey: string | null | undefined,
+): string | null {
+  if (!biomarkerKey) {
+    return null
+  }
+
+  return resolveExperimentMetricKey(query, biomarkerKey)
+}
+
+function resolveExperimentMetricKey(
+  query: QueryRuntimeModule,
+  metricKey: string,
+): string {
+  const trimmedMetricKey = metricKey.trim()
+  const metricSlug = trimmedMetricKey.split(':').at(-1) ?? trimmedMetricKey
+  const definition = trimmedMetricKey.startsWith('biomarker:')
+    ? query.resolveMetricDefinitionForBiomarker(trimmedMetricKey) ??
+      query.resolveMetricDefinition(metricSlug)
+    : query.resolveMetricDefinition(trimmedMetricKey)
+
+  return definition?.key ?? query.normalizeMetricKey(
+    trimmedMetricKey.startsWith('biomarker:') ? metricSlug : trimmedMetricKey,
+  )
+}
+
+function buildExperimentMetricPointDateFilter(
+  frontmatter: ExperimentFrontmatter,
+  asOf?: string,
+): Pick<QueryMetricPointFilters, 'from' | 'to'> {
+  const starts: string[] = []
+  const ends: string[] = []
+  const addRange = (start: string | null | undefined, end: string | null | undefined) => {
+    if (start) {
+      starts.push(start)
+    }
+    if (end) {
+      ends.push(end)
+    }
+  }
+
+  addRange(
+    frontmatter.runPlan?.baselineStart,
+    capExperimentMetricEndDate(frontmatter.runPlan?.baselineEnd, asOf),
+  )
+  addRange(
+    frontmatter.runPlan?.interventionStart,
+    capExperimentMetricEndDate(frontmatter.runPlan?.interventionEnd, asOf),
+  )
+
+  for (const measurement of frontmatter.analysisPlan?.plannedMeasurements ?? []) {
+    addRange(
+      measurement.targetWindow?.start,
+      capExperimentMetricEndDate(measurement.targetWindow?.end, asOf),
+    )
+  }
+
+  return {
+    ...(starts.length > 0 ? { from: sortedIsoDates(starts)[0] } : {}),
+    ...(ends.length > 0 ? { to: sortedIsoDates(ends).at(-1) } : {}),
+  }
+}
+
+function buildExperimentAnchorMetricPointDateFilter(
+  asOf?: string,
+): Pick<QueryMetricPointFilters, 'to'> {
+  return asOf ? { to: asOf } : {}
+}
+
+function capExperimentMetricEndDate(
+  configuredEnd: string | null | undefined,
+  asOf: string | undefined,
+): string | null | undefined {
+  if (!asOf) {
+    return configuredEnd
+  }
+
+  if (!configuredEnd) {
+    return asOf
+  }
+
+  return configuredEnd < asOf ? configuredEnd : asOf
+}
+
+function sortedIsoDates(values: readonly string[]) {
+  return [...values].sort((left, right) => left.localeCompare(right))
 }
 
 async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJournalVaultCoreRuntime> {

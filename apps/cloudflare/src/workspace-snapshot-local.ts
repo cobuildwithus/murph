@@ -213,8 +213,12 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       if (!zstd.stdin || !zstd.stdout) {
         throw new Error("Hosted workspace snapshot zstd streams are unavailable.");
       }
-      await Promise.all([
+      const archiveInputPipe = waitForHostedWorkspaceSnapshotProcessPipe(
         pipeline(tar.stdout, zstd.stdin),
+        [tarExit, zstdExit],
+      );
+      await Promise.all([
+        archiveInputPipe,
         pipeline(
           zstd.stdout,
           createHashTransform(plaintextArchiveHash),
@@ -462,8 +466,14 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
       if (!zstd.stdin) {
         throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
       }
-      zstdInputPipe = pipeline(Readable.from([plaintextArchive]), zstd.stdin);
-      archivePipe = pipeline(zstd.stdout, tar.stdin);
+      zstdInputPipe = waitForHostedWorkspaceSnapshotProcessPipe(
+        pipeline(Readable.from([plaintextArchive]), zstd.stdin),
+        [zstdExit, tarExit],
+      );
+      archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
+        pipeline(zstd.stdout, tar.stdin),
+        [zstdExit, tarExit],
+      );
       await Promise.all([
         zstdInputPipe,
         archivePipe,
@@ -798,15 +808,21 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   tar.stdout.setEncoding("utf8");
   const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
   const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
-  const decryptPipe = pipeline(
-    createReadStream(input.encryptedFilePath, {
-      end: input.encryptedByteSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
-      start: 0,
-    }),
-    decipher,
-    zstd.stdin,
+  const decryptPipe = waitForHostedWorkspaceSnapshotProcessPipe(
+    pipeline(
+      createReadStream(input.encryptedFilePath, {
+        end: input.encryptedByteSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
+        start: 0,
+      }),
+      decipher,
+      zstd.stdin,
+    ),
+    [zstdExit, tarExit],
   );
-  const archivePipe = pipeline(zstd.stdout, tar.stdin);
+  const archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
+    pipeline(zstd.stdout, tar.stdin),
+    [zstdExit, tarExit],
+  );
   const lines = createInterface({
     crlfDelay: Number.POSITIVE_INFINITY,
     input: tar.stdout,
@@ -1137,12 +1153,39 @@ async function readHostedWorkspaceSnapshotProcessFailure(
   return firstFailure?.status === "rejected" ? firstFailure.reason : null;
 }
 
+export async function waitForHostedWorkspaceSnapshotProcessPipe(
+  pipe: Promise<void>,
+  processExits: readonly Promise<void>[],
+): Promise<void> {
+  try {
+    await pipe;
+  } catch (error) {
+    if (!isHostedWorkspaceSnapshotPipeCloseError(error)) {
+      throw error;
+    }
+    const processFailure = await readHostedWorkspaceSnapshotProcessFailure(processExits);
+    if (processFailure) {
+      throw processFailure;
+    }
+  }
+}
+
 function shouldPreferHostedWorkspaceSnapshotProcessFailure(error: unknown): boolean {
   if (readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)) {
     return true;
   }
+  return isHostedWorkspaceSnapshotPipeCloseError(error);
+}
+
+function isHostedWorkspaceSnapshotPipeCloseError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
+  }
+  if (
+    isNodeErrorCode(error, "ERR_STREAM_PREMATURE_CLOSE")
+    || isNodeErrorCode(error, "EPIPE")
+  ) {
+    return true;
   }
   return /(?:premature close|\bEPIPE\b|write after end|stream closed|aborted)/iu
     .test(error.message);

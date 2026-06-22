@@ -6,6 +6,7 @@ import {
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
 import { isSearchIndexedQueryEntity } from "./query-visibility.ts";
+import { buildSampleSummaryId } from "./sample-summary-id.ts";
 import type { DailySampleSummary } from "./summaries.ts";
 
 const DEFAULT_LIMIT = 20;
@@ -309,7 +310,7 @@ function buildSampleSummarySearchDocument(
   },
 ): SearchableDocument {
   const unit = summary.unit ?? "none";
-  const recordId = `sample-summary:${summary.date}:${summary.stream}:${unit}`;
+  const recordId = buildSampleSummaryId(summary);
   const title = `${summary.stream} daily summary`;
   const tags = ["sample_summary", summary.stream, unit];
   const structuredText = compactStrings([
