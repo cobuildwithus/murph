@@ -8,7 +8,6 @@ import type {
   HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import type { HostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceCheckpointResponse, parseHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type { HostedWorkspaceCheckpointResponse } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -32,17 +31,12 @@ import {
 import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
-  HostedRuntimeControlPlaneFetchError,
-  combineAbortSignalsWithCleanup,
-  isRetryableHostedRuntimeReplaySafeReadTransportError,
-} from "./control-plane-fetch.ts";
-import {
   buildHostedWorkspaceSnapshotRestoreLogDetails,
-  buildHostedRuntimeSafeErrorMetadata,
   readHostedRuntimeStepElapsedMs,
   runHostedWorkspaceSnapshotRestoreReplaySafeReadStep,
   runHostedWorkspaceSnapshotRestoreStep,
 } from "./diagnostics.ts";
+import { readHostedRuntimeResponseBodyChunks } from "./hosted-response-body.ts";
 import {
   assertHostedOk,
   fetchHostedResponse,
@@ -249,92 +243,60 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         step: "size_guard",
       });
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
-      // The data-key unwrap (worker KMS round trip) and presign GET share no
-      // inputs. Run them concurrently, then open and consume the R2 response
-      // inside the replay-safe read attempt so mid-body transport failures get
-      // a fresh response, decipher, archive buffer, and restore temp directory.
-      const dataKeyPromise = (async () => {
-        const dataKeyUnwrapStartedAt = Date.now();
-        const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-          details: restoreLogDetails,
-          run: async () => await unwrapWorkspaceSnapshotDataKey({
-            aad: request.ref.encryption.aad,
+      const dataKeyUnwrapStartedAt = Date.now();
+      const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+        details: restoreLogDetails,
+        run: async () => await unwrapWorkspaceSnapshotDataKey({
+          aad: request.ref.encryption.aad,
+          fetchImpl: input.fetchImpl,
+          rootKeyId: request.ref.encryption.rootKeyId,
+          signal: request.signal ?? null,
+          timeoutMs: input.timeoutMs,
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          wrappedDataKey: request.ref.encryption.wrappedDataKey,
+        }),
+        step: "data_key_unwrap",
+      });
+      timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
+
+      const presignGetStartedAt = Date.now();
+      const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+        details: restoreLogDetails,
+        run: async () => {
+          const result = await presignWorkspaceSnapshotGet({
             fetchImpl: input.fetchImpl,
-            rootKeyId: request.ref.encryption.rootKeyId,
+            objectKey: request.ref.objectKey,
+            ref: request.ref,
             signal: request.signal ?? null,
+            snapshotId: request.ref.snapshotId,
             timeoutMs: input.timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-            wrappedDataKey: request.ref.encryption.wrappedDataKey,
-          }),
-          step: "data_key_unwrap",
-        });
-        timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
-        return dataKey;
-      })();
-      const presignAbort = new AbortController();
-      void dataKeyPromise.catch(() => {
-        presignAbort.abort(
-          new Error("Hosted workspace snapshot data key unwrap failed; presign GET is unnecessary."),
-        );
-      });
-      const presignGetPromise = (async () => {
-        const presignGetStartedAt = Date.now();
-        const presignSignal = combineAbortSignalsWithCleanup(
-          request.signal ?? null,
-          presignAbort.signal,
-        );
-        try {
-          const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-            details: restoreLogDetails,
-            run: async () => {
-              const result = await presignWorkspaceSnapshotGet({
-                fetchImpl: input.fetchImpl,
-                objectKey: request.ref.objectKey,
-                ref: request.ref,
-                signal: presignSignal.signal,
-                snapshotId: request.ref.snapshotId,
-                timeoutMs: input.timeoutMs,
-                workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-              });
-              const expiresAtMs = Date.parse(result.expiresAt);
-              if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-                throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-              }
-              return {
-                ...result,
-                expiresAtMs,
-              };
-            },
-            step: "presign_get",
           });
-          timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
-          return presignedGet;
-        } finally {
-          presignSignal.dispose();
-        }
-      })();
-      const [dataKeySettled, presignGetSettled] = await Promise.allSettled([
-        dataKeyPromise,
-        presignGetPromise,
-      ]);
-      if (dataKeySettled.status === "rejected") {
-        throw dataKeySettled.reason;
-      }
-      if (presignGetSettled.status === "rejected") {
-        throw presignGetSettled.reason;
-      }
+          const expiresAtMs = Date.parse(result.expiresAt);
+          if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+            throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+          }
+          return {
+            ...result,
+            expiresAtMs,
+          };
+        },
+        step: "presign_get",
+      });
+      timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+
       const objectFetchStartedAt = Date.now();
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         run: async () => {
           const objectFetchTimeoutMs =
-            Math.max(1, presignGetSettled.value.expiresAtMs - Date.now() - 5_000);
+            Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
           const encryptedObject = await fetchHostedWorkspaceSnapshotEncryptedObjectStream({
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
-            getUrl: presignGetSettled.value.getUrl,
+            getUrl: presignedGet.getUrl,
             signal: request.signal ?? null,
             timeoutMs: objectFetchTimeoutMs,
           });
@@ -343,7 +305,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           }
           try {
             return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-              dataKey: dataKeySettled.value,
+              dataKey,
               durableRoot: request.durableRoot,
               encryptedStream: encryptedObject.encryptedStream,
               ref: request.ref,
@@ -658,66 +620,38 @@ function createHostedWorkspaceSnapshotEncryptedObjectBody(input: {
 }): HostedWorkspaceSnapshotEncryptedObjectBody {
   let byteCount = 0;
   let cancelPromise: Promise<void> | null = null;
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let streamDone = false;
 
   const cancel = async (): Promise<void> => {
     if (streamDone) {
       return;
     }
-    cancelPromise ??= (reader
-      ? reader.cancel()
-      : input.responseBody.cancel())
-      .catch(() => undefined);
+    cancelPromise ??= input.responseBody.cancel().catch(() => undefined);
     await cancelPromise;
   };
 
   async function* readBody(): AsyncIterable<Uint8Array> {
-    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-    const readSignal = combineAbortSignalsWithCleanup(input.signal ?? null, timeoutSignal);
     try {
-      reader = input.responseBody.getReader();
-      while (true) {
-        const next = await readHostedWorkspaceSnapshotResponseBodyChunk({
-          reader,
-          signal: readSignal.signal,
-        });
-        if (next.done) {
-          break;
-        }
-        byteCount += next.value.byteLength;
+      for await (const next of readHostedRuntimeResponseBodyChunks({
+        body: input.responseBody,
+        description: "Hosted workspace snapshot fetch",
+        signal: input.signal ?? null,
+        timeoutMs: input.timeoutMs,
+      })) {
+        byteCount += next.byteLength;
         if (byteCount > input.expectedEncryptedByteSize) {
           throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
         }
-        yield next.value;
+        yield next;
       }
       if (byteCount !== input.expectedEncryptedByteSize) {
         throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
       }
       streamDone = true;
-    } catch (error) {
-      const wrappedError = new HostedRuntimeControlPlaneFetchError({
-        cause: error,
-        description: "Hosted workspace snapshot fetch response body read",
-        signalState: {
-          callerSignalAborted: input.signal?.aborted ?? false,
-          requestSignalAborted: readSignal.signal.aborted,
-          timeoutMs: input.timeoutMs,
-          timeoutSignalAborted: timeoutSignal.aborted,
-        },
-      });
-
-      if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
-        throw wrappedError;
-      }
-
-      throw error;
     } finally {
-      readSignal.dispose();
       if (!streamDone) {
         await cancel();
       }
-      reader?.releaseLock();
     }
   }
 
@@ -725,41 +659,6 @@ function createHostedWorkspaceSnapshotEncryptedObjectBody(input: {
     cancel,
     encryptedStream: readBody(),
   };
-}
-
-async function readHostedWorkspaceSnapshotResponseBodyChunk(input: {
-  reader: ReadableStreamDefaultReader<Uint8Array>;
-  signal: AbortSignal;
-}): Promise<ReadableStreamReadResult<Uint8Array>> {
-  if (input.signal.aborted) {
-    throw readHostedWorkspaceSnapshotAbortReason(input.signal);
-  }
-
-  return await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
-    let settled = false;
-    const settle = (finish: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      input.signal.removeEventListener("abort", abort);
-      finish();
-    };
-    const abort = () => {
-      settle(() => reject(readHostedWorkspaceSnapshotAbortReason(input.signal)));
-    };
-    input.signal.addEventListener("abort", abort, { once: true });
-    input.reader.read().then(
-      (result) => settle(() => resolve(result)),
-      (error: unknown) => settle(() => reject(error)),
-    );
-  });
-}
-
-function readHostedWorkspaceSnapshotAbortReason(signal: AbortSignal): unknown {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 }
 
 async function cancelHostedWorkspaceSnapshotResponseBody(

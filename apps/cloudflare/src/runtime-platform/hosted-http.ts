@@ -4,10 +4,10 @@ import { parseHostedRunnerProviderEffectErrorResponse } from "../runner-effects-
 import {
   HostedRuntimeControlPlaneFetchError,
   combineAbortSignalsWithCleanup,
-  isRetryableHostedRuntimeReplaySafeReadTransportError,
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import { readHostedRuntimeResponseBodyChunks } from "./hosted-response-body.ts";
 import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export async function fetchHostedResponse(input: {
@@ -176,89 +176,18 @@ async function readHostedResponseText(input: {
     return "";
   }
 
-  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-  const readSignal = combineAbortSignalsWithCleanup(input.signal ?? null, timeoutSignal);
-  const reader = input.response.body.getReader();
   const decoder = new TextDecoder();
-  let streamDone = false;
-  try {
-    let text = "";
-    while (true) {
-      const result = await readHostedResponseBodyChunk({
-        reader,
-        signal: readSignal.signal,
-      });
-      if (result.done) {
-        streamDone = true;
-        break;
-      }
-      text += decoder.decode(result.value, { stream: true });
-    }
-    text += decoder.decode();
-    return text;
-  } catch (error) {
-    if (shouldPreserveHostedRuntimeFetchError(error)) {
-      throw error;
-    }
-
-    const wrappedError = new HostedRuntimeControlPlaneFetchError({
-      cause: error,
-      description: `${input.description} response body read`,
-      signalState: {
-        callerSignalAborted: input.signal?.aborted ?? false,
-        requestSignalAborted: readSignal.signal.aborted,
-        timeoutMs: input.timeoutMs,
-        timeoutSignalAborted: timeoutSignal.aborted,
-      },
-    });
-
-    if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
-      throw wrappedError;
-    }
-
-    throw error;
-  } finally {
-    if (!streamDone) {
-      await reader.cancel().catch(() => undefined);
-    }
-    reader.releaseLock();
-    readSignal.dispose();
+  let text = "";
+  for await (const chunk of readHostedRuntimeResponseBodyChunks({
+    body: input.response.body,
+    description: input.description,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
+  })) {
+    text += decoder.decode(chunk, { stream: true });
   }
-}
-
-function readHostedResponseBodyChunk(input: {
-  reader: ReadableStreamDefaultReader<Uint8Array>;
-  signal: AbortSignal;
-}): Promise<ReadableStreamReadResult<Uint8Array>> {
-  if (input.signal.aborted) {
-    return Promise.reject(readHostedResponseAbortReason(input.signal));
-  }
-
-  return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
-    let settled = false;
-    const settle = (run: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      input.signal.removeEventListener("abort", abort);
-      run();
-    };
-    const abort = () => {
-      settle(() => reject(readHostedResponseAbortReason(input.signal)));
-    };
-    input.signal.addEventListener("abort", abort, { once: true });
-    input.reader.read().then(
-      (result) => settle(() => resolve(result)),
-      (error) => settle(() => reject(error)),
-    );
-  });
-}
-
-function readHostedResponseAbortReason(signal: AbortSignal): unknown {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+  text += decoder.decode();
+  return text;
 }
 
 export async function fetchHostedProviderEffectJson(input: {
