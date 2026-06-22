@@ -111,6 +111,9 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from './assistant/execution-context.js'
 import type {
+  AssistantHostedToolContext,
+} from './assistant/hosted-tool-context.js'
+import type {
   AssistantNoReplyDisposition,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
@@ -349,6 +352,15 @@ function resolveCodexAppServerProgressDelivery(
   return input.progressDelivery ?? null
 }
 
+function resolveCodexAppServerHostedToolContext(
+  input: Pick<
+    CodexAppServerTurnInput,
+    'hostedToolContext'
+  >,
+): AssistantHostedToolContext | null {
+  return input.hostedToolContext ?? null
+}
+
 async function waitForCodexProgressDrain(
   pending: readonly Promise<unknown>[],
 ): Promise<boolean> {
@@ -400,6 +412,7 @@ export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   approvalPolicy?: string
   configOverrides?: readonly string[]
   codexCommand?: string
@@ -433,6 +446,7 @@ export interface CodexAppServerTurnInput {
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
@@ -2797,15 +2811,17 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+      connectedAppsAvailable: input.connectedAppsAvailable === true,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       progressDelivery:
         dynamicToolRequest.kind === 'send-progress-update'
           ? dynamicToolProgressDelivery
-          : resolveCodexAppServerProgressDelivery(input),
+          : null,
       publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:

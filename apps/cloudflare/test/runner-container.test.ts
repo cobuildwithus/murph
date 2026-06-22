@@ -34,6 +34,9 @@ import {
 import {
   buildHostedRunnerContainerCaEnv,
 } from "../src/runner-container-ca-env.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
@@ -167,47 +170,25 @@ describe("RunnerContainer", () => {
     expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
-  it("recycles a warm shell after the configured successful invocation count", async () => {
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT: "2",
-      },
-    });
+  it("does not recycle a healthy warm shell by successful invocation count", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble();
 
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_first"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).not.toHaveBeenCalled();
+    for (let index = 1; index <= 101; index += 1) {
+      await expect(container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(`evt_no_success_recycle_${index}`),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+      expect(destroy).not.toHaveBeenCalled();
+    }
 
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_second"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).toHaveBeenCalledTimes(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_after_reset"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
-  it("posts a payloadless runtime wake to the active workspace invocation", async () => {
+  it("posts an exact runtime wake to the active workspace invocation", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
     const { container, containerFetch } = createContainerDouble({
@@ -225,6 +206,7 @@ describe("RunnerContainer", () => {
           return new Response(null, {
             headers: {
               "x-runtime-wake-accepted": "1",
+              "x-runtime-wake-identity-checked": "1",
             },
             status: 204,
           });
@@ -266,9 +248,360 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/runtime-wake")
     );
     expect(wakeCall?.[1]).toMatchObject({
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
-    expect(wakeCall?.[1]?.body).toBeUndefined();
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_evt_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+  });
+
+  it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+              "x-runtime-wake-identity-checked": "1",
+            },
+            status: 204,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+
+    const wakeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    );
+    expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    });
+  });
+
+  it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+            },
+            status: 204,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "container-rpc-error",
+    });
+  });
+
+  it("treats a legacy identity-blind rejected wake as no active child when health reports idle", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 0,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+  });
+
+  it("does not use the legacy health fallback when the wake response omits the accepted header", async () => {
+    let healthCallCount = 0;
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          healthCallCount += 1;
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 0,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(healthCallCount).toBe(0);
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed while health reports active work", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: 1,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health is unavailable", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          throw new Error("health probe unavailable");
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health omits active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health is malformed", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response("not-json", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a nonnumeric active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: "0",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+  });
+
+  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a negative active job count", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            activeJobCount: -1,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }),
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
   });
 
   it("ensureProcessing wakes the exact active child without starting a replacement", async () => {
@@ -397,7 +730,33 @@ describe("RunnerContainer", () => {
   });
 
   it("ensureProcessing starts work when no active child can be woken", async () => {
-    const { container, containerFetch } = createContainerDouble();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-absent": "1",
+              "x-runtime-wake-accepted": "0",
+            },
+            status: 204,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
 
     await expect(container.ensureProcessing({
       activeRuntime: {
@@ -871,8 +1230,8 @@ describe("RunnerContainer", () => {
       leaseGeneration: "10",
       userId: "member_123",
     })).resolves.toEqual({
-      kind: "not-wakeable",
-      reason: "no-active-child",
+      kind: "unknown",
+      reason: "active-child-rejected",
     });
 
     expect(containerFetch.mock.calls.some(([url]) =>
@@ -1247,13 +1606,13 @@ describe("RunnerContainer", () => {
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
-          model: "gpt-5.4-nano",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: "gpt-5.4-nano",
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1276,14 +1635,14 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     });
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
       egressGrantConsumed: true,
-      model: "gpt-5.4-nano",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stdoutBytes: 2_048,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
@@ -1333,7 +1692,7 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             liveModelTurn: {
               durationMs: 1_234,
-              model: "gpt-5.4-nano",
+              model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -1354,7 +1713,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 
@@ -1433,7 +1792,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 
@@ -1453,7 +1812,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     }).catch((caught: unknown) => caught);
 
@@ -3161,6 +3520,66 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toBeUndefined();
 
+    expect(destroy).toHaveBeenCalledTimes(1);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("destroys and clears preserved liveness after explicit abort is accepted", async () => {
+    let abortPosted = false;
+    let runnerResponseLost = false;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: runnerResponseLost ? 1 : 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        abortPosted = true;
+        return new Response(null, { status: 204 });
+      }
+
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      runnerResponseLost = true;
+      throw new Error("Network connection lost");
+    });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_abort_after_accepted_response_lost");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    expect(abortPosted).toBe(true);
     expect(destroy).toHaveBeenCalledTimes(1);
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: false,

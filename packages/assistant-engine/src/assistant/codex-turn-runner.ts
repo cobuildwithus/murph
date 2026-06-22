@@ -62,6 +62,9 @@ import type {
 import type {
   AssistantProgressDelivery,
 } from './turn-progress.js'
+import type {
+  AssistantHostedToolContext,
+} from './hosted-tool-context.js'
 import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -171,6 +174,7 @@ export async function executeCodexTurnWithRecovery(input: {
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnRecoveryOutcome> {
@@ -430,6 +434,8 @@ async function executeAssistantCodexAttempt(input: {
         session: attemptPlan.session,
         sharedPlan: executionPlan.sharedPlan,
       }),
+      connectedAppsAvailable:
+        executionPlan.executionContext?.hosted?.connectedAppsAvailable ?? false,
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:
@@ -453,6 +459,7 @@ async function executeAssistantCodexAttempt(input: {
       voiceMemoDeliveryChannel,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+      hostedToolContext: executionPlan.hostedToolContext ?? null,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
       developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -645,11 +652,13 @@ function resolveAssistantVoiceMemoDeliveryChannel(input: {
   })
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
   if (channel === 'linq') {
-    return (
-      normalizeNullableString(deliveryFields.explicitTarget) === null &&
-      deliveryFields.bindingDelivery?.kind === 'thread' &&
-      normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
-    )
+    const bindingTarget =
+      deliveryFields.bindingDelivery?.kind === 'thread'
+        ? normalizeNullableString(deliveryFields.bindingDelivery.target)
+        : null
+    const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
+    return bindingTarget !== null &&
+      (explicitTarget === null || explicitTarget === bindingTarget)
       ? 'linq'
       : null
   }

@@ -517,8 +517,15 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
     expect(finalDockerfile).toContain('select(.slug == "gpt-5.5")');
+    expect(finalDockerfile).toContain('slug == "gpt-5.4-nano"');
+    expect(finalDockerfile).toContain('first_model("gpt-5.4-mini")');
+    expect(finalDockerfile).toContain(".supports_search_tool = false");
+    expect(finalDockerfile).toContain(".supports_parallel_tool_calls = false");
+    expect(finalDockerfile).toContain(".use_responses_lite = true");
     expect(finalDockerfile).toContain('"id":"flex"');
-    expect(finalDockerfile).toContain('jq -e \'any(.models[]?; .slug == "gpt-5.5"');
+    expect(finalDockerfile).toContain(
+      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == true))\'',
+    );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
@@ -582,7 +589,7 @@ describe("hosted runner container image contract", () => {
     expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
   });
 
-  it("proves the final image Codex model catalog patch adds and validates gpt-5.5 flex", async () => {
+  it("proves the final image Codex model catalog patch adds and validates smoke models", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -604,9 +611,85 @@ describe("hosted runner container image contract", () => {
     const patchedCatalogJson = runJqFilter(patchFilter, stockCatalogWithoutFlex);
     const patchedCatalog = parseCodexModelCatalogJson(patchedCatalogJson);
 
+    expect(readCodexModelSlugs(patchedCatalog)).toEqual([
+      "gpt-5.5",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+    ]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["auto", "flex"]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
-    expect(runJqFilter(validationFilter, patchedCatalog).trim()).toBe("true");
+    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
+    });
+    expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
+
+    const catalogWithDuplicateTemplateModels: CodexModelCatalog = {
+      models: [
+        {
+          slug: "gpt-5.5",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Second Auto" }],
+        },
+      ],
+    };
+    const duplicateTemplatePatchedCatalogJson = runJqFilter(
+      patchFilter,
+      catalogWithDuplicateTemplateModels,
+    );
+    const duplicateTemplatePatchedCatalog = parseCodexModelCatalogJson(
+      duplicateTemplatePatchedCatalogJson,
+    );
+
+    expect(readCodexModelSlugs(duplicateTemplatePatchedCatalog).filter((slug) => slug === "gpt-5.4-nano"))
+      .toHaveLength(1);
+    expect(runJqFilter(validationFilter, duplicateTemplatePatchedCatalog, { slurp: true }).trim())
+      .toBe("true");
+    expect(runJqFilter(
+      validationFilter,
+      `${duplicateTemplatePatchedCatalogJson}\n${duplicateTemplatePatchedCatalogJson}`,
+      { slurp: true },
+    ).trim()).toBe("false");
+
+    const catalogWithUnsafeNano: CodexModelCatalog = {
+      models: [
+        {
+          slug: "gpt-5.5",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-nano",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+          supports_parallel_tool_calls: true,
+          supports_search_tool: true,
+        },
+      ],
+    };
+    const normalizedNanoCatalog = parseCodexModelCatalogJson(
+      runJqFilter(patchFilter, catalogWithUnsafeNano),
+    );
+    expect(readCodexModelSlugs(normalizedNanoCatalog).filter((slug) => slug === "gpt-5.4-nano"))
+      .toHaveLength(1);
+    expect(readCodexModelServiceTierIds(normalizedNanoCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(normalizedNanoCatalog, "gpt-5.4-nano")).toMatchObject({
+      supports_parallel_tool_calls: false,
+      supports_search_tool: false,
+      use_responses_lite: true,
+    });
+    expect(runJqFilter(validationFilter, normalizedNanoCatalog, { slurp: true }).trim()).toBe("true");
 
     const alreadyPatchedCatalog: CodexModelCatalog = {
       models: [
@@ -617,15 +700,24 @@ describe("hosted runner container image contract", () => {
             { id: "flex", name: "Existing Flex" },
           ],
         },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
       ],
     };
     const repatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, alreadyPatchedCatalog),
     );
     const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.5");
+    const twicePatchedCatalog = parseCodexModelCatalogJson(
+      runJqFilter(patchFilter, repatchedCatalog),
+    );
 
     expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
-    expect(runJqFilter(validationFilter, repatchedCatalog).trim()).toBe("true");
+    expect(readCodexModelSlugs(twicePatchedCatalog).filter((slug) => slug === "gpt-5.4-nano"))
+      .toHaveLength(1);
+    expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -845,7 +937,7 @@ function readLastDockerUser(dockerfile: string): string | null {
 }
 
 type CodexModelCatalog = {
-  models: Array<{
+  models: Array<Record<string, unknown> & {
     slug: string;
     service_tiers?: Array<{
       id: string;
@@ -864,7 +956,7 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
     "u",
   ).exec(dockerfile);
   const validationMatch = new RegExp(
-    String.raw`&& jq -e '([^']+)' /tmp/murph-codex-model-catalog\.openai-flex\.json >/dev/null`,
+    String.raw`&& jq -s -e '([^']+)' /tmp/murph-codex-model-catalog\.openai-flex\.json >/dev/null`,
     "u",
   ).exec(dockerfile);
 
@@ -878,10 +970,17 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   };
 }
 
-function runJqFilter(filter: string, input: CodexModelCatalog): string {
-  return execFileSync("jq", [filter], {
+function runJqFilter(
+  filter: string,
+  input: CodexModelCatalog | string,
+  options: { slurp?: boolean } = {},
+): string {
+  return execFileSync("jq", [
+    ...(options.slurp === true ? ["-s"] : []),
+    filter,
+  ], {
     encoding: "utf8",
-    input: JSON.stringify(input),
+    input: typeof input === "string" ? input : JSON.stringify(input),
   });
 }
 
@@ -897,4 +996,16 @@ function parseCodexModelCatalogJson(catalogJson: string): CodexModelCatalog {
 
 function readCodexModelServiceTierIds(catalog: CodexModelCatalog, slug: string): string[] {
   return catalog.models.find((model) => model.slug === slug)?.service_tiers?.map((tier) => tier.id) ?? [];
+}
+
+function readCodexModel(catalog: CodexModelCatalog, slug: string): Record<string, unknown> {
+  const model = catalog.models.find((candidate) => candidate.slug === slug);
+  if (!model) {
+    throw new Error(`Codex model catalog is missing ${slug}`);
+  }
+  return model;
+}
+
+function readCodexModelSlugs(catalog: CodexModelCatalog): string[] {
+  return catalog.models.map((model) => model.slug);
 }

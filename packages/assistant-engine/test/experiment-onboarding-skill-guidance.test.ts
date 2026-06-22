@@ -236,4 +236,27 @@ describe('experiment onboarding skill guidance', () => {
       'The user does not need to approve the cadence separately once they have agreed to the run plan and assistant support is available',
     )
   })
+
+  it('preserves the user-valued outcome selected during first-run onboarding', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'The user-facing plan preserves the result the user chose',
+    )
+    expect(raw).toContain(
+      'selected user-valued outcome from first-run onboarding',
+    )
+    expect(raw).toContain(
+      'Do not silently replace it with adherence, a convenient wearable proxy, or the protocol\'s default metric',
+    )
+    expect(raw).toContain(
+      'resolve what magnitude or direction of change would be meaningful enough to affect the user\'s decision',
+    )
+    expect(raw).toContain(
+      'label the review as directional or exploratory rather than treating noise as success',
+    )
+    expect(raw).toContain(
+      'If the selected protocol cannot credibly measure the promised result in its test window',
+    )
+  })
 })

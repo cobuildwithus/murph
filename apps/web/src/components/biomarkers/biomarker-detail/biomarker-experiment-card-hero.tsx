@@ -26,7 +26,7 @@ export function BiomarkerExperimentCardHero({
       href={protocol.href}
       className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 lg:flex-row"
     >
-      <div className="relative aspect-[2/1] w-full shrink-0 overflow-hidden sm:aspect-[16/9] lg:aspect-auto lg:w-[320px] lg:self-stretch">
+      <div className="relative aspect-[2/1] w-full shrink-0 overflow-hidden outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10 sm:aspect-[16/9] lg:aspect-auto lg:w-[320px] lg:self-stretch">
         {imageSrc ? (
           <Image
             src={imageSrc}
@@ -50,7 +50,7 @@ export function BiomarkerExperimentCardHero({
             <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
               {protocol.category}
             </span>
-            <h3 className="font-serif text-xl/tight font-semibold tracking-tight text-foreground text-pretty sm:text-2xl/tight lg:text-[26px]">
+            <h3 className="font-serif text-xl/tight font-semibold tracking-tight text-foreground text-balance sm:text-2xl/tight lg:text-[26px]">
               {protocol.title}
             </h3>
           </div>
@@ -100,7 +100,7 @@ function Stat({
       </span>
       <span
         className={cn(
-          "font-serif text-sm/5 font-semibold text-foreground text-pretty sm:text-base/6",
+          "font-serif text-sm/5 font-semibold tabular-nums text-foreground text-pretty sm:text-base/6",
           valueClassName,
         )}
       >

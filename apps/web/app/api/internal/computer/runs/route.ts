@@ -11,7 +11,6 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(await service.startRun({
     memberId,
-    profileKey: body.profileKey,
     resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,
     resumeDeliveryContext: body.resumeDeliveryContext,
     resumeRunId: body.resumeRunId,

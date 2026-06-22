@@ -21,26 +21,21 @@ import {
 const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER =
   "hostedWorkspaceSnapshotRestoreStep";
 export type HostedWorkspaceSnapshotRestoreStep =
-  | "archive_restore"
   | "data_key_unwrap"
   | "object_fetch"
   | "presign_get"
-  | "scratch_prepare"
   | "size_guard";
 
 const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS =
   new Set<HostedWorkspaceSnapshotRestoreStep>([
-    "archive_restore",
     "data_key_unwrap",
     "object_fetch",
     "presign_get",
-    "scratch_prepare",
     "size_guard",
   ]);
 
 export function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
   ref: HostedWorkspaceSnapshotV2Ref;
-  scratchRootPresent: boolean;
   timeoutMs: number;
 }): HostedExecutionStructuredLogDetails {
   return {
@@ -49,7 +44,6 @@ export function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
     archiveFileCount: input.ref.archive.fileCount,
     archiveTotalPlainBytes: input.ref.archive.totalPlainBytes,
     operation: "workspace_snapshot_restore",
-    scratchRootPresent: input.scratchRootPresent,
     timeoutMs: input.timeoutMs,
   };
 }

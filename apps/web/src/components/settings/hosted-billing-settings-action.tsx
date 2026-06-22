@@ -183,7 +183,7 @@ export function HostedBillingSettingsAction(props: {
       </div>
 
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+        <DialogContent className="max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
               Manage subscription
@@ -253,7 +253,7 @@ export function HostedBillingSettingsAction(props: {
         open={confirmation === "upgrade"}
         onOpenChange={(open) => { if (!open) closeConfirmation(); }}
       >
-        <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+        <DialogContent className="max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
               Upgrade to Edge
@@ -300,7 +300,7 @@ export function HostedBillingSettingsAction(props: {
         open={confirmation === "start-pulse"}
         onOpenChange={(open) => { if (!open) closeConfirmation(); }}
       >
-        <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+        <DialogContent className="max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
               Start Pulse
@@ -367,7 +367,7 @@ export function HostedBillingSettingsAction(props: {
         open={confirmation === "switch-to-pulse"}
         onOpenChange={(open) => { if (!open) closeConfirmation(); }}
       >
-        <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+        <DialogContent className="max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
               Switch to Pulse

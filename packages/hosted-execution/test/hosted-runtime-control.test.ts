@@ -786,11 +786,14 @@ describe("hosted runtime control contracts", () => {
         presignGetMs: 4,
         objectFetchMs: 5,
         decryptMs: 6,
-        extractMs: 7,
-        encryptedBytes: 8,
-        plainBytes: 9,
+        archiveExtractMs: 7,
+        durableRootReplaceMs: 9,
+        cleanupMs: 10,
+        extractMs: 11,
+        encryptedBytes: 12,
+        plainBytes: 13,
       },
-      boot: { nodeStartupMs: 10, restoreWasCold: true },
+      boot: { nodeStartupMs: 14, restoreWasCold: true },
       wake: {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
         foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
@@ -1093,6 +1096,15 @@ describe("hosted runtime control contracts", () => {
       workspace,
     })).toEqual({
       checkpointed: true,
+      workspace,
+    });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
+      workspace,
+    })).toEqual({
+      checkpointConflictReason: "foreground_pending",
+      checkpointed: false,
       workspace,
     });
     expect(parseHostedBrowserVaultReplicaPublishResponse({

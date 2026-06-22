@@ -73,7 +73,6 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
 ]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
-const DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT = 25;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
@@ -223,7 +222,6 @@ type RunnerContainerDestroyReason =
   | "destroy-instance"
   | "invoke-failure"
   | "readiness-failure"
-  | "success-recycle"
   | "warm-health-failed"
   | "warm-invalidated";
 
@@ -358,7 +356,6 @@ export class RunnerContainer extends Container {
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
-  private successfulWarmInvocationCount = 0;
   private warmShellInvalidatedByUnsettledDestroy = false;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
@@ -462,14 +459,10 @@ export class RunnerContainer extends Container {
     ) {
       return;
     }
-    let abortPostStatus: RunnerWorkspaceInvocationAbortPostStatus = "failed";
     if (this.workspaceInvocationAbortEndpointReady) {
-      abortPostStatus = await this.postWorkspaceInvocationAbort(input);
+      await this.postWorkspaceInvocationAbort(input);
     }
-    if (
-      this.workspaceInvocationActiveOperationPreservedAfterTransportFailure
-      && abortPostStatus !== "accepted"
-    ) {
+    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
       if (!abortController.signal.aborted) {
         abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
       }
@@ -537,15 +530,17 @@ export class RunnerContainer extends Container {
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     const active = this.workspaceInvocationActiveOperation;
     if (
-      !active
-      || active.userId !== input.userId
-      || active.attemptId !== input.attemptId
-      || active.leaseGeneration !== input.leaseGeneration
+      active
+      && (
+        active.userId !== input.userId
+        || active.attemptId !== input.attemptId
+        || active.leaseGeneration !== input.leaseGeneration
+      )
     ) {
-      return { kind: "not-wakeable", reason: "no-active-child" };
+      return { kind: "unknown", reason: "active-child-rejected" };
     }
 
-    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
+    if (active && this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
       let activeInContainer = true;
       try {
         activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
@@ -569,38 +564,76 @@ export class RunnerContainer extends Container {
       const response = await this.containerFetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
+          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
           method: "POST",
           signal: runtimeWakeSignal,
         },
       );
-      const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      const acceptedHeader = response.headers.get("x-runtime-wake-accepted");
+      const accepted = acceptedHeader === "1";
+      const explicitlyRejected = acceptedHeader === "0";
+      const absent = response.headers.get("x-runtime-wake-absent") === "1";
+      const identityChecked =
+        response.headers.get("x-runtime-wake-identity-checked") === "1";
+      const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
       const pending = response.headers.get("x-runtime-wake-pending") === "1";
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
       });
-      if (!response.ok || !accepted) {
+      const acceptedWithoutIdentityProof =
+        response.ok && accepted && !active && !identityChecked;
+      let legacyNoActiveChild = false;
+      if (
+        response.ok
+        && !active
+        && explicitlyRejected
+        && !accepted
+        && !absent
+        && !identityChecked
+        && !mismatch
+      ) {
+        try {
+          legacyNoActiveChild = !(await this.readWorkspaceInvocationActiveFromHealth());
+        } catch {
+          legacyNoActiveChild = false;
+        }
+      }
+      if (!response.ok || !accepted || acceptedWithoutIdentityProof) {
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             runtimeWakeAccepted: accepted,
+            runtimeWakeAbsent: absent,
+            runtimeWakeIdentityChecked: identityChecked,
+            runtimeWakeLegacyNoActiveChild: legacyNoActiveChild,
+            runtimeWakeMismatch: mismatch,
             runtimeWakeStatus: response.status,
-            workspaceAttemptId: active.attemptId,
+            workspaceAttemptId: input.attemptId,
           },
           level: "warn",
-          message: "Hosted execution container runtime wake was not accepted by the active child.",
+          message: "Hosted execution container runtime wake was not accepted by a verified active child.",
           phase: "scheduled",
           userId: input.userId,
         });
       }
+      if (acceptedWithoutIdentityProof) {
+        return { kind: "unknown", reason: "container-rpc-error" };
+      }
       if (response.ok && accepted) {
         return { action: pending ? "already_running" : "woken", kind: "accepted" };
+      }
+      if (response.ok && (absent || legacyNoActiveChild)) {
+        return { kind: "not-wakeable", reason: "no-active-child" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          workspaceAttemptId: active.attemptId,
+          workspaceAttemptId: input.attemptId,
         },
         error,
         level: "warn",
@@ -896,7 +929,6 @@ export class RunnerContainer extends Container {
     });
     this.stopGeneration += 1;
     this.clearRecentReadinessProof();
-    this.successfulWarmInvocationCount = 0;
     this.warmShellInvalidatedByUnsettledDestroy = false;
     this.resolveStopObservers();
     emitHostedExecutionStructuredLog({
@@ -1126,22 +1158,6 @@ export class RunnerContainer extends Container {
                 reason: "invoke-failure",
               });
             }
-          } else if (this.recordSuccessfulWarmInvocationShouldRecycle()) {
-            emitHostedExecutionStructuredLog({
-              component: "container",
-              details: {
-                recycleAfterSuccessCount:
-                  readRunnerContainerRecycleAfterSuccessCount(this.environment),
-                successfulWarmInvocationCount: this.successfulWarmInvocationCount,
-              },
-              message: "Hosted execution container reached warm success recycle limit.",
-              phase: "container.ready",
-              userId: routeUserId,
-            });
-            await this.stopWarmContainer({
-              failClosed: true,
-              reason: "success-recycle",
-            });
           }
         } else if (cleanupWarmContainerOnFailure) {
           await this.stopWarmContainer({
@@ -1189,7 +1205,14 @@ export class RunnerContainer extends Container {
     if (!response.ok) {
       throw new Error(`Hosted runner container health returned HTTP ${response.status}.`);
     }
-    return typeof payload.activeJobCount === "number" && payload.activeJobCount > 0;
+    if (
+      typeof payload.activeJobCount !== "number"
+      || !Number.isFinite(payload.activeJobCount)
+      || payload.activeJobCount < 0
+    ) {
+      throw new Error("Hosted runner container health did not include a valid active job count.");
+    }
+    return payload.activeJobCount > 0;
   }
 
   private async postWorkspaceInvocationAbort(input: {
@@ -1688,15 +1711,12 @@ export class RunnerContainer extends Container {
     try {
       destroyed = await this.destroyIfRunning({ failClosed, reason });
     } catch (error) {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
     }
     if (destroyed) {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else {
-      this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = true;
     }
     return destroyed;
@@ -1738,12 +1758,6 @@ export class RunnerContainer extends Container {
     for (const observer of observers) {
       observer();
     }
-  }
-
-  private recordSuccessfulWarmInvocationShouldRecycle(): boolean {
-    this.successfulWarmInvocationCount += 1;
-    return this.successfulWarmInvocationCount
-      >= readRunnerContainerRecycleAfterSuccessCount(this.environment);
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -1832,7 +1846,6 @@ export class RunnerContainer extends Container {
       lastActivityObservedStage: this.lastActivityObservedStage,
       runnerIdleTtlMs,
       sleepAfter: String(this.sleepAfter),
-      successfulWarmInvocationCount: this.successfulWarmInvocationCount,
       warmShellInvalidatedByUnsettledDestroy: this.warmShellInvalidatedByUnsettledDestroy,
     };
   }
@@ -3008,31 +3021,6 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   if (!Number.isSafeInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
     throw new TypeError(
       `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer greater than or equal to ${MIN_RUNNER_IDLE_TTL_MS}.`,
-    );
-  }
-
-  return parsed;
-}
-
-function readRunnerContainerRecycleAfterSuccessCount(
-  source: RunnerContainerEnvironmentSource,
-): number {
-  const raw = source.HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
-
-  if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
-  }
-
-  if (typeof raw !== "string") {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a string when configured.",
-    );
-  }
-
-  const parsed = readStrictPositiveIntegerEnv(raw);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a positive integer.",
     );
   }
 

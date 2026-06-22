@@ -1363,12 +1363,105 @@ describe("hosted runtime internal web routes", () => {
 
     expect(conflictPayload).toMatchObject({
       checkpointed: false,
+      checkpointConflictReason: "workspace_version",
       workspace: {
         snapshotRef: createBundleRef("snapshot_current"),
         version: "6",
       },
     });
     expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
+  });
+
+  it("returns a typed foreground-pending checkpoint conflict for idle shutdown races", async () => {
+    mocks.checkpointHostedWorkspace.mockResolvedValue({
+      status: "foreground_pending",
+      workspace: buildWorkspaceRecord({
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      }),
+    });
+
+    const response = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_idle_shutdown_foreground_pending",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        reason: "idle_shutdown",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "1",
+        },
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      },
+    ));
+    const payload = parseHostedWorkspaceCheckpointResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      checkpointed: false,
+      checkpointConflictReason: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+      },
+      snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps old idle checkpoint callers compatible with the redacted mailbox imported seq", async () => {
+    mocks.checkpointHostedWorkspace.mockResolvedValue({
+      status: "foreground_pending",
+      workspace: buildWorkspaceRecord({
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      }),
+    });
+
+    const response = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_idle_shutdown_redacted_seq",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        reason: "idle_shutdown",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "1",
+          state: "idle",
+        },
+        snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      },
+    ));
+    const payload = parseHostedWorkspaceCheckpointResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      checkpointed: false,
+      checkpointConflictReason: "foreground_pending",
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "4",
+      },
+    });
+    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      expectedVersion: "4",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "1",
+        state: "idle",
+      },
+      snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
   it("signals a runtime recheck after checkpointing a future workspace wake", async () => {

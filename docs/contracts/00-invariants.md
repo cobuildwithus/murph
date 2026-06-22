@@ -12,6 +12,12 @@
 
 - Do not add unbounded linear-or-worse scans over any growing collection, including repo files, vault records, runtime state, database rows, object-store keys, mailbox items, transcripts, logs, API result sets, or in-memory accumulators. Any path that can run during user-visible work, recurring jobs, deploy checks, or normal local commands must use a bounded window, limit, cursor, index, manifest, precomputed projection, exact key lookup, or explicit pagination. Intentional full scans are allowed only for bounded fixture data, one-shot migrations, offline/admin repair tools, or diagnostics with a documented size cap and operator-visible cost.
 
+## Hosted Workspace File Cardinality
+
+- Hosted workspace restore/checkpoint treats file count as a latency, memory, and privacy budget. A routine feature must not create an unbounded number of small files under the restored workspace just because each file is small.
+- Before adding a new workspace write family, classify the state, choose a compact storage shape, define snapshot inclusion or exclusion, and document retention or compaction. Prefer existing shards, ledgers, manifests, SQLite stores, or owner documents over per-event file trees.
+- Detailed rule: `docs/contracts/06-hosted-workspace-file-count.md`.
+
 ## Canonical Storage
 
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
@@ -45,7 +51,7 @@
 
 ## User-Facing Message Sends
 
-- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, and the first welcome. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, and billing cancellation feedback email. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
 
 ## Hosted Foreground Priority
 

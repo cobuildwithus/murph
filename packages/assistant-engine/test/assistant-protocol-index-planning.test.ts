@@ -66,6 +66,7 @@ import {
 } from '../src/assistant/turn-finalizer.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
@@ -318,13 +319,15 @@ describe('assistant protocol index planning', () => {
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
-        dynamicTools: resolveMurphDynamicTools({}),
+        dynamicTools: resolveMurphDynamicTools({
+          progressUpdatesAvailable: false,
+        }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
   })
 
-  it('adds the reaction dynamic tool to the route contract only for Telegram reply contexts', async () => {
+  it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -358,6 +361,61 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: true,
+          progressUpdatesAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const linqReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: true,
+        deliveryReplyToMessageId: 'linq-message-1',
+        deliveryTarget: 'linq-chat-1',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(linqReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: linqReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: true,
+          progressUpdatesAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const linqSmsReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: false,
+        deliveryReplyToMessageId: 'linq-message-1',
+        deliveryTarget: 'linq-chat-1',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(linqSmsReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: linqSmsReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: false,
+          progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -382,6 +440,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
+          progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -402,12 +461,64 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
+          progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
     expect(telegramNoReplyPlan.assistantContractFingerprint).not.toBe(
       telegramReplyPlan.assistantContractFingerprint,
+    )
+  })
+
+  it('keeps hosted computer tools in the auto-reply route contract', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const route = createRoute()
+    const profile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: createHostedToolContext(),
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        deliverResponse: true,
+        turnTrigger: 'automation-auto-reply',
+      },
+      profile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: plan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          computerToolsAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
     )
   })
 
@@ -1567,6 +1678,19 @@ function createRoute(): CodexThreadIdentity {
     ),
     routeFingerprint: 'route-test',
     routeId: 'route-test',
+  }
+}
+
+function createHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    requiredUserMessageDeliveryAvailable: true,
+    sendRequiredUserMessage: vi.fn(async () => ({
+      kind: 'sent' as const,
+      source: 'model' as const,
+    })),
   }
 }
 

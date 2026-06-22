@@ -56,10 +56,10 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
       </div>
       {stats.due > 0 ? (
         <div className="flex items-baseline justify-between border-t border-border/50 pt-3">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs tabular-nums text-muted-foreground">
             {stats.completed} of {stats.due} due
           </span>
-          <span className="font-serif text-sm font-semibold text-foreground">
+          <span className="font-serif text-sm font-semibold tabular-nums text-foreground">
             {stats.adherencePercent}%
           </span>
         </div>

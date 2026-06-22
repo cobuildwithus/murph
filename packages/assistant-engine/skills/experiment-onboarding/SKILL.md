@@ -14,6 +14,7 @@ Help the user set up a bounded experiment that fits their life, then create the 
 - Protocol resolved from Health Commons when one exists.
 - Safety addressed before the run is created.
 - Run record captures protocol, schedule, measurement, stop conditions, and reminder preference.
+- The user-facing plan preserves the result the user chose, distinguishes the primary outcome from adherence and supporting evidence, and does not promise more than the timeframe can show.
 - After creating a protocol-linked run, the user gets the matching experiment page link so they can open the protocol and later results view.
 - Reminder/support setup is handled explicitly: first-session instruction is resolved through the current reply or a one-shot first-session prep reminder; planned-session support is scheduled, declined, or concretely blocked; and recurring behavior support carries the compact follow-through loop when adherence or friction is likely to matter.
 
@@ -32,6 +33,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 ## Decision rules
 
 - Ask what the user wants to get out of the experiment only when their goal is unclear.
+- When the user arrives with a selected user-valued outcome from first-run onboarding, treat that outcome and the evidence named with it as the setup anchor. Do not silently replace it with adherence, a convenient wearable proxy, or the protocol's default metric. Where the protocol supports it, resolve what magnitude or direction of change would be meaningful enough to affect the user's decision; otherwise label the review as directional or exploratory rather than treating noise as success. If the selected protocol cannot credibly measure the promised result in its test window, explain the mismatch and adapt the plan, choose a better same-family protocol, narrow the promise, or offer a different option before creating the run.
 - Before asking any experiment onboarding question, perform a bounded vault-first evidence pass for information that could affect setup. This is a prerequisite, not an optional courtesy. Read the protocol page, active experiments, saved memory/preferences, relevant journal notes, regimens/supplements/medications, labs, documents, and wearable summaries when those surfaces could matter.
 - Do not ask the user to restate labs, wearable signals, notes, active experiments, regimen details, goals, conditions, allergies, preferences, or other saved context that a targeted vault read already answers.
 - For lab-backed protocols, inspect structured lab surfaces such as `vault-cli blood-test list --format json`, `vault-cli blood-test show <id> --format json`, `vault-cli search query "<lab or biomarker terms>" --format json`, and `vault-cli timeline --format json` before asking about baseline or follow-up lab availability. If a usable panel exists, propose it and ask only for confirmation when selection or freshness is ambiguous.

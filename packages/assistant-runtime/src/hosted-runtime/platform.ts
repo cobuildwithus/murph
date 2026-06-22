@@ -302,10 +302,12 @@ export interface HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
 export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   sizeGuardMs?: number;
   dataKeyUnwrapMs?: number;
-  scratchPrepareMs?: number;
   presignGetMs?: number;
   objectFetchMs?: number;
   decryptMs?: number;
+  archiveExtractMs?: number;
+  durableRootReplaceMs?: number;
+  cleanupMs?: number;
   extractMs?: number;
   encryptedBytes?: number;
   plainBytes?: number;
@@ -330,7 +332,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
   restoreWorkspaceSnapshot(input: {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
-    scratchRoot?: string | null;
+    signal?: AbortSignal | null;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
@@ -357,6 +359,7 @@ export interface HostedRuntimeVaultSharePort {
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
+  connectedAppsAvailable?: boolean | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;

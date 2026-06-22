@@ -372,6 +372,7 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   sending: AssistantOutboxIntent
 }): boolean {
   return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+    isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input)
 }
 
@@ -426,6 +427,16 @@ function isLinqPartialDeliveryWithoutProviderIds(input: {
 
   const providerMessageIds = readProviderMessageIdsFromErrorRecord(errorRecord, context)
   return providerMessageIds === null
+}
+
+function isLinqMessageReactionAmbiguityWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  sending: AssistantOutboxIntent
+}): boolean {
+  return input.deliveryMayHaveSucceeded &&
+    input.sending.channel === 'linq' &&
+    input.sending.operation?.kind === 'message-reaction' &&
+    input.sending.deliveryTransportIdempotent === false
 }
 
 function readTelegramAmbiguousDeliveryFromError(input: {

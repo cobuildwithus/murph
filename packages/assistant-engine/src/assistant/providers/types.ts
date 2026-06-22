@@ -23,6 +23,9 @@ import type { AssistantCodexContinuation } from '../active-turn-input-journal.js
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 import type { AssistantProgressDelivery } from '../turn-progress.js'
 import type {
+  AssistantHostedToolContext,
+} from '../hosted-tool-context.js'
+import type {
   AssistantHostedGeneratedImageUploader,
 } from '../execution-context.js'
 import type {
@@ -83,6 +86,7 @@ export interface AssistantProviderTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
   codexHome?: string | null
@@ -119,6 +123,7 @@ export interface AssistantProviderTurnInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
@@ -151,6 +156,7 @@ export interface AssistantProviderTurnExecutionInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
@@ -178,6 +184,7 @@ export interface AssistantProviderTurnExecutionInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

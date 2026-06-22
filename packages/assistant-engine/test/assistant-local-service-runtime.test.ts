@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
@@ -76,6 +76,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/prompt-attempts.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/service-usage.js')
+  vi.doUnmock('../src/assistant/runtime-budgets.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
@@ -139,6 +140,54 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
+    vault: '/vaults/test',
+  })
+  assert.ok(
+    (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) <
+      (mocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0),
+  )
+})
+
+test('sendAssistantMessageLocal compacts oversized runtime logs before foreground turn writes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-local-service-runtime-maintenance-',
+  )
+  tempRoots.push(parentRoot)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(paths.journalsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    paths.runtimeEventsPath,
+    Array.from({ length: 2050 }, (_value, index) =>
+      JSON.stringify(makeRuntimeEvent(index)),
+    ).join('\n') + '\n',
+    'utf8',
+  )
+
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    useRealRuntimeMaintenance: true,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Summarize my inbox',
+    vault: vaultRoot,
+  })
+
+  const compactedRuntimeEvents = await readFile(paths.runtimeEventsPath, 'utf8')
+  const compactedRuntimeEventCount = compactedRuntimeEvents
+    .trim()
+    .split('\n')
+    .filter(Boolean).length
+
+  assert.ok(compactedRuntimeEventCount <= 2000)
+  assert.match(compactedRuntimeEvents, /runtime\.maintenance/)
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length > 0, true)
 })
 
 test('sendAssistantMessageLocal delivers media-only provider replies', async () => {
@@ -2054,9 +2103,15 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
+  const blockedMaintenance = createDeferred<void>()
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  mocks.maybeRunAssistantRuntimeMaintenance
+    .mockResolvedValueOnce(undefined)
+    .mockImplementationOnce(async () => {
+      await blockedMaintenance.promise
+    })
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
@@ -2103,6 +2158,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Follow-up while running'])
   })
+  assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
   providerRelease.resolve()
 
   const [firstResult, steeredResult] = await Promise.all([
@@ -4705,7 +4761,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal does not expose progress delivery for hosted auto-replies', async () => {
+test('sendAssistantMessageLocal exposes hosted progress and computer context for auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4738,6 +4794,7 @@ test('sendAssistantMessageLocal does not expose progress delivery for hosted aut
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
         userEnvKeys: [],
       },
     },
@@ -4751,8 +4808,14 @@ test('sendAssistantMessageLocal does not expose progress delivery for hosted aut
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
-  assert.equal(progressDelivery, null)
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.ok(progressDelivery)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
+  await progressDelivery.send('Checking the iMessage thread.')
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
   assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
@@ -4793,9 +4856,12 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
@@ -4807,6 +4873,156 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
     'Checking the iMessage thread.',
   )
+})
+
+test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {
+  const progressDeliveryDependencies = {
+    sendLinqVoiceMemo: vi.fn(async () => ({
+      providerMessageId: 'progress-voice-memo',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only Linq manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.equal(progressDelivery, null)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal enables hosted computer tools for Telegram when provider fetch and delivery are available', async () => {
+  const progressDeliveryDependencies = {
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'telegram-thread',
+      target: 'telegram-thread',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only Telegram manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.ok(progressDelivery)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
+  await progressDelivery.send('Checking the Telegram thread.')
+
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
+    'Checking the Telegram thread.',
+  )
+})
+
+test('sendAssistantMessageLocal does not expose hosted progress or computer delivery for unsupported channels', async () => {
+  const progressDeliveryDependencies = {
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'telegram-thread',
+      target: 'telegram-thread',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'whatsapp'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'whatsapp',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only WhatsApp manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.equal(progressDelivery, null)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(hostedToolContext.computerToolsAvailable, false)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendTelegram.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal lets the provider own hosted attachment progress', async () => {
@@ -5023,9 +5239,12 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
-  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
   assert.deepEqual(result, {
@@ -5039,13 +5258,12 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
   )
 })
 
-test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resolved audience channels', async () => {
+test('sendAssistantMessageLocal does not expose optional progress delivery for hosted email', async () => {
   const progressDeliveryDependencies = {
-    sendLinq: vi.fn(async () => ({
-      providerMessageId: 'progress-message',
-      providerThreadId: 'thread-progress',
-      target: 'thread-progress',
-      targetKind: 'thread' as const,
+    sendEmail: vi.fn(async () => ({
+      providerMessageId: 'required-message',
+      providerThreadId: 'email-thread',
+      target: 'email-thread',
     })),
   }
   const sharedPlan = createSharedPlan()
@@ -5058,33 +5276,47 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
   })
 
   await sendAssistantMessageLocal({
-    channel: 'linq',
+    channel: 'email',
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        providerFetch: vi.fn(async () => new Response(null)),
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only manual reply',
+    prompt: 'Hosted queue-only email manual reply',
     turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
-  assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
-  const result = await progressDelivery.send('Checking the iMessage thread.')
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.equal(progressDelivery, null)
+  assert.ok(hostedToolContext)
+  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(hostedToolContext.computerToolsAvailable, true)
+  const result = await hostedToolContext.sendRequiredUserMessage(
+    'Open this handoff link?',
+  )
 
   assert.deepEqual(result, {
-    kind: 'failed',
+    kind: 'sent',
     source: 'model',
   })
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
-  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
+    'Open this handoff link?',
+  )
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
@@ -6990,6 +7222,7 @@ async function loadLocalServiceModule(input?: {
     session: AssistantSession
   }
   reactionOutcome?: AssistantDeliveryOutcome
+  useRealRuntimeMaintenance?: boolean
   route?: {
     provider: string
     providerOptions?: {
@@ -7004,6 +7237,7 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const useRealRuntimeMaintenance = input?.useRealRuntimeMaintenance === true
   const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
     '../src/assistant/store.js',
   )
@@ -7293,6 +7527,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
+    maybeRunAssistantRuntimeMaintenance: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/runtime-budgets.js').maybeRunAssistantRuntimeMaintenance
+        >[0],
+      ) => undefined,
+    ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
     saveAssistantSession: vi.fn(),
@@ -7520,6 +7761,12 @@ async function loadLocalServiceModule(input?: {
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
+  if (!useRealRuntimeMaintenance) {
+    vi.doMock('../src/assistant/runtime-budgets.js', () => ({
+      maybeRunAssistantRuntimeMaintenance:
+        mocks.maybeRunAssistantRuntimeMaintenance,
+    }))
+  }
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/runtime-state-service.js', () => ({
       createAssistantRuntimeStateService: vi.fn(() => mocks.runtimeState),
@@ -7568,6 +7815,22 @@ function isTraceEventWithRawType(
     !Array.isArray(rawEvent) &&
     (rawEvent as { type?: unknown }).type === type
   )
+}
+
+function makeRuntimeEvent(index: number) {
+  return {
+    at: `2026-04-08T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(
+      index % 60,
+    ).padStart(2, '0')}.000Z`,
+    component: 'test',
+    dataJson: null,
+    entityId: `entity-${index}`,
+    entityType: 'session',
+    kind: 'runtime.maintenance' as const,
+    level: 'info' as const,
+    message: `event-${index}`,
+    schema: 'murph.assistant-runtime-event.v1' as const,
+  }
 }
 
 function createHostedMailboxSourceRef(input: {

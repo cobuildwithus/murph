@@ -115,7 +115,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Assistant outbox intents that must move with hosted delivery continuity.",
   ),
   definePortableAssistantSubtree(
-    ".runtime/operations/assistant/accepted-turn-inputs",
+    ".runtime/operations/assistant/state/accepted-turn-inputs",
     "Assistant active-turn accepted input journals that must move with hosted execution continuity.",
   ),
   defineMachineLocalAssistantSubtree(
@@ -164,7 +164,11 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/diagnostics",
-    "Assistant diagnostics snapshots and events move with hosted debugging continuity.",
+    "Assistant diagnostics summary state moves with hosted debugging continuity; event logs are machine-local debugging residue.",
+  ),
+  defineMachineLocalAssistantFile(
+    ".runtime/operations/assistant/diagnostics/events.jsonl",
+    "Assistant diagnostic event log is bounded local debugging residue; diagnostics snapshot carries portable counters and recent warnings.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
@@ -172,7 +176,11 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/journals",
-    "Assistant journals and runtime event logs move with hosted debugging continuity.",
+    "Assistant journals move with hosted debugging continuity; runtime event logs are machine-local debugging residue.",
+  ),
+  defineMachineLocalAssistantFile(
+    ".runtime/operations/assistant/journals/runtime-events.jsonl",
+    "Assistant runtime event log is bounded local debugging residue and is excluded from hosted workspace snapshots.",
   ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/issues",

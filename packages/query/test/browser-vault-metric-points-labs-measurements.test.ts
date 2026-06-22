@@ -707,10 +707,14 @@ test("query projection rebuild stores shared event and wearable metric points in
       );
       const stepsPoint = JSON.parse(
         rows.find((row) => row.metricKey === "steps")?.metricPointJson ?? "null",
-      ) as { context?: { contributingRecordIds?: unknown }; source?: { recordId?: string } } | null;
+      ) as { context?: { contributingRecordIds?: unknown }; source?: unknown } | null;
       assert.ok(stepsPoint);
-      assert.equal(stepsPoint.source?.recordId, "smp_projection_steps");
+      assert.equal(Object.hasOwn(stepsPoint, "source"), false);
       assert.equal(stepsPoint.context?.contributingRecordIds, undefined);
+      assert.doesNotMatch(
+        rows.find((row) => row.metricKey === "steps")?.metricPointJson ?? "",
+        /smp_projection_steps/u,
+      );
     } finally {
       database.close();
     }

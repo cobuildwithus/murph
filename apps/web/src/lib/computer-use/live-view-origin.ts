@@ -1,50 +1,23 @@
-export const HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_ENV_KEY =
-  "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS";
+export const KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES = [
+  "https://*.onkernel.com:8443",
+] as const;
 
-type EnvSource = Readonly<Record<string, string | undefined>>;
-
-export function readConfiguredComputerLiveViewOrigins(
-  env: EnvSource = process.env,
-): string[] {
-  const raw = env[HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_ENV_KEY]?.trim();
-  if (!raw) {
-    return [];
-  }
-
-  const origins = new Set<string>();
-  for (const segment of raw.split(/[\s,]+/u)) {
-    const origin = normalizeComputerLiveViewOrigin(segment);
-    if (origin) {
-      origins.add(origin);
-    }
-  }
-
-  return [...origins];
-}
+export const KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES = [
+  "https://*.onkernel.com:8443",
+  "wss://*.onkernel.com:8443",
+] as const;
 
 export function isAllowedComputerLiveViewUrl(input: {
-  env?: EnvSource;
   url: string;
 }): boolean {
-  let origin: string;
+  let parsedUrl: URL;
   try {
-    origin = new URL(input.url).origin;
+    parsedUrl = new URL(input.url);
   } catch {
     return false;
   }
 
-  return readConfiguredComputerLiveViewOrigins(input.env).includes(origin);
-}
-
-function normalizeComputerLiveViewOrigin(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    return new URL(trimmed).origin;
-  } catch {
-    return null;
-  }
+  return parsedUrl.protocol === "https:"
+    && parsedUrl.port === "8443"
+    && parsedUrl.hostname.endsWith(".onkernel.com");
 }

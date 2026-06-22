@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-20
+Last verified: 2026-06-21
 
 ## Purpose
 
@@ -17,6 +17,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-04-26 |
+| `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace file-count invariant for restored runtime write paths, checkpoint/restore cost, and compact side-effect storage choices. | Hosted workspace checkpoint/restore contract | High | 2026-06-21 |
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-05-13 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-05-13 |
@@ -46,11 +47,16 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, build-time catalog generation, scoped runtime artifacts, future aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-06-05 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding product boundary for start intents, Health Commons setup slots, assistant safety/setup flow, reminder-support policy, and private run handoff. | Experiment onboarding behavior | High | 2026-06-07 |
+| `agent-docs/product-specs/first-experiment-outcome-selection.md` | First-run experiment choice rules for outcome-valued options, credible evidence, timeframe integrity, and setup handoff. | First experiment outcome selection behavior | High | 2026-06-21 |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync, hybrid WHOOP posture, MVP scope, and phases. | Companion app plan | High | 2026-06-10 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-06-12 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion app MVP build spec: Privy login, Connect Apple Health, sign-in token endpoint. | Companion app build plan | High | 2026-06-10 |
+| `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |
+| `agent-docs/feature-user-story-audit/gap-triage.md` | Triage notes for gaps found during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
+| `agent-docs/feature-user-story-audit/parse-warnings.md` | Parser warnings captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
+| `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, CI, diff-aware package-boundary checks, hosted computer-use coverage, hosted Temporal orchestration guard coverage, hosted web E2E testkit triggers, the hosted-local Workers AI transcription E2E gate, and the Cloudflare immediate-deploy Blacksmith path. | Testing and CI truth | High | 2026-06-17 |

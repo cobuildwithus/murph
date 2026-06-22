@@ -8,6 +8,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   markLinqChatRead: vi.fn(),
+  sendEmail: vi.fn(),
   sendHostedProviderLinqMessage: vi.fn(),
   startLinqTypingIndicator: vi.fn(),
   startTelegramTypingIndicator: vi.fn(),
@@ -45,6 +46,11 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.markLinqChatRead.mockResolvedValue(undefined);
+  mocks.sendEmail.mockResolvedValue({
+    providerMessageId: "email-message",
+    providerThreadId: "email-thread",
+    target: "email-thread",
+  });
   mocks.sendHostedProviderLinqMessage.mockResolvedValue({
     providerMessageId: "linq-message",
     providerThreadId: "linq-thread",
@@ -258,12 +264,27 @@ test("hosted channel activity does not use ambient fetch when provider fetch is 
 });
 
 test("hosted progress delivery dependencies use the hosted Linq provider effect", async () => {
-  const providerFetch = vi.fn<typeof fetch>();
+  const providerFetch = vi.fn<typeof fetch>(async () =>
+    Response.json({
+      ok: true,
+      result: {
+        chat: { id: 123 },
+        message_id: 42,
+      },
+    })
+  );
   const signal = new AbortController().signal;
   const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      sendEmail: mocks.sendEmail,
+    },
     forwardedEnv: {
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+    },
+    platformEnv: {
+      TELEGRAM_BOT_TOKEN: "platform-telegram-token",
     },
     providerFetch,
     signal,
@@ -289,11 +310,24 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     target: "linq-thread",
     targetKind: "thread",
   });
+  await delivery.sendTelegram?.({
+    idempotencyKey: "telegram-progress-key",
+    message: "Checking the current Telegram thread.",
+    replyToMessageId: "7",
+    target: "123",
+  });
+  await delivery.sendEmail?.({
+    idempotencyKey: "email-progress-key",
+    identityId: null,
+    message: "Checking the current email thread.",
+    replyToMessageId: "email-reply",
+    subject: "Murph update",
+    target: "email-thread",
+    targetKind: "thread",
+  });
 
   assert.equal(delivery.signal, signal);
-  assert.equal("sendTelegram" in delivery, false);
   assert.equal("sendWhatsApp" in delivery, false);
-  assert.equal("sendEmail" in delivery, false);
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
@@ -319,6 +353,47 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     fetchImplementation: providerFetch,
     signal,
   });
+  assert.equal(
+    String(providerFetch.mock.calls[0]?.[0]),
+    "https://api.telegram.example/botplatform-telegram-token/sendMessage",
+  );
+  assert.deepEqual(JSON.parse(String(providerFetch.mock.calls[0]?.[1]?.body)), {
+    chat_id: "123",
+    reply_to_message_id: 7,
+    text: "Checking the current Telegram thread.",
+  });
+  assert.deepEqual(mocks.sendEmail.mock.calls[0]?.[0], {
+    idempotencyKey: "email-progress-key",
+    message: "Checking the current email thread.",
+    replyToMessageId: "email-reply",
+    subject: "Murph update",
+    target: "email-thread",
+    targetKind: "thread",
+  });
+});
+
+test("hosted progress email delivery rejects participant targets", async () => {
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      sendEmail: mocks.sendEmail,
+    },
+  });
+  const sendEmail = delivery.sendEmail;
+  assert.ok(sendEmail);
+
+  await assert.rejects(
+    () => sendEmail({
+      identityId: null,
+      message: "Checking the current email participant.",
+      subject: null,
+      target: "sender@example.test",
+      targetKind: "participant",
+    }),
+    {
+      code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+    },
+  );
+  assert.equal(mocks.sendEmail.mock.calls.length, 0);
 });
 
 test("hosted progress Linq delivery aborts provider send when request signal aborts", async () => {

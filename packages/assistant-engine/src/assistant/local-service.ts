@@ -70,6 +70,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantExecutionContext,
+  type AssistantHostedProgressDeliveryDependencies,
   type AssistantExecutionContext,
 } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -89,6 +90,7 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
+import { maybeRunAssistantRuntimeMaintenance } from './runtime-budgets.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -98,9 +100,13 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
+  normalizeAssistantProgressText,
   shouldCreateAssistantProgressDelivery,
-  type AssistantProgressDelivery,
+  type AssistantProgressDeliveryResult,
 } from './turn-progress.js'
+import {
+  createAssistantHostedToolContext,
+} from './hosted-tool-context.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantAcceptedTurnInputJournal,
@@ -116,7 +122,10 @@ import {
   createAssistantActiveTurnInputController,
   steerAssistantActiveTurnInputWithStatus,
 } from './active-turn-input-controller.js'
-import { normalizeNullableString } from './shared.js'
+import {
+  normalizeNullableString,
+  warnAssistantBestEffortFailure,
+} from './shared.js'
 import type {
   AssistantMessageInput,
   AssistantDeliveryOutcome,
@@ -141,6 +150,45 @@ function resolveAssistantProgressDeliveryChannel(input: {
     ?? normalizeNullableString(input.session.binding.channel)
 }
 
+function hasHostedTextDeliveryForChannel(input: {
+  channel: string | null
+  dependencies?: AssistantHostedProgressDeliveryDependencies | null
+  includeEmail?: boolean
+}): boolean {
+  const dependencies = input.dependencies
+  if (!dependencies) {
+    return false
+  }
+
+  switch (input.channel) {
+    case 'telegram':
+      return typeof dependencies.sendTelegram === 'function'
+    case 'linq':
+      return typeof dependencies.sendLinq === 'function'
+    case 'email':
+      return input.includeEmail === true &&
+        typeof dependencies.sendEmail === 'function'
+    default:
+      return false
+  }
+}
+
+function isHostedOptionalProgressDeliveryAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): boolean {
+  const hosted = input.executionContext?.hosted
+  if (!hosted) {
+    return true
+  }
+
+  return hasHostedTextDeliveryForChannel({
+    channel: resolveAssistantProgressDeliveryChannel(input),
+    dependencies: hosted.progressDeliveryDependencies,
+  })
+}
+
 function isRequiredUserMessageDeliveryAvailable(input: {
   executionContext: AssistantExecutionContext | null
   session: AssistantSession
@@ -151,16 +199,63 @@ function isRequiredUserMessageDeliveryAvailable(input: {
     return true
   }
 
-  return resolveAssistantProgressDeliveryChannel(input) === 'linq' &&
-    typeof hosted.progressDeliveryDependencies?.sendLinq === 'function'
+  return hasHostedTextDeliveryForChannel({
+    channel: resolveAssistantProgressDeliveryChannel(input),
+    dependencies: hosted.progressDeliveryDependencies,
+    includeEmail: true,
+  })
 }
 
 function isHostedComputerToolTransportAvailable(input: {
   executionContext: AssistantExecutionContext | null
-  requiredUserMessageDeliveryAvailable: boolean
 }): boolean {
-  return input.requiredUserMessageDeliveryAvailable &&
-    typeof input.executionContext?.hosted?.providerFetch === 'function'
+  return typeof input.executionContext?.hosted?.providerFetch === 'function'
+}
+
+async function sendHostedRequiredUserMessage(input: {
+  dependencies?: AssistantHostedProgressDeliveryDependencies | null
+  getDeliveryContext: () => {
+    messageInput: AssistantMessageInput
+    session: AssistantSession
+  }
+  sharedPlan: AssistantTurnSharedPlan
+  text: string
+  turnId: string
+}): Promise<AssistantProgressDeliveryResult> {
+  const text = normalizeAssistantProgressText(input.text)
+  if (!text) {
+    return {
+      kind: 'skipped',
+      reason: 'empty',
+      source: 'model',
+    }
+  }
+
+  const deliveryContext = input.getDeliveryContext()
+  try {
+    await deliverAssistantProgressUpdate({
+      dependencies: input.dependencies ?? undefined,
+      input: deliveryContext.messageInput,
+      ordinal: 0,
+      session: deliveryContext.session,
+      sharedPlan: input.sharedPlan,
+      text,
+      turnId: input.turnId,
+    })
+    return {
+      kind: 'sent',
+      source: 'model',
+    }
+  } catch (error) {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'required hosted user-message delivery',
+    })
+    return {
+      kind: 'failed',
+      source: 'model',
+    }
+  }
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -280,6 +375,12 @@ export async function sendAssistantMessageLocal(
       throw createAssistantActiveTurnNotActiveError()
     }
   }
+
+  await runAssistantTurnBestEffort(() =>
+    maybeRunAssistantRuntimeMaintenance({
+      vault: input.vault,
+    })
+  )
 
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
@@ -402,34 +503,43 @@ export async function sendAssistantMessageLocal(
             session: resolved.session,
             sharedPlan,
           })
+        const hostedOptionalProgressDeliveryAvailable =
+          isHostedOptionalProgressDeliveryAvailable({
+            executionContext,
+            session: resolved.session,
+            sharedPlan,
+          })
         const hostedComputerToolsAvailable =
+          input.deliverResponse === true &&
           isHostedComputerToolTransportAvailable({
             executionContext,
-            requiredUserMessageDeliveryAvailable,
-          })
-        const progressDelivery = shouldCreateAssistantProgressDelivery(input)
+          }) && requiredUserMessageDeliveryAvailable
+        const hostedExecutionContext = executionContext?.hosted ?? null
+        const progressDelivery =
+          shouldCreateAssistantProgressDelivery(input) &&
+          hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
-                const hosted = executionContext?.hosted
+                const hosted = hostedExecutionContext
                 if (hosted) {
-                  const deliveryChannel = resolveAssistantProgressDeliveryChannel(
-                    progressInput,
-                  )
-                  if (deliveryChannel !== 'linq') {
+                  const dependencies = hosted.progressDeliveryDependencies
+                  if (
+                    !dependencies ||
+                    !hasHostedTextDeliveryForChannel({
+                      channel: resolveAssistantProgressDeliveryChannel(
+                        progressInput,
+                      ),
+                      dependencies,
+                    })
+                  ) {
                     throw new VaultCliError(
                       'ASSISTANT_PROGRESS_CHANNEL_UNSUPPORTED',
-                      'Hosted model progress updates are currently supported for iMessage delivery only.',
-                    )
-                  }
-                  if (!hosted.progressDeliveryDependencies?.sendLinq) {
-                    throw new VaultCliError(
-                      'ASSISTANT_PROGRESS_DELIVERY_UNAVAILABLE',
-                      'Hosted iMessage progress delivery dependencies were not available.',
+                      'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
                   await deliverAssistantProgressUpdate({
                     ...progressInput,
-                    dependencies: hosted.progressDeliveryDependencies,
+                    dependencies,
                   })
                   return
                 }
@@ -443,11 +553,43 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
-              hostedComputerToolsAvailable,
-              requiredUserMessageDeliveryAvailable,
               session: resolved.session,
               sharedPlan,
               turnId: currentUserTurn.turnId,
+            })
+          : null
+        const hostedToolContext = hostedExecutionContext
+          ? createAssistantHostedToolContext({
+              computerToolsAvailable: hostedComputerToolsAvailable,
+              getDeliveryContext: () => ({
+                messageInput: currentInput,
+                session: currentSession,
+              }),
+              messageInput: input,
+              requiredUserMessageDeliveryAvailable,
+              sendRequiredUserMessage: async (text) =>
+                progressDelivery
+                  ? await progressDelivery.send(text, {
+                      required: true,
+                      source: 'model',
+                    })
+                  : requiredUserMessageDeliveryAvailable
+                    ? await sendHostedRequiredUserMessage({
+                        dependencies:
+                          hostedExecutionContext.progressDeliveryDependencies,
+                        getDeliveryContext: () => ({
+                          messageInput: currentInput,
+                          session: currentSession,
+                        }),
+                        sharedPlan,
+                        text,
+                        turnId: currentUserTurn.turnId,
+                      })
+                  : {
+                      kind: 'failed',
+                      source: 'model',
+                    },
+              session: resolved.session,
             })
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
@@ -778,6 +920,7 @@ export async function sendAssistantMessageLocal(
           resolvedSession: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           progressDelivery,
+          hostedToolContext,
           turnId: currentUserTurn.turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {

@@ -261,7 +261,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(waitUntilSettled).toBe(true);
   });
 
-  it("clears the fresh fence asynchronously when the accepted first container request fails", async () => {
+  it("keeps the fresh fence asynchronously when an accepted first container request fails without conclusive liveness", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -305,9 +305,9 @@ describe("HostedUserRunner execution coordination", () => {
     await flushWaitUntil();
 
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      active_workspace_version: null,
-      failure_count: 1,
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
       last_invocation_at: null,
     });
     expect(runtimeLogSawDeletedAlarm).toBe(true);
@@ -327,8 +327,9 @@ describe("HostedUserRunner execution coordination", () => {
       level: "warn",
       phase: "error",
       redactedJson: expect.objectContaining({
+        attemptLivenessProbeOutcome: "unsupported",
         attemptStillActive: false,
-        fenceCleared: true,
+        fenceCleared: false,
         safeErrorMessage: "Hosted execution runtime failed.",
       }),
       workspaceVersion: "5",
@@ -340,10 +341,11 @@ describe("HostedUserRunner execution coordination", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          transportFailureFenceCleared: true,
+          transportFailureFenceCleared: false,
           workspaceVersion: "5",
         }),
-        message: "Hosted runner runtime execution adapter failed.",
+        message:
+          "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
       }),
     );
   });
@@ -435,9 +437,9 @@ describe("HostedUserRunner execution coordination", () => {
     await flushWaitUntil();
 
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      active_workspace_version: null,
-      failure_count: 1,
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
       last_invocation_at: null,
     });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -1552,6 +1554,49 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
       last_invocation_at: "2026-04-27T00:00:31.000Z",
+      wake_at: null,
+    });
+  });
+
+  it("preserves a non-wakeable accepted fence when committed-progress recovery is unknown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const onStatusRead = vi.fn(async () => {
+      throw new Error("status unavailable");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-recover-unknown",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:01:01.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      backoff_until: null,
       wake_at: null,
     });
   });

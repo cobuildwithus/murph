@@ -66,6 +66,9 @@ import {
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 import {
   CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS,
   extractAssistantMessageFallback,
@@ -83,8 +86,15 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 const MURPH_DYNAMIC_TOOLS = resolveMurphDynamicTools({})
+const MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS = resolveMurphDynamicTools({
+  progressUpdatesAvailable: false,
+})
 const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
   computerToolsAvailable: true,
+})
+const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS = resolveMurphDynamicTools({
+  computerToolsAvailable: true,
+  progressUpdatesAvailable: false,
 })
 
 const tempRoots: string[] = []
@@ -98,14 +108,27 @@ function sentProgressResult(source: 'model' | 'system' = 'model') {
 
 function createProgressDeliveryMock(
   result: ReturnType<typeof sentProgressResult> = sentProgressResult(),
-  options: { hostedComputerToolsAvailable?: boolean } = {},
 ) {
   return {
-    hostedComputerToolsAvailable: options.hostedComputerToolsAvailable === true,
     send: vi.fn(async (_text: string) => {
       void _text
       return result
     }),
+  }
+}
+
+function createHostedToolContext(input: {
+  computerToolsAvailable?: boolean
+  sendResult?: Awaited<ReturnType<AssistantHostedToolContext['sendRequiredUserMessage']>>
+} = {}): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: input.computerToolsAvailable ?? true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    requiredUserMessageDeliveryAvailable: true,
+    sendRequiredUserMessage: vi.fn(async () =>
+      input.sendResult ?? { kind: 'sent' as const, source: 'model' as const }
+    ),
   }
 }
 
@@ -462,7 +485,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -482,7 +505,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -499,8 +522,16 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        hostedToolContext: createHostedToolContext(),
+      }),
+    ).toMatchObject({
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS,
+    })
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
+        hostedToolContext: createHostedToolContext(),
         progressDelivery: {
-          hostedComputerToolsAvailable: true,
           async send() {
             return sentProgressResult()
           },
@@ -682,7 +713,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS,
+              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -1261,9 +1292,8 @@ describe('assistant codex runtime', () => {
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
     const fetchOrder: string[] = []
-    const progressDelivery = createProgressDeliveryMock(sentProgressResult(), {
-      hostedComputerToolsAvailable: true,
-    })
+    const hostedToolContext = createHostedToolContext()
+    const progressDelivery = createProgressDeliveryMock(sentProgressResult())
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1415,6 +1445,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         fetchImpl,
+        hostedToolContext,
         progressDelivery,
         prompt: 'navigate then pause',
         workingDirectory,
@@ -1423,9 +1454,8 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-    expect(progressDelivery.send).toHaveBeenCalledWith(
+    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
       'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
-      { required: true, source: 'model' },
     )
   })
 
@@ -1439,9 +1469,10 @@ describe('assistant codex runtime', () => {
     let liveTurn: CodexAppServerLiveTurn | null = null
     let liveTurnReleased = 0
 
-    const progressDelivery = {
-      hostedComputerToolsAvailable: true,
-      send: vi.fn(async () => {
+    const progressDelivery = createProgressDeliveryMock()
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      sendRequiredUserMessage: vi.fn(async () => {
         pauseMessageDeliveryStarted.resolve()
         expect(liveTurnReleased).toBe(1)
         expect(liveTurn).not.toBeNull()
@@ -1587,6 +1618,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         fetchImpl,
+        hostedToolContext,
         onLiveTurn: (turn) => {
           liveTurn = turn
           liveTurnReady.resolve()
@@ -1602,9 +1634,8 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(liveTurnReleased).toBe(1)
-    expect(progressDelivery.send).toHaveBeenCalledWith(
+    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
       'Should I book this appointment?',
-      { required: true, source: 'model' },
     )
   })
 
@@ -4544,10 +4575,8 @@ describe('assistant codex runtime', () => {
     let liveTurnRegistrations = 0
     mockProcessGroupSignalsForChildren(spawnedChildren)
 
-    const progressDelivery = {
-      hostedComputerToolsAvailable: true,
-      send: vi.fn(async () => sentProgressResult()),
-    }
+    const hostedToolContext = createHostedToolContext()
+    const progressDelivery = createProgressDeliveryMock()
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -4689,6 +4718,7 @@ describe('assistant codex runtime', () => {
         PATH: '/custom/bin',
       },
       fetchImpl,
+      hostedToolContext,
       progressDelivery,
       sandbox: 'workspace-write' as const,
       workingDirectory,
@@ -4719,9 +4749,8 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-prestart-pause-live-turn-2',
     })
     expect(liveTurnRegistrations).toBe(0)
-    expect(progressDelivery.send).toHaveBeenCalledWith(
+    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
       'Should I book this appointment?',
-      { required: true, source: 'model' },
     )
   })
 
@@ -8998,7 +9027,7 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -9800,7 +9829,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
           })
           child.stdout.write(
             jsonLine({

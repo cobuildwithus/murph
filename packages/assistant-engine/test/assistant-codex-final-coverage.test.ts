@@ -664,6 +664,16 @@ describe('Codex model catalog', () => {
       },
       {
         audience: {
+          bindingDelivery: { kind: 'thread', target: 'linq-thread' },
+          channel: 'linq',
+          explicitTarget: 'linq-thread',
+        },
+        deliverResponse: true,
+        expectedChannel: 'linq',
+        name: 'deliverable Linq current-thread explicit target',
+      },
+      {
+        audience: {
           bindingDelivery: null,
           channel: 'linq',
           explicitTarget: 'linq-thread-explicit',
@@ -819,25 +829,52 @@ describe('Codex model catalog', () => {
     }
   })
 
-  it('forwards Telegram message reaction availability from auto-reply targets to Codex', async () => {
+  it('forwards message reaction availability from auto-reply targets to Codex', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
     const scenarios = [
       {
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: true,
+        deliveryReplyToMessageId: 'linq-message-1',
+        expected: true,
+        name: 'iMessage Linq reply target',
+        target: 'linq-chat-1',
+      },
+      {
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: false,
+        deliveryReplyToMessageId: 'linq-message-1',
+        expected: false,
+        name: 'non-iMessage Linq reply target',
+        target: 'linq-chat-1',
+      },
+      {
+        channel: 'linq',
+        deliveryMessageReactionsAvailable: true,
+        deliveryReplyToMessageId: null,
+        expected: false,
+        name: 'Linq target without message id',
+        target: 'linq-chat-1',
+      },
+      {
+        channel: 'telegram',
         deliveryReplyToMessageId: 'telegram-message-1',
         expected: true,
         name: 'ordinary Telegram reply target',
         target: 'telegram-thread-1',
       },
       {
+        channel: 'telegram',
         deliveryReplyToMessageId: null,
         expected: false,
         name: 'Telegram target without message id',
         target: 'telegram-thread-1',
       },
       {
+        channel: 'telegram',
         deliveryReplyToMessageId: 'telegram-business-message-1',
         expected: false,
         name: 'Telegram Business reply target',
@@ -852,8 +889,14 @@ describe('Codex model catalog', () => {
 
     for (const scenario of scenarios) {
       const input = {
-        channel: 'telegram',
+        channel: scenario.channel,
         deliverResponse: true,
+        ...(scenario.channel === 'linq'
+          ? {
+              deliveryMessageReactionsAvailable:
+                scenario.deliveryMessageReactionsAvailable,
+            }
+          : {}),
         ...(scenario.deliveryReplyToMessageId === null
           ? {}
           : { deliveryReplyToMessageId: scenario.deliveryReplyToMessageId }),
@@ -862,7 +905,7 @@ describe('Codex model catalog', () => {
         vault: '/vaults/test',
       } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
       const sharedPlan = createSharedPlan()
-      sharedPlan.conversationPolicy.audience.channel = 'telegram'
+      sharedPlan.conversationPolicy.audience.channel = scenario.channel
       sharedPlan.conversationPolicy.audience.explicitTarget = scenario.target
       sharedPlan.conversationPolicy.audience.threadId = scenario.target
 

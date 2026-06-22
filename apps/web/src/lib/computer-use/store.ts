@@ -5,13 +5,11 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import { HOSTED_COMPUTER_PROFILE_KEYS } from "@murphai/hosted-execution/computer-use";
 import type {
   HostedComputerAwaitingReason,
   HostedComputerFinishOutcome,
   HostedComputerHandoffPurpose,
   HostedComputerHandoffStatus,
-  HostedComputerProfileKey,
   HostedComputerRunStatus,
 } from "@murphai/hosted-execution/computer-use";
 
@@ -50,7 +48,6 @@ export interface ComputerRunRecord {
   memberId: string;
   pausedAt: Date | null;
   pendingHandoffId: string | null;
-  profileKey: HostedComputerProfileKey;
   status: HostedComputerRunStatus;
   suggestedReply: string | null;
   updatedAt: Date;
@@ -108,7 +105,6 @@ export interface ComputerUseStore {
     kernelProfileName: string;
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     startUrl: string | null;
   }): Promise<ComputerCreateRunResult>;
   attachRunBrowser(input: {
@@ -118,10 +114,9 @@ export interface ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
-  findActiveRunForProfileKey(input: {
+  findActiveRunForMember(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
   }): Promise<ComputerRunRecord | null>;
   findHandoffByRun(input: {
     handoffId: string;
@@ -131,11 +126,10 @@ export interface ComputerUseStore {
     limit?: number;
     now: Date;
   }): Promise<ComputerRunRecord[]>;
-  listStaleActiveRunsForProfileKey(input: {
+  listStaleActiveRunsForMember(input: {
     limit?: number;
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
   }): Promise<ComputerRunRecord[]>;
   listMemberRuns(input: {
     memberId: string;
@@ -248,19 +242,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     this.prisma = prisma;
   }
 
-  async findActiveRunForProfileKey(input: {
+  async findActiveRunForMember(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
   }): Promise<ComputerRunRecord | null> {
     const run = await this.prisma.hostedComputerRun.findFirst({
-      orderBy: {
-        updatedAt: "desc",
-      },
       where: {
         expiresAt: { gt: input.now },
         memberId: input.memberId,
-        profileKey: input.profileKey,
         status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
       },
     });
@@ -268,11 +257,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return run ? mapRun(run) : null;
   }
 
-  async listStaleActiveRunsForProfileKey(input: {
+  async listStaleActiveRunsForMember(input: {
     limit?: number;
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
   }): Promise<ComputerRunRecord[]> {
     const runs = await this.prisma.hostedComputerRun.findMany({
       orderBy: {
@@ -281,7 +269,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       take: input.limit,
       where: {
         memberId: input.memberId,
-        profileKey: input.profileKey,
         OR: [
           {
             expiresAt: { lte: input.now },
@@ -368,20 +355,15 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     kernelProfileName: string;
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     startUrl: string | null;
   }): Promise<ComputerCreateRunResult> {
     return await this.prisma.$transaction(async (tx) => {
       await lockMemberComputerUseAvailable(tx, input.memberId);
 
       const activeRun = await tx.hostedComputerRun.findFirst({
-        orderBy: {
-          updatedAt: "desc",
-        },
         where: {
           expiresAt: { gt: input.now },
           memberId: input.memberId,
-          profileKey: input.profileKey,
           status: { in: ACTIVE_COMPUTER_RUN_STATUSES },
         },
       });
@@ -399,7 +381,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           kernelProfileName: input.kernelProfileName,
           lastUrl: input.startUrl,
           memberId: input.memberId,
-          profileKey: input.profileKey,
         },
       });
 
@@ -1213,21 +1194,10 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     memberId: run.memberId,
     pausedAt: run.pausedAt,
     pendingHandoffId: run.pendingHandoffId,
-    profileKey: readProfileKey(run.profileKey),
     status: readRunStatus(run.status),
     suggestedReply: run.suggestedReply,
     updatedAt: run.updatedAt,
   };
-}
-
-function readProfileKey(value: string): HostedComputerProfileKey {
-  for (const profileKey of HOSTED_COMPUTER_PROFILE_KEYS) {
-    if (profileKey === value) {
-      return profileKey;
-    }
-  }
-
-  throw new Error(`Unknown hosted computer profile key: ${value}`);
 }
 
 function readRunCheckpointContext(

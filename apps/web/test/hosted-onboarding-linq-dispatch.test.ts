@@ -528,6 +528,7 @@ https://join.example.test/join/code_first_text`);
               channel: "linq",
               linqMessage: expect.objectContaining({
                 messageId: "msg_123",
+                reactionEligible: false,
                 service,
               }),
             }),
@@ -615,6 +616,77 @@ https://join.example.test/join/code_first_text`);
       );
     },
   );
+
+  it("marks Linq reaction eligibility from raw parts before mailbox text compaction", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+            {
+              type: "link",
+              value: "https://example.test/check-in",
+            },
+          ],
+        },
+        eventId: "evt_text_link_reaction_eligible",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "evt_text_link_reaction_eligible",
+          message: expect.objectContaining({
+            linqMessage: expect.objectContaining({
+              parts: [
+                {
+                  type: "text",
+                  value: "hello\nhttps://example.test/check-in",
+                },
+              ],
+              reactionEligible: false,
+              service: "iMessage",
+            }),
+          }),
+        }),
+      }),
+    );
+  });
 
   it("ignores non-allowlisted local Linq inbound messages before member lookup or wake handoff", async () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = ["+15559999999"];

@@ -47,7 +47,7 @@ export function BiomarkerExperimentRow({
       href={protocol.href}
       className={`group grid ${ROW_GRID} items-center gap-x-3 px-5 py-4 transition-colors hover:bg-muted/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px] md:gap-x-6`}
     >
-      <div className="relative size-10 shrink-0 overflow-hidden rounded-md">
+      <div className="relative size-10 shrink-0 overflow-hidden rounded-md outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10">
         {imageSrc ? (
           <Image
             src={imageSrc}

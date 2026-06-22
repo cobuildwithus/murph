@@ -734,6 +734,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     presignGetMs?: number;
     objectFetchMs?: number;
     decryptMs?: number;
+    archiveExtractMs?: number;
+    durableRootReplaceMs?: number;
+    cleanupMs?: number;
     extractMs?: number;
     encryptedBytes?: number;
     plainBytes?: number;
@@ -787,6 +790,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "presignGetMs",
     "objectFetchMs",
     "decryptMs",
+    "archiveExtractMs",
+    "durableRootReplaceMs",
+    "cleanupMs",
     "extractMs",
     "encryptedBytes",
     "plainBytes",
@@ -1101,6 +1107,14 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
 export type HostedWorkspaceCheckpointReason =
   (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
 
+export const HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS = [
+  "foreground_pending",
+  "workspace_version",
+] as const;
+
+export type HostedWorkspaceCheckpointConflictReason =
+  (typeof HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS)[number];
+
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
@@ -1115,6 +1129,7 @@ export interface HostedWorkspaceCheckpointRequest {
 
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
+  checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
   workspace: HostedWorkspaceState;
 }
 

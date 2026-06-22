@@ -15,7 +15,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
   AssistantChannelDependencies,
-  'sendLinq' | 'sendLinqVoiceMemo' | 'signal'
+  'sendTelegram' | 'sendLinq' | 'sendLinqVoiceMemo' | 'sendEmail' | 'signal'
 >
 
 export interface AssistantHostedDeviceConnectLink {
@@ -71,6 +71,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
+  connectedAppsAvailable?: boolean | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   issueDeviceConnectLink?(
@@ -118,6 +119,9 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
+      ...(hosted?.connectedAppsAvailable === true
+        ? { connectedAppsAvailable: true }
+        : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
@@ -220,17 +224,38 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
   }
 
   const dependencies: AssistantHostedProgressDeliveryDependencies = {}
+  if (typeof input.sendTelegram === 'function') {
+    dependencies.sendTelegram = input.sendTelegram
+  }
   if (typeof input.sendLinq === 'function') {
     dependencies.sendLinq = input.sendLinq
   }
   if (typeof input.sendLinqVoiceMemo === 'function') {
     dependencies.sendLinqVoiceMemo = input.sendLinqVoiceMemo
   }
-  if (input.signal && (dependencies.sendLinq || dependencies.sendLinqVoiceMemo)) {
+  if (typeof input.sendEmail === 'function') {
+    dependencies.sendEmail = input.sendEmail
+  }
+  if (
+    input.signal &&
+    (
+      dependencies.sendTelegram ||
+      dependencies.sendLinq ||
+      dependencies.sendLinqVoiceMemo ||
+      dependencies.sendEmail
+    )
+  ) {
     dependencies.signal = input.signal
   }
 
-  return dependencies.sendLinq || dependencies.sendLinqVoiceMemo ? dependencies : undefined
+  return (
+    dependencies.sendTelegram ||
+    dependencies.sendLinq ||
+    dependencies.sendLinqVoiceMemo ||
+    dependencies.sendEmail
+  )
+    ? dependencies
+    : undefined
 }
 
 export function normalizeAssistantHostedDeviceConnectProviderKey(

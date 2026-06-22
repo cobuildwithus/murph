@@ -457,6 +457,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
+        reactionEligible: isHostedLinqMessageReactionEligible({
+          parts: messageEvent.data.message.parts,
+          service: messageEvent.data.service ?? null,
+        }),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
           : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -777,6 +781,14 @@ function buildHostedLinqMailboxParts(
   }
 
   return mailboxParts;
+}
+
+function isHostedLinqMessageReactionEligible(input: {
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
+  service: string | null;
+}): boolean {
+  return input.service?.trim().toLowerCase() === "imessage"
+    && input.parts.length === 1;
 }
 
 function buildHostedLinqMailboxTextPart(

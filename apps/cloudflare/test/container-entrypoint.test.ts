@@ -89,6 +89,7 @@ import {
 } from "../src/container-entrypoint.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
@@ -558,6 +559,14 @@ describe("startHostedContainerEntrypoint", () => {
 
     await invocationStarted.promise;
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
@@ -581,6 +590,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(secondPendingWake.status).toBe(204);
     expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
@@ -619,6 +629,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
@@ -628,6 +640,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: true,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: true,
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -637,6 +651,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: true,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: true,
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -646,6 +662,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
@@ -655,11 +673,108 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
       ]);
+  });
+
+  it("requires exact runtime wake identity before waking an active invocation", async () => {
+    const invocationReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    let runtimeWakeCount = 0;
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onRuntimeWakeReady?.(() => {
+          runtimeWakeCount += 1;
+          return true;
+        });
+        invocationReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_identity",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await invocationReady.promise;
+
+    const staleWakeRequests = [
+      {
+        attemptId: "attempt_stale",
+        leaseGeneration: "1",
+        userId: "u1",
+      },
+      {
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "2",
+        userId: "u1",
+      },
+      {
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "1",
+        userId: "u2",
+      },
+    ];
+    const staleWakes: Response[] = [];
+    for (const wakeRequest of staleWakeRequests) {
+      staleWakes.push(await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify(wakeRequest),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }));
+    }
+    const matchingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_identity",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    for (const staleWake of staleWakes) {
+      expect(staleWake.status).toBe(204);
+      expect(staleWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(staleWake.headers.get("x-runtime-wake-identity-checked")).toBeNull();
+      expect(staleWake.headers.get("x-runtime-wake-mismatch")).toBe("1");
+    }
+    expect(matchingWake.status).toBe(204);
+    expect(matchingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(matchingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
+    expect(matchingWake.headers.get("x-runtime-wake-mismatch")).toBeNull();
+    expect(runtimeWakeCount).toBe(1);
+    expect(invocationResponse.status).toBe(200);
   });
 
   it("does not mark runtime wakes accepted when the active invocation cannot consume them", async () => {
@@ -725,6 +840,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
@@ -734,6 +851,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
           runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
@@ -889,7 +1008,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: "gpt-5.4-nano",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -915,13 +1034,13 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: "gpt-5.4-nano",
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: "gpt-5.4-nano",
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       signal: expect.any(AbortSignal),
     });
   });
@@ -991,7 +1110,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(response.json).toMatchObject({
         liveModelTurn: {
-          model: "gpt-5.4-nano",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         },
         ok: true,
       });
@@ -1033,6 +1152,102 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("extracts redacted JSONL stdout diagnostics when live model turn smoke exits nonzero", async () => {
+    const smokeHomeParent = await mkdtemp(path.join(
+      path.sep,
+      "var",
+      "tmp",
+      "murph-codex-smoke-home-",
+    ));
+    const previousHostedHome = process.env.HOSTED_HOME;
+    const stdinChunks: string[] = [];
+    process.env.HOSTED_HOME = smokeHomeParent;
+    mocks.spawn.mockImplementationOnce(() => {
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const process = new EventEmitter();
+      const spawnedProcess = Object.assign(process, {
+        kill: vi.fn(() => true),
+        stderr,
+        stdin: {
+          end: vi.fn((chunk?: string | Uint8Array) => {
+            if (typeof chunk === "string") {
+              stdinChunks.push(chunk);
+            } else if (chunk instanceof Uint8Array) {
+              stdinChunks.push(Buffer.from(chunk).toString("utf8"));
+            }
+            queueMicrotask(() => {
+              stdout.emit("data", "plain text should be ignored\n");
+              stdout.emit("data", `${JSON.stringify({
+                error: {
+                  message:
+                    `unsupported hosted search api_key=<VALUE> sk-proj-${"a".repeat(24)} échoué`,
+                },
+                type: "error",
+              })}\n`);
+              stdout.emit("data", `${JSON.stringify({
+                message:
+                  `fallback message id_token=<VALUE> eyJ${"b".repeat(12)}.${"c".repeat(12)}.${"d".repeat(12)}`,
+                type: "error",
+              })}\n`);
+              stderr.emit("data", "short stderr clue\n");
+              spawnedProcess.emit("close", 1, null);
+            });
+          }),
+        },
+        stdout,
+      });
+      return spawnedProcess;
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await sendHostedContainerJsonRequest({
+        body: "",
+        path: "/internal/deploy-live-model-turn-smoke",
+        port: address.port,
+      });
+
+      expect(response.status).toBe(500);
+      expect(response.json).toMatchObject({
+        error: "Hosted live model turn smoke failed.",
+        ok: false,
+      });
+      const smokeErrorMessage = (response.json as { smokeErrorMessage?: unknown }).smokeErrorMessage;
+      expect(typeof smokeErrorMessage).toBe("string");
+      expect(smokeErrorMessage).toContain("stdoutExcerpt");
+      expect(smokeErrorMessage).toContain("unsupported hosted search");
+      expect(smokeErrorMessage).toContain("fallback message");
+      expect(smokeErrorMessage).toContain("api_key=<REDACTED>");
+      expect(smokeErrorMessage).toContain("id_token=<REDACTED>");
+      expect(smokeErrorMessage).toContain("short stderr clue");
+      expect(smokeErrorMessage).not.toContain("<VALUE>");
+      expect(smokeErrorMessage).not.toContain("sk-proj-");
+      expect(smokeErrorMessage).not.toContain("eyJ");
+      expect(smokeErrorMessage).not.toContain("échoué");
+      expect(smokeErrorMessage).not.toContain("plain text should be ignored");
+      expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
+      expect(stdinChunks).toEqual([DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT]);
+    } finally {
+      if (previousHostedHome === undefined) {
+        delete process.env.HOSTED_HOME;
+      } else {
+        process.env.HOSTED_HOME = previousHostedHome;
+      }
+      await rm(smokeHomeParent, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("keeps deploy-smoke Codex home outside the system temporary directory", () => {
     const hostedHome = path.join(path.sep, "home", "runner", ".murph");
     const runnerHome = path.join(path.sep, "home", "runner");
@@ -1058,7 +1273,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => {
       throw new Error(
-        `Hosted live model turn smoke codex exec exited with 1. stderrExcerpt="quota éxhausted ${"x".repeat(600)}"`,
+        `Hosted live model turn smoke codex exec exited with 1. stdoutExcerpt="unsupported tool ${"y".repeat(600)}" stderrExcerpt="quota éxhausted ${"x".repeat(600)}"`,
       );
     });
     const server = await startHostedContainerEntrypoint({
@@ -1088,6 +1303,7 @@ describe("startHostedContainerEntrypoint", () => {
     const smokeErrorMessage = (response.json as { smokeErrorMessage?: unknown }).smokeErrorMessage;
     expect(typeof smokeErrorMessage).toBe("string");
     expect(smokeErrorMessage).toContain("codex exec exited with 1");
+    expect(smokeErrorMessage).toContain("stdoutExcerpt");
     expect(smokeErrorMessage).not.toContain("é");
     expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
   });

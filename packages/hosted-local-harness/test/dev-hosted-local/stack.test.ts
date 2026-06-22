@@ -188,6 +188,12 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
       ],
       slug: "gpt-5.5",
     },
+    {
+      display_name: "GPT-5.4-Mini",
+      priority: 4,
+      service_tiers: [],
+      slug: "gpt-5.4-mini",
+    },
   ],
 });
 const defaultSpawnSyncImplementation = (
@@ -233,7 +239,6 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
   }) => Promise<HostedLocalLinqWebhookSetup | null>
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
-const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
 const STUB_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
 const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
   JSON.stringify({
@@ -432,7 +437,6 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
 vi.mock("../../src/dev-hosted-local/linq-webhook-tunnel.ts", () => ({
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
-  waitForHostedLocalLinqWebhookTarget,
 }));
 
 vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
@@ -539,6 +543,7 @@ describe("hosted local dev stack", () => {
     spawnSync.mockImplementation(defaultSpawnSyncImplementation);
     waitForHostedLocalTemporalPortRelease.mockResolvedValue(undefined);
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("starts Cloudflare through the prepared app-owned dev entrypoint", async () => {
@@ -2130,6 +2135,10 @@ describe("hosted local dev stack", () => {
       }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "linq-tunnel", pid: 142 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 143 }));
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw new Error("Linq webhook target readiness GET should not run.");
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -2175,14 +2184,7 @@ describe("hosted local dev stack", () => {
       }),
       stderrTarget: undefined,
     });
-    expect(waitForHostedLocalLinqWebhookTarget).toHaveBeenCalledWith({
-      setup: expect.objectContaining({
-        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
-      }),
-    });
-    expect(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]).toBeLessThan(
-      registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0],
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
     const runnerImageInspectCallIndex = spawnSync.mock.calls.findIndex(([command, args]) =>
       command === "docker" &&
       Array.isArray(args) &&
@@ -2193,7 +2195,7 @@ describe("hosted local dev stack", () => {
     expect(runnerImageInspectCallIndex).toBeGreaterThanOrEqual(0);
     expect(
       spawnSync.mock.invocationCallOrder[runnerImageInspectCallIndex] ?? Number.POSITIVE_INFINITY,
-    ).toBeLessThan(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]);
+    ).toBeLessThan(registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0]);
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
@@ -2266,6 +2268,48 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
+    spawnSync.mockImplementation((command, args) => {
+      if (
+        command === "codex" &&
+        args[0] === "debug" &&
+        args[1] === "models" &&
+        args[2] === "--bundled"
+      ) {
+        return {
+          error: undefined,
+          status: 0,
+          stdout: JSON.stringify({
+            models: [
+              {
+                name: "GPT-5.5",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.5",
+              },
+              {
+                display_name: "GPT-5.4-Mini",
+                priority: 4,
+                service_tiers: [],
+                slug: "gpt-5.4-mini",
+              },
+              {
+                display_name: "Bundled Nano",
+                service_tiers: [{ id: "auto", name: "Auto" }],
+                slug: "gpt-5.4-nano",
+                supports_parallel_tool_calls: true,
+                supports_search_tool: true,
+              },
+            ],
+          }),
+        };
+      }
+
+      return defaultSpawnSyncImplementation(command, args);
+    });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -2326,6 +2370,18 @@ describe("hosted local dev stack", () => {
           ]),
           slug: "gpt-5.5",
         },
+        {
+          display_name: "GPT-5.4-Mini",
+          slug: "gpt-5.4-mini",
+        },
+        {
+          display_name: "GPT-5.4-Nano",
+          service_tiers: [],
+          slug: "gpt-5.4-nano",
+          supports_parallel_tool_calls: false,
+          supports_search_tool: false,
+          use_responses_lite: true,
+        },
       ],
     });
     expect(spawnSync).toHaveBeenCalledWith(
@@ -2346,6 +2402,10 @@ describe("hosted local dev stack", () => {
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.5.",
       stdout: JSON.stringify({ models: [] }),
+    },
+    {
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
+      stdout: JSON.stringify({ models: [{ slug: "gpt-5.5" }] }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",

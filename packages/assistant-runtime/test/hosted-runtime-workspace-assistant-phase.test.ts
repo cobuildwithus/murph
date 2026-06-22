@@ -619,6 +619,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
+      executionContext: expect.objectContaining({
+        hosted: expect.objectContaining({
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+        }),
+      }),
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();

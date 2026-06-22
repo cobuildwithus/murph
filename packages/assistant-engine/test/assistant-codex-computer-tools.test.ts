@@ -11,6 +11,9 @@ import {
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
 import type {
+  AssistantHostedToolContext,
+} from "../src/assistant/hosted-tool-context.ts";
+import type {
   AssistantProgressDelivery,
 } from "../src/assistant/turn-progress.ts";
 
@@ -65,6 +68,7 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
+    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
     );
@@ -89,7 +93,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("sends start-run requests without model-supplied resume evidence", async () => {
+  it("keeps start-run profile keys off the model surface while sending fresh starts", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -97,7 +101,6 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,
@@ -115,28 +118,73 @@ describe("murph computer dynamic tools", () => {
       });
     });
 
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: {
+          conversationId: "model-authored-conversation",
+          recipientKey: "model-authored-recipient",
+        },
+        resumeRunId: null,
+        startUrl: null,
+      },
+      tool: "computer_start_run",
+    }));
+
+    if (!request || request.kind !== "computer-start-run") {
+      throw new Error("Expected computer_start_run request.");
+    }
+
+    expect(request.args).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: {
+        conversationId: "model-authored-conversation",
+        recipientKey: "model-authored-recipient",
+      },
+      resumeRunId: null,
+      startUrl: null,
+    });
+
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
-      request: {
-        args: {
-          profileKey: "appointments",
-          resumeAfterMailboxItemId: null,
-          resumeDeliveryContext: {
-            conversationId: "model-authored-conversation",
-            recipientKey: "model-authored-recipient",
-          },
-          resumeRunId: null,
-          startUrl: null,
-        },
-        kind: "computer-start-run",
-      },
+      request,
     });
 
     expect(result.rpcResult.success).toBe(true);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { profileKey: "appointments" },
+    { legacyProfileKey: "appointments" },
+    { memberScopedProfileRequired: true },
+  ])("rejects stale start-run profile field %# before execution", async (argumentsValue) => {
+    const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue,
+      tool: "computer_start_run",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: null,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("adds current hosted mailbox proof only for explicit resume requests", async () => {
@@ -146,7 +194,6 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
           conversationId: "conversation-123",
@@ -170,17 +217,17 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
-      nextUsageOrdinal: () => 1,
-      progressDelivery: createProgressDelivery({
+      hostedToolContext: createHostedToolContext({
         deliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
         },
         hostedMailboxItemIds: ["hmi_old", "hmi_user_reply"],
       }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: "model_supplied_mailbox_item",
           resumeDeliveryContext: {
             conversationId: "model-authored-conversation",
@@ -197,6 +244,56 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("does not retry when web returns an old profile-mismatch error", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return jsonResponse({
+        error: {
+          code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
+          message: "Computer run belongs to a different browser profile.",
+        },
+      }, 409);
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        deliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
+        hostedMailboxItemIds: ["hmi_user_reply"],
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          resumeAfterMailboxItemId: null,
+          resumeDeliveryContext: null,
+          resumeRunId: "hcr_run123",
+          startUrl: null,
+        },
+        kind: "computer-start-run",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        resumeRunId: "hcr_run123",
+      }),
+    ]);
+    expect(bodies[0]).not.toHaveProperty("profileKey");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("rejects computer requests when hosted computer transport is unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "running" })
@@ -205,11 +302,11 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: null,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: null,
           resumeDeliveryContext: null,
           resumeRunId: null,
@@ -247,6 +344,7 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -267,6 +365,39 @@ describe("murph computer dynamic tools", () => {
     expect(text).toContain("visible-title-canary");
     expect(text).toContain("token=secret");
     expect(text).toContain("#frag");
+  });
+
+  it("surfaces coded start-run configuration failures", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        error: {
+          code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+          message: "Kernel live-view URL is not allowed by hosted computer-use configuration.",
+        },
+      }, 502)
+    );
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          resumeAfterMailboxItemId: null,
+          resumeDeliveryContext: null,
+          resumeRunId: null,
+          startUrl: "https://shop.example.test",
+        },
+        kind: "computer-start-run",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toBe(
+      "computer API failed with status 502: HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED: Kernel live-view URL is not allowed by hosted computer-use configuration.",
+    );
   });
 
   it("runs a browser action and returns the current action URL", async () => {
@@ -298,6 +429,7 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -349,6 +481,7 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -460,6 +593,7 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -495,6 +629,7 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext: createHostedToolContext(),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -510,7 +645,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step",
+      `computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
     );
   });
 
@@ -539,7 +674,7 @@ describe("murph computer dynamic tools", () => {
     });
   });
 
-  it("pauses through web-control and sends the returned message through progress delivery", async () => {
+  it("pauses through web-control and sends the returned message through required user-message delivery", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -568,7 +703,7 @@ describe("murph computer dynamic tools", () => {
         status: "awaiting_user",
       });
     });
-    const progressDelivery = createProgressDelivery({
+    const hostedToolContext = createHostedToolContext({
       deliveryContext: {
         conversationId: "conversation-123",
         recipientKey: "recipient-123",
@@ -578,8 +713,9 @@ describe("murph computer dynamic tools", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
-      progressDelivery,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
@@ -597,9 +733,8 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(progressDelivery.send).toHaveBeenCalledWith(
+    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
       "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
-      { required: true, source: "model" },
     );
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
@@ -620,13 +755,14 @@ describe("murph computer dynamic tools", () => {
         status: "awaiting_user",
       })
     );
-    const progressDelivery = createProgressDelivery();
+    const hostedToolContext = createHostedToolContext();
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
-      progressDelivery,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           handoffPurpose: "login",
@@ -641,9 +777,8 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(progressDelivery.send).toHaveBeenCalledWith(
+    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
       "Can you log in here?\n\nhttps://web.example.test/computer/handoff/raw-token",
-      { required: true, source: "model" },
     );
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
@@ -659,17 +794,17 @@ describe("murph computer dynamic tools", () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "awaiting_user" })
     );
-    const progressDelivery: AssistantProgressDelivery = {
-      hostedComputerToolsAvailable: false,
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
       requiredUserMessageDeliveryAvailable: false,
-      send: vi.fn(async () => ({ kind: "sent" as const, source: "model" as const })),
-    };
+    });
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
-      progressDelivery,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
@@ -688,7 +823,7 @@ describe("murph computer dynamic tools", () => {
       "computer tools are unavailable without hosted computer-use transport",
     );
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
   });
 
   it("cancels the run if pause transport outcome is unknown before user delivery", async () => {
@@ -717,14 +852,15 @@ describe("murph computer dynamic tools", () => {
         status: "failed",
       });
     });
-    const progressDelivery = createProgressDelivery();
+    const hostedToolContext = createHostedToolContext();
 
     const result = await executeMurphDynamicToolRequest({
       abortSignal: controller.signal,
       env: {},
       fetchImpl,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
-      progressDelivery,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
@@ -742,7 +878,7 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.contentItems[0]!.text).toBe(
       "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; computer run was canceled",
     );
-    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -765,16 +901,16 @@ describe("murph computer dynamic tools", () => {
 
       throw new Error("unexpected finish call");
     });
-    const progressDelivery: AssistantProgressDelivery = {
-      hostedComputerToolsAvailable: true,
-      send: vi.fn(async () => ({ kind: "failed" as const, source: "model" as const })),
-    };
+    const hostedToolContext = createHostedToolContext({
+      sendResult: { kind: "failed" as const, source: "model" as const },
+    });
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
-      progressDelivery,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
@@ -816,17 +952,30 @@ function dynamicToolCall(input: {
   };
 }
 
-function createProgressDelivery(input: {
+function createHostedToolContext(input: {
+  computerToolsAvailable?: boolean;
   deliveryContext?: {
     conversationId: string | null;
     recipientKey: string | null;
   };
   hostedMailboxItemIds?: string[];
-} = {}): AssistantProgressDelivery {
+  requiredUserMessageDeliveryAvailable?: boolean;
+  sendResult?: Awaited<ReturnType<AssistantHostedToolContext["sendRequiredUserMessage"]>>;
+} = {}): AssistantHostedToolContext {
   return {
     currentHostedDeliveryContext: () => input.deliveryContext ?? null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
-    hostedComputerToolsAvailable: true,
+    computerToolsAvailable: input.computerToolsAvailable ?? true,
+    requiredUserMessageDeliveryAvailable:
+      input.requiredUserMessageDeliveryAvailable ?? true,
+    sendRequiredUserMessage: vi.fn(async () =>
+      input.sendResult ?? { kind: "sent" as const, source: "model" as const }
+    ),
+  };
+}
+
+function createProgressDelivery(): AssistantProgressDelivery {
+  return {
     send: vi.fn(async (_text: string, options) => ({
       kind: "sent" as const,
       source: options?.source ?? "model",

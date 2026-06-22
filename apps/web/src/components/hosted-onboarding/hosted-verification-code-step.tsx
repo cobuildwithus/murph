@@ -62,7 +62,7 @@ export function HostedVerificationCodeStep({
             disabled={disabled}
             variant="link"
             size="xs"
-            className="h-auto p-0 text-sm text-muted-foreground"
+            className="relative h-auto p-0 text-sm text-muted-foreground before:absolute before:-inset-x-3 before:-inset-y-2.5 before:content-['']"
           >
             {pendingAction === "send-code" ? "Sending..." : "Resend code"}
           </Button>

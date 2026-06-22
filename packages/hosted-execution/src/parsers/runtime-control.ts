@@ -25,6 +25,7 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxConsumeRequest,
@@ -831,6 +832,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "presignGetMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "objectFetchMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "decryptMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "archiveExtractMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "durableRootReplaceMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "cleanupMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
@@ -1093,6 +1097,15 @@ export function parseHostedWorkspaceCheckpointResponse(
       record.checkpointed,
       "Hosted workspace checkpoint response checkpointed",
     ),
+    ...(record.checkpointConflictReason === undefined
+      ? {}
+      : {
+          checkpointConflictReason: parseNullableAllowedString(
+            record.checkpointConflictReason,
+            "Hosted workspace checkpoint response checkpointConflictReason",
+            HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
+          ),
+        }),
     workspace: parseHostedWorkspaceState(record.workspace),
   };
 }
@@ -1781,6 +1794,18 @@ function parseAllowedString<T extends string>(
   throw new TypeError(`${label} is not supported.`);
 }
 
+function parseNullableAllowedString<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return parseAllowedString(value, label, allowed);
+}
+
 function requirePositiveInteger(value: unknown, label: string): number {
   const parsed = requireNonNegativeInteger(value, label);
 
@@ -1809,6 +1834,14 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
   }
 
   return text;
+}
+
+function readNullableNonNegativeBigIntString(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return requireNonNegativeBigIntString(value, label);
 }
 
 function parseHostedRuntimeRedactedJson(

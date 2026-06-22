@@ -23,7 +23,7 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewP
       {heroProtocols.length > 0 ? (
         <section className="flex flex-col gap-6">
           <div className="flex flex-col gap-3">
-            <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
+            <h2 className="font-serif text-2xl font-semibold tracking-tight text-balance text-foreground sm:text-[28px]">
               Experiments
             </h2>
             <p className="max-w-3xl text-sm/6 text-muted-foreground text-pretty">

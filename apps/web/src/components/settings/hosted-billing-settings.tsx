@@ -70,7 +70,7 @@ export function HostedBillingSettings(props: {
     <div className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <p className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+          <p className="font-serif text-2xl font-semibold tracking-tight text-balance text-foreground">
             {planDisplayName}
           </p>
           {statusChip ? (
@@ -80,7 +80,7 @@ export function HostedBillingSettings(props: {
           ) : null}
         </div>
         {hasPendingPulseSwitch && pendingPulseSwitchDate ? (
-          <p className="mt-1.5 text-sm text-muted-foreground">
+          <p className="mt-1.5 text-sm text-pretty text-muted-foreground">
             Pulse starts {pendingPulseSwitchDate}{scheduledPlanPrice ? ` at ${scheduledPlanPrice}` : ""}
           </p>
         ) : null}

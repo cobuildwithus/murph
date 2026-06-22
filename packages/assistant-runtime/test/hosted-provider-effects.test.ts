@@ -12,6 +12,7 @@ import {
   sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage,
   sendHostedProviderWhatsAppMessage,
+  setHostedProviderLinqMessageReaction,
 } from "../src/hosted-provider-effects.ts";
 import {
   HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
@@ -132,6 +133,17 @@ describe("hosted provider effects", () => {
     });
     await expect(markHostedProviderLinqRead({
       chatId: "chat_123",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(setHostedProviderLinqMessageReaction({
+      reaction: "heart",
+      targetMessageId: "message_123",
     }, {
       env: {
         LINQ_API_TOKEN: "linq-token",
@@ -684,10 +696,21 @@ describe("hosted provider effects", () => {
     });
     vi.stubGlobal("fetch", rawGlobalFetch);
     const fetchImplementation = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => new Response(null, {
-      status: 204,
-    }));
+      ...args: Parameters<typeof fetch>
+    ) => {
+      const url = String(args[0]);
+      if (url.endsWith("/reactions")) {
+        return new Response(JSON.stringify({ status: "accepted" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response(null, {
+        status: 204,
+      });
+    });
     const dependencies = {
       env: {
         LINQ_API_TOKEN: "linq-token",
@@ -706,18 +729,30 @@ describe("hosted provider effects", () => {
     await markHostedProviderLinqRead({
       chatId: "chat_123",
     }, dependencies);
+    await setHostedProviderLinqMessageReaction({
+      reaction: "thumbs_up",
+      targetMessageId: "message_reaction_123",
+    }, dependencies);
     await deleteHostedProviderLinqMessages({
       messageIds: ["message_123"],
     }, dependencies);
 
     expect(rawGlobalFetch).not.toHaveBeenCalled();
-    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(fetchImplementation).toHaveBeenCalledTimes(5);
     expect(fetchImplementation.mock.calls.map(([input]) => String(input))).toEqual([
       "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
       "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
       "https://api.linqapp.com/api/partner/v3/chats/chat_123/read",
+      "https://api.linqapp.com/api/partner/v3/messages/message_reaction_123/reactions",
       "https://api.linqapp.com/api/partner/v3/messages/message_123",
     ]);
+    assert.deepEqual(
+      JSON.parse(String(fetchImplementation.mock.calls[3]?.[1]?.body)),
+      {
+        operation: "add",
+        type: "like",
+      },
+    );
   });
 
   it("sends WhatsApp messages through Worker-owned provider env", async () => {

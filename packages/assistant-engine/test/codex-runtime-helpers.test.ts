@@ -1894,6 +1894,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       dynamicToolCount: resolveMurphDynamicTools({
         allowMessageReactions: true,
+        progressUpdatesAvailable: false,
       }).length,
       messageReactionsAvailable: true,
       reactionDynamicToolAvailable: true,

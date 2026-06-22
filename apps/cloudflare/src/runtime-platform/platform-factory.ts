@@ -104,6 +104,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ),
         }
       : {}),
+    connectedAppsAvailable: transport !== null,
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
     ...(transport
       ? {

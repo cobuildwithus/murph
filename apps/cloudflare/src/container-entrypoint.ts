@@ -76,6 +76,7 @@ import {
 const HOSTED_CONTAINER_PROCESS_START_MS = Date.now() - Math.round(process.uptime() * 1000);
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+const HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
   "/internal/deploy-codex-shell-smoke";
@@ -90,9 +91,11 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS = 220;
 const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
 const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 5_000;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -308,6 +311,12 @@ interface HostedContainerProcessIsolationResult {
   killedPids: number[];
 }
 
+interface HostedContainerRuntimeWakeRequest {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+}
+
 type HostedContainerCleanupStatus = "not_run" | "passed" | "failed";
 
 export async function startHostedContainerEntrypoint(input: {
@@ -324,9 +333,13 @@ export async function startHostedContainerEntrypoint(input: {
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
   let activeRuntimeWake: ((notifiedAtEpochMs?: number) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
+  let activeRuntimeWakeLeaseGeneration: string | null = null;
+  let activeRuntimeWakeUserId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  let activeRuntimeWakePendingLeaseGeneration: string | null = null;
   let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
+  let activeRuntimeWakePendingUserId: string | null = null;
   let activeWorkspaceInvocationAbort: {
     abort: (reason: Error) => void;
     attemptId: string | null;
@@ -398,18 +411,62 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
-        discardUnreadRequestBody(request);
+        let wakeRequest: HostedContainerRuntimeWakeRequest | null;
+        try {
+          wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint rejected the runtime wake request body.",
+            phase: "failed",
+          });
+          const classified = classifyRequestDecodeError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
         const wake = activeRuntimeWake;
         const notifiedAtEpochMs = Date.now();
+        let absent = false;
+        let mismatch = false;
         let pending = false;
-        let accepted = wake?.(notifiedAtEpochMs) === true;
-        if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
-          if (!activeRuntimeWakePending) {
-            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+        let accepted = false;
+        if (wakeRequest && wake !== null) {
+          mismatch = !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
+            attemptId: activeRuntimeWakeAttemptId,
+            leaseGeneration: activeRuntimeWakeLeaseGeneration,
+            userId: activeRuntimeWakeUserId,
+          });
+          accepted = !mismatch && wake(notifiedAtEpochMs) === true;
+        } else if (!wakeRequest) {
+          accepted = wake?.(notifiedAtEpochMs) === true;
+        }
+        if (
+          !accepted
+          && !mismatch
+          && wake === null
+          && activeRuntimeWakePendingAttemptId !== null
+        ) {
+          if (
+            wakeRequest
+            && !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
+              attemptId: activeRuntimeWakePendingAttemptId,
+              leaseGeneration: activeRuntimeWakePendingLeaseGeneration,
+              userId: activeRuntimeWakePendingUserId,
+            })
+          ) {
+            mismatch = true;
+          } else {
+            if (!activeRuntimeWakePending) {
+              activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+            }
+            activeRuntimeWakePending = true;
+            pending = true;
+            accepted = true;
           }
-          activeRuntimeWakePending = true;
-          pending = true;
-          accepted = true;
+        } else if (!accepted && !mismatch && wakeRequest && wake === null) {
+          absent = activeRuntimeWakePendingAttemptId === null;
         }
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -418,6 +475,8 @@ export async function startHostedContainerEntrypoint(input: {
             activeRuntimeWakePending,
             activeRuntimeWakePresent: wake !== null,
             runtimeWakeAccepted: accepted,
+            runtimeWakeAbsent: absent,
+            runtimeWakeMismatch: mismatch,
             runtimeWakePending: pending,
             workspaceAttemptId: activeRuntimeWakeAttemptId,
             workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
@@ -431,8 +490,17 @@ export async function startHostedContainerEntrypoint(input: {
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");
         }
+        if (wakeRequest && accepted && !mismatch) {
+          response.setHeader("x-runtime-wake-identity-checked", "1");
+        }
         if (pending) {
           response.setHeader("x-runtime-wake-pending", "1");
+        }
+        if (absent) {
+          response.setHeader("x-runtime-wake-absent", "1");
+        }
+        if (mismatch) {
+          response.setHeader("x-runtime-wake-mismatch", "1");
         }
         response.statusCode = 204;
         response.end();
@@ -601,8 +669,8 @@ export async function startHostedContainerEntrypoint(input: {
             return;
           }
           // Live-turn smoke diagnostics carry locally constructed labels plus
-          // a capped, ASCII-only codex stderr excerpt; no env or credential
-          // material is ever included, so surface the message for CI logs.
+          // capped, redacted Codex stdout/stderr excerpts so CI can show the
+          // provider-side reason without dumping raw JSONL or credentials.
           writeJsonResponse(response, 500, {
             error: "Hosted live model turn smoke failed.",
             ok: false,
@@ -703,6 +771,8 @@ export async function startHostedContainerEntrypoint(input: {
         userId: readHostedExecutionRunnerJobUserId(job),
       });
       activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
+      activeRuntimeWakePendingLeaseGeneration = readHostedContainerWorkspaceLeaseGeneration(job);
+      activeRuntimeWakePendingUserId = readHostedExecutionRunnerJobUserId(job);
       activeAbortRecord = {
         abort(reason: Error) {
           if (!containerShutdownController.signal.aborted && !invocationAbort.signal.aborted) {
@@ -733,6 +803,12 @@ export async function startHostedContainerEntrypoint(input: {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
             ? readHostedContainerWorkspaceAttemptId(job)
+            : null;
+          activeRuntimeWakeLeaseGeneration = job
+            ? readHostedContainerWorkspaceLeaseGeneration(job)
+            : null;
+          activeRuntimeWakeUserId = job
+            ? readHostedExecutionRunnerJobUserId(job)
             : null;
           runtimeWakeForRequest = sendWake;
           const pendingWake = activeRuntimeWakePending;
@@ -812,6 +888,8 @@ export async function startHostedContainerEntrypoint(input: {
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
+        activeRuntimeWakeLeaseGeneration = null;
+        activeRuntimeWakeUserId = null;
       }
       if (
         job
@@ -819,7 +897,9 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeRuntimeWakePending = false;
         activeRuntimeWakePendingAttemptId = null;
+        activeRuntimeWakePendingLeaseGeneration = null;
         activeRuntimeWakePendingNotifiedAtEpochMs = null;
+        activeRuntimeWakePendingUserId = null;
       }
       if (
         activeAbortRecord
@@ -1236,6 +1316,68 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
   };
 }
 
+async function readHostedContainerRuntimeWakeRequest(
+  request: IncomingMessage,
+): Promise<HostedContainerRuntimeWakeRequest | null> {
+  const body = (await readHostedContainerInvocationRequestBody(
+    request,
+    HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES,
+  )).trim();
+  if (!body) {
+    return null;
+  }
+
+  return parseHostedContainerRuntimeWakeRequest(JSON.parse(body));
+}
+
+function parseHostedContainerRuntimeWakeRequest(
+  value: unknown,
+): HostedContainerRuntimeWakeRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Runtime wake request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const attemptId = typeof record.attemptId === "string"
+    ? record.attemptId.trim()
+    : "";
+  const leaseGeneration = typeof record.leaseGeneration === "string"
+    ? record.leaseGeneration.trim()
+    : "";
+  const userId = typeof record.userId === "string"
+    ? record.userId.trim()
+    : "";
+
+  if (!attemptId) {
+    throw new TypeError("Runtime wake request requires attemptId.");
+  }
+  if (!leaseGeneration) {
+    throw new TypeError("Runtime wake request requires leaseGeneration.");
+  }
+  if (!userId) {
+    throw new TypeError("Runtime wake request requires userId.");
+  }
+
+  return {
+    attemptId,
+    leaseGeneration,
+    userId,
+  };
+}
+
+function hostedContainerRuntimeWakeIdentityMatches(
+  expected: HostedContainerRuntimeWakeRequest,
+  actual: {
+    attemptId: string | null;
+    leaseGeneration: string | null;
+    userId: string | null;
+  },
+): boolean {
+  return actual.attemptId === expected.attemptId
+    && actual.leaseGeneration === expected.leaseGeneration
+    && actual.userId === expected.userId;
+}
+
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return null;
@@ -1564,23 +1706,72 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         finish(new Error(
           `Hosted live model turn smoke codex exec exited with ${code ?? signal ?? "unknown"}. `
             + `stdoutBytes=${stdoutBytes} `
-            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
+            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(
+              stderrBuffer,
+              HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS,
+            ))} `
+            + `stdoutExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeStdoutSafeText(stdoutTail))}`,
         ));
       });
       child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
     }));
 }
 
-// Smoke failure text may embed codex stderr. The subprocess only ever holds
-// the credential placeholder, so there is no real key to leak, but cap the
-// excerpt and strip non-printable/non-ASCII bytes so diagnostics stay
-// content-bounded.
-function buildHostedContainerLiveModelTurnSmokeSafeText(value: string): string {
+// Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
+// printable diagnostic text and scrub obvious credential shapes before the
+// message leaves the container.
+function buildHostedContainerLiveModelTurnSmokeSafeText(
+  value: string,
+  maxChars = HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS,
+): string {
   return value
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"',}]+/giu, "$1<REDACTED>")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <REDACTED>")
+    .replace(
+      /((?:api|auth|access|refresh|id)?[_-]?(?:token|secret|password|private[_-]?jwk|key)\s*[:=]\s*)[^\s"',}]+/giu,
+      "$1<REDACTED>",
+    )
+    .replace(/\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
+    .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu, "<REDACTED>")
+    .replace(/\bwhsec[_-][A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
+    .replace(/\bgh[opsru]_[A-Za-z0-9_]{16,}\b/gu, "<REDACTED>")
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu, "<REDACTED>")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu, "<REDACTED>")
     .replace(/[^\x20-\x7e]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim()
-    .slice(0, HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS);
+    .slice(0, maxChars);
+}
+
+function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): string {
+  const extractedText = value
+    .split(/\r?\n/gu)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return "";
+        }
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.message === "string") {
+          return record.message;
+        }
+        const error = record.error;
+        if (error && typeof error === "object" && !Array.isArray(error)) {
+          const errorRecord = error as Record<string, unknown>;
+          return typeof errorRecord.message === "string" ? errorRecord.message : "";
+        }
+      } catch {
+        return "";
+      }
+      return "";
+    })
+    .filter((line) => line.length > 0)
+    .join(" ");
+  return buildHostedContainerLiveModelTurnSmokeSafeText(
+    extractedText,
+    HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS,
+  );
 }
 
 async function withHostedContainerCodexSmokeWorkspace<T>(

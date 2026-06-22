@@ -28,6 +28,7 @@ import {
   resolveLinqApiBaseUrl,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
+  setLinqMessageReaction,
 } from '../src/linq-runtime.ts'
 import {
   deleteTelegramMessages,
@@ -73,6 +74,31 @@ function createTelegramResponse(
     },
     ok: status >= 200 && status < 300,
     status,
+  }
+}
+
+function createLinqJsonResponse(
+  payload: unknown,
+  status = 200,
+): {
+  arrayBuffer(): Promise<ArrayBuffer>
+  json(): Promise<unknown>
+  ok: boolean
+  status: number
+  text(): Promise<string>
+} {
+  return {
+    async arrayBuffer() {
+      return new ArrayBuffer(0)
+    },
+    async json() {
+      return payload
+    },
+    ok: status >= 200 && status < 300,
+    status,
+    async text() {
+      return JSON.stringify(payload)
+    },
   }
 }
 
@@ -433,6 +459,72 @@ test('setTelegramMessageReaction posts a single emoji reaction to the target mes
       },
     ],
   })
+})
+
+test('setLinqMessageReaction posts standard tapback reactions to the target message', async () => {
+  const scenarios = [
+    { reaction: 'heart', type: 'love' },
+    { reaction: 'thumbs_up', type: 'like' },
+    { reaction: 'laugh', type: 'laugh' },
+  ] as const
+
+  for (const scenario of scenarios) {
+    const seenRequests: Array<{
+      body: Record<string, unknown> | null
+      headers?: Record<string, string>
+      method: string
+      url: string
+    }> = []
+    const fetchImplementation = vi.fn(async (url: string, init: {
+      body?: string | Blob
+      headers?: Record<string, string>
+      method: string
+      signal?: AbortSignal
+    }) => {
+      seenRequests.push({
+        body: typeof init.body === 'string'
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null,
+        headers: init.headers,
+        method: init.method,
+        url,
+      })
+      return createLinqJsonResponse({
+        message: 'Reaction processed',
+        status: 'accepted',
+        trace_id: 'trace_1',
+      })
+    })
+
+    const delivery = await setLinqMessageReaction(
+      {
+        reaction: scenario.reaction,
+        targetMessageId: 'message_123',
+      },
+      {
+        env: {
+          LINQ_API_BASE_URL: 'https://api.linq.example/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    expect(delivery).toEqual({
+      reaction: scenario.reaction,
+      targetMessageId: 'message_123',
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(seenRequests[0]).toMatchObject({
+      body: {
+        operation: 'add',
+        type: scenario.type,
+      },
+      method: 'POST',
+      url: 'https://api.linq.example/api/partner/v3/messages/message_123/reactions',
+    })
+    expect(seenRequests[0]?.headers?.authorization).toBe('Bearer linq-token')
+  }
 })
 
 test('setTelegramMessageReaction posts the Telegram heart reaction emoji without a variation selector', async () => {
