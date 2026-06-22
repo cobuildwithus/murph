@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   claimHostedAiUsageLimitNotice: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   drainHostedLinqSideEffectsDirect: vi.fn(),
+  fetch: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxFirstPendingConversationItem: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  releaseHostedAiUsageLimitNotice: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
 }));
 
@@ -46,6 +48,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => 
   return {
     ...original,
     claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
   };
 });
 
@@ -112,11 +115,23 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
     mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue(undefined);
+    mocks.fetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 7001 } }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+    );
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    mocks.releaseHostedAiUsageLimitNotice.mockResolvedValue(undefined);
+    vi.stubEnv("TELEGRAM_API_BASE_URL", "https://telegram.example.test/");
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-token");
+    vi.stubGlobal("fetch", mocks.fetch);
   });
 
   afterEach(() => {
     consoleInfoSpy.mockRestore();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -321,6 +336,211 @@ describe("hosted orchestration reconciliation facts", () => {
         }),
       ],
     });
+  });
+
+  it("sends the current-chat Telegram usage-limit notice when pending conversation work is runtime-denied", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      periodStart: deniedDecision.periodStart,
+      prisma: { kind: "prisma" },
+      sentAt: new Date(FIXED_NOW),
+    });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mocks.fetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://telegram.example.test/bottelegram-token/sendMessage");
+    expect(init).toMatchObject({
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      business_connection_id: "biz-42",
+      chat_id: "telegram_chat_runtime_denied",
+      direct_messages_topic_id: 9,
+      reply_to_message_id: 7000,
+      text: deniedDecision.userNotice.message,
+    });
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("releases the Telegram usage-limit notice claim when provider delivery fails", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          description: "Forbidden: bot was blocked by the user",
+          error_code: 403,
+          ok: false,
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 403,
+        },
+      ),
+    );
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    consoleErrorSpy.mockRestore();
+
+    expect(response.status).toBe(500);
+    expect(mocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      periodStart: deniedDecision.periodStart,
+      prisma: { kind: "prisma" },
+      sentAt: new Date(FIXED_NOW),
+    });
+  });
+
+  it("does not send a current-chat usage-limit notice for email runtime denial", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildEmailConversationWake());
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("does not claim the Telegram usage-limit notice when Telegram delivery is unconfigured", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
   });
 
   it("does not gate replay-only conversation lag above local import but at or below consumed", async () => {
@@ -593,6 +813,40 @@ function buildLinqConversationWake() {
         ],
       },
       phoneLookupKey: "contact_lookup",
+    },
+    occurredAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
+}
+
+function buildTelegramConversationWake() {
+  return {
+    eventId: "telegram_event_runtime_denied",
+    kind: "conversation.message",
+    message: {
+      channel: "telegram",
+      telegramMessage: {
+        messageId: "7000",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
+      },
+    },
+    occurredAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
+}
+
+function buildEmailConversationWake() {
+  return {
+    eventId: "email_event_runtime_denied",
+    kind: "conversation.message",
+    message: {
+      channel: "email",
+      identityId: "identity_email_runtime_denied",
+      messageId: "email_message_runtime_denied",
+      rawMessageKey: "raw_email_runtime_denied",
+      threadTarget: "thread_email_runtime_denied",
     },
     occurredAt: FIXED_NOW,
     userId: MEMBER_ID,
