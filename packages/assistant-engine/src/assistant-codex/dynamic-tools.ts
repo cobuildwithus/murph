@@ -290,7 +290,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end.',
+    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, optionally create a secure browser handoff link, and send the message through the current Murph channel. A successful call already creates a user-visible message; when there is nothing useful to add, use murph.finish_without_reply to avoid a redundant second reply.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
