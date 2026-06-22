@@ -59,6 +59,7 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -181,6 +182,17 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted execution usage recording",
     path: "/api/internal/hosted-execution/usage/record",
+  },
+  {
+    body: {
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["native-message-formatting"],
+      },
+    },
+    name: "hosted product feedback recording",
+    path: HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   },
   {
     body: {

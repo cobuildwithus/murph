@@ -30,6 +30,7 @@ function XIcon() {
 
 const footerLinks = {
   murph: [
+    { label: "Changelog", href: "/changelog", external: false },
     { label: "Security", href: "/security", external: false },
     {
       label: "GitHub",
@@ -69,7 +70,7 @@ export function SiteFooter() {
                     {...(link.external
                       ? { target: "_blank", rel: "noreferrer" }
                       : {})}
-                    className="text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex min-h-10 items-center text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -86,7 +87,7 @@ export function SiteFooter() {
                   <a
                     key={link.href}
                     href={link.href}
-                    className="text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex min-h-10 items-center text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -117,7 +118,7 @@ export function SiteFooter() {
               href="https://x.com/withmurphai"
               target="_blank"
               rel="noreferrer"
-              className="text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
               aria-label="Murph on X"
             >
               <XIcon />
@@ -126,7 +127,7 @@ export function SiteFooter() {
               href="https://github.com/cobuildwithus/murph"
               target="_blank"
               rel="noreferrer"
-              className="text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
               aria-label="Murph on GitHub"
             >
               <GitHubIcon />

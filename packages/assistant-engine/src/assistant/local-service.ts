@@ -597,6 +597,8 @@ export async function sendAssistantMessageLocal(
         const providerRequestOrdinal = 0
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
+        let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
+          initialAcceptedInputJournal.inputs
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string
@@ -708,6 +710,7 @@ export async function sendAssistantMessageLocal(
           })
           currentInput = nextInput
           acceptedInputIdsForProviderRequest = acceptedInputJournal.inputIds
+          acceptedInputItemsForProviderRequest = acceptedInputJournal.inputs
           return {
             acceptedInputJournal,
             acceptedInputItems,
@@ -760,6 +763,8 @@ export async function sendAssistantMessageLocal(
           ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
         let providerRequestAcceptedInputIds: readonly string[] =
           acceptedInputIdsForProviderRequest
+        let providerRequestAcceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[] =
+          acceptedInputItemsForProviderRequest
         const drainLiveSteeredActiveTurnInputs = async (drainInput: {
           continuation:
             ExecutedAssistantProviderTurnResult['codexContinuation'] | null
@@ -802,14 +807,21 @@ export async function sendAssistantMessageLocal(
               providerRequestAcceptedInputIds =
                 providerRequestJournal?.inputIds ??
                 accepted.acceptedInputJournal.inputIds
+              providerRequestAcceptedInputItems =
+                providerRequestJournal?.inputs ??
+                accepted.acceptedInputJournal.inputs
             } else {
               providerRequestAcceptedInputIds =
                 accepted.acceptedInputJournal.inputIds
+              providerRequestAcceptedInputItems =
+                accepted.acceptedInputJournal.inputs
             }
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
+          acceptedInputItems: providerRequestAcceptedInputItems,
           activeTurnSteering: turnInputController,
           input: currentInput,
           onCodexThreadHistoryUnsafe: async (event) => {
@@ -893,7 +905,10 @@ export async function sendAssistantMessageLocal(
               })
             providerRequestAcceptedInputIds =
               providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           },
           onProviderRequestStarted: (event) => {
             if (!currentInput.onProviderRequestStarted) {
@@ -934,7 +949,10 @@ export async function sendAssistantMessageLocal(
               })
             providerRequestAcceptedInputIds =
               providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           } else {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
@@ -945,7 +963,10 @@ export async function sendAssistantMessageLocal(
               }) ?? providerRequestJournal
             providerRequestAcceptedInputIds =
               providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
           const failedProviderResult = {
             attemptCount: providerOutcome.attemptCount,
@@ -1111,7 +1132,10 @@ export async function sendAssistantMessageLocal(
             })
           providerRequestAcceptedInputIds =
             providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+          providerRequestAcceptedInputItems =
+            providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         } else {
           providerRequestJournal =
             await runtimeState.turns.acceptedInputs.updateProviderRequest({
@@ -1122,7 +1146,10 @@ export async function sendAssistantMessageLocal(
             }) ?? providerRequestJournal
           providerRequestAcceptedInputIds =
             providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+          providerRequestAcceptedInputItems =
+            providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         }
         currentSession = providerResult.session
         responseText = providerResult.response
