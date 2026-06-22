@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
+  sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
   stripe: {
     events: {
       retrieve: vi.fn(),
@@ -82,6 +83,11 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
   sendHostedSignupNotificationEmailForMemberBestEffort:
     mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
+  sendHostedSubscriptionCancellationEmailForMember:
+    mocks.sendHostedSubscriptionCancellationEmailForMember,
 }));
 
 import {
@@ -163,6 +169,9 @@ describe("hosted Stripe event reconciliation", () => {
       status: "sent",
     });
     mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
+    mocks.sendHostedSubscriptionCancellationEmailForMember.mockResolvedValue({
+      status: "sent",
+    });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
   });
 
@@ -293,6 +302,7 @@ describe("hosted Stripe event reconciliation", () => {
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
   });
 
   it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
@@ -623,6 +633,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it.each([
+    ["customer.subscription.deleted", "canceled"],
     ["customer.subscription.paused", "paused"],
     ["customer.subscription.resumed", "active"],
   ] as const)("routes %s through the live Stripe subscription", async (type, status) => {
@@ -662,6 +673,276 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("sends the cancellation feedback email after a cancellation billing write", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "canceled",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValueOnce({
+      subscriptionCancellationEmail: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember)
+      .toHaveBeenCalledWith({
+        memberId: "member_123",
+        prisma: prisma.client,
+        stripeSubscriptionId: "sub_123",
+      });
+    expect(
+      mocks.sendHostedSubscriptionCancellationEmailForMember.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prisma.client.hostedStripeEvent.update).mock.invocationCallOrder[0],
+    );
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      subscriptionCancellationEmailSentAt: expect.any(Date),
+    }));
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("retries cancellation feedback email provider failures before completing the receipt", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "canceled",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      subscriptionCancellationEmail: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    mocks.sendHostedSubscriptionCancellationEmailForMember
+      .mockRejectedValueOnce(new Error("resend down"))
+      .mockResolvedValueOnce({
+        status: "sent",
+      });
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "failed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).toHaveBeenCalledTimes(1);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      eventId: event.id,
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0].nextAttemptAt = new Date(0);
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).toHaveBeenCalledTimes(2);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      eventId: event.id,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+
+    errorSpy.mockRestore();
+  });
+
+  it("does not resend cancellation feedback when provider success was marked before receipt completion failed", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "canceled",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      subscriptionCancellationEmail: {
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    mocks.sendHostedSubscriptionCancellationEmailForMember.mockResolvedValue({
+      status: "sent",
+    });
+
+    let failedCompletion = false;
+    const defaultUpdate = vi.mocked(prisma.client.hostedStripeEvent.update)
+      .getMockImplementation();
+    vi.mocked(prisma.client.hostedStripeEvent.update).mockImplementation(async (input) => {
+      if (
+        !failedCompletion &&
+        input.data.status === HostedStripeEventStatus.completed
+      ) {
+        failedCompletion = true;
+        throw new Error("receipt completion failed");
+      }
+
+      if (!defaultUpdate) {
+        throw new Error("missing default hostedStripeEvent.update mock");
+      }
+
+      return defaultUpdate(input);
+    });
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "failed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).toHaveBeenCalledTimes(1);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+      subscriptionCancellationEmailSentAt: expect.any(Date),
+    }));
+
+    prisma.rows[0].nextAttemptAt = new Date(0);
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).toHaveBeenCalledTimes(1);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+      subscriptionCancellationEmailSentAt: expect.any(Date),
+    }));
+
+    errorSpy.mockRestore();
+  });
+
+  it("does not send the cancellation feedback email when the cancellation billing write fails", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "canceled",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.applyStripeSubscriptionUpdated.mockRejectedValueOnce(
+      new Error("billing write failed"),
+    );
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      eventId: event.id,
+      hostedExecutionEventId: null,
+      status: "failed",
+    });
+
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember)
+      .not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      eventId: event.id,
+      lastErrorCode: "Error",
+      lastErrorMessage: "[redacted]",
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+    expect(errorSpy).toHaveBeenCalledWith("Hosted Stripe event reconciliation failed.", {
+      attemptCount: 1,
+      errorMessage: "billing write failed",
+      errorName: "Error",
+      eventIdSuffix: "ed_123",
+      eventType: "customer.subscription.deleted",
+      poisoned: false,
+    });
+    errorSpy.mockRestore();
   });
 
   it("accepts subscription trial_will_end without mutating entitlement state", async () => {
@@ -966,6 +1247,7 @@ function makeSubscriptionUpdatedEvent(): Stripe.Event {
 
 function makeSubscriptionEvent(
   type:
+    | "customer.subscription.deleted"
     | "customer.subscription.paused"
     | "customer.subscription.resumed"
     | "customer.subscription.trial_will_end",
@@ -980,7 +1262,9 @@ function makeSubscriptionEvent(
         metadata: {
           memberId: "member_123",
         },
-        status: type === "customer.subscription.paused"
+        status: type === "customer.subscription.deleted"
+          ? "canceled"
+          : type === "customer.subscription.paused"
           ? "paused"
           : type === "customer.subscription.trial_will_end"
             ? "trialing"
@@ -1110,6 +1394,7 @@ function createStripeEventPrismaHarness() {
           receivedAt: data.receivedAt as Date,
           status: data.status as HostedStripeEventStatus,
           stripeCreatedAt: data.stripeCreatedAt as Date,
+          subscriptionCancellationEmailSentAt: null,
           type: data.type as string,
           updatedAt: new Date(),
         };
@@ -1139,6 +1424,13 @@ function createStripeEventPrismaHarness() {
           return { count: 0 };
         }
 
+        if ("subscriptionCancellationEmailSentAt" in data) {
+          row.subscriptionCancellationEmailSentAt =
+            data.subscriptionCancellationEmailSentAt as Date;
+          row.updatedAt = new Date();
+          return { count: 1 };
+        }
+
         row.attemptCount += (data.attemptCount as { increment: number }).increment;
         row.claimExpiresAt = data.claimExpiresAt as Date;
         row.lastErrorCode = data.lastErrorCode as string | null;
@@ -1163,6 +1455,13 @@ function matchesStripeEventWhere(row: MutableStripeEventRow, where: StripeEventW
   }
 
   if (where.updatedAt && row.updatedAt.getTime() !== where.updatedAt.getTime()) {
+    return false;
+  }
+
+  if (
+    where.subscriptionCancellationEmailSentAt === null
+    && row.subscriptionCancellationEmailSentAt !== null
+  ) {
     return false;
   }
 
@@ -1203,12 +1502,14 @@ type MutableStripeEventRow = {
   receivedAt: Date;
   status: HostedStripeEventStatus;
   stripeCreatedAt: Date;
+  subscriptionCancellationEmailSentAt: Date | null;
   type: string;
   updatedAt: Date;
 };
 
 type StripeEventWhere = {
   eventId?: string;
+  subscriptionCancellationEmailSentAt?: null;
   updatedAt?: Date;
   OR?: Array<
     | {
