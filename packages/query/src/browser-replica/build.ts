@@ -1,5 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { metricPointRecordIds } from "../metric-point-record-ids.ts";
+import { metricPointRecordIds } from "../metrics/index.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";

@@ -291,15 +291,16 @@ export interface BrowserVaultExperimentResultsView {
 }
 
 interface BrowserVaultExperimentRunContext {
+  adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
   asOfDate: string;
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
   eventTimeZone: string | null;
-  adherenceTargets: ExperimentAdherenceTarget[];
   expectedEffects: BrowserVaultExperimentExpectedEffectInput[];
   run: BrowserVaultExperimentResultRun;
+  unsupportedExplicitAdherenceTargets: boolean;
 }
 
 interface BrowserVaultExperimentExpectedEffectInput {
@@ -434,7 +435,7 @@ function buildRunContext(
   const schedule = readRunSchedule(attributes, diagnostics);
   const runPlanRecord = readRecord(attributes.runPlan);
   const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);
-  const adherenceTargets: ExperimentAdherenceTarget[] = parsedAdherenceTargets === null
+  const adherenceTargets: ExperimentAdherenceTarget[] = parsedAdherenceTargets.targets === null
     ? synthesizeLegacySessionAdherenceTargets({
         runPlan: {
           minimumUsefulSessions: readNumber(runPlanRecord, "minimumUsefulSessions") ?? undefined,
@@ -443,7 +444,7 @@ function buildRunContext(
           targetSessions: readNumber(runPlanRecord, "targetSessions") ?? undefined,
         },
       })
-    : parsedAdherenceTargets;
+    : parsedAdherenceTargets.targets;
   const runTimeZone = adherenceTargets[0]?.calendar.timeZone ?? schedule?.timeZone ?? null;
   const asOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
@@ -486,6 +487,7 @@ function buildRunContext(
     adherenceTargets,
     expectedEffects,
     run,
+    unsupportedExplicitAdherenceTargets: parsedAdherenceTargets.unsupportedExplicit,
   };
 }
 
@@ -538,11 +540,11 @@ function readRunSchedule(
 function readAdherenceTargets(
   attributes: JsonRecord,
   diagnostics: BrowserVaultExperimentResultDiagnostic[],
-): ExperimentAdherenceTarget[] | null {
+): { targets: ExperimentAdherenceTarget[] | null; unsupportedExplicit: boolean } {
   const runPlan = readRecord(attributes.runPlan);
 
   if (!runPlan || runPlan.adherenceTargets === undefined || runPlan.adherenceTargets === null) {
-    return null;
+    return { targets: null, unsupportedExplicit: false };
   }
 
   const result = experimentAdherenceTargetsSchema.safeParse(runPlan.adherenceTargets);
@@ -552,7 +554,7 @@ function readAdherenceTargets(
       message: "The experiment has adherence targets, but they are not supported by browser Results.",
       severity: "warning",
     });
-    return [];
+    return { targets: [], unsupportedExplicit: true };
   }
 
   if (!result.data.every(isBrowserSupportedAdherenceTarget)) {
@@ -561,10 +563,10 @@ function readAdherenceTargets(
       message: "The experiment has adherence targets outside the browser Results support set.",
       severity: "warning",
     });
-    return [];
+    return { targets: [], unsupportedExplicit: true };
   }
 
-  return result.data;
+  return { targets: result.data, unsupportedExplicit: false };
 }
 
 function isBrowserSupportedAdherenceTarget(target: ExperimentAdherenceTarget): boolean {
@@ -1119,6 +1121,10 @@ function buildAdherenceResult(
   const interventionStart = context.run.windows.interventionStart;
   const interventionEnd = context.run.windows.interventionEnd;
 
+  if (context.unsupportedExplicitAdherenceTargets) {
+    return null;
+  }
+
   if (adherenceTargets.length === 0 || !interventionStart || !interventionEnd) {
     context.diagnostics.push({
       code: "no_schedule",
@@ -1372,22 +1378,25 @@ function buildProgressResult(
 ): BrowserVaultExperimentProgressResult {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
+  const hasUnsupportedExplicitTargets = context.unsupportedExplicitAdherenceTargets;
   const targetSessions =
+    hasUnsupportedExplicitTargets ? null :
     rollupTarget?.rollup?.targetCompletions ??
     (hasAmbiguousTargets ? null : context.run.runPlan.targetSessions);
   const minimumUsefulSessions =
+    hasUnsupportedExplicitTargets ? null :
     rollupTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.run.runPlan.minimumUsefulSessions);
-  const completedSessions = hasAmbiguousTargets
+  const completedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
     : schedule?.completedSessions ?? countSessionEvents(context.events, "completed");
-  const partialSessions = hasAmbiguousTargets
+  const partialSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
     : schedule?.partialSessions ?? countSessionEvents(context.events, "partial");
-  const missedSessions = hasAmbiguousTargets
+  const missedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
     : schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
-  const skippedSessions = hasAmbiguousTargets ? 0 : schedule?.skippedSessions ?? 0;
+  const skippedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets ? 0 : schedule?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
   const progressSchedule = rollupTarget && schedule
     ? {
@@ -1395,7 +1404,7 @@ function buildProgressResult(
         cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
       }
     : schedule;
-  const expectedSessionsByNow = hasAmbiguousTargets
+  const expectedSessionsByNow = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? null
     : computeExpectedSessionsByNow(
         context.run,
@@ -1416,7 +1425,7 @@ function buildProgressResult(
       missedSessions,
       partialSessions,
       skippedSessions,
-      status: hasAmbiguousTargets
+      status: hasUnsupportedExplicitTargets || hasAmbiguousTargets
         ? "unknown"
         : classifyAdherenceStatus({
             expectedSessionsByNow,
@@ -1542,6 +1551,10 @@ function buildOutcomeResult(
     progress.adherence.loggedSessions < progress.adherence.minimumUsefulSessions
   ) {
     reasons.push("Logged session count stayed below the minimum useful target.");
+  }
+
+  if (context.unsupportedExplicitAdherenceTargets) {
+    reasons.push("Browser Results cannot evaluate this experiment's adherence target yet.");
   }
 
   const unsupportedCount = biomarkers.filter((entry) => entry.status === "unsupported_source").length;

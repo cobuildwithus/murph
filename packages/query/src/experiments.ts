@@ -24,7 +24,7 @@ import {
   matchesExperimentMetricIdentity,
   resolveExperimentMetricIdentity,
 } from "./experiment-metrics.ts";
-import { metricPointRecordIds } from "./metric-point-record-ids.ts";
+import { metricPointRecordIds } from "./metrics/index.ts";
 import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,

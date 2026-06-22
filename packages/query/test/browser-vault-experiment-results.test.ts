@@ -1189,7 +1189,8 @@ test("does not synthesize legacy schedules for unsupported explicit metric adher
   assert.ok(result);
   assert.equal(result.schedule, null);
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
-  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
+  assert.equal(result.progress?.adherence.status, "unknown");
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
 });
 
 test("keeps comparator-bounded metric thresholds unknown", () => {
@@ -1351,6 +1352,14 @@ test("does not replace metric adherence rollups with auxiliary session targets",
         }),
         sessionEvent("2026-04-08", "completed"),
       ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 62],
+        ["2026-04-02", 61],
+        ["2026-04-03", 63],
+        ["2026-04-08", 58],
+        ["2026-04-09", 57],
+        ["2026-04-10", 59],
+      ]),
     }),
   );
 
@@ -1358,11 +1367,14 @@ test("does not replace metric adherence rollups with auxiliary session targets",
 
   assert.ok(result);
   assert.equal(result.schedule, null);
-  assert.equal(result.progress?.adherence.completedSessions, 1);
-  assert.equal(result.progress?.adherence.loggedSessions, 1);
+  assert.equal(result.progress?.adherence.completedSessions, 0);
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
   assert.equal(result.progress?.adherence.targetSessions, null);
-  assert.equal(result.progress?.adherence.status, "on_track");
+  assert.equal(result.progress?.adherence.status, "unknown");
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
+  assert.ok(result.outcome?.confidence.reasons.includes(
+    "Browser Results cannot evaluate this experiment's adherence target yet.",
+  ));
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {

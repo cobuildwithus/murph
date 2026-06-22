@@ -1,4 +1,5 @@
-import type { MetricPoint } from "./metrics/index.ts";
+import { uniqueStrings } from "./catalog.ts";
+import type { MetricPoint } from "./types.ts";
 
 export function metricPointRecordIds(point: MetricPoint): string[] {
   const ids = new Set<string>();
@@ -20,7 +21,7 @@ export function metricPointRecordIds(point: MetricPoint): string[] {
     }
   }
 
-  return [...ids];
+  return uniqueStrings([...ids]);
 }
 
 function sampleSummaryRecordIdAliases(recordId: string): string[] {

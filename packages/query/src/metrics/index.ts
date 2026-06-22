@@ -55,6 +55,7 @@ export {
   formatMetricDisplayValue,
   listMetricPoints,
   listMetricDefinitions,
+  metricPointRecordIds,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,

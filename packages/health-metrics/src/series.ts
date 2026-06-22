@@ -7,6 +7,7 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue, formatNumber } from "./format.ts";
+import { metricPointRecordIds } from "./record-ids.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
   ListMetricPointsInput,
@@ -267,18 +268,6 @@ function groupMetricPointsByDate(points: readonly MetricPoint[]): MetricPoint[][
 
 function pointNumericValue(point: MetricPoint): number | null {
   return point.canonicalValue ?? point.value;
-}
-
-function metricPointRecordIds(point: MetricPoint): string[] {
-  const contributingRecordIds = point.context.contributingRecordIds;
-  if (Array.isArray(contributingRecordIds)) {
-    return uniqueStrings([
-      ...contributingRecordIds.filter((value): value is string => typeof value === "string" && value.length > 0),
-      point.source.recordId,
-    ]);
-  }
-
-  return [point.source.recordId];
 }
 
 function aggregateMetricValues(values: readonly number[], aggregation: MetricSeriesAggregation): number {
