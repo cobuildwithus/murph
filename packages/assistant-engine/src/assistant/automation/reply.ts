@@ -2301,9 +2301,7 @@ function readAssistantInputCandidateMessageReactionsAvailable(input: {
   }
 
   const metadata = candidate.event.sourceMetadata
-  return metadata?.kind === 'linq'
-    && normalizeNullableString(metadata.service)?.toLowerCase() === 'imessage'
-    && metadata.partCount === 1
+  return metadata?.kind === 'linq' && metadata.reactionEligible === true
 }
 
 function readPromptInputReplyTargetMessageId(input: {

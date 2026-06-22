@@ -593,6 +593,67 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("collects non-idempotent Linq reactions after same-boundary replies", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reaction",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reaction",
+        media: [],
+        message: "",
+        operation: {
+          kind: "message-reaction",
+          reaction: "heart",
+          targetMessageId: "linq_message_1",
+        },
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reply",
+        deliveryIdempotencyKey: "assistant-segment:turn_1:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reply",
+        media: [],
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_reaction", "intent_reply"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_reply",
+      "intent_reaction",
+    ]);
+    expect(sideEffects.map((effect) => effect.payload.transportIdempotent)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
   it("trusts the persisted transport idempotency flag for Linq effects", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -3102,7 +3163,7 @@ describe("hosted runtime callbacks", () => {
     },
   );
 
-  it("blocks the same-turn reply after an ambiguous non-idempotent Linq reaction", async () => {
+  it("does not block the same-turn reply after an ambiguous non-idempotent Linq reaction", async () => {
     const reactionEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_reaction",
       deliveryPhase: "foreground_current_turn",
@@ -3164,9 +3225,12 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
       "intent_reaction",
+      "intent_message",
     ]);
     expect(outcomes[0]?.deliveryStatus).toBe("failed_ambiguous");
-    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(outcomes[1]?.deliveryStatus).toBe("sent");
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
   it("preserves provider diagnostics from persisted mirror failures", async () => {

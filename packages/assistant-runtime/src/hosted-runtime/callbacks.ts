@@ -617,9 +617,10 @@ function compareHostedAssistantDeliveryOperationOrder(
 function readHostedAssistantDeliveryOperationPriority(
   intent: AssistantOutboxIntent,
 ): number {
-  // Reactions are idempotent; send them before same-boundary replies because
-  // non-idempotent replies can pause later work while awaiting confirmation.
-  return intent.operation?.kind === "message-reaction" ? 0 : 1;
+  if (intent.operation?.kind !== "message-reaction") {
+    return 1;
+  }
+  return intent.deliveryTransportIdempotent ? 0 : 2;
 }
 
 function compareHostedAssistantDeliveryCandidateCreatedAt(
@@ -976,17 +977,12 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
       );
       blockedForegroundDeliveryKeys.add(boundaryKey);
-      const successorResetAt = await resolveHostedAssistantSuccessorResetAt({
-        effect: assistantDeliveryEffect,
-        vaultRoot: input.vaultRoot,
-      });
       await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
           ),
-        minimumNextAttemptAt: successorResetAt,
         preparedDispatchByIntentId,
         vaultRoot: input.vaultRoot,
       });
@@ -1000,14 +996,6 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   effect: HostedAssistantDeliveryEffect;
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
-  if (
-    input.effect.deliveryPhase === "foreground_current_turn"
-    && isHostedAssistantReactionOnlyEffect(input.effect)
-    && input.outcome.deliveryStatus === "failed_ambiguous"
-  ) {
-    return true;
-  }
-
   return input.effect.deliveryPhase === "foreground_current_turn"
     && !isHostedAssistantReactionOnlyEffect(input.effect)
     && input.outcome.deliveryStatus !== "sent"
@@ -1079,26 +1067,6 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
       vault: input.vaultRoot,
     });
   }
-}
-
-async function resolveHostedAssistantSuccessorResetAt(input: {
-  effect: HostedAssistantDeliveryEffect;
-  vaultRoot: string;
-}): Promise<Date> {
-  const now = new Date();
-  const mirrorState = await readAssistantOutboxIntentMirrorState({
-    intentId: input.effect.effectId,
-    now,
-    sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
-    vault: input.vaultRoot,
-  });
-  const nextAttemptAt = mirrorState.intent?.nextAttemptAt;
-  const nextAttemptAtMs = typeof nextAttemptAt === "string"
-    ? Date.parse(nextAttemptAt)
-    : Number.NaN;
-  return Number.isFinite(nextAttemptAtMs)
-    ? new Date(Math.max(nextAttemptAtMs, now.getTime()))
-    : now;
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {

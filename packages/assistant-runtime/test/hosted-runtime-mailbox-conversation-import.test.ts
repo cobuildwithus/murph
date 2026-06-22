@@ -176,6 +176,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.sourceMetadata, {
       kind: "linq",
       partCount: 2,
+      reactionEligible: false,
       service: null,
     });
     assert.ok(replyTarget);
@@ -995,6 +996,7 @@ describe("hosted mailbox conversation import adapter", () => {
               value: "hello from email",
             },
           ],
+          reactionEligible: true,
           service: "iMessage",
         },
         phoneLookupKey: null,
@@ -1049,6 +1051,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.sourceMetadata, {
       kind: "linq",
       partCount: 1,
+      reactionEligible: true,
       service: "iMessage",
     });
   });
