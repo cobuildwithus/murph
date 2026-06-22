@@ -187,23 +187,11 @@ export async function runIntegrationIngestMigration(
   input: RunIntegrationIngestMigrationInput,
 ): Promise<IntegrationIngestMigrationResult> {
   const apply = input.apply === true;
-  const initial = await detectIntegrationIngestMigrationDetails(input);
-  if (initial.public.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
+  if (!apply) {
+    const initial = await detectIntegrationIngestMigrationDetails(input);
     return {
       ...initial.public,
-      mode: apply ? "apply" : "dry-run",
-      mutated: false,
-      appendedBundleCount: 0,
-      detachedEventRowCount: 0,
-      deletedFileCount: 0,
-      finalized: false,
-      auditPaths: [],
-    };
-  }
-  if (!apply || initial.public.blockerCount > 0) {
-    return {
-      ...initial.public,
-      mode: apply ? "apply" : "dry-run",
+      mode: "dry-run",
       mutated: false,
       appendedBundleCount: 0,
       detachedEventRowCount: 0,
@@ -221,13 +209,15 @@ export async function runIntegrationIngestMigration(
 
   const phaseB = await withMigrationLock(input.vaultRoot, async () => {
     const fresh = await detectIntegrationIngestMigrationDetails(input);
-    assertNoMigrationBlockers(fresh.public);
+    if (fresh.public.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION || fresh.public.blockerCount > 0) {
+      return { kind: "early" as const, detection: fresh.public };
+    }
     const maxBundles = Math.max(1, Math.trunc(input.maxBundles ?? DEFAULT_MAX_BUNDLES));
     const candidates = fresh.bundles.filter((bundle) =>
       bundle.journalState === "absent" || bundle.referencedEventRowCount > 0
     ).slice(0, maxBundles);
     if (candidates.length === 0) {
-      return { appended: 0, detachedRows: 0, auditPath: null as string | null };
+      return { kind: "applied" as const, appended: 0, detachedRows: 0, auditPath: null as string | null };
     }
 
     const candidateIds = new Set(candidates.map((bundle) => bundle.importId));
@@ -276,11 +266,24 @@ export async function runIntegrationIngestMigration(
     });
 
     return {
+      kind: "applied" as const,
       appended: appendPlan.appendedIds.length,
       detachedRows: rewritten.detachedRowCount,
       auditPath: result.auditPath,
     };
   });
+  if (phaseB.kind === "early") {
+    return {
+      ...phaseB.detection,
+      mode: "apply",
+      mutated: false,
+      appendedBundleCount: 0,
+      detachedEventRowCount: 0,
+      deletedFileCount: 0,
+      finalized: false,
+      auditPaths: [],
+    };
+  }
   appendedBundleCount += phaseB.appended;
   detachedEventRowCount += phaseB.detachedRows;
   if (phaseB.auditPath) auditPaths.push(phaseB.auditPath);
@@ -294,10 +297,13 @@ export async function runIntegrationIngestMigration(
       bundle.journalState === "equal" && bundle.referencedEventRowCount === 0
     ).slice(0, maxBundles);
     if (candidates.length === 0) {
-      return { deleted: 0, auditPath: null as string | null };
+      return { deleted: 0, auditPath: null as string | null, hasKnownMoreWork: fresh.public.hasMore };
     }
+    const journalById = new Map(
+      (await readIntegrationIngestEntries(input.vaultRoot)).map((entry) => [entry.record.id, entry.record] as const),
+    );
     for (const bundle of candidates) {
-      await reverifyLegacyBundle(input.vaultRoot, bundle);
+      await reverifyLegacyBundle(input.vaultRoot, bundle, journalById.get(bundle.importId));
     }
     const filePaths = [...new Set(candidates.flatMap((bundle) => bundle.allFilePaths))].sort();
     const summary = `Deleted ${filePaths.length} verified legacy integration file(s) after journal migration.`;
@@ -323,7 +329,7 @@ export async function runIntegrationIngestMigration(
         return { auditPath: audit.relativePath };
       },
     });
-    return { deleted: filePaths.length, auditPath: result.auditPath };
+    return { deleted: filePaths.length, auditPath: result.auditPath, hasKnownMoreWork: fresh.public.hasMore };
   });
   deletedFileCount += phaseC.deleted;
   if (phaseC.auditPath) auditPaths.push(phaseC.auditPath);
@@ -333,7 +339,7 @@ export async function runIntegrationIngestMigration(
   }
 
   let finalized = false;
-  if (input.finalize !== false) {
+  if (input.finalize !== false && !phaseC.hasKnownMoreWork) {
     const finalizeResult = await finalizeIntegrationIngestMigration(input.vaultRoot);
     if (finalizeResult) {
       auditPaths.push(finalizeResult.auditPath);
@@ -536,7 +542,8 @@ async function detectIntegrationIngestMigrationDetails(
     journalBytes: 0,
     budgetExceeded: false,
   };
-  const manifestPaths = (await walkVaultFiles(input.vaultRoot, LEGACY_INTEGRATION_ROOT))
+  const allLegacyFiles = (await walkVaultFiles(input.vaultRoot, LEGACY_INTEGRATION_ROOT)).sort();
+  const manifestPaths = allLegacyFiles
     .filter((relativePath) => isRawManifestFileName(path.posix.basename(relativePath)))
     .sort();
   const manifestPathsByDirectory = new Map<string, string[]>();
@@ -547,7 +554,6 @@ async function detectIntegrationIngestMigrationDetails(
     manifestPathsByDirectory.set(directory, paths);
   }
   const directories = [...manifestPathsByDirectory.keys()].sort();
-  const allLegacyFiles = (await walkVaultFiles(input.vaultRoot, LEGACY_INTEGRATION_ROOT)).sort();
   for (const relativePath of allLegacyFiles) {
     const containingBundle = directories.find((directory) =>
       relativePath === directory || relativePath.startsWith(`${directory}/`)
@@ -1044,7 +1050,11 @@ function rewriteEventShardsForBundles(
   return { shards: rewritten, detachedRowCount };
 }
 
-async function reverifyLegacyBundle(vaultRoot: string, bundle: LegacyIntegrationBundle): Promise<void> {
+async function reverifyLegacyBundle(
+  vaultRoot: string,
+  bundle: LegacyIntegrationBundle,
+  existingJournalRecord: IntegrationIngestRecord | undefined,
+): Promise<void> {
   for (const entry of bundle.artifacts) {
     const resolved = await resolveVaultPathOnDisk(vaultRoot, entry.artifact.relativePath);
     const bytes = await fs.readFile(resolved.absolutePath);
@@ -1068,8 +1078,10 @@ async function reverifyLegacyBundle(vaultRoot: string, bundle: LegacyIntegration
       );
     }
   }
-  const existing = (await readIntegrationIngestEntries(vaultRoot)).find((entry) => entry.record.id === bundle.importId);
-  if (!existing || stableSerializeIntegrationIngest(existing.record) !== stableSerializeIntegrationIngest(bundle.row)) {
+  if (
+    !existingJournalRecord
+    || stableSerializeIntegrationIngest(existingJournalRecord) !== stableSerializeIntegrationIngest(bundle.row)
+  ) {
     throw new VaultError(
       "JOURNAL_ROW_CONFLICT",
       `Integration ingest "${bundle.importId}" is missing or changed before legacy deletion.`,
