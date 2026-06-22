@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  collectEventRawReferencePaths,
   rawImportManifestSchema,
   safeParseContract,
   type ContractSchema,
@@ -793,44 +794,10 @@ async function validateEventRecordReferences(
   vaultRoot: string,
   record: UnknownRecord,
 ): Promise<ValidationIssue[]> {
-  const referencedPaths = new Set<string>();
-
-  if (Array.isArray(record.rawRefs)) {
-    for (const rawRef of record.rawRefs) {
-      if (typeof rawRef === "string") {
-        referencedPaths.add(rawRef);
-      }
-    }
-  }
-
-  const mediaLists = [
-    Array.isArray((record as { media?: unknown }).media)
-      ? ((record as { media: unknown[] }).media)
-      : [],
-    Array.isArray((record as { workout?: { media?: unknown } }).workout?.media)
-      ? (((record as { workout: { media: unknown[] } }).workout.media))
-      : [],
-    Array.isArray((record as { attachments?: unknown }).attachments)
-      ? ((record as { attachments: unknown[] }).attachments)
-      : [],
-  ];
-
-  for (const mediaList of mediaLists) {
-    for (const media of mediaList) {
-      if (
-        media &&
-        typeof media === "object" &&
-        typeof (media as { relativePath?: unknown }).relativePath === "string"
-      ) {
-        referencedPaths.add((media as { relativePath: string }).relativePath);
-      }
-    }
-  }
-
   const issues: ValidationIssue[] = [];
   const manifestDirectories = new Set<string>();
 
-  for (const referencedPath of [...referencedPaths].sort()) {
+  for (const referencedPath of collectEventRawReferencePaths(record)) {
     issues.push(
       ...(await validateExistingVaultFile(
         vaultRoot,

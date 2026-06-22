@@ -4,6 +4,7 @@ import { createReadStream, promises as fs } from "node:fs";
 
 import {
   assertContract,
+  collectEventRawReferencePaths,
   inboxAttachmentRetentionRecordSchema,
   inboxCaptureRecordSchema,
   safeParseContract,
@@ -366,7 +367,7 @@ async function listDurableRawInboxReferences(vaultRoot: string): Promise<Set<str
 
   for (const relativePath of ledgerPaths) {
     for (const record of await readJsonlRecords({ vaultRoot, relativePath })) {
-      for (const referencedPath of collectRecordRawReferences(record)) {
+      for (const referencedPath of collectEventRawReferencePaths(record)) {
         const storedPath = normalizeRawInboxMediaPath(referencedPath);
         if (storedPath) {
           references.add(storedPath);
@@ -376,36 +377,6 @@ async function listDurableRawInboxReferences(vaultRoot: string): Promise<Set<str
   }
 
   return references;
-}
-
-function collectRecordRawReferences(record: Record<string, unknown>): string[] {
-  const references: string[] = [];
-  if (Array.isArray(record.rawRefs)) {
-    for (const rawRef of record.rawRefs) {
-      if (typeof rawRef === "string") {
-        references.push(rawRef);
-      }
-    }
-  }
-
-  collectMediaReferences(record.media, references);
-  if (isRecord(record.workout)) {
-    collectMediaReferences(record.workout.media, references);
-  }
-  collectMediaReferences(record.attachments, references);
-  return references;
-}
-
-function collectMediaReferences(value: unknown, references: string[]): void {
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  for (const item of value) {
-    if (isRecord(item) && typeof item.relativePath === "string") {
-      references.push(item.relativePath);
-    }
-  }
 }
 
 async function findLatestParserManifest(input: {
@@ -610,8 +581,4 @@ function toRetentionAbortError(signal: AbortSignal | null | undefined): Error {
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && typeof (error as NodeJS.ErrnoException).code === "string";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

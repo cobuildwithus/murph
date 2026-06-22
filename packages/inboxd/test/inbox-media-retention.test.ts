@@ -336,6 +336,12 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
           fileName: "same-bytes-duplicate.png",
           data: imageBytes,
         },
+        {
+          kind: "image",
+          mime: "image/png",
+          fileName: "evidence-only.png",
+          data: imageBytes,
+        },
       ],
       raw: {},
     },
@@ -344,10 +350,12 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   const durablePath = old.stored.attachments[0]?.storedPath ?? "";
   const protectedPath = old.stored.attachments[1]?.storedPath ?? "";
   const duplicatePath = old.stored.attachments[2]?.storedPath ?? "";
+  const evidencePath = old.stored.attachments[3]?.storedPath ?? "";
   assert.ok(freshPath);
   assert.ok(durablePath);
   assert.ok(protectedPath);
   assert.ok(duplicatePath);
+  assert.ok(evidencePath);
 
   await appendJsonlRecord({
     vaultRoot,
@@ -363,6 +371,12 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
       title: "Promoted inbox media",
       note: "Durable event keeps one exact raw path.",
       rawRefs: [durablePath],
+      evidence: [
+        {
+          rawRef: evidencePath,
+          sourceLabel: "Inbox evidence",
+        },
+      ],
       media: [
         {
           relativePath: durablePath,
@@ -384,6 +398,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   assert.deepEqual(result.records.map((record) => record.storedPath), [duplicatePath]);
   assert.equal(await fileExists(vaultRoot, freshPath), true);
   assert.equal(await fileExists(vaultRoot, durablePath), true);
+  assert.equal(await fileExists(vaultRoot, evidencePath), true);
   assert.equal(await fileExists(vaultRoot, protectedPath), true);
   assert.equal(await fileExists(vaultRoot, duplicatePath), false);
 });

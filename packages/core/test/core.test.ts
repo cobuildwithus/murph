@@ -3334,6 +3334,45 @@ test("validateVault rejects event rawRefs that point at retention-expired inbox 
   );
 });
 
+test("validateVault checks event evidence rawRefs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired_evidence/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: "evt_01JQ8PWXP5A68SQM1W0GYM40V6",
+      kind: "note",
+      occurredAt: "2026-07-05T00:00:00.000Z",
+      recordedAt: "2026-07-05T00:00:00.000Z",
+      dayKey: "2026-07-05",
+      source: "manual",
+      title: "Expired inbox evidence",
+      note: "The raw inbox media bytes were referenced only from evidence.",
+      evidence: [
+        {
+          rawRef: storedPath,
+          sourceLabel: "Inbox evidence",
+        },
+      ],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_REFERENCE_MISSING" &&
+        issue.path === storedPath,
+    ),
+  );
+});
+
 test("validateVault accepts expired raw inbox media for the matching inbox capture attachment", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
