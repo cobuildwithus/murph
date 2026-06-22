@@ -1751,7 +1751,6 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
     select: { claimHash: true },
     take: 1,
     where: {
-      completedAt: null,
       expiresAt: { gt: new Date() },
       memberId: input.memberId,
       startedAt: { gte: input.providerCleanupStartedAt },

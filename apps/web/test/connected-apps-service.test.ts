@@ -244,7 +244,7 @@ describe("connected-app service", () => {
     vi.unstubAllEnvs();
   });
 
-  it("binds connect intents to the member and releases the claim if Composio link creation fails", async () => {
+  it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
     const harness = installPrismaHarness();
     const claim = await createConnectClaim("hbm_member");
     const wrongMemberFetch = vi.fn(async (): Promise<Response> =>
@@ -260,6 +260,30 @@ describe("connected-app service", () => {
       httpStatus: 410,
     });
     expect(wrongMemberFetch).not.toHaveBeenCalled();
+
+    const failedSessionFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      expect(parsed.pathname).toBe("/api/v3.1/tool_router/session");
+      expect(init?.method).toBe("POST");
+      return jsonResponse({ error: "session failed" }, 500);
+    });
+    await expect(startHostedConnectedAppConnection({
+      claim,
+      fetchImpl: failedSessionFetch,
+      memberId: "hbm_member",
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: 503,
+    });
+    expect(harness.intentForClaim(claim)).toMatchObject({
+      connectedAccountId: null,
+      memberId: "hbm_member",
+      startedAt: null,
+      toolkit: "gmail",
+    });
 
     const failedLinkFetch = createStartFetch({
       claim,
@@ -279,7 +303,7 @@ describe("connected-app service", () => {
     expect(harness.intentForClaim(claim)).toMatchObject({
       connectedAccountId: null,
       memberId: "hbm_member",
-      startedAt: null,
+      startedAt: expect.any(Date),
       toolkit: "gmail",
     });
   });

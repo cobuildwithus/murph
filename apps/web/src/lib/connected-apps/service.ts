@@ -124,6 +124,7 @@ export async function startHostedConnectedAppConnection(input: {
     memberId: input.memberId,
     prisma,
   });
+  let providerLinkAttempted = false;
 
   try {
     const sessionId = await ensureHostedConnectedAppsSession({
@@ -133,6 +134,7 @@ export async function startHostedConnectedAppConnection(input: {
       prisma,
     });
     const callbackUrl = buildHostedConnectedAppCallbackUrl(input.claim);
+    providerLinkAttempted = true;
     const link = await client.createLink({
       ...(intent.alias ? { alias: intent.alias } : {}),
       callbackUrl,
@@ -145,10 +147,12 @@ export async function startHostedConnectedAppConnection(input: {
     });
     return { redirectUrl: link.redirectUrl };
   } catch (error) {
-    await releaseHostedConnectedAppIntent({
-      claimHash: intent.claimHash,
-      prisma,
-    });
+    if (!providerLinkAttempted) {
+      await releaseHostedConnectedAppIntent({
+        claimHash: intent.claimHash,
+        prisma,
+      });
+    }
     throw mapConnectedAppsError(error);
   }
 }
