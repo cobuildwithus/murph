@@ -100,8 +100,9 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
+  normalizeAssistantProgressText,
   shouldCreateAssistantProgressDelivery,
-  type AssistantProgressDelivery,
+  type AssistantProgressDeliveryResult,
 } from './turn-progress.js'
 import {
   createAssistantHostedToolContext,
@@ -121,7 +122,10 @@ import {
   createAssistantActiveTurnInputController,
   steerAssistantActiveTurnInputWithStatus,
 } from './active-turn-input-controller.js'
-import { normalizeNullableString } from './shared.js'
+import {
+  normalizeNullableString,
+  warnAssistantBestEffortFailure,
+} from './shared.js'
 import type {
   AssistantMessageInput,
   AssistantDeliveryOutcome,
@@ -146,9 +150,10 @@ function resolveAssistantProgressDeliveryChannel(input: {
     ?? normalizeNullableString(input.session.binding.channel)
 }
 
-function hasHostedProgressDeliveryForChannel(input: {
+function hasHostedTextDeliveryForChannel(input: {
   channel: string | null
   dependencies?: AssistantHostedProgressDeliveryDependencies | null
+  includeEmail?: boolean
 }): boolean {
   const dependencies = input.dependencies
   if (!dependencies) {
@@ -161,10 +166,27 @@ function hasHostedProgressDeliveryForChannel(input: {
     case 'linq':
       return typeof dependencies.sendLinq === 'function'
     case 'email':
-      return typeof dependencies.sendEmail === 'function'
+      return input.includeEmail === true &&
+        typeof dependencies.sendEmail === 'function'
     default:
       return false
   }
+}
+
+function isHostedOptionalProgressDeliveryAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): boolean {
+  const hosted = input.executionContext?.hosted
+  if (!hosted) {
+    return true
+  }
+
+  return hasHostedTextDeliveryForChannel({
+    channel: resolveAssistantProgressDeliveryChannel(input),
+    dependencies: hosted.progressDeliveryDependencies,
+  })
 }
 
 function isRequiredUserMessageDeliveryAvailable(input: {
@@ -177,9 +199,10 @@ function isRequiredUserMessageDeliveryAvailable(input: {
     return true
   }
 
-  return hasHostedProgressDeliveryForChannel({
+  return hasHostedTextDeliveryForChannel({
     channel: resolveAssistantProgressDeliveryChannel(input),
     dependencies: hosted.progressDeliveryDependencies,
+    includeEmail: true,
   })
 }
 
@@ -187,6 +210,52 @@ function isHostedComputerToolTransportAvailable(input: {
   executionContext: AssistantExecutionContext | null
 }): boolean {
   return typeof input.executionContext?.hosted?.providerFetch === 'function'
+}
+
+async function sendHostedRequiredUserMessage(input: {
+  dependencies?: AssistantHostedProgressDeliveryDependencies | null
+  getDeliveryContext: () => {
+    messageInput: AssistantMessageInput
+    session: AssistantSession
+  }
+  sharedPlan: AssistantTurnSharedPlan
+  text: string
+  turnId: string
+}): Promise<AssistantProgressDeliveryResult> {
+  const text = normalizeAssistantProgressText(input.text)
+  if (!text) {
+    return {
+      kind: 'skipped',
+      reason: 'empty',
+      source: 'model',
+    }
+  }
+
+  const deliveryContext = input.getDeliveryContext()
+  try {
+    await deliverAssistantProgressUpdate({
+      dependencies: input.dependencies ?? undefined,
+      input: deliveryContext.messageInput,
+      ordinal: 0,
+      session: deliveryContext.session,
+      sharedPlan: input.sharedPlan,
+      text,
+      turnId: input.turnId,
+    })
+    return {
+      kind: 'sent',
+      source: 'model',
+    }
+  } catch (error) {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'required hosted user-message delivery',
+    })
+    return {
+      kind: 'failed',
+      source: 'model',
+    }
+  }
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -434,12 +503,20 @@ export async function sendAssistantMessageLocal(
             session: resolved.session,
             sharedPlan,
           })
+        const hostedOptionalProgressDeliveryAvailable =
+          isHostedOptionalProgressDeliveryAvailable({
+            executionContext,
+            session: resolved.session,
+            sharedPlan,
+          })
         const hostedComputerToolsAvailable =
           input.deliverResponse === true &&
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && requiredUserMessageDeliveryAvailable
-        const progressDelivery = shouldCreateAssistantProgressDelivery(input)
+        const progressDelivery =
+          shouldCreateAssistantProgressDelivery(input) &&
+          hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
                 const hosted = executionContext?.hosted
@@ -447,7 +524,7 @@ export async function sendAssistantMessageLocal(
                   const dependencies = hosted.progressDeliveryDependencies
                   if (
                     !dependencies ||
-                    !hasHostedProgressDeliveryForChannel({
+                    !hasHostedTextDeliveryForChannel({
                       channel: resolveAssistantProgressDeliveryChannel(
                         progressInput,
                       ),
@@ -495,6 +572,18 @@ export async function sendAssistantMessageLocal(
                       required: true,
                       source: 'model',
                     })
+                  : requiredUserMessageDeliveryAvailable
+                    ? await sendHostedRequiredUserMessage({
+                        dependencies:
+                          executionContext.hosted?.progressDeliveryDependencies,
+                        getDeliveryContext: () => ({
+                          messageInput: currentInput,
+                          session: currentSession,
+                        }),
+                        sharedPlan,
+                        text,
+                        turnId: currentUserTurn.turnId,
+                      })
                   : {
                       kind: 'failed',
                       source: 'model',

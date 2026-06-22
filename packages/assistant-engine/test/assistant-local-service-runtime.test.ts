@@ -4984,7 +4984,7 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
   )
 })
 
-test('sendAssistantMessageLocal does not mark required hosted progress delivery available for unsupported channels', async () => {
+test('sendAssistantMessageLocal does not expose hosted progress or computer delivery for unsupported channels', async () => {
   const progressDeliveryDependencies = {
     sendTelegram: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -5023,16 +5023,10 @@ test('sendAssistantMessageLocal does not mark required hosted progress delivery 
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(progressDelivery)
+  assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
-  const result = await progressDelivery.send('Checking the WhatsApp thread.')
-
-  assert.deepEqual(result, {
-    kind: 'failed',
-    source: 'model',
-  })
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendTelegram.mock.calls.length, 0)
 })
@@ -5270,10 +5264,10 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
   )
 })
 
-test('sendAssistantMessageLocal routes hosted email model progress through progress delivery dependencies', async () => {
+test('sendAssistantMessageLocal does not expose optional progress delivery for hosted email', async () => {
   const progressDeliveryDependencies = {
     sendEmail: vi.fn(async () => ({
-      providerMessageId: 'progress-message',
+      providerMessageId: 'required-message',
       providerThreadId: 'email-thread',
       target: 'email-thread',
     })),
@@ -5308,11 +5302,13 @@ test('sendAssistantMessageLocal routes hosted email model progress through progr
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(progressDelivery)
+  assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  const result = await progressDelivery.send('Checking the email thread.')
+  const result = await hostedToolContext.sendRequiredUserMessage(
+    'Open this handoff link?',
+  )
 
   assert.deepEqual(result, {
     kind: 'sent',
@@ -5325,7 +5321,7 @@ test('sendAssistantMessageLocal routes hosted email model progress through progr
   )
   assert.equal(
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
-    'Checking the email thread.',
+    'Open this handoff link?',
   )
 })
 

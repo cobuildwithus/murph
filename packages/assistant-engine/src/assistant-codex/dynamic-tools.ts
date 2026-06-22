@@ -358,8 +358,13 @@ export function resolveMurphDynamicTools(input: {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
+  progressUpdatesAvailable?: boolean | null
 }): readonly MurphDynamicTool[] {
   return MURPH_DYNAMIC_TOOLS.filter((tool) => {
+    if (tool === MURPH_SEND_PROGRESS_UPDATE_TOOL) {
+      return input.progressUpdatesAvailable !== false
+    }
+
     if (tool === MURPH_FINISH_WITHOUT_REPLY_TOOL) {
       return input.allowFinishWithoutReply !== false
     }
