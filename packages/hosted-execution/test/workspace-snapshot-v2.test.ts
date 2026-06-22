@@ -28,7 +28,7 @@ describe("hosted workspace snapshot v2 refs", () => {
   });
 
   it("keeps the total plain snapshot limit bounded for restore extraction", () => {
-    expect(HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES).toBe(512 * 1024 * 1024);
+    expect(HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES).toBe(1024 * 1024 * 1024);
   });
 
   it("parses the single encrypted object snapshot contract", () => {

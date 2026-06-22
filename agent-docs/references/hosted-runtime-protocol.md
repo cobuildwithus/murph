@@ -645,7 +645,7 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - runtime timers and next wake projection
 - checkpoint timing
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
-  512 MiB encrypted single-object and total plain-byte limits, encrypted byte
+  512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)
 
 ### Cloudflare Owns
