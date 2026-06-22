@@ -512,6 +512,7 @@ describe("hosted execution coverage gaps", () => {
       "./bundles",
       "./cli-runtime-bridge",
       "./computer-use",
+      "./connected-apps",
       "./contracts",
       "./dashboard-replica",
       "./env",

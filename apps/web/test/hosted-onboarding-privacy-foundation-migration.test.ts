@@ -3,6 +3,24 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedConnectedAppConnectIntent: [
+    'claimHash String @id @map("claim_hash")',
+    'memberId String @map("member_id")',
+    "toolkit String",
+    "alias String?",
+    'connectedAccountId String? @map("connected_account_id")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'expiresAt DateTime @map("expires_at")',
+    'startedAt DateTime? @map("started_at")',
+    'completedAt DateTime? @map("completed_at")',
+  ],
+  HostedConnectedAppsSession: [
+    'memberId String @id @map("member_id")',
+    'remoteSessionId String @unique @map("remote_session_id")',
+    'policyRevision Int @map("policy_revision")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
   HostedMember: [
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -101,6 +119,8 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedConsentGrant",
   "HostedInvite",
   "HostedLinqDailyState",
+  "HostedConnectedAppConnectIntent",
+  "HostedConnectedAppsSession",
   "HostedMember",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
@@ -345,6 +365,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026061700_hosted_computer_use",
       "2026062100_hosted_computer_single_member_profile",
       "2026062101_hosted_subscription_cancellation_email_sent",
+      "20260622120000_connected_apps",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -788,7 +809,8 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(HostedMember\w*)\s+\{/gmu)].map((match) => match[1]);
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|Member\w*))\s+\{/gmu)]
+    .map((match) => match[1]);
 }
 
 function readPrismaScalarFields(schema: string, modelName: string): Array<[string, string]> {

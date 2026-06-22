@@ -400,6 +400,7 @@ export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   approvalPolicy?: string
   configOverrides?: readonly string[]
   codexCommand?: string
@@ -2797,6 +2798,7 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+      connectedAppsAvailable: input.connectedAppsAvailable === true,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
