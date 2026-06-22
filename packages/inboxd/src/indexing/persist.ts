@@ -52,6 +52,7 @@ import {
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
+import { findLatestInboxParserManifestPath } from "./parser-derivatives.js";
 import { listInboxAttachmentRetentionRecords } from "./retention.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
@@ -711,15 +712,9 @@ async function readRetainedParserProjection(input: {
   attachment: InboxAttachmentRetentionRecord;
   vaultRoot: string;
 }): Promise<RetainedParserProjection | null> {
-  const derivative = input.attachment.retainedDerivative;
-  if (derivative?.kind !== "parser-manifest") {
-    return null;
-  }
-
-  const manifestPath = normalizeRetainedParserManifestPath({
-    attachmentId: input.attachment.attachmentId,
-    captureId: input.attachment.captureId,
-    pathValue: derivative.path,
+  const manifestPath = await resolveRetainedParserManifestPath({
+    attachment: input.attachment,
+    vaultRoot: input.vaultRoot,
   });
   if (!manifestPath) {
     return null;
@@ -779,6 +774,29 @@ async function readRetainedParserProjection(input: {
     parserProviderId: typeof manifest.providerId === "string" ? manifest.providerId : null,
     transcriptText: transcriptOnly ? plainText : null,
   };
+}
+
+async function resolveRetainedParserManifestPath(input: {
+  attachment: InboxAttachmentRetentionRecord;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const derivative = input.attachment.retainedDerivative;
+  if (derivative?.kind === "parser-manifest") {
+    const manifestPath = normalizeRetainedParserManifestPath({
+      attachmentId: input.attachment.attachmentId,
+      captureId: input.attachment.captureId,
+      pathValue: derivative.path,
+    });
+    if (manifestPath) {
+      return manifestPath;
+    }
+  }
+
+  return await findLatestInboxParserManifestPath({
+    attachmentId: input.attachment.attachmentId,
+    captureId: input.attachment.captureId,
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 function normalizeRetainedParserManifestPath(input: {

@@ -1,4 +1,3 @@
-import path from "node:path";
 import { createHash } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 
@@ -24,6 +23,7 @@ import {
   withCanonicalWriteLockScope,
   walkVaultFiles,
 } from "@murphai/core";
+import { findLatestInboxParserManifestPath } from "./parser-derivatives.js";
 
 const INBOX_MEDIA_RETENTION_DAYS = 14;
 const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -41,6 +41,7 @@ export interface RunInboxMediaRetentionInput {
   maxAttachments?: number;
   now?: Date | string;
   protectedAttachmentIds?: Iterable<string>;
+  protectedCaptureIds?: Iterable<string>;
   protectedStoredPaths?: Iterable<string>;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -72,6 +73,7 @@ export async function runInboxMediaRetention(
   }
   const cutoffMs = Date.parse(now) - INBOX_MEDIA_RETENTION_WINDOW_MS;
   const protectedAttachmentIds = new Set(input.protectedAttachmentIds ?? []);
+  const protectedCaptureIds = new Set(input.protectedCaptureIds ?? []);
   const protectedStoredPaths = normalizeProtectedStoredPaths(input.protectedStoredPaths ?? []);
   const [captureRecords, durableRawInboxRefs, initialRetentionRecords] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot),
@@ -93,6 +95,9 @@ export async function runInboxMediaRetention(
     throwIfRetentionAborted(input.signal);
     const recordedAtMs = Date.parse(capture.recordedAt);
     if (!Number.isFinite(recordedAtMs)) {
+      continue;
+    }
+    if (protectedCaptureIds.has(capture.captureId)) {
       continue;
     }
 
@@ -123,6 +128,10 @@ export async function runInboxMediaRetention(
         continue;
       }
 
+      if (candidates.length >= maxAttachments) {
+        hasMoreEligibleAttachments = true;
+        break captureLoop;
+      }
       const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
       if (integrity.kind === "missing") {
         if (alreadyRetained || !input.materializeCandidatePaths) {
@@ -131,11 +140,6 @@ export async function runInboxMediaRetention(
       }
       if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
         continue;
-      }
-
-      if (candidates.length >= maxAttachments) {
-        hasMoreEligibleAttachments = true;
-        break captureLoop;
       }
       candidates.push({
         attachment,
@@ -186,6 +190,7 @@ export async function runInboxMediaRetention(
         throwIfRetentionAborted(input.signal);
         if (
           latestDurableRawInboxRefs.has(candidate.storedPath) ||
+          protectedCaptureIds.has(candidate.capture.captureId) ||
           protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
           protectedStoredPaths.has(candidate.storedPath)
         ) {
@@ -210,7 +215,7 @@ export async function runInboxMediaRetention(
               attachment: candidate.attachment,
               capture: candidate.capture,
               purgedAt: now,
-              retainedDerivative: await findLatestParserManifest({
+              retainedDerivative: await buildRetainedParserDerivative({
                 attachmentId: candidate.attachment.attachmentId,
                 captureId: candidate.capture.captureId,
                 vaultRoot: input.vaultRoot,
@@ -231,6 +236,7 @@ export async function runInboxMediaRetention(
 
       const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
       if (records.length > 0) {
+        throwIfRetentionAborted(input.signal);
         await runCanonicalWrite({
           vaultRoot: input.vaultRoot,
           operationType: "inbox_media_retention",
@@ -379,24 +385,12 @@ async function listDurableRawInboxReferences(vaultRoot: string): Promise<Set<str
   return references;
 }
 
-async function findLatestParserManifest(input: {
+async function buildRetainedParserDerivative(input: {
   attachmentId: string;
   captureId: string;
   vaultRoot: string;
 }): Promise<InboxAttachmentRetentionRecord["retainedDerivative"]> {
-  const attemptsDirectory = normalizeRelativeVaultPath(
-    path.posix.join(
-      "derived/inbox",
-      input.captureId,
-      "attachments",
-      input.attachmentId,
-      "attempts",
-    ),
-  );
-  const manifests = (await walkVaultFiles(input.vaultRoot, attemptsDirectory, {
-    extension: ".json",
-  })).filter((relativePath) => path.posix.basename(relativePath) === "manifest.json");
-  const latest = manifests.sort().at(-1);
+  const latest = await findLatestInboxParserManifestPath(input);
   return latest ? { kind: "parser-manifest", path: latest } : null;
 }
 

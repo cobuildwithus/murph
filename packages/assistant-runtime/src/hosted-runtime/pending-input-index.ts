@@ -36,6 +36,7 @@ export interface HostedPendingAssistantInputState {
 
 export interface HostedPendingAssistantInputMediaRetentionProtections {
   protectedAttachmentIds: string[];
+  protectedCaptureIds: string[];
   protectedStoredPaths: string[];
 }
 
@@ -84,6 +85,7 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
     vaultRoot: input.vaultRoot,
   });
   const protectedAttachmentIds = new Set<string>();
+  const protectedCaptureIds = new Set<string>();
   const protectedStoredPaths = new Set<string>();
 
   for (const inputId of inputIds) {
@@ -93,6 +95,13 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
     });
     if (!event) {
       continue;
+    }
+
+    if (event.projection.captureId) {
+      protectedCaptureIds.add(event.projection.captureId);
+    }
+    if (event.attachmentEvidence.optionalInboxCaptureId) {
+      protectedCaptureIds.add(event.attachmentEvidence.optionalInboxCaptureId);
     }
 
     for (const attachment of event.attachmentEvidence.attachments) {
@@ -113,6 +122,7 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
 
   return {
     protectedAttachmentIds: [...protectedAttachmentIds].sort(),
+    protectedCaptureIds: [...protectedCaptureIds].sort(),
     protectedStoredPaths: [...protectedStoredPaths].sort(),
   };
 }

@@ -1338,9 +1338,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
       trackMailboxPostCheckpointEffects(result);
-      runtimeStateDirty ||= result.runtimeStateDirty;
+      const inboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
+        nowMs: Date.now(),
+        workspace: workspaceRead.workspace,
+      });
+      runtimeStateDirty ||= result.runtimeStateDirty || inboxMediaRetentionWakeDue;
       if (result.runtimeStateDirty) {
         markIdleCheckpointTimerAfterDirtyWork();
+      } else if (inboxMediaRetentionWakeDue) {
+        idleCheckpointStartByMs = Date.now();
       }
       // Best-effort consented vault-share offer: runs once per wake after the foreground
       // pass so it never delays user-facing work, holds no share state (web is the
@@ -1497,20 +1503,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || (accumulatedProjection.nextWakeAt !== null
             && Date.parse(accumulatedProjection.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
-        const mediaRetentionProtections = idleMaintenancePendingWork
-          ? {
-              protectedAttachmentIds: [],
-              protectedStoredPaths: [],
-            }
-          : await collectHostedPendingAssistantInputMediaRetentionProtections({
-              vaultRoot: restored.vaultRoot,
-            });
+        const mediaRetentionProtections =
+          await collectHostedPendingAssistantInputMediaRetentionProtections({
+            vaultRoot: restored.vaultRoot,
+          });
         const idleMaintenance = await runHostedIdleCheckpointMaintenance({
           pendingWork: idleMaintenancePendingWork,
           materializeRetentionCandidatePaths: async (storedPaths) => {
             await restored.materializeWorkspaceArtifacts(storedPaths);
           },
           protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
+          protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
           protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
           // The compact call rides the same warm-process credential as turns,
           // so attribute it the same way: members using their own provider key
@@ -2882,6 +2885,21 @@ function resolveHostedWorkspaceRunNextWake(input: {
       reason: mailboxImportRetryAt ? "mailbox" : null,
     },
   ]);
+}
+
+function isHostedInboxMediaRetentionWakeDue(input: {
+  nowMs: number;
+  workspace: HostedWorkspaceState | null;
+}): boolean {
+  if (
+    input.workspace?.nextWakeReason !== "inbox_media_retention" ||
+    !input.workspace.nextWakeAt
+  ) {
+    return false;
+  }
+
+  const wakeMs = Date.parse(input.workspace.nextWakeAt);
+  return Number.isFinite(wakeMs) && wakeMs <= input.nowMs;
 }
 
 function selectEarliestHostedRuntimeWake(

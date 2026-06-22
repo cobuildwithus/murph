@@ -162,6 +162,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(runInboxMediaRetention).toHaveBeenCalledWith({
         materializeCandidatePaths: undefined,
         protectedAttachmentIds: undefined,
+        protectedCaptureIds: undefined,
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),
         vaultRoot: "/vault",
@@ -202,6 +203,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       model: "gpt-5.5",
       pendingWork: false,
       protectedAttachmentIds: ["att_pending"],
+      protectedCaptureIds: ["cap_pending"],
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       providerName: "hosted-openai",
       recordUsage: null,
@@ -214,6 +216,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(runInboxMediaRetention).toHaveBeenCalledWith({
       materializeCandidatePaths: materializeRetentionCandidatePaths,
       protectedAttachmentIds: ["att_pending"],
+      protectedCaptureIds: ["cap_pending"],
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
@@ -491,6 +494,54 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       }),
     ).toEqual({ kind: "skipped", reason: "pending_work", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("runs a bounded inbox media retention slice when compaction is skipped for pending work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 1,
+      expiredBytes: 512,
+      hasMoreEligibleAttachments: true,
+      nextEligibleAt: null,
+      records: [],
+    });
+
+    try {
+      await expect(
+        runHostedIdleCheckpointMaintenance({
+          credentialSource: "platform",
+          memberId: "member_1",
+          model: "gpt-5.5",
+          pendingWork: true,
+          protectedCaptureIds: ["cap_pending"],
+          providerName: "hosted-openai",
+          recordUsage: null,
+          resolveAssistantSessionId: null,
+          shutdownSignal: null,
+          vaultRoot: "/vault",
+          wakeSignal: null,
+        }),
+      ).resolves.toEqual({
+        kind: "skipped",
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        nextWakeReason: "inbox_media_retention",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+      });
+      expect(runInboxMediaRetention).toHaveBeenCalledWith({
+        materializeCandidatePaths: undefined,
+        maxAttachments: 1,
+        protectedAttachmentIds: undefined,
+        protectedCaptureIds: ["cap_pending"],
+        protectedStoredPaths: undefined,
+        signal: expect.any(AbortSignal),
+        vaultRoot: "/vault",
+      });
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips unpriced models so usage can never be unaccountable", async () => {

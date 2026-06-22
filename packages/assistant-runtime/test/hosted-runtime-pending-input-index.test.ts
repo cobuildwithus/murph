@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
@@ -136,7 +137,68 @@ describe("hosted pending assistant input index", () => {
       vaultRoot,
     })).resolves.toEqual({
       protectedAttachmentIds: ["att_cap_pending_media_01", "descriptor_image_1"],
+      protectedCaptureIds: ["cap_pending_media"],
       protectedStoredPaths: [rawPath],
+    });
+  });
+
+  it("protects a pending capture when attachment evidence failed without attachment rows", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const captureId = "cap_pending_failed_evidence";
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_pending_failed_evidence",
+        eventId: "evt_pending_failed_evidence",
+        itemId: "item_pending_failed_evidence",
+        laneSeq: "10",
+        messageId: "msg_pending_failed_evidence",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "pending media input with failed evidence",
+      }),
+    });
+
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      projection: {
+        captureId,
+        status: "succeeded",
+      },
+      vault: vaultRoot,
+    });
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: captureId,
+        reasonCode: "inbox_projection_unavailable",
+        source: "hosted-inbox-projection",
+        status: "failed",
+        updatedAt: "2026-04-23T00:00:03.000Z",
+      },
+      inputId: event.inputId,
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
+      vaultRoot,
+    })).resolves.toEqual({
+      protectedAttachmentIds: [],
+      protectedCaptureIds: [captureId],
+      protectedStoredPaths: [],
     });
   });
 

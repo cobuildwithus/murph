@@ -820,6 +820,104 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services a due inbox media retention wake without mailbox or assistant progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const recordedAt = "2026-04-01T00:00:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const persisted = await persistCanonicalInboxCapture({
+        vaultRoot,
+        captureId: "cap_workspace_due_retention_wake",
+        eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V2",
+        storedAt: recordedAt,
+        input: {
+          source: "telegram",
+          externalId: "msg-workspace-due-retention-wake",
+          accountId: "self",
+          thread: {
+            id: "thread-workspace-due-retention-wake",
+            isDirect: true,
+          },
+          actor: {
+            isSelf: false,
+          },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          text: "old media",
+          attachments: [
+            {
+              kind: "audio",
+              mime: "audio/mp4",
+              fileName: "voice.m4a",
+              data: Buffer.from("audio-bytes"),
+            },
+          ],
+          raw: {},
+        },
+      });
+      const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+      assert.ok(audioPath);
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_due_retention_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/due-retention-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "inbox_media_retention",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      await assert.rejects(stat(path.join(vaultRoot, audioPath)), { code: "ENOENT" });
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("waits for deferred import enrichment before idle checkpointing dirty runtime state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

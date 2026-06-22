@@ -57,6 +57,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   model: string | null;
   pendingWork: boolean;
   protectedAttachmentIds?: readonly string[];
+  protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
@@ -67,12 +68,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
 }): Promise<HostedIdleMaintenanceOutcome> {
   if (input.shutdownSignal?.aborted) {
     return { kind: "skipped", reason: "shutdown", threadContextTokensBefore: null };
-  }
-  if (input.pendingWork) {
-    // The checkpoint is on a prompt-return path (mailbox budget exhausted or
-    // an imminent projected wake); a compact here would delay member-visible
-    // work, which is exactly what this feature must never do.
-    return { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null };
   }
 
   const abortController = new AbortController();
@@ -97,7 +92,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       try {
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
+          ...(input.pendingWork ? { maxAttachments: 1 } : {}),
           protectedAttachmentIds: input.protectedAttachmentIds,
+          protectedCaptureIds: input.protectedCaptureIds,
           protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
@@ -120,6 +117,15 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         shutdownSignal: input.shutdownSignal,
         wakeInterrupted,
       });
+    }
+    if (input.pendingWork) {
+      // The checkpoint is on a prompt-return path (mailbox budget exhausted or
+      // an imminent projected wake); retention is bounded and privacy-critical,
+      // but Codex compaction would delay member-visible work.
+      return attachInboxMediaRetentionWake(
+        { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null },
+        retentionWake,
+      );
     }
     // Without a priced hosted model id the compact call's usage cannot be
     // accounted against the member's allowance, so do not spend unattributable
@@ -238,14 +244,18 @@ function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
   };
 }
 
+function resolveInboxMediaRetentionImmediateWake(): HostedIdleMaintenanceWake {
+  return {
+    nextWakeAt: new Date().toISOString(),
+    nextWakeReason: "inbox_media_retention",
+  };
+}
+
 function resolveInboxMediaRetentionWake(
   result: InboxMediaRetentionResult,
 ): HostedIdleMaintenanceWake {
   if (result.hasMoreEligibleAttachments) {
-    return {
-      nextWakeAt: new Date().toISOString(),
-      nextWakeReason: "inbox_media_retention",
-    };
+    return resolveInboxMediaRetentionImmediateWake();
   }
 
   if (result.nextEligibleAt) {
