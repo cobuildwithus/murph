@@ -12,9 +12,8 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, readOptionalJsonObject } from "@/src/lib/http";
 import {
-  hasHostedMemberActiveAccess,
-  isHostedMemberSuspended,
-} from "@/src/lib/hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -110,11 +109,10 @@ async function resolveHostedEmailRouteMemberUserId(input: {
     return null;
   }
 
-  return !isHostedMemberSuspended(member.suspendedAt)
-    && hasHostedMemberActiveAccess({
-      billingStatus: member.billingStatus,
-      suspendedAt: member.suspendedAt,
-    })
+  return await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma: input.prisma,
+  })
     ? input.memberId
     : null;
 }

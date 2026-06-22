@@ -6,8 +6,8 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  hasHostedMemberActiveAccess,
-} from "@/src/lib/hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -47,12 +47,16 @@ export const GET = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeWorkspaceReadActiveAccess(userId: string): Promise<void> {
+  const prisma = getPrisma();
   const member = await readHostedMemberCoreState({
     memberId: userId,
-    prisma: getPrisma(),
+    prisma,
   });
 
-  if (member && hasHostedMemberActiveAccess(member)) {
+  if (member && await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  })) {
     return;
   }
 

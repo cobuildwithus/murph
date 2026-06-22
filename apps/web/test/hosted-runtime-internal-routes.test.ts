@@ -1576,6 +1576,41 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
   });
 
+  it("reads workspace state for sponsored Family members", async () => {
+    const prisma = createPrismaClientStub();
+    prisma.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: {
+        billingStatus: "active",
+        id: "hbag_family",
+        maxSeats: 4,
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_family",
+      memberId: "member_routes_1",
+      role: "member",
+      status: "active",
+    });
+    prisma.hostedAccountGroupMembership.count.mockResolvedValueOnce(2);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
+      billingStatus: "not_started",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+      { method: "GET" },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedWorkspaceReadResponse(await response.json()).workspace)
+      .toMatchObject({
+        userId: "member_routes_1",
+        version: "4",
+      });
+  });
+
   it("accepts old runner checkpoint payloads without browser-vault replica refs", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
@@ -2474,7 +2509,7 @@ function createPrismaClientStub() {
   return {
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async (): Promise<unknown | null> => null),
     },
     kind: "prisma",
   };
