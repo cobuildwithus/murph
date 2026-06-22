@@ -62,6 +62,7 @@ import {
 import {
   createHostedAssistantTurnEnvironment,
 } from "./environment.ts";
+import { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 import {
   summarizeHostedAssistantAutoReplyEligibleAfter,
   summarizeHostedRuntimeStatusCounts,
@@ -69,7 +70,6 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
-import { emitHostedAssistantProviderTraceLog } from "./events.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,

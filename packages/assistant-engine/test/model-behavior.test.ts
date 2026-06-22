@@ -356,6 +356,12 @@ describe('assistant local PDF evidence guidance', () => {
       'When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields.',
     )
     expect(prompt).toContain(
+      'WHOOP does not share step counts. If the visible connected or referenced source is WHOOP and no separate non-WHOOP step source is available, do not proactively report, infer, discuss, or ask for step counts.',
+    )
+    expect(prompt).toContain(
+      'If the user asks about steps or missing step counts, say WHOOP unfortunately does not send steps to Murph and Murph is building an app-based steps connection expected in about 1-2 weeks.',
+    )
+    expect(prompt).toContain(
       'Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal.',
     )
     expect(prompt).toContain(

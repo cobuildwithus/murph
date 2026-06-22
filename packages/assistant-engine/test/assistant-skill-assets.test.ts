@@ -691,6 +691,12 @@ describe('assistant skill assets', () => {
       'Do not make RHR, HRV, recovery, steps, or another wearable metric the headline merely because the data is available',
     )
     expect(raw).toContain(
+      'Provider exception: WHOOP does not share step counts',
+    )
+    expect(raw).toContain(
+      'Murph is building an app-based steps connection expected in about 1-2 weeks',
+    )
+    expect(raw).toContain(
       'Invite only missing context as it happens',
     )
     expect(raw).toContain(

@@ -1359,6 +1359,9 @@ describe("executeHostedMailboxEvent", () => {
     expect(seedInput?.instructions).toContain(
       "The user's answer will be handled by the next normal Murph onboarding turn",
     );
+    expect(seedInput?.instructions).toContain(
+      "Ensure the question you are about to ask doesn't have an answer that has been saved to the user's vault already.",
+    );
     expect(seedInput?.instructions).toContain("next unresolved onboarding step");
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
