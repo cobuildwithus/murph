@@ -1384,8 +1384,16 @@ function isUnknownComputerOutcomeError(input: {
   status: number
   unknownOutcomeOnFailure: boolean
 }): boolean {
-  return input.unknownOutcomeOnFailure
-    && (input.status >= 500 || input.code === 'HOSTED_COMPUTER_EVAL_FAILED')
+  if (!input.unknownOutcomeOnFailure) {
+    return false
+  }
+
+  if (!input.code) {
+    return input.status >= 500
+  }
+
+  return input.code === 'HOSTED_COMPUTER_EVAL_FAILED'
+    || input.code === 'HOSTED_COMPUTER_ACTION_STATE_INVALID'
 }
 
 function readComputerPauseMessage(payload: unknown): string | null {
