@@ -651,6 +651,60 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
+  it("includes structured browser execution details in unknown-outcome action failures", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        error: {
+          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          details: {
+            browserAction: "click",
+            kernelError:
+              "locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+            kernelStderr: "page context closed",
+            locator: "role=button, name=Place your order, exact=true",
+            timeoutMs: 20000,
+          },
+          message: "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+        },
+      }, 502)
+    );
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          action: "click",
+          locator: {
+            by: "role",
+            exact: true,
+            name: "Place your order",
+            role: "button",
+          },
+          runId: "run_123",
+          timeoutMs: 20000,
+        },
+        kind: "computer-act",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toBe(
+      [
+        "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; backend error: HOSTED_COMPUTER_EVAL_FAILED: Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+        "backend details:",
+        "browserAction: click",
+        "locator: role=button, name=Place your order, exact=true",
+        "timeoutMs: 20000",
+        "kernelError: locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+        "kernelStderr: page context closed",
+      ].join("\n"),
+    );
+  });
+
   it("parses the generic pause-for-user checkpoint tool", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {

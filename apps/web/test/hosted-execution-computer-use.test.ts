@@ -7,6 +7,7 @@ import type {
 import type {
   ComputerKernelClient,
 } from "../src/lib/computer-use/kernel-client";
+import { computerUseError } from "../src/lib/computer-use/errors";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
   ComputerHandoffRecord,
@@ -2185,6 +2186,64 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
+      status: "running",
+    });
+  });
+
+  it("adds action context to Kernel browser evaluation failures", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        lastTitle: "Checkout",
+        lastUrl: "https://shop.example.test/checkout",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResultForCall() {
+        throw computerUseError({
+          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          details: {
+            kernelError:
+              "locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+            kernelStderr: "page context closed",
+          },
+          httpStatus: 502,
+          message:
+            "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+          retryable: true,
+        });
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: true, name: "Place your order", role: "button" },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 20000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_EVAL_FAILED",
+      details: {
+        browserAction: "click",
+        kernelError:
+          "locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+        kernelStderr: "page context closed",
+        locator: "role=button, name=Place your order, exact=true",
+        timeoutMs: 20000,
+      },
+      message: "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+      retryable: true,
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Checkout",
+      lastUrl: "https://shop.example.test/checkout",
       status: "running",
     });
   });

@@ -1427,6 +1427,7 @@ async function readHostedComputerApiError(input: {
     const error = asRecord(record?.error)
     const code = typeof error?.code === 'string' ? error.code : null
     const message = typeof error?.message === 'string' ? error.message : null
+    const details = readHostedComputerApiErrorDetails(error?.details)
     if (isUnknownComputerOutcomeError({
       code,
       status: response.status,
@@ -1435,16 +1436,28 @@ async function readHostedComputerApiError(input: {
       return {
         text: appendHostedComputerApiErrorDetail(
           HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
-          { code, message },
+          { code, details, message },
         ),
         unknownOutcome: true,
       }
     }
     if (code && message) {
-      return { text: `${fallback}: ${code}: ${message}`, unknownOutcome: false }
+      return {
+        text: appendHostedComputerApiErrorDetail(
+          `${fallback}: ${code}: ${message}`,
+          { code: null, details, message: null },
+        ),
+        unknownOutcome: false,
+      }
     }
     if (code) {
-      return { text: `${fallback}: ${code}`, unknownOutcome: false }
+      return {
+        text: appendHostedComputerApiErrorDetail(
+          `${fallback}: ${code}`,
+          { code: null, details, message: null },
+        ),
+        unknownOutcome: false,
+      }
     }
   } catch {
     // Ignore non-JSON error bodies; hosted web route helpers keep safe details in JSON.
@@ -1465,19 +1478,60 @@ function appendHostedComputerApiErrorDetail(
   text: string,
   detail: {
     code: string | null
+    details?: string | null
     message: string | null
   },
 ): string {
+  const details = detail.details ? `\nbackend details:\n${detail.details}` : ''
   if (detail.code && detail.message) {
-    return `${text}; backend error: ${detail.code}: ${detail.message}`
+    return `${text}; backend error: ${detail.code}: ${detail.message}${details}`
   }
   if (detail.code) {
-    return `${text}; backend error: ${detail.code}`
+    return `${text}; backend error: ${detail.code}${details}`
   }
   if (detail.message) {
-    return `${text}; backend error: ${detail.message}`
+    return `${text}; backend error: ${detail.message}${details}`
   }
-  return text
+  return `${text}${details}`
+}
+
+function readHostedComputerApiErrorDetails(value: unknown): string | null {
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+
+  const lines = [
+    readHostedComputerApiErrorDetailLine('browserAction', record.browserAction),
+    readHostedComputerApiErrorDetailLine('locator', record.locator),
+    readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
+    readHostedComputerApiErrorDetailLine('waitMs', record.waitMs),
+    readHostedComputerApiErrorDetailLine('kernelError', record.kernelError),
+    readHostedComputerApiErrorDetailLine('kernelStderr', record.kernelStderr),
+    readHostedComputerApiErrorDetailLine('kernelStdout', record.kernelStdout),
+  ].filter((line): line is string => line !== null)
+
+  return lines.length > 0 ? lines.join('\n') : null
+}
+
+function readHostedComputerApiErrorDetailLine(
+  label: string,
+  value: unknown,
+): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text ? `${label}: ${text}` : null
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `${label}: ${value}`
+  }
+
+  if (typeof value === 'boolean') {
+    return `${label}: ${value}`
+  }
+
+  return null
 }
 
 function isUnknownComputerOutcomeError(input: {
