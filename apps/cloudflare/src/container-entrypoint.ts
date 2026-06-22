@@ -14,6 +14,9 @@ import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
+} from "@murphai/contracts";
+import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -1807,7 +1810,7 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
       path.join(smokeVaultRoot, "vault.json"),
       `${JSON.stringify({
         createdAt: "2026-05-22T00:00:00.000Z",
-        formatVersion: 1,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         timezone: "UTC",
         title: "Hosted Codex Shell Smoke",
         vaultId: "vault_01JY0000000000000000000000",
