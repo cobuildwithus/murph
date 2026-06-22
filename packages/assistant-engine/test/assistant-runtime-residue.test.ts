@@ -357,7 +357,7 @@ describe('assistant runtime residue pruning', () => {
 
     const result = await pruneAssistantRuntimeResidue({
       now: PRUNE_NOW,
-      pendingInputIds: null,
+      pendingInputIds: [],
       vault: vaultRoot,
     })
 
@@ -400,7 +400,7 @@ describe('assistant runtime residue pruning', () => {
 
     await expect(pruneAssistantRuntimeResidue({
       now: PRUNE_NOW,
-      pendingInputIds: null,
+      pendingInputIds: [],
       vault: source.vaultRoot,
     })).rejects.toThrow('Assistant state path must not contain symlinks')
     await expectPathExists(resolveIntentProvenancePath(target.paths, intentId))

@@ -90,7 +90,7 @@ interface AssistantRuntimeResiduePrunePlan {
 
 export async function pruneAssistantRuntimeResidue(input: {
   now?: Date
-  pendingInputIds: readonly string[] | null
+  pendingInputIds: readonly string[]
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -104,10 +104,10 @@ export async function pruneAssistantRuntimeResidue(input: {
   })
 }
 
-export async function pruneAssistantRuntimeResidueAtPaths(input: {
+async function pruneAssistantRuntimeResidueAtPaths(input: {
   now: Date
   paths: AssistantStatePaths
-  pendingInputIds: readonly string[] | null
+  pendingInputIds: readonly string[]
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
   const directories = resolveAssistantRuntimeResidueDirectories(input.paths)
@@ -163,12 +163,12 @@ export async function pruneAssistantRuntimeResidueAtPaths(input: {
 function planAssistantRuntimeResiduePrune(input: {
   inventory: AssistantRuntimeResidueInventory
   now: Date
-  pendingInputIds: readonly string[] | null
+  pendingInputIds: readonly string[]
 }): AssistantRuntimeResiduePrunePlan {
   const cutoffMs = input.now.getTime() - ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS
-  const pendingInputIds = input.pendingInputIds === null
-    ? null
-    : new Set(input.pendingInputIds.map((inputId) => inputId.trim()).filter(Boolean))
+  const pendingInputIds = new Set(
+    input.pendingInputIds.map((inputId) => inputId.trim()).filter(Boolean),
+  )
   const activeOutbox = input.inventory.outbox.records
     .map(({ record }) => record)
     .filter(isActiveAssistantOutboxIntent)
@@ -200,7 +200,6 @@ function planAssistantRuntimeResiduePrune(input: {
   for (const journal of input.inventory.journals.records) {
     const receipt = receiptsByTurnId.get(journal.record.turnId)?.record ?? null
     const canPrune =
-      pendingInputIds !== null &&
       input.inventory.journals.trusted &&
       input.inventory.outbox.trusted &&
       receipt !== null &&
@@ -222,7 +221,6 @@ function planAssistantRuntimeResiduePrune(input: {
   const evidenceGroups = buildEvidenceGroups(input.inventory.evidence.records)
   const prunableEvidenceGroups = evidenceGroups
     .filter((group) =>
-      pendingInputIds !== null &&
       input.inventory.evidence.trusted &&
       input.inventory.inputEvents.trusted &&
       input.inventory.journals.trusted &&
@@ -274,7 +272,6 @@ function planAssistantRuntimeResiduePrune(input: {
   }
 
   if (
-    pendingInputIds !== null &&
     input.inventory.evidence.trusted &&
     input.inventory.inputEvents.trusted &&
     input.inventory.journals.trusted &&
@@ -334,14 +331,12 @@ function planAssistantRuntimeResiduePrune(input: {
       }
     }
 
-    if (pendingInputIds !== null) {
-      for (const receipt of unprotectedReceipts) {
-        if (
-          receipt.record.status === 'running' &&
-          resolveReceiptTimestampMs(receipt.record) < cutoffMs
-        ) {
-          receiptPaths.push(receipt.filePath)
-        }
+    for (const receipt of unprotectedReceipts) {
+      if (
+        receipt.record.status === 'running' &&
+        resolveReceiptTimestampMs(receipt.record) < cutoffMs
+      ) {
+        receiptPaths.push(receipt.filePath)
       }
     }
   }
@@ -363,18 +358,14 @@ function planAssistantRuntimeResiduePrune(input: {
 }
 
 function receiptHasNoPendingAutoReplyInputs(input: {
-  pendingInputIds: ReadonlySet<string> | null
+  pendingInputIds: ReadonlySet<string>
   receipt: AssistantTurnReceipt
 }): boolean {
   const metadata = readAssistantAutoReplyReceiptMetadata(input.receipt)
   if (!metadata) {
     return true
   }
-  const pendingInputIds = input.pendingInputIds
-  return (
-    pendingInputIds !== null &&
-    metadata.inputIds.every((inputId) => !pendingInputIds.has(inputId))
-  )
+  return metadata.inputIds.every((inputId) => !input.pendingInputIds.has(inputId))
 }
 
 function isPrunableTerminalAssistantTurnReceipt(

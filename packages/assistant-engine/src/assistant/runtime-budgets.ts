@@ -15,7 +15,6 @@ import {
   pruneAssistantTranscriptRetention,
 } from './store/persistence.js'
 import { pruneAssistantTerminalOutboxIntents } from './outbox/store.js'
-import { pruneAssistantRuntimeResidueAtPaths } from './runtime-residue.js'
 import { pruneAssistantCronRunHistory } from './cron/store.js'
 import {
   clearAssistantRuntimeWriteLock,
@@ -132,19 +131,6 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
       `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
     )
   }
-  const runtimeResidue = await pruneAssistantRuntimeResidueAtPaths({
-    now: input.now,
-    paths: input.paths,
-    pendingInputIds: null,
-    vault: input.vault,
-  })
-  const runtimeResiduePruned =
-    countAssistantRuntimeResiduePrunedFiles(runtimeResidue)
-  if (runtimeResiduePruned > 0) {
-    notes.push(
-      `${runtimeResiduePruned} assistant runtime residue file(s) were pruned.`,
-    )
-  }
   const cronHistory = await pruneAssistantCronRunHistory({
     now: input.now,
     paths: input.paths,
@@ -177,17 +163,6 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
         ? notes.join(' ')
         : 'Assistant runtime maintenance ran with no corrective actions.',
     data: {
-      assistantRuntimeAcceptedTurnInputJournalsPruned:
-        runtimeResidue.acceptedTurnInputJournalsPruned,
-      assistantRuntimeAutoReplyEvidenceFilesPruned:
-        runtimeResidue.autoReplyEvidenceFilesPruned,
-      assistantRuntimeAutoReplyEvidenceGroupsPruned:
-        runtimeResidue.autoReplyEvidenceGroupsPruned,
-      assistantRuntimeAutoReplyIntentProvenancePruned:
-        runtimeResidue.autoReplyIntentProvenancePruned,
-      assistantRuntimeInputEventsPruned: runtimeResidue.inputEventsPruned,
-      assistantRuntimeReceiptsPruned: runtimeResidue.receiptsPruned,
-      assistantRuntimeResiduePruned: runtimeResiduePruned,
       cronResponsesRedacted: cronHistory.responsesRedacted,
       cronRunsPruned: cronHistory.runsPruned,
       staleQuarantinePruned,
@@ -300,18 +275,6 @@ function buildDefaultAssistantRuntimeBudgetSnapshot(
       notes: [],
     },
   })
-}
-
-function countAssistantRuntimeResiduePrunedFiles(
-  result: Awaited<ReturnType<typeof pruneAssistantRuntimeResidueAtPaths>>,
-): number {
-  return (
-    result.acceptedTurnInputJournalsPruned +
-    result.autoReplyEvidenceFilesPruned +
-    result.autoReplyIntentProvenancePruned +
-    result.inputEventsPruned +
-    result.receiptsPruned
-  )
 }
 
 async function pruneAssistantQuarantineFiles(
