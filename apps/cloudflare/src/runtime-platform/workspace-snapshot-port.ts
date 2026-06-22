@@ -292,7 +292,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           const objectFetchTimeoutMs =
             Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
-          const encryptedObject = await fetchHostedWorkspaceSnapshotEncryptedObjectStream({
+          const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
@@ -300,20 +300,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             signal: request.signal ?? null,
             timeoutMs: objectFetchTimeoutMs,
           });
-          if (!encryptedObject) {
-            throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
-          }
-          try {
-            return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-              dataKey,
-              durableRoot: request.durableRoot,
-              encryptedStream: encryptedObject.encryptedStream,
-              ref: request.ref,
-              signal: request.signal ?? null,
-            });
-          } finally {
-            await encryptedObject.cancel();
-          }
+          return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+            dataKey,
+            durableRoot: request.durableRoot,
+            encryptedStream,
+            ref: request.ref,
+            signal: request.signal ?? null,
+          });
         },
         step: "object_fetch",
       });
@@ -350,11 +343,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
     },
   };
   return port;
-}
-
-interface HostedWorkspaceSnapshotEncryptedObjectBody {
-  cancel(): Promise<void>;
-  encryptedStream: AsyncIterable<Uint8Array>;
 }
 
 function parseHostedWorkspaceSnapshotStartPayload(
@@ -568,14 +556,14 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
   return dataKey;
 }
 
-async function fetchHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   deadlineMs: number;
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
   getUrl: string;
   signal?: AbortSignal | null;
   timeoutMs: number;
-}): Promise<HostedWorkspaceSnapshotEncryptedObjectBody | null> {
+}): AsyncIterable<Uint8Array> {
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
@@ -590,7 +578,7 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   });
   if (response.status === 404) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
-    return null;
+    throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
   }
   if (!response.ok) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
@@ -604,61 +592,22 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot fetch content-length does not match its ref.");
   }
-  return createHostedWorkspaceSnapshotEncryptedObjectBody({
-    expectedEncryptedByteSize: input.expectedEncryptedByteSize,
-    responseBody: response.body,
+  let byteCount = 0;
+  for await (const next of readHostedRuntimeResponseBodyChunks({
+    body: response.body,
+    description: "Hosted workspace snapshot fetch",
     signal: input.signal ?? null,
     timeoutMs: Math.max(1, input.deadlineMs - Date.now()),
-  });
-}
-
-function createHostedWorkspaceSnapshotEncryptedObjectBody(input: {
-  expectedEncryptedByteSize: number;
-  responseBody: ReadableStream<Uint8Array>;
-  signal?: AbortSignal | null;
-  timeoutMs: number;
-}): HostedWorkspaceSnapshotEncryptedObjectBody {
-  let byteCount = 0;
-  let cancelPromise: Promise<void> | null = null;
-  let streamDone = false;
-
-  const cancel = async (): Promise<void> => {
-    if (streamDone) {
-      return;
+  })) {
+    byteCount += next.byteLength;
+    if (byteCount > input.expectedEncryptedByteSize) {
+      throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
     }
-    cancelPromise ??= input.responseBody.cancel().catch(() => undefined);
-    await cancelPromise;
-  };
-
-  async function* readBody(): AsyncIterable<Uint8Array> {
-    try {
-      for await (const next of readHostedRuntimeResponseBodyChunks({
-        body: input.responseBody,
-        description: "Hosted workspace snapshot fetch",
-        signal: input.signal ?? null,
-        timeoutMs: input.timeoutMs,
-      })) {
-        byteCount += next.byteLength;
-        if (byteCount > input.expectedEncryptedByteSize) {
-          throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
-        }
-        yield next;
-      }
-      if (byteCount !== input.expectedEncryptedByteSize) {
-        throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
-      }
-      streamDone = true;
-    } finally {
-      if (!streamDone) {
-        await cancel();
-      }
-    }
+    yield next;
   }
-
-  return {
-    cancel,
-    encryptedStream: readBody(),
-  };
+  if (byteCount !== input.expectedEncryptedByteSize) {
+    throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
+  }
 }
 
 async function cancelHostedWorkspaceSnapshotResponseBody(

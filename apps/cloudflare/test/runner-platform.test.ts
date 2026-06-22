@@ -1562,7 +1562,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
     const abortController = new AbortController();
     let objectFetchCount = 0;
-    let objectBodyCanceled = false;
+    let objectBodyCancelCount = 0;
     let resolveObjectBodyOpened: (() => void) | null = null;
     const objectBodyOpened = new Promise<void>((resolve) => {
       resolveObjectBodyOpened = resolve;
@@ -1594,7 +1594,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           objectFetchCount += 1;
           return new Response(new ReadableStream<Uint8Array>({
             cancel: () => {
-              objectBodyCanceled = true;
+              objectBodyCancelCount += 1;
             },
             start: () => {
               resolveObjectBodyOpened?.();
@@ -1625,7 +1625,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       await expect(restore).rejects.toThrow("restore aborted while reading snapshot body");
       expect(objectFetchCount).toBe(1);
-      expect(objectBodyCanceled).toBe(true);
+      expect(objectBodyCancelCount).toBe(1);
       await expect(access(durableRoot)).rejects.toThrow();
       expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
         log.message === "Hosted workspace snapshot restore read step failed; retrying."
