@@ -575,16 +575,14 @@ export function AppIconCard({
       <div className="flex items-center gap-4 p-5">
         <div
           aria-hidden="true"
-          className="relative grid size-[62px] shrink-0 grid-cols-3 gap-[5px] rounded-[14px] border border-[#2d3436]/12 bg-[#1f241c] p-2.5 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.25)]"
+          className="relative flex size-[62px] shrink-0 items-center justify-center rounded-[14px] border border-[#2d3436]/12 bg-[#1f241c] p-[9px] shadow-[0_2px_8px_-4px_rgba(0,0,0,0.25)]"
         >
-          {Array.from({ length: 9 }).map((_, index) => (
-            <span
-              key={index}
-              className={`size-2 rounded-full ${
-                index === 4 ? "bg-[#83945f]" : "bg-[#c4a882]/85"
-              }`}
-            />
-          ))}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icons/murph-mark.svg"
+            alt=""
+            className="h-auto w-full"
+          />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="font-serif text-[1.05rem] font-semibold leading-tight text-[#2d3436]">
