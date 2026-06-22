@@ -17,6 +17,7 @@ import {
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import { collectEventRawReferences } from "./event-raw-references.ts";
 import { ensureDirectory, pathExists, readJsonFile, walkVaultFiles } from "./fs.ts";
 import {
   buildIntegrationIngestAppendPlan,
@@ -632,7 +633,19 @@ async function buildEventRewritePlan(input: {
       }
 
       const record = result.data;
-      const rawRefs = Array.isArray(record.rawRefs) ? record.rawRefs : [];
+      const eventRawReferences = collectEventRawReferences(record);
+      for (const reference of eventRawReferences) {
+        if (reference.location === "rawRefs" || !isLegacyIntegrationRawPath(reference.relativePath)) {
+          continue;
+        }
+        input.blockers.push(
+          `Event "${record.id}" ${reference.location} references legacy integration raw path "${reference.relativePath}".`,
+        );
+      }
+
+      const rawRefs = eventRawReferences
+        .filter((reference) => reference.location === "rawRefs")
+        .map((reference) => reference.relativePath);
       if (rawRefs.length === 0) {
         nextRows.push(record);
         continue;
@@ -681,13 +694,9 @@ async function buildEventRewritePlan(input: {
 }
 
 function readLegacyIntegrationRawRefs(record: unknown): string[] {
-  if (!isRecord(record) || !Array.isArray(record.rawRefs)) {
-    return [];
-  }
-
-  return record.rawRefs.filter((rawRef): rawRef is string =>
-    typeof rawRef === "string" && isLegacyIntegrationRawPath(rawRef),
-  );
+  return collectEventRawReferences(record)
+    .map((reference) => reference.relativePath)
+    .filter(isLegacyIntegrationRawPath);
 }
 
 function omitRawRefs(record: EventRecord): EventRecord {

@@ -64,6 +64,7 @@ function artifactFor(input: {
 
 async function createLegacyIntegrationVault(input: {
   corruptArtifact?: boolean;
+  eventRecord?: (artifact: RawImportManifestArtifact, eventId: string) => EventRecord;
   eventId?: string;
   formatVersion?: unknown;
   includeReceiptPayload?: boolean;
@@ -161,6 +162,19 @@ async function createLegacyIntegrationVault(input: {
   await writeVaultJson(vaultRoot, manifestPath, manifest);
 
   const eventId = input.eventId ?? EVENT_ID;
+  const defaultEvent = {
+    schemaVersion: "murph.event.v1",
+    id: eventId,
+    kind: "note",
+    occurredAt: "2026-03-16T09:30:00.000Z",
+    recordedAt: "2026-03-16T09:30:00.000Z",
+    dayKey: "2026-03-16",
+    timeZone: "UTC",
+    source: "device",
+    title: "Legacy device note",
+    note: "legacy",
+    rawRefs: [providerArtifact.relativePath],
+  } satisfies EventRecord;
   await writeVaultText(
     vaultRoot,
     EVENT_SHARD,
@@ -171,22 +185,23 @@ async function createLegacyIntegrationVault(input: {
           kind: "not_a_real_event_kind",
           rawRefs: [providerArtifact.relativePath],
         })}\n`
-      : `${JSON.stringify({
-          schemaVersion: "murph.event.v1",
-          id: eventId,
-          kind: "note",
-          occurredAt: "2026-03-16T09:30:00.000Z",
-          recordedAt: "2026-03-16T09:30:00.000Z",
-          dayKey: "2026-03-16",
-          timeZone: "UTC",
-          source: "device",
-          title: "Legacy device note",
-          note: "legacy",
-          rawRefs: [providerArtifact.relativePath],
-        } satisfies EventRecord)}\n`,
+      : `${JSON.stringify(input.eventRecord?.(providerArtifact, eventId) ?? defaultEvent)}\n`,
   );
 
   return { artifact: providerArtifact, manifestPath, providerContent, vaultRoot };
+}
+
+function baseEventFields(eventId: string) {
+  return {
+    schemaVersion: "murph.event.v1",
+    id: eventId,
+    occurredAt: "2026-03-16T09:30:00.000Z",
+    recordedAt: "2026-03-16T09:30:00.000Z",
+    dayKey: "2026-03-16",
+    timeZone: "UTC",
+    source: "device",
+    title: "Legacy device note",
+  } as const;
 }
 
 test("migrateIntegrationStorage dry-runs existing v1 integration raw bundles without mutating files", async () => {
@@ -447,6 +462,108 @@ test("migrateIntegrationStorage blocks invalid legacy event rows with integratio
   assert.deepEqual(eventRows[0]?.rawRefs, [artifact.relativePath]);
 });
 
+for (const scenario of [
+  {
+    name: "evidence raw refs",
+    location: "evidence.rawRef",
+    eventRecord: (artifact: RawImportManifestArtifact, eventId: string): EventRecord => ({
+      ...baseEventFields(eventId),
+      kind: "note",
+      note: "legacy evidence",
+      evidence: [
+        {
+          sourceLabel: "Legacy provider payload",
+          rawRef: artifact.relativePath,
+        },
+      ],
+    }),
+  },
+  {
+    name: "attachments",
+    location: "attachments.relativePath",
+    eventRecord: (artifact: RawImportManifestArtifact, eventId: string): EventRecord => ({
+      ...baseEventFields(eventId),
+      kind: "note",
+      note: "legacy attachment",
+      attachments: [
+        {
+          role: "provider-snapshot",
+          kind: "other",
+          relativePath: artifact.relativePath,
+          mediaType: artifact.mediaType,
+          sha256: artifact.sha256,
+          originalFileName: artifact.originalFileName,
+        },
+      ],
+    }),
+  },
+  {
+    name: "event media",
+    location: "media.relativePath",
+    eventRecord: (artifact: RawImportManifestArtifact, eventId: string): EventRecord => ({
+      ...baseEventFields(eventId),
+      kind: "body_measurement",
+      measurements: [
+        {
+          type: "weight",
+          value: 180,
+          unit: "lb",
+        },
+      ],
+      media: [
+        {
+          kind: "other",
+          relativePath: artifact.relativePath,
+          mediaType: artifact.mediaType,
+        },
+      ],
+    }),
+  },
+  {
+    name: "workout media",
+    location: "workout.media.relativePath",
+    eventRecord: (artifact: RawImportManifestArtifact, eventId: string): EventRecord => ({
+      ...baseEventFields(eventId),
+      kind: "activity_session",
+      activityType: "strength-training",
+      durationMinutes: 45,
+      workout: {
+        media: [
+          {
+            kind: "other",
+            relativePath: artifact.relativePath,
+            mediaType: artifact.mediaType,
+          },
+        ],
+        exercises: [],
+      },
+    }),
+  },
+]) {
+  test(`migrateIntegrationStorage blocks nested legacy integration ${scenario.name} before mutating`, async () => {
+    const { artifact, manifestPath, vaultRoot } = await createLegacyIntegrationVault({
+      eventRecord: scenario.eventRecord,
+    });
+
+    const result = await migrateIntegrationStorage({ vaultRoot, apply: true });
+
+    assert.equal(result.mutated, false);
+    assert.equal(result.auditPath, null);
+    assert.ok(result.blockerCount >= 1);
+    assert.ok(
+      result.blockers.some((blocker) =>
+        blocker.includes(scenario.location) && blocker.includes(artifact.relativePath)
+      ),
+    );
+    await fs.access(path.join(vaultRoot, artifact.relativePath));
+    await fs.access(path.join(vaultRoot, manifestPath));
+    await assert.rejects(() => fs.access(path.join(vaultRoot, INGEST_SHARD)));
+
+    const metadata = JSON.parse(await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(metadata.formatVersion, 1);
+  });
+}
+
 test("migrateIntegrationStorage blocks corrupted legacy artifact hashes", async () => {
   const { artifact, vaultRoot } = await createLegacyIntegrationVault({ corruptArtifact: true });
 
@@ -480,6 +597,37 @@ test("validateVault rejects v2 legacy integration raw files and event refs", asy
   assert.equal(validation.valid, false);
   assert.ok(validation.issues.some((issue) => issue.code === "RAW_INTEGRATIONS_LEGACY_FORBIDDEN"));
   assert.ok(validation.issues.some((issue) => issue.code === "INTEGRATION_RAW_REF_FORBIDDEN"));
+});
+
+test("validateVault rejects evidence raw refs to legacy integration storage", async () => {
+  const { artifact, vaultRoot } = await createLegacyIntegrationVault({
+    eventRecord: (legacyArtifact, eventId) => ({
+      ...baseEventFields(eventId),
+      kind: "note",
+      note: "legacy evidence",
+      evidence: [
+        {
+          sourceLabel: "Legacy provider payload",
+          rawRef: legacyArtifact.relativePath,
+        },
+      ],
+    }),
+  });
+  await writeVaultJson(vaultRoot, "vault.json", {
+    ...JSON.parse(await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8")),
+    formatVersion: 2,
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "INTEGRATION_RAW_REF_FORBIDDEN" &&
+        issue.path === artifact.relativePath,
+    ),
+  );
 });
 
 test("validateVault rejects duplicate integration ingest ids", async () => {

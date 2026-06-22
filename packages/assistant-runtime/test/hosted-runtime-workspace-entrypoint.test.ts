@@ -6735,11 +6735,18 @@ describe("hosted workspace runtime entrypoint", () => {
       const baseAssistantRoot = resolveAssistantStatePaths(sourceBaseVaultRoot).assistantStateRoot;
       await mkdir(path.join(baseAssistantRoot, "outbox"), { recursive: true });
       const eventShardRelativePath = "ledger/events/2026/2026-05.jsonl";
+      const legacyRawRelativePath = "raw/integrations/whoop/legacy.json";
       await mkdir(path.join(sourceBaseVaultRoot, "ledger", "events", "2026"), { recursive: true });
+      await mkdir(path.join(sourceBaseVaultRoot, "raw", "integrations", "whoop"), { recursive: true });
       await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
       await writeFile(
         path.join(sourceBaseVaultRoot, eventShardRelativePath),
-        "{\"id\":\"evt_restore\",\"rawRefs\":[\"raw/integrations/whoop/legacy.json\"]}\n",
+        `{"id":"evt_restore","rawRefs":["${legacyRawRelativePath}"]}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseVaultRoot, legacyRawRelativePath),
+        "{\"legacy\":true}\n",
         "utf8",
       );
       await writeFile(
@@ -6794,6 +6801,12 @@ describe("hosted workspace runtime entrypoint", () => {
             kind: "text_upsert",
             sha256: eventRewritePayloadHash,
             targetRelativePath: eventShardRelativePath,
+          },
+          {
+            allowRaw: true,
+            existedBefore: true,
+            kind: "delete",
+            targetRelativePath: legacyRawRelativePath,
           },
         ],
         committedAt: TEST_NOW,
@@ -6930,6 +6943,7 @@ describe("hosted workspace runtime entrypoint", () => {
         await readFile(path.join(vaultRoot, eventShardRelativePath), "utf8"),
         eventRewritePayload.toString("utf8"),
       );
+      await assert.rejects(readFile(path.join(vaultRoot, legacyRawRelativePath), "utf8"));
       await assert.rejects(readFile(path.join(vaultRoot, "journal", "forged-local.md"), "utf8"));
       await assert.rejects(
         readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-old.json"), "utf8"),
