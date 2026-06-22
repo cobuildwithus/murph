@@ -372,7 +372,6 @@ async function compactLegacyWearableReceiptEnvelopesLocked({
       vaultRoot,
       errorCode: "LEGACY_WEARABLE_RECEIPT_COMPACTION_INVALID_VAULT",
       message: "Legacy wearable receipt compaction produced an invalid vault.",
-      allowLegacyIntegrationRaw: true,
     });
   }
 

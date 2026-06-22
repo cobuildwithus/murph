@@ -2102,6 +2102,23 @@ function prepareDeviceSampleEntries(
   });
 }
 
+function dedupeNormalizedDeviceSamplesByRecordId(
+  samples: readonly NormalizedDeviceSample[],
+): NormalizedDeviceSample[] {
+  const seen = new Set<string>();
+  const deduped: NormalizedDeviceSample[] = [];
+
+  for (const sample of samples) {
+    if (seen.has(sample.recordId)) {
+      continue;
+    }
+    seen.add(sample.recordId);
+    deduped.push(sample);
+  }
+
+  return deduped;
+}
+
 function prepareDeviceBatchPlan({
   provider,
   accountId,
@@ -2128,11 +2145,12 @@ function prepareDeviceBatchPlan({
     ingestReceipt,
     provenance,
   });
+  const uniqueSamples = dedupeNormalizedDeviceSamplesByRecordId(normalizedInputs.samples);
 
   const effectiveOccurredAt = earliestTimestamp(
     [
       ...normalizedInputs.events.map(({ seed }) => seed.occurredAt),
-      ...normalizedInputs.samples.map(({ seed }) => seed.recordedAt),
+      ...uniqueSamples.map(({ seed }) => seed.recordedAt),
     ],
     normalizedInputs.importedAt,
   );
@@ -2143,7 +2161,7 @@ function prepareDeviceBatchPlan({
       accountId: normalizedInputs.accountId ?? null,
       importedAt: normalizedInputs.importedAt,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
-      sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
+      sampleIds: uniqueSamples.map(({ recordId }) => recordId),
       evidenceParts: normalizedInputs.evidenceParts.map((artifact) => ({
         role: artifact.role,
         fileName: artifact.fileName,
@@ -2160,7 +2178,7 @@ function prepareDeviceBatchPlan({
   });
   const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts, rawDirectory);
   const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedEvidenceParts);
-  const preparedSamples = prepareDeviceSampleEntries(normalizedInputs.samples);
+  const preparedSamples = prepareDeviceSampleEntries(uniqueSamples);
 
   return {
     importId,

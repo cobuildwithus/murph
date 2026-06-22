@@ -70,7 +70,7 @@ test("runWearableStorageMigrationPass tombstones derived canonical raw artifacts
   await assertManifestArtifactMatchesFile(vaultRoot, "03-canonical-wearable-records.json");
   const afterDetection = await detectWearableStorageMigrationCandidates({ vaultRoot });
   assert.equal(afterDetection.legacyCanonicalArtifactCount, 0);
-  assert.equal((await validateVault({ vaultRoot, allowLegacyIntegrationRaw: true })).valid, true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
 test("dense raw timeseries tombstoning requires explicit prune flag", async () => {
@@ -280,6 +280,63 @@ test("pruneWearableDenseRawTimeseries runs only old dense raw retention", async 
     await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"), "utf8"),
     /sampleValues/u,
   );
+});
+
+test("pruneWearableDenseRawTimeseries preserves integration ingest evidence bytes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-dense-raw-ingest-reference");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const denseRole = "junction-timeseries-heartrate";
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-01T00:00:00.000Z",
+    evidenceParts: [
+      {
+        role: denseRole,
+        fileName: "heart-rate-timeseries.json",
+        mediaType: "application/json",
+        metadata: {
+          artifactClass: "dense_provider_timeseries",
+          resource: "heart_rate",
+          resourceCategory: "timeseries",
+          retentionClass: "debug_temporary",
+        },
+        content: {
+          resource: "heart_rate",
+          sampleValues: Array.from({ length: 512 }, (_, index) => index),
+        },
+      },
+      {
+        role: "wearable-raw-receipt:device-batch",
+        fileName: "raw-ingest-receipt.json",
+        mediaType: "application/json",
+        content: {
+          schemaVersion: "wearable.raw_ingest_receipt.v1",
+          payloadHash: "payload_hash",
+          rawArtifactCount: 1,
+          rawArtifactRoles: [denseRole],
+        },
+      },
+    ],
+  });
+  const densePart = result.evidenceParts.find((part) => part.role === denseRole);
+  assert.ok(densePart);
+  const before = await fs.readFile(path.join(vaultRoot, densePart.relativePath), "utf8");
+  const beforeDetection = await detectWearableStorageMigrationCandidates({
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+  assert.equal(beforeDetection.retentionEligibleDenseProviderRawTimeseriesCount, 1);
+
+  const prune = await pruneWearableDenseRawTimeseries({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(prune.tombstonedDenseRawArtifactCount, 0);
+  assert.equal(await fs.readFile(path.join(vaultRoot, densePart.relativePath), "utf8"), before);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
 test("dense raw pruning allows one oversized candidate to avoid no-progress loops", async () => {
@@ -1122,7 +1179,7 @@ test("detectWearableStorageMigrationCandidates reports dense sample-debug shards
 
   assert.equal(result.mutated, false);
   assert.equal(await fs.readFile(path.join(vaultRoot, sampleShardPath), "utf8"), before);
-  assert.equal((await validateVault({ vaultRoot, allowLegacyIntegrationRaw: true })).valid, true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
 test("runWearableStorageMigrationPass leaves manual sample shards untouched", async () => {

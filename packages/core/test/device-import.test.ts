@@ -1641,6 +1641,42 @@ test("importDeviceBatch supports sample-only batches without evidence parts", as
   assert.equal(ingestRecord.outputs?.sampleIdsComplete, true);
 });
 
+test("importDeviceBatch dedupes duplicate samples across stored records and ingest outputs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-duplicate-samples");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const sample = {
+    stream: "respiratory_rate",
+    unit: "breaths_per_minute",
+    sample: {
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      value: 14.8,
+    },
+  } as const;
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    samples: [sample, sample],
+  });
+
+  assert.equal(result.samples.length, 1);
+  const sampleRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.sampleShardPaths[0] as string,
+  })) as SampleRecord[];
+  assert.deepEqual(sampleRecords.map((record) => record.id), result.samples.map((record) => record.id));
+
+  const { record: ingestRecord } = await readRequiredIntegrationIngest({
+    vaultRoot,
+    id: result.importId,
+  });
+  assert.deepEqual(ingestRecord.outputs?.sampleIds, result.samples.map((record) => record.id));
+  assert.equal(ingestRecord.outputs?.sampleIdsComplete, true);
+  assert.equal(ingestRecord.counts.sampleCount, 1);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
 test("importDeviceBatch rejects empty batches", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-empty");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

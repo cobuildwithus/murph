@@ -76,9 +76,7 @@ interface LoadVaultInput {
   vaultRoot?: string;
 }
 
-interface ValidateVaultInput extends LoadVaultInput {
-  allowLegacyIntegrationRaw?: boolean;
-}
+type ValidateVaultInput = LoadVaultInput;
 
 interface RepairVaultResult {
   metadataFile: string;
@@ -147,7 +145,6 @@ interface AssertValidVaultInput {
   vaultRoot?: string;
   errorCode?: string;
   message?: string;
-  allowLegacyIntegrationRaw?: boolean;
 }
 
 function assertContractShape<T>(
@@ -1198,9 +1195,7 @@ async function validateWriteOperations(vaultRoot: string): Promise<ValidationIss
 
 export async function validateVault({
   vaultRoot,
-  allowLegacyIntegrationRaw = false,
 }: ValidateVaultInput = {}): Promise<ValidateVaultResult> {
-  void allowLegacyIntegrationRaw;
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const issues: ValidationIssue[] = [];
   let metadata: VaultMetadata | null = null;
@@ -1272,9 +1267,8 @@ export async function assertValidVault({
   vaultRoot,
   errorCode = "VAULT_VALIDATION_FAILED",
   message = "Vault failed canonical validation.",
-  allowLegacyIntegrationRaw = false,
 }: AssertValidVaultInput = {}): Promise<ValidateVaultResult> {
-  const result = await validateVault({ vaultRoot, allowLegacyIntegrationRaw });
+  const result = await validateVault({ vaultRoot });
 
   if (!result.valid) {
     throw new VaultError(errorCode, message, {

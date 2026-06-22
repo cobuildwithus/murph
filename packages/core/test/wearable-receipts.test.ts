@@ -97,7 +97,7 @@ test("compactLegacyWearableReceiptEnvelopes removes only legacy envelope payload
   assert.equal(JSON.stringify(compactionAudit).includes("dense-sentinel"), false);
   assert.equal(JSON.stringify(compactionAudit).includes(RAW_DIRECTORY), false);
 
-  const validation = await validateVault({ vaultRoot, allowLegacyIntegrationRaw: true });
+  const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
 });
 

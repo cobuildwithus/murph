@@ -446,7 +446,6 @@ export async function runWearableStorageMigrationPass({
       errorCode: "WEARABLE_STORAGE_MIGRATION_INVALID_VAULT",
       message: "Wearable storage migration produced an invalid vault.",
       vaultRoot,
-      allowLegacyIntegrationRaw: true,
     });
   }
 
@@ -996,7 +995,12 @@ async function collectLedgerRawReferences(
   options: { shouldContinue?: () => boolean } = {},
 ): Promise<LedgerRawReferenceScan> {
   const rawPaths = new Set<string>();
-  for (const directory of ["ledger/events", "ledger/samples", "ledger/metric-samples"]) {
+  for (const directory of [
+    VAULT_LAYOUT.eventLedgerDirectory,
+    VAULT_LAYOUT.sampleLedgerDirectory,
+    VAULT_LAYOUT.metricSampleLedgerDirectory,
+    VAULT_LAYOUT.integrationIngestLedgerDirectory,
+  ]) {
     if (options.shouldContinue?.() === false) {
       return { kind: "interrupted" };
     }
