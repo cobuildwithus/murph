@@ -21,11 +21,14 @@ const COLOR = {
   border: "rgba(120,110,86,0.18)",
   feature: "#52672D",
   foreground: "#2C322F",
+  heroBg: "#3A4A1E",
+  heroAccent: "#D8C28C",
+  heroBody: "rgba(244,238,225,0.78)",
+  heroForeground: "#F4EEE1",
   improvement: "#8A6038",
   muted: "#726B5E",
   panel: "rgba(255,253,249,0.62)",
 };
-const COMPACT_ITEM_COUNT = 5;
 
 export async function GET(
   _request: Request,
@@ -64,86 +67,91 @@ function DigestCard({
   if (!hero) {
     return null;
   }
-  const columns = buildDigestColumns(rest);
-  const compact = rest.length >= 4;
   const publishedOn = hero.publishedOn;
   const headline = buildHeadline(items);
+  const breakdown = buildBreakdown(items);
 
   return (
     <div
       style={{
         backgroundColor: COLOR.background,
+        backgroundImage:
+          "radial-gradient(circle at top right, rgba(196,168,130,0.18), transparent 55%)",
         color: COLOR.foreground,
         display: "flex",
         flexDirection: "column",
         fontFamily: "DM Sans",
         height: "100%",
-        padding: "44px 62px 42px",
+        padding: "40px 56px 36px",
         width: "100%",
       }}
     >
-      <div style={{ alignItems: "flex-start", display: "flex", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <div
-            style={{
-              color: COLOR.muted,
-              display: "flex",
-              fontSize: 15,
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-            }}
-          >
-            New in Murph · {formatCardDate(publishedOn)}
-          </div>
-          <div
-            style={{
-              display: "flex",
-              fontFamily: "Fraunces",
-              fontSize: 52,
-              fontWeight: 600,
-              lineHeight: 1.04,
-              marginTop: 12,
-            }}
-          >
-            {headline}
-          </div>
+      <div
+        style={{
+          alignItems: "center",
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <div
+          style={{
+            color: COLOR.muted,
+            display: "flex",
+            fontSize: 13,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+          }}
+        >
+          Issue · {formatCardDate(publishedOn)}
         </div>
         <MurphWordmark />
       </div>
 
-      <HeroItem item={hero} />
-
-      {rest.length > 0 ? (
-        <div style={{ display: "flex", flexGrow: 1, gap: 18, marginTop: 18 }}>
-          {columns.map((column, columnIndex) => (
-            <div
-              key={columnIndex}
-              style={{
-                display: "flex",
-                flexBasis: 0,
-                flexDirection: "column",
-                flexGrow: 1,
-                gap: compact ? 8 : 10,
-              }}
-            >
-              {column.items.map((item) => (
-                <DigestItem key={item.id} compact={compact} item={item} />
-              ))}
-            </div>
-          ))}
+      <div
+        style={{
+          alignItems: "flex-end",
+          display: "flex",
+          gap: 14,
+          marginTop: 18,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            fontFamily: "Fraunces",
+            fontSize: 80,
+            fontWeight: 600,
+            letterSpacing: -1.5,
+            lineHeight: 0.95,
+          }}
+        >
+          {headline}
         </div>
-      ) : (
-        <div style={{ display: "flex", flexGrow: 1 }} />
-      )}
+        <div
+          style={{
+            color: COLOR.muted,
+            display: "flex",
+            fontSize: 14,
+            letterSpacing: 0.9,
+            paddingBottom: 12,
+            textTransform: "uppercase",
+          }}
+        >
+          {breakdown}
+        </div>
+      </div>
+
+      <HeroPanel item={hero} />
+
+      {rest.length > 0 ? <AlsoNew items={rest} /> : null}
 
       <div
         style={{
-          borderTop: `1px solid ${COLOR.border}`,
           color: COLOR.muted,
           display: "flex",
           fontSize: 16,
           justifyContent: "space-between",
-          marginTop: 22,
+          marginTop: "auto",
           paddingTop: 14,
         }}
       >
@@ -154,30 +162,31 @@ function DigestCard({
   );
 }
 
-function HeroItem({ item }: { item: PublishedChangelogItem }) {
-  const accent = item.kind === "feature" ? COLOR.feature : COLOR.improvement;
+function HeroPanel({ item }: { item: PublishedChangelogItem }) {
   const kindLabel = item.kind === "feature" ? "FEATURE" : "IMPROVEMENT";
   return (
     <div
       style={{
-        alignItems: "flex-start",
-        backgroundColor: COLOR.panel,
-        border: `1px solid ${COLOR.border}`,
-        borderLeft: `4px solid ${accent}`,
-        borderRadius: 18,
+        backgroundColor: COLOR.heroBg,
+        backgroundImage:
+          "radial-gradient(circle at top right, rgba(216,194,140,0.18), transparent 60%)",
+        borderRadius: 24,
+        boxShadow: "0 18px 38px -22px rgba(58,74,30,0.6)",
+        color: COLOR.heroForeground,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
-        marginTop: 24,
-        padding: "18px 22px",
+        gap: 12,
+        marginTop: 22,
+        overflow: "hidden",
+        padding: "26px 32px 28px",
       }}
     >
       <div
         style={{
-          color: accent,
+          color: COLOR.heroAccent,
           display: "flex",
           fontSize: 13,
-          letterSpacing: 1.4,
+          letterSpacing: 1.6,
         }}
       >
         {kindLabel}
@@ -186,12 +195,89 @@ function HeroItem({ item }: { item: PublishedChangelogItem }) {
         style={{
           display: "flex",
           fontFamily: "Fraunces",
-          fontSize: 30,
+          fontSize: 38,
           fontWeight: 600,
-          lineHeight: 1.1,
+          letterSpacing: -0.5,
+          lineHeight: 1.05,
         }}
       >
-        {formatDigestTitle(item.title, 60)}
+        {formatDigestTitle(item.title, 68)}
+      </div>
+      <div
+        style={{
+          color: COLOR.heroBody,
+          display: "flex",
+          fontSize: 17,
+          lineHeight: 1.4,
+          maxWidth: 980,
+        }}
+      >
+        {formatDigestTitle(item.summary, 150)}
+      </div>
+    </div>
+  );
+}
+
+function AlsoNew({ items }: { items: readonly PublishedChangelogItem[] }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        marginTop: 22,
+      }}
+    >
+      <div
+        style={{
+          color: COLOR.muted,
+          display: "flex",
+          fontSize: 12,
+          letterSpacing: 1.4,
+          textTransform: "uppercase",
+        }}
+      >
+        Also new
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {items.slice(0, 4).map((item) => {
+          const accent =
+            item.kind === "feature" ? COLOR.feature : COLOR.improvement;
+          return (
+            <div
+              key={item.id}
+              style={{
+                alignItems: "baseline",
+                display: "flex",
+                gap: 14,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  backgroundColor: accent,
+                  borderRadius: 999,
+                  display: "flex",
+                  flexShrink: 0,
+                  height: 7,
+                  transform: "translateY(-2px)",
+                  width: 7,
+                }}
+              />
+              <span
+                style={{
+                  display: "flex",
+                  fontFamily: "Fraunces",
+                  fontSize: 21,
+                  fontWeight: 600,
+                  lineHeight: 1.15,
+                }}
+              >
+                {formatDigestTitle(item.title, 56)}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -204,12 +290,27 @@ function buildHeadline(items: readonly PublishedChangelogItem[]): string {
     return items[0]!.kind === "feature" ? "New feature." : "Worth a look.";
   }
   if (featureCount > 0 && improvementCount === 0) {
-    return `${featureCount} new ${featureCount === 1 ? "feature" : "features"}.`;
+    return "New features.";
   }
   if (improvementCount > 0 && featureCount === 0) {
-    return `${improvementCount} ${improvementCount === 1 ? "improvement" : "improvements"}.`;
+    return "Under the hood.";
   }
-  return `${items.length} updates worth a try.`;
+  return "Shipped.";
+}
+
+function buildBreakdown(items: readonly PublishedChangelogItem[]): string {
+  const featureCount = items.filter((item) => item.kind === "feature").length;
+  const improvementCount = items.length - featureCount;
+  const parts: string[] = [];
+  if (featureCount > 0) {
+    parts.push(`${featureCount} ${featureCount === 1 ? "feature" : "features"}`);
+  }
+  if (improvementCount > 0) {
+    parts.push(
+      `${improvementCount} ${improvementCount === 1 ? "improvement" : "improvements"}`,
+    );
+  }
+  return parts.join(" · ");
 }
 
 function MurphWordmark() {
@@ -246,84 +347,6 @@ function MurphWordmark() {
       </span>
     </div>
   );
-}
-
-function DigestItem({
-  compact,
-  item,
-}: {
-  compact: boolean;
-  item: PublishedChangelogItem;
-}) {
-  const accent = item.kind === "feature" ? COLOR.feature : COLOR.improvement;
-  const title = formatDigestTitle(item.title, compact ? 54 : 68);
-  return (
-    <div
-      style={{
-        alignItems: "flex-start",
-        backgroundColor: COLOR.panel,
-        border: `1px solid ${COLOR.border}`,
-        borderRadius: 16,
-        display: "flex",
-        gap: 14,
-        minHeight: compact ? 78 : 96,
-        overflow: "hidden",
-        padding: compact ? "12px 16px" : "15px 20px",
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          alignSelf: "stretch",
-          backgroundColor: accent,
-          borderRadius: 999,
-          display: "flex",
-          flexShrink: 0,
-          width: 3,
-        }}
-      />
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        <div
-          style={{
-            color: accent,
-            display: "flex",
-            fontSize: 13,
-            letterSpacing: 1.3,
-            textTransform: "uppercase",
-          }}
-        >
-          {item.kind}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            fontFamily: "Fraunces",
-            fontSize: compact ? 21 : 24,
-            fontWeight: 600,
-            lineHeight: compact ? 1.08 : 1.12,
-            marginTop: 3,
-          }}
-        >
-          {title}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function buildDigestColumns(items: readonly PublishedChangelogItem[]): Array<{
-  items: readonly PublishedChangelogItem[];
-  ordinalOffset: number;
-}> {
-  if (items.length <= 3) {
-    return [{ items, ordinalOffset: 0 }];
-  }
-
-  const splitAt = Math.ceil(items.length / 2);
-  return [
-    { items: items.slice(0, splitAt), ordinalOffset: 0 },
-    { items: items.slice(splitAt), ordinalOffset: splitAt },
-  ];
 }
 
 function formatDigestTitle(title: string, maxChars: number): string {

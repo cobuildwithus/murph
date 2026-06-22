@@ -67,7 +67,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Connect external apps to Murph",
         summary:
-          "Murph can now connect to apps like Gmail, Google Calendar, Notion, and Linear — then read, send, and act inside them when you ask.",
+          "Murph can now connect to apps like Gmail and Google Calendar — then read, send, and act inside them when you ask.",
         details:
           "Ask Murph to add an event, draft an email, or move a ticket. Connect each app once and stay in chat for the rest.",
         relevanceTags: ["integrations", "automation", "hosted"],
