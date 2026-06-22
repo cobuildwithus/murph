@@ -35,7 +35,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:
-      'Use when Murph is operating a live website through hosted computer-use tools, including shopping, checkout, appointment booking, forms, authenticated websites, browser inspection, or other Playwright-driven external browser actions.',
+      'Use when Murph needs to operate a live website for a health-relevant task, including booking, rescheduling, or canceling care; ordering contacts, supplements, OTC products, health equipment, groceries, or meals; using provider, insurer, pharmacy, optical, retailer, or meal-service portals; checkout, forms, refill requests, bills, authenticated websites, browser inspection, or other Playwright-driven external browser actions.',
   },
 ] as const
 
