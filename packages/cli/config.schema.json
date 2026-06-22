@@ -214,6 +214,51 @@
                       }
                     }
                   }
+                },
+                "repair-integration-ingests": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show migration work without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply one bounded migration pass.",
+                          "type": "boolean"
+                        },
+                        "finalize": {
+                          "default": true,
+                          "description": "Advance the vault to the current format after all legacy work is gone. Pass --no-finalize to stage multiple apply passes.",
+                          "type": "boolean"
+                        },
+                        "maxBundles": {
+                          "description": "Maximum legacy integration bundles to process in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 250
+                        },
+                        "maxBytes": {
+                          "description": "Maximum legacy source bytes to inspect in one pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
