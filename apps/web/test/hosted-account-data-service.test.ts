@@ -91,6 +91,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
   "prisma.hosted_ai_usage_period",
+  "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
@@ -315,6 +316,7 @@ describe("buildHostedDataExport", () => {
         "prisma.hosted_computer_handoff": 1,
         "prisma.hosted_computer_run": 1,
         "prisma.hosted_mailbox_payload": 1,
+        "prisma.hosted_product_feedback": 1,
         "prisma.hosted_vault_share": 1,
         "prisma.hosted_web_session": 1,
         "prisma.hosted_user_crypto_audit": 1,
@@ -329,6 +331,11 @@ describe("buildHostedDataExport", () => {
             truncated: false,
           },
           aiUsagePeriods: {
+            exportedRows: 1,
+            maxRows: 250,
+            truncated: false,
+          },
+          productFeedback: {
             exportedRows: 1,
             maxRows: 250,
             truncated: false,
@@ -417,6 +424,15 @@ describe("buildHostedDataExport", () => {
           browserVaultReplicaRefPresent: true,
           snapshotRefPresent: true,
         },
+      },
+      productFeedback: {
+        entries: [
+          {
+            idPresent: true,
+            kind: "feature_interest",
+            relatedChangelogItemIds: ["native-message-formatting"],
+          },
+        ],
       },
       wearables: {
         deviceConnections: [
@@ -550,6 +566,7 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("device-1");
     expect(serialized).not.toContain("agent-session-1");
     expect(serialized).not.toContain("usage-1");
+    expect(serialized).not.toContain("feedback-secret-id");
     expect(serialized).not.toContain("route-a");
     expect(serialized).not.toContain("runtime-log-1");
     expect(serialized).not.toContain("attempt-1");
@@ -1747,6 +1764,18 @@ function makeHostedAiUsagePeriodRowForTest(input: {
   };
 }
 
+function makeHostedProductFeedbackRowForTest(input: {
+  memberId: string;
+}) {
+  return {
+    createdAt: new Date("2026-06-22T12:00:00.000Z"),
+    id: "feedback-secret-id",
+    kind: "feature_interest",
+    memberId: input.memberId,
+    relatedChangelogItemIdsJson: ["native-message-formatting"],
+  };
+}
+
 async function encryptHostedMailboxPayloadForFixture(input: {
   dedupeKey: string;
   itemId: string;
@@ -1857,6 +1886,7 @@ function makeDeviceTokenAuditRowForTest(input: {
 async function createHostedAccountDataExportPrisma(input: {
   aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
   aiUsagePeriodRows?: ReturnType<typeof makeHostedAiUsagePeriodRowForTest>[];
+  productFeedbackRows?: ReturnType<typeof makeHostedProductFeedbackRowForTest>[];
   deviceConnectionRows?: ReturnType<typeof makeDeviceConnectionExportRowForTest>[];
   deviceSyncSignalRows?: ReturnType<typeof makeDeviceSyncSignalRowForTest>[];
   deviceTokenAuditRows?: ReturnType<typeof makeDeviceTokenAuditRowForTest>[];
@@ -2126,6 +2156,11 @@ async function createHostedAccountDataExportPrisma(input: {
           updatedAt: new Date("2026-04-27T00:16:30.000Z"),
         },
       ],
+    },
+    hostedProductFeedback: {
+      count,
+      findMany: async () =>
+        input.productFeedbackRows ?? [makeHostedProductFeedbackRowForTest({ memberId })],
     },
     hostedConsentEvent: {
       count,

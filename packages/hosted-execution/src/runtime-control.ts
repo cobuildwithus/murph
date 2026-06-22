@@ -686,6 +686,28 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
+export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
+  "feature_interest",
+] as const;
+
+export type HostedProductFeedbackKind =
+  (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
+
+export interface HostedRuntimeProductFeedbackRecord {
+  idempotencyKey: string;
+  kind: HostedProductFeedbackKind;
+  relatedChangelogItemIds: string[];
+}
+
+export interface HostedRuntimeProductFeedbackRecordRequest {
+  feedback: HostedRuntimeProductFeedbackRecord;
+}
+
+export interface HostedRuntimeProductFeedbackRecordResponse {
+  feedbackId: string;
+  recorded: boolean;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }

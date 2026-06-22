@@ -222,6 +222,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
         generatedImageUploaderRequired: true,
+        ...(input.runtime.platform.productFeedbackPort
+          ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
+          : {}),
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,

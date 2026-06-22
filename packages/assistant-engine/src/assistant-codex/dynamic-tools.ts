@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import {
+  HOSTED_PRODUCT_FEEDBACK_KINDS,
+  type HostedRuntimeProductFeedbackRecord,
+} from '@murphai/hosted-execution/runtime-control'
+import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_RUNS_PATH,
@@ -35,6 +39,7 @@ import {
 } from '../assistant/tool-validation-digest.js'
 import type {
   AssistantProgressDelivery,
+  AssistantTurnProductFeedbackRecorder,
 } from '../assistant/turn-progress.js'
 import type {
   CodexRpcMessage,
@@ -172,6 +177,34 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       },
     },
     required: ['prompt'],
+  },
+} as const
+
+export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
+  namespace: 'murph',
+  name: 'submit_product_feedback',
+  description:
+    'Record product feedback only after the user explicitly expresses interest in shipped changelog items. Do not infer feedback silently, and do not submit new feature requests or conversation details.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: {
+        type: 'string',
+        enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
+      },
+      relatedChangelogItemIds: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 7,
+        items: {
+          type: 'string',
+          maxLength: 120,
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+        },
+      },
+    },
+    required: ['kind', 'relatedChangelogItemIds'],
   },
 } as const
 
@@ -341,6 +374,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
 ] as const
@@ -367,6 +401,7 @@ export function resolveMurphDynamicTools(input: {
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  productFeedbackAvailable?: boolean | null
 }): readonly MurphDynamicTool[] {
   return MURPH_DYNAMIC_TOOLS.filter((tool) => {
     if (tool === MURPH_SEND_PROGRESS_UPDATE_TOOL) {
@@ -379,6 +414,10 @@ export function resolveMurphDynamicTools(input: {
 
     if (tool === MURPH_REACT_TO_MESSAGE_TOOL) {
       return input.allowMessageReactions === true
+    }
+
+    if (tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL) {
+      return input.productFeedbackAvailable === true
     }
 
     if (
@@ -428,6 +467,16 @@ const generateImageArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+
+const submitProductFeedbackArgumentsSchema = z
+  .object({
+    kind: z.enum(HOSTED_PRODUCT_FEEDBACK_KINDS),
+    relatedChangelogItemIds: z
+      .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
+      .min(1)
+      .max(7)
+  })
+  .strict()
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -627,6 +676,14 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-product-feedback-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'submit-product-feedback'
+      feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+    }
+  | {
       kind: 'send-progress-update'
       text: string
     }
@@ -726,6 +783,19 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-voice-memo',
         args: parsed.args,
+      }
+    }
+    case MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name: {
+      const parsed = parseSubmitProductFeedbackArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-product-feedback-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'submit-product-feedback',
+        feedback: parsed.feedback,
       }
     }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
@@ -895,6 +965,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedToolContext?: AssistantHostedToolContext | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   nextUsageOrdinal: () => number
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
@@ -924,6 +995,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
       return toolTextResult(false, 'invalid reaction arguments')
+    case 'invalid-product-feedback-arguments':
+      return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -947,6 +1020,11 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeProgressUpdateTool({
         progressDelivery: input.progressDelivery,
         text: input.request.text,
+      })
+    case 'submit-product-feedback':
+      return await executeSubmitProductFeedbackTool({
+        feedback: input.request.feedback,
+        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'finish-without-reply':
       return {
@@ -1096,6 +1174,24 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
+}
+
+async function executeSubmitProductFeedbackTool(input: {
+  feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+  productFeedbackRecorder: AssistantTurnProductFeedbackRecorder | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.productFeedbackRecorder?.recordProductFeedback) {
+    return toolTextResult(false, 'product feedback recording is not available for this turn')
+  }
+  try {
+    const result = await input.productFeedbackRecorder.recordProductFeedback(input.feedback)
+    return toolTextResult(
+      true,
+      result.recorded ? 'product feedback recorded' : 'product feedback already recorded',
+    )
+  } catch {
+    return toolTextResult(false, 'product feedback recording failed')
+  }
 }
 
 async function executeProgressUpdateTool(input: {
@@ -1609,6 +1705,34 @@ function parseGenerateImageArguments(
   }
   return {
     args: parsed.data,
+    ok: true,
+  }
+}
+
+function parseSubmitProductFeedbackArguments(
+  value: unknown,
+):
+  | {
+      feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = submitProductFeedbackArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.submit_product_feedback.input',
+        schemaRootKeys: readZodObjectRootKeys(submitProductFeedbackArgumentsSchema),
+        toolName: 'murph.submit_product_feedback',
+      }),
+    }
+  }
+
+  return {
+    feedback: parsed.data,
     ok: true,
   }
 }

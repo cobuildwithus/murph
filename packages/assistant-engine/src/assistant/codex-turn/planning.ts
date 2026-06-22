@@ -57,8 +57,9 @@ import type {
 import type {
   AssistantActiveTurnLiveProviderSteering,
 } from '../turn-input.js'
-import type {
-  AssistantProgressDelivery,
+import {
+  resolveAssistantProductFeedbackAcceptedInputIds,
+  type AssistantProgressDelivery,
 } from '../turn-progress.js'
 import type {
   AssistantHostedToolContext,
@@ -70,6 +71,7 @@ import {
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
   AssistantCodexContinuation,
 } from '../active-turn-input-journal.js'
 import type {
@@ -228,6 +230,7 @@ export type AssistantCodexTurnResolvedExecutionProfile =
   Required<Omit<AssistantCodexTurnExecutionProfile, 'nativeResumePolicy'>>
 
 export interface AssistantCodexTurnExecutionPlan {
+  acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
@@ -299,6 +302,7 @@ export function resolveAssistantCodexThreadScope(input: {
 }
 
 export async function buildCodexTurnExecutionPlan(input: {
+  acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
@@ -318,6 +322,7 @@ export async function buildCodexTurnExecutionPlan(input: {
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
 
   return {
+    acceptedInputItems: input.acceptedInputItems ?? [],
     activeTurnSteering: input.activeTurnSteering ?? null,
     executionContext,
     input: input.input,
@@ -341,6 +346,7 @@ export async function buildCodexTurnAttemptPlan(input: {
     attemptCount: input.attemptCount,
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: input.executionPlan.acceptedInputItems,
       executionContext: input.executionPlan.executionContext,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
@@ -356,6 +362,7 @@ export async function buildCodexTurnAttemptPlan(input: {
 }
 
 export async function resolveAssistantRouteTurnPlan(input: {
+  acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   input: AssistantMessageInput
   profile: AssistantCodexTurnResolvedExecutionProfile
@@ -517,6 +524,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const productFeedbackAcceptedInputIds =
+    resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
   const dynamicTools = resolveMurphDynamicTools({
     allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
     allowMessageReactions: messageReactionsAvailable,
@@ -525,6 +534,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     progressUpdatesAvailable: input.progressDelivery != null,
     connectedAppsAvailable:
       input.executionContext?.hosted?.connectedAppsAvailable === true,
+    productFeedbackAvailable:
+      productFeedbackAcceptedInputIds.length > 0 &&
+      typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

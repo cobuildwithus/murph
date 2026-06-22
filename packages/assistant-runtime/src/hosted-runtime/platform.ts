@@ -14,6 +14,8 @@ import type {
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
   HostedRuntimeIssueExportResponse,
+  HostedRuntimeProductFeedbackRecord,
+  HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -252,6 +254,12 @@ export interface HostedRuntimeIssueExportPort {
   recordIssues(issues: readonly object[]): Promise<HostedRuntimeIssueRecordResponse>;
 }
 
+export interface HostedRuntimeProductFeedbackPort {
+  recordProductFeedback(
+    feedback: HostedRuntimeProductFeedbackRecord,
+  ): Promise<HostedRuntimeProductFeedbackRecordResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   // Optional for deploy-window compatibility with older platform builds.
   // Advances the durable per-lane consumed watermark after a clean pass;
@@ -369,6 +377,7 @@ export interface HostedRuntimePlatform {
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
+  productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;

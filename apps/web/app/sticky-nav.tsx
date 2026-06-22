@@ -30,7 +30,7 @@ export function StickyNav({
 
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-4 transition-all duration-300 sm:px-10 lg:px-16 ${
+      className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-4 transition-[background-color,backdrop-filter] duration-300 sm:px-10 lg:px-16 ${
         scrolled
           ? "bg-[#1A1F16]/90 backdrop-blur-xl"
           : ""
@@ -60,6 +60,7 @@ export function StickyNav({
         {[
           { href: "/#how", label: "How it works" },
           { href: "/#faq", label: "FAQ" },
+          { href: "/changelog", label: "Changelog" },
           { href: "/security", label: "Security" },
         ].map(({ href, label }) => (
           <a
