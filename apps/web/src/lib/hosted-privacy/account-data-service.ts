@@ -1592,6 +1592,7 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     request: input.request,
   });
+  const connectedAppProviderCleanupStartedAt = new Date();
   const connectedAppRevocations = await revokeConnectedAppsBestEffort({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -1614,6 +1615,16 @@ export async function deleteHostedAccountData(input: {
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
+      prisma: tx,
+    });
+    await refreshHostedMemberAccountDeletionFenceTx({
+      memberId: input.memberId,
+      now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertNoConnectedAppWritesAfterProviderCleanupTx({
+      memberId: input.memberId,
+      providerCleanupStartedAt: connectedAppProviderCleanupStartedAt,
       prisma: tx,
     });
     await lockHostedComputerUseRowsForAccountDeletionTx({
@@ -1714,6 +1725,48 @@ async function markHostedMemberSuspendedForAccountDeletion(input: {
       },
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function refreshHostedMemberAccountDeletionFenceTx(input: {
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.hostedMember.updateMany({
+    data: {
+      suspendedAt: input.now,
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+}
+
+async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  providerCleanupStartedAt: Date;
+}): Promise<void> {
+  const writes = await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    select: { claimHash: true },
+    take: 1,
+    where: {
+      completedAt: null,
+      expiresAt: { gt: new Date() },
+      memberId: input.memberId,
+      startedAt: { gte: input.providerCleanupStartedAt },
+    },
+  });
+  if (writes.length === 0) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_CONNECTED_APP_WRITE_IN_PROGRESS",
+    httpStatus: 503,
+    message: "A connected-app connection changed during account deletion. Retry account deletion before local account records are removed.",
+    retryable: true,
+  });
 }
 
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {

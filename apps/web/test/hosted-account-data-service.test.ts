@@ -1523,6 +1523,42 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
+  it("re-fences before local deletion and aborts if a connected-app write starts after provider cleanup", async () => {
+    const order: string[] = [];
+    serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([]);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppsSession: true,
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+      transactionConnectedAppConnectIntentRows: [
+        {
+          alias: "work",
+          claimHash: "late_claim_hash",
+          connectedAccountId: null,
+          toolkit: "gmail",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_WRITE_IN_PROGRESS",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).toHaveBeenCalledWith({
+      statuses: null,
+      toolkits: null,
+      userId: "member_123",
+    });
+    expect(order.filter((entry) => entry === "update:hostedMember")).toHaveLength(2);
+    expect(order).not.toContain("delete:hostedMember");
+  });
+
   it("allows account deletion when Composio rejects revoke but provider record deletion succeeds", async () => {
     serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([
       {
@@ -2423,6 +2459,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
+  transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   transactionDeviceConnections?: Array<{
     id: string;
     provider: string;
@@ -2465,6 +2502,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.operationOrder?.push("find:hostedComputerRun");
         return [];
       },
+    },
+    hostedConnectedAppConnectIntent: {
+      ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
+      findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
     },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
@@ -2588,6 +2629,7 @@ type HostedAccountDeletionPrismaDeleteCall = {
 
 type HostedAccountDeletionConnectedAppIntentRow = {
   alias: string | null;
+  claimHash?: string;
   connectedAccountId: string | null;
   toolkit: string;
 };
@@ -2608,6 +2650,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
     }>>;
   };
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<unknown[]>;
+  };
+  hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
