@@ -2209,6 +2209,36 @@ test("ConnectPage shows callback errors with the original source label", async (
   assert.match(markup, /Oura gave us an expired or invalid return from the last attempt\./);
 });
 
+test("ConnectPage shows rejected callback errors with the original source label", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "whoop",
+      deviceSyncError: "OAUTH_CALLBACK_REJECTED",
+      deviceSyncProvider: "whoop",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /Unable to finish connection/);
+  assert.match(markup, /Whoop was not connected this time\./);
+});
+
+test("ConnectPage shows fallback callback errors with the original source label", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "garmin",
+      deviceSyncError: "UPSTREAM_TIMEOUT",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /Unable to finish connection/);
+  assert.match(markup, /We could not finish connecting Garmin\./);
+});
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

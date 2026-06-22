@@ -2,23 +2,23 @@
 
 Generated: 2026-06-21
 
-Canonical source: `feature-status.csv`. This file explains the 24 rows with missing automated story coverage and the 6 rows marked dead/unreachable. Four rows are both missing and dead/unreachable, so the triage covers 26 unique feature rows.
+Canonical source: `feature-status.csv`. This file explains the 24 rows with missing automated story coverage and the 4 rows marked dead/unreachable. The remaining dead/unreachable rows are also missing automated story coverage, so the triage covers 24 unique feature rows.
 
 ## Summary
 
 - Missing-test rows: 24
-- Dead/unreachable rows: 6
-- Unique rows investigated: 26
+- Dead/unreachable rows: 4
+- Unique rows investigated: 24
+- Superseded device-sync settings rows removed from the tracker: 2
 - Product-breaking failures found during this pass: 0
 
 ## Pattern
 
-Most missing rows are existing static marketing, internal design, or deck/security content that lacks focused assertions. The dead/unreachable rows are different: one passkey settings component is unmounted, three overview components are reachable only through the design gallery, and two old device-sync settings rows appear superseded by the current `/connect` path.
+Most missing rows are existing static marketing, internal design, or deck/security content that lacks focused assertions. The remaining dead/unreachable rows are different: one passkey settings component is unmounted, and three overview components are reachable only through the design gallery. The two old device-sync settings rows were removed because `/settings` now links to `/connect` and no current route mounts that settings component.
 
 ## Group Counts
 
 - Dead/unreachable and missing coverage: 1
-- Dead/unreachable superseded settings UI: 2
 - Dead/unreachable design demo: 3
 - Data branch coverage gap: 1
 - API route coverage gap: 2
@@ -33,8 +33,6 @@ Most missing rows are existing static marketing, internal design, or deck/securi
 | feature_id | feature_status | coverage | group | cause | recommended next action | evidence inspected |
 | --- | --- | --- | --- | --- | --- | --- |
 | settings-passkey-create | dead/unreachable | missing | Dead/unreachable and missing coverage | Reachability gap: HostedPasskeySettings is not imported by any current app route or test; /settings omits the passkey UI, so there is no in-app path to create a passkey from this component. | Product decision: wire into settings and add a Privy/linking test, or delete/retire the component and remove it from the product feature inventory. | apps/web/src/components/settings/hosted-passkey-settings.tsx; apps/web/app/(dashboard)/settings/page.tsx |
-| device-sync-reconnect | dead/unreachable | covered | Dead/unreachable superseded settings UI | Reachability gap: reconnect UI remains tested inside HostedDeviceSyncSettingsClient, but /settings now links to /connect instead of mounting the settings component; the current product path is the connect page. | Mark as superseded by /connect or delete the stale settings component after confirming no product route should mount it. | apps/web/app/(dashboard)/settings/page.tsx; apps/web/src/components/settings/hosted-device-sync-settings-client.tsx |
-| hosted-device-sync-settings-component | dead/unreachable | covered | Dead/unreachable superseded settings UI | Reachability gap: HostedDeviceSyncSettings and its client are not imported by SettingsPage; /settings Wearables links to /connect. Existing tests cover stale unmounted UI. | Mark as superseded by /connect or delete the stale settings component/tests once product confirms /settings should not host this UI. | apps/web/app/(dashboard)/settings/page.tsx; apps/web/src/components/settings/hosted-device-sync-settings.tsx |
 | overview-design-active-experiment-banner | dead/unreachable | missing | Dead/unreachable design demo | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. | Remove from product feature inventory or explicitly classify as design-gallery demo; delete it if the demo is no longer needed. | apps/web/src/components/overview/active-experiment-banner.tsx; apps/web/app/design/components-content.tsx |
 | overview-design-domain-card | dead/unreachable | missing | Dead/unreachable design demo | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. | Remove from product feature inventory or explicitly classify as design-gallery demo; delete it if the demo is no longer needed. | apps/web/src/components/overview/health-domain-card.tsx; apps/web/app/design/components-content.tsx |
 | overview-design-profile-stats | dead/unreachable | missing | Dead/unreachable design demo | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. | Remove from product feature inventory or explicitly classify as design-gallery demo; delete it if the demo is no longer needed. | apps/web/src/components/overview/profile-stats.tsx; apps/web/app/design/components-content.tsx |
@@ -61,7 +59,7 @@ Most missing rows are existing static marketing, internal design, or deck/securi
 
 ## Suggested Order
 
-1. Resolve the true reachability decisions first: passkey settings, old device-sync settings UI, and design-gallery-only overview components. These are inventory/product-scope questions, not just missing tests.
+1. Resolve the true reachability decisions first: passkey settings and design-gallery-only overview components. These are inventory/product-scope questions, not just missing tests.
 2. Add tiny tests for operational surfaces if they are supported health endpoints: Linq GET health and Telegram GET health.
 3. Add one populated fixture test for provider source health on `/signals`. This is a real data branch rather than static copy.
 4. Treat homepage, security, design, and pitch rows as lower-risk content coverage unless those pages are release-critical contracts.
