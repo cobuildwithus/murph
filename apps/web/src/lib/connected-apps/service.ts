@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedConnectedAppsManageInput,
   HostedConnectedAppsRequest,
@@ -92,6 +92,7 @@ export async function executeHostedConnectedAppsRequest(input: {
           client,
           memberId: input.memberId,
           selector: input.request.input.account,
+          scope: "configured",
         });
         return await client.execute({
           account: account.id,
@@ -187,6 +188,18 @@ export async function completeHostedConnectedAppConnection(input: {
   }
 
   try {
+    if (!await isHostedConnectedAppsMemberActive({
+      memberId: intent.memberId,
+      prisma,
+    })) {
+      await cleanupInactiveMemberConnectedAccountBestEffort({
+        accountId: input.connectedAccountId,
+        client,
+        intent,
+      });
+      throw inactiveConnectedAppsMemberError();
+    }
+
     const accounts = await client.listAccounts({
       accountIds: [input.connectedAccountId],
       toolkit: intent.toolkit,
@@ -268,10 +281,11 @@ async function executeConnectedAppsManagement(input: {
         : undefined;
       const accounts = await input.client.listAccounts({
         ...(toolkit ? { toolkit } : {}),
+        ...(toolkit ? {} : { toolkits: null }),
         userId: input.memberId,
       });
       return {
-        accounts: accounts.map(presentConnectedAccount),
+        accounts: accounts.map((account) => presentConnectedAccount(account, input.config)),
         toolkits: input.config.toolkits.map((slug) => ({
           label: formatHostedConnectedAppToolkitLabel(slug),
           slug,
@@ -299,11 +313,12 @@ async function executeConnectedAppsManagement(input: {
         client: input.client,
         memberId: input.memberId,
         selector: input.input.account,
+        scope: "all-owned",
       });
       await input.client.renameAccount(account.id, input.input.alias);
       return {
         account: {
-          ...presentConnectedAccount(account),
+          ...presentConnectedAccount(account, input.config),
           alias: input.input.alias,
         },
         status: "renamed",
@@ -314,10 +329,11 @@ async function executeConnectedAppsManagement(input: {
         client: input.client,
         memberId: input.memberId,
         selector: input.input.account,
+        scope: "all-owned",
       });
       await input.client.disconnectAccount(account.id);
       return {
-        account: presentConnectedAccount(account),
+        account: presentConnectedAccount(account, input.config),
         status: "disconnected",
       };
     }
@@ -377,7 +393,10 @@ async function createHostedConnectedAppIntent(input: {
   }
 
   await input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
+    await assertHostedConnectedAppsMemberActiveTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     await tx.hostedConnectedAppConnectIntent.deleteMany({
       where: { expiresAt: { lte: now } },
     });
@@ -413,6 +432,10 @@ async function claimHostedConnectedAppIntent(input: {
   }
 
   return await input.prisma.$transaction(async (tx) => {
+    await assertHostedConnectedAppsMemberActiveTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const updated = await tx.hostedConnectedAppConnectIntent.updateMany({
       where: {
         claimHash,
@@ -456,8 +479,12 @@ async function resolveOwnedConnectedAccount(input: {
   client: ReturnType<typeof createComposioConnectedAppsClient>;
   memberId: string;
   selector: string;
+  scope: "all-owned" | "configured";
 }): Promise<ComposioConnectedAccount> {
-  const accounts = await input.client.listAccounts({ userId: input.memberId });
+  const accounts = await input.client.listAccounts({
+    ...(input.scope === "all-owned" ? { toolkits: null } : {}),
+    userId: input.memberId,
+  });
   const selector = input.selector.trim().toLowerCase();
   const matches = accounts.filter((account) =>
     account.id.toLowerCase() === selector
@@ -481,12 +508,74 @@ async function resolveOwnedConnectedAccount(input: {
   });
 }
 
-function presentConnectedAccount(account: ComposioConnectedAccount) {
+async function assertHostedConnectedAppsMemberActiveTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  if (!await isHostedConnectedAppsMemberActive(input)) {
+    throw inactiveConnectedAppsMemberError();
+  }
+}
+
+async function isHostedConnectedAppsMemberActive(input: {
+  memberId: string;
+  prisma: Pick<PrismaClient | Prisma.TransactionClient, "hostedMember">;
+}): Promise<boolean> {
+  const member = await input.prisma.hostedMember.findUnique({
+    select: {
+      billingStatus: true,
+      suspendedAt: true,
+    },
+    where: { id: input.memberId },
+  });
+  return member?.billingStatus === HostedBillingStatus.active && !member.suspendedAt;
+}
+
+async function cleanupInactiveMemberConnectedAccountBestEffort(input: {
+  accountId: string;
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  intent: HostedConnectedAppIntent;
+}): Promise<void> {
+  try {
+    const accounts = await input.client.listAccounts({
+      accountIds: [input.accountId],
+      statuses: null,
+      toolkit: input.intent.toolkit,
+      userId: input.intent.memberId,
+    });
+    const account = accounts.find((candidate) =>
+      candidate.id === input.accountId
+      && candidate.toolkit.slug === input.intent.toolkit
+    );
+    if (account?.status.toUpperCase() === "ACTIVE") {
+      await input.client.disconnectAccount(input.accountId);
+    }
+    await input.client.deleteAccount(input.accountId);
+  } catch {
+    // Account deletion is best-effort on the callback path. The account
+    // deletion flow performs fail-closed provider cleanup before local removal.
+  }
+}
+
+function inactiveConnectedAppsMemberError() {
+  return hostedOnboardingError({
+    code: "CONNECTED_APPS_MEMBER_INACTIVE",
+    httpStatus: 403,
+    message: "Connected apps are unavailable for this Murph account.",
+  });
+}
+
+function presentConnectedAccount(
+  account: ComposioConnectedAccount,
+  config: Pick<ReturnType<typeof readHostedConnectedAppsConfig>, "toolkits">,
+) {
   return {
     alias: account.alias,
     id: account.id,
     status: account.status,
     toolkit: account.toolkit.slug,
+    toolkitConfigured: config.toolkits.includes(account.toolkit.slug),
     toolkitLabel: formatHostedConnectedAppToolkitLabel(account.toolkit.slug),
     wordId: account.wordId,
   };

@@ -16,6 +16,12 @@ import {
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
 
+interface MemberRow {
+  billingStatus: "active" | "canceled";
+  id: string;
+  suspendedAt: Date | null;
+}
+
 interface IntentRow {
   alias: string | null;
   claimHash: string;
@@ -97,14 +103,35 @@ interface FakePrisma {
       where: { memberId: string };
     }) => Promise<SessionRow>;
   };
+  hostedMember: {
+    findUnique: (input: {
+      select: {
+        billingStatus: true;
+        suspendedAt: true;
+      };
+      where: { id: string };
+    }) => Promise<Pick<MemberRow, "billingStatus" | "suspendedAt"> | null>;
+  };
 }
 
 class ConnectedAppsPrismaHarness {
   readonly intents = new Map<string, IntentRow>();
+  readonly members = new Map<string, MemberRow>();
   readonly sessions = new Map<string, SessionRow>();
   readonly prisma: FakePrisma;
 
   constructor() {
+    this.members.set("hbm_member", {
+      billingStatus: "active",
+      id: "hbm_member",
+      suspendedAt: null,
+    });
+    this.members.set("hbm_other", {
+      billingStatus: "active",
+      id: "hbm_other",
+      suspendedAt: null,
+    });
+
     const prisma: FakePrisma = {
       $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback) => callback(prisma)),
@@ -182,6 +209,17 @@ class ConnectedAppsPrismaHarness {
           return cloneSession(row);
         }),
       },
+      hostedMember: {
+        findUnique: vi.fn(async ({ where }) => {
+          const member = this.members.get(where.id);
+          return member
+            ? {
+                billingStatus: member.billingStatus,
+                suspendedAt: member.suspendedAt,
+              }
+            : null;
+        }),
+      },
     };
     this.prisma = prisma;
   }
@@ -244,6 +282,56 @@ describe("connected-app service", () => {
       startedAt: null,
       toolkit: "gmail",
     });
+  });
+
+  it("rejects connected-app writes after the hosted member is suspended", async () => {
+    const harness = installPrismaHarness();
+    harness.members.get("hbm_member")!.suspendedAt = new Date("2026-06-22T12:00:00.000Z");
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ unexpected: true })
+    );
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          action: "connect",
+          alias: "work",
+          toolkit: "gmail",
+        },
+        operation: "manage",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_MEMBER_INACTIVE",
+      httpStatus: 403,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(harness.intents.size).toBe(0);
+  });
+
+  it("rejects claimed connection links after the hosted member is suspended", async () => {
+    const harness = installPrismaHarness();
+    const claim = await createConnectClaim("hbm_member");
+    harness.members.get("hbm_member")!.suspendedAt = new Date("2026-06-22T12:00:00.000Z");
+    const fetchImpl = createStartFetch({
+      claim,
+      connectedAccountId: "ca_work",
+      remoteSessionId: "trs_member",
+    });
+
+    await expect(startHostedConnectedAppConnection({
+      claim,
+      fetchImpl,
+      memberId: "hbm_member",
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_MEMBER_INACTIVE",
+      httpStatus: 403,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(harness.intentForClaim(claim)?.startedAt).toBeNull();
   });
 
   it("verifies callback account id, member query, toolkit, and active status before completion", async () => {
@@ -356,6 +444,74 @@ describe("connected-app service", () => {
     expect(verifiedAccountFetch).toHaveBeenCalledTimes(verifiedFetchCallsAfterCompletion);
   });
 
+  it("rejects suspended-member callbacks and cleans up the exact provider account", async () => {
+    const harness = installPrismaHarness();
+    const claim = await createConnectClaim("hbm_member");
+    const startFetch = createStartFetch({
+      claim,
+      connectedAccountId: "ca_work",
+      remoteSessionId: "trs_member",
+    });
+    await startHostedConnectedAppConnection({
+      claim,
+      fetchImpl: startFetch,
+      memberId: "hbm_member",
+    });
+    harness.members.get("hbm_member")!.suspendedAt = new Date("2026-06-22T12:00:00.000Z");
+
+    const cleanupCalls: Array<{ method: string | undefined; pathname: string }> = [];
+    const cleanupFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      cleanupCalls.push({ method: init?.method, pathname: parsed.pathname });
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        expect(parsed.searchParams.getAll("connected_account_ids")).toEqual(["ca_work"]);
+        expect(parsed.searchParams.getAll("statuses")).toEqual([]);
+        expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual(["gmail"]);
+        expect(parsed.searchParams.getAll("user_ids")).toEqual(["hbm_member"]);
+        return jsonResponse({
+          items: [
+            {
+              alias: "work",
+              id: "ca_work",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Gmail", slug: "gmail" },
+              word_id: "bright-river",
+            },
+          ],
+        });
+      }
+      if (parsed.pathname === "/api/v3.1/connected_accounts/ca_work/revoke") {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({});
+      }
+      if (parsed.pathname === "/api/v3.1/connected_accounts/ca_work") {
+        expect(init?.method).toBe("DELETE");
+        return jsonResponse({});
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(completeHostedConnectedAppConnection({
+      claim,
+      connectedAccountId: "ca_work",
+      fetchImpl: cleanupFetch,
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_MEMBER_INACTIVE",
+      httpStatus: 403,
+    });
+
+    expect(cleanupCalls).toEqual([
+      { method: "GET", pathname: "/api/v3.1/connected_accounts" },
+      { method: "POST", pathname: "/api/v3.1/connected_accounts/ca_work/revoke" },
+      { method: "DELETE", pathname: "/api/v3.1/connected_accounts/ca_work" },
+    ]);
+    expect(harness.intentForClaim(claim)?.completedAt).toBeNull();
+  });
+
   it("resolves execution account selectors to one owned Composio account id before egress", async () => {
     installPrismaHarness();
     const executeFetch = vi.fn(async (
@@ -412,6 +568,125 @@ describe("connected-app service", () => {
       },
     })).resolves.toEqual({ data: [] });
     expect(executeFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps removed-toolkit grants manageable without making them executable", async () => {
+    vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        expect(init?.method).toBe("GET");
+        expect(parsed.searchParams.getAll("user_ids")).toEqual(["hbm_member"]);
+        expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual([]);
+        return jsonResponse({
+          items: [
+            {
+              alias: "work",
+              id: "ca_gmail",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Gmail", slug: "gmail" },
+              word_id: "bright-river",
+            },
+          ],
+        });
+      }
+      if (parsed.pathname === "/api/v3.1/connected_accounts/ca_gmail/revoke") {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({});
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: { action: "list" },
+        operation: "manage",
+      },
+    })).resolves.toMatchObject({
+      accounts: [
+        {
+          id: "ca_gmail",
+          toolkit: "gmail",
+          toolkitConfigured: false,
+        },
+      ],
+      toolkits: [
+        {
+          slug: "googlecalendar",
+        },
+      ],
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_gmail",
+          action: "disconnect",
+        },
+        operation: "manage",
+      },
+    })).resolves.toMatchObject({
+      account: {
+        id: "ca_gmail",
+        toolkit: "gmail",
+        toolkitConfigured: false,
+      },
+      status: "disconnected",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not execute against removed-toolkit grants", async () => {
+    vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        expect(init?.method).toBe("POST");
+        const body = readJsonBody(init);
+        expect(body).toMatchObject({
+          toolkits: { enable: ["googlecalendar"] },
+        });
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        expect(init?.method).toBe("GET");
+        expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual(["googlecalendar"]);
+        return jsonResponse({ items: [] });
+      }
+      if (parsed.pathname.includes("/execute")) {
+        throw new Error("Removed-toolkit account should not be executable.");
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_gmail",
+          arguments: {},
+          toolSlug: "GMAIL_FETCH_EMAILS",
+        },
+        operation: "execute",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_ACCOUNT_NOT_FOUND",
+      httpStatus: 404,
+    });
   });
 
   it("recreates stored Tool Router sessions when session-defining config changes", async () => {

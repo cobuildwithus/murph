@@ -632,7 +632,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("terminates Temporal before Prisma deletion and again after Cloudflare cleanup", async () => {
+  it("suspends before Temporal cleanup and terminates again after Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
       order.push("temporal");
@@ -657,7 +657,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["temporal", "prisma", "prisma", "cloudflare", "temporal"]);
+    expect(order).toEqual(["prisma", "temporal", "prisma", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -714,8 +714,8 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(order).toEqual([
-      "stripe:subscription-cancel",
       "prisma",
+      "stripe:subscription-cancel",
       "prisma",
       "stripe:customer-delete",
       "privy:user-delete",
@@ -761,7 +761,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED");
-    expect(onTransaction).not.toHaveBeenCalled();
+    expect(onTransaction).toHaveBeenCalledTimes(1);
     expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
@@ -889,7 +889,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED");
-    expect(onTransaction).not.toHaveBeenCalled();
+    expect(onTransaction).toHaveBeenCalledTimes(1);
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
 
@@ -1201,7 +1201,7 @@ describe("deleteHostedAccountData", () => {
     expect(result.cloudflare.deleted).toBe(false);
   });
 
-  it("pre-terminates Temporal but skips Cloudflare cleanup when the Prisma transaction fails", async () => {
+  it("skips external cleanup when the suspension transaction fails", async () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => {
         throw new Error("transaction failed");
@@ -1214,11 +1214,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
-    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledTimes(1);
-    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledWith({
-      reason: "account-deleted",
-      userId: "member_123",
-    });
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 
@@ -1325,7 +1321,8 @@ describe("deleteHostedAccountData", () => {
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppsSession: true,
-      onTransaction: () => order.push("prisma"),
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
     });
 
     const result = await deleteHostedAccountData({
@@ -1341,11 +1338,14 @@ describe("deleteHostedAccountData", () => {
     });
     expect(serviceMocks.connectedAppsClient.disconnectAccount).toHaveBeenCalledWith("ca_gmail");
     expect(serviceMocks.connectedAppsClient.deleteAccount).toHaveBeenCalledWith("ca_gmail");
-    expect(order.indexOf("revoke:ca_gmail")).toBeGreaterThanOrEqual(0);
-    expect(order.indexOf("revoke:ca_gmail")).toBeLessThan(
-      order.indexOf("composio-delete:ca_gmail"),
-    );
-    expect(order.indexOf("composio-delete:ca_gmail")).toBeLessThan(order.indexOf("prisma"));
+    const suspensionIndex = order.indexOf("update:hostedMember");
+    const revokeIndex = order.indexOf("revoke:ca_gmail");
+    const providerDeleteIndex = order.indexOf("composio-delete:ca_gmail");
+    const localDeleteTransactionIndex = order.lastIndexOf("transaction");
+    expect(suspensionIndex).toBeGreaterThanOrEqual(0);
+    expect(suspensionIndex).toBeLessThan(revokeIndex);
+    expect(revokeIndex).toBeLessThan(providerDeleteIndex);
+    expect(providerDeleteIndex).toBeLessThan(localDeleteTransactionIndex);
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "ca_gmail",
@@ -1378,7 +1378,8 @@ describe("deleteHostedAccountData", () => {
     );
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppsSession: true,
-      onTransaction: () => order.push("prisma"),
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
     });
 
     await expect(deleteHostedAccountData({
@@ -1393,7 +1394,8 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.connectedAppsClient.disconnectAccount).toHaveBeenCalledWith("ca_gmail");
     expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
-    expect(order).toEqual([]);
+    expect(order).toContain("update:hostedMember");
+    expect(order).not.toContain("delete:hostedMember");
   });
 
   it("deletes abandoned connected-app records without provider revoke before local account deletion", async () => {
@@ -1413,7 +1415,8 @@ describe("deleteHostedAccountData", () => {
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppsSession: true,
-      onTransaction: () => order.push("prisma"),
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
     });
 
     const result = await deleteHostedAccountData({
@@ -1424,10 +1427,94 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.connectedAppsClient.disconnectAccount).not.toHaveBeenCalled();
     expect(serviceMocks.connectedAppsClient.deleteAccount).toHaveBeenCalledWith("ca_pending");
-    expect(order.indexOf("composio-delete:ca_pending")).toBeLessThan(order.indexOf("prisma"));
+    expect(order.indexOf("update:hostedMember")).toBeLessThan(
+      order.indexOf("composio-delete:ca_pending"),
+    );
+    expect(order.indexOf("composio-delete:ca_pending")).toBeLessThan(
+      order.lastIndexOf("transaction"),
+    );
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "ca_pending",
+        errorCode: null,
+        providerLabel: "Gmail (work)",
+        status: "not_needed",
+        warningCode: null,
+      },
+    ]);
+  });
+
+  it("blocks local account deletion while a connected-app link is being created", async () => {
+    const order: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppConnectIntentRows: [
+        {
+          alias: "work",
+          connectedAccountId: null,
+          toolkit: "gmail",
+        },
+      ],
+      connectedAppsSession: true,
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
+    expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
+    expect(order).toContain("update:hostedMember");
+    expect(order).not.toContain("delete:hostedMember");
+  });
+
+  it("deletes in-flight connected-app provider accounts not returned by the account list", async () => {
+    const order: string[] = [];
+    serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([]);
+    serviceMocks.connectedAppsClient.deleteAccount.mockImplementation(async (accountId: string) => {
+      order.push(`composio-delete:${accountId}`);
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppConnectIntentRows: [
+        {
+          alias: "work",
+          connectedAccountId: "ca_started",
+          toolkit: "gmail",
+        },
+      ],
+      connectedAppsSession: true,
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).toHaveBeenCalledWith({
+      statuses: null,
+      toolkits: null,
+      userId: "member_123",
+    });
+    expect(serviceMocks.connectedAppsClient.deleteAccount).toHaveBeenCalledWith("ca_started");
+    expect(order.indexOf("update:hostedMember")).toBeLessThan(
+      order.indexOf("composio-delete:ca_started"),
+    );
+    expect(order.indexOf("composio-delete:ca_started")).toBeLessThan(
+      order.lastIndexOf("transaction"),
+    );
+    expect(result.providerRevocations).toEqual([
+      {
+        connectionId: "ca_started",
         errorCode: null,
         providerLabel: "Gmail (work)",
         status: "not_needed",
@@ -1545,7 +1632,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
     expect(revokeAccess).toHaveBeenCalledTimes(1);
-    expect(order).toEqual([]);
+    expect(order).toEqual(["prisma"]);
   });
 });
 
@@ -2323,6 +2410,7 @@ async function createHostedAccountDataExportPrismaForTest(
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
+  connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
@@ -2414,6 +2502,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
         ? { memberId: "member_123" }
         : null,
     },
+    hostedConnectedAppConnectIntent: {
+      findMany: async () => input.connectedAppConnectIntentRows ?? [],
+    },
     hostedComputerRun: {
       findMany: async () => {
         input.operationOrder?.push("find:hostedComputerRun");
@@ -2493,6 +2584,12 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
 type HostedAccountDeletionPrismaDeleteCall = {
   model: string;
   where: unknown;
+};
+
+type HostedAccountDeletionConnectedAppIntentRow = {
+  alias: string | null;
+  connectedAccountId: string | null;
+  toolkit: string;
 };
 
 type HostedAccountDeletionPrismaDeleteDelegate = {

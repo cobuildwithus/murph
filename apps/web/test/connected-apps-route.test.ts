@@ -113,7 +113,7 @@ function createIntent(input: {
     claimHash: "claim_hash",
     completedAt: input.completedAt ?? null,
     connectedAccountId: input.connectedAccountId ?? null,
-    expiresAt: input.expiresAt ?? new Date("2026-06-22T12:15:00.000Z"),
+    expiresAt: input.expiresAt ?? new Date("2035-06-22T12:15:00.000Z"),
     memberId: input.memberId ?? "member_123",
     startedAt: input.startedAt ?? null,
     toolkit: input.toolkit ?? "gmail",

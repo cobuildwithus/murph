@@ -1573,6 +1573,12 @@ export async function deleteHostedAccountData(input: {
   const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
   const privyUserId = identity?.privyUserId ?? null;
 
+  const deletionStartedAt = new Date();
+  await markHostedMemberSuspendedForAccountDeletion({
+    memberId: input.memberId,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
   await terminateHostedUserRuntimeWorkflowBestEffort({
     reason: "account-deleted",
     userId: input.memberId,
@@ -1600,12 +1606,6 @@ export async function deleteHostedAccountData(input: {
   const stripeSubscription = await cancelHostedStripeSubscriptionForAccountDeletion({
     memberId: input.memberId,
     stripeSubscriptionId,
-  });
-  const deletionStartedAt = new Date();
-  await markHostedMemberSuspendedForAccountDeletion({
-    memberId: input.memberId,
-    now: deletionStartedAt,
-    prisma: input.prisma,
   });
   await deleteHostedComputerUseExternalStateForAccountDeletion({
     memberId: input.memberId,
@@ -2239,11 +2239,25 @@ async function revokeConnectedAppsBestEffort(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountProviderRevocationResult[]> {
+  const inFlightIntents = await listInFlightConnectedAppIntentsForDeletion(input);
+  if (inFlightIntents.some((intent) => !intent.connectedAccountId)) {
+    return [{
+      connectionId: "composio_connected_app_connection_in_progress",
+      errorCode: "CONNECTED_APP_CONNECTION_IN_PROGRESS",
+      providerLabel: "Connected apps",
+      status: "failed",
+      warningCode: null,
+    }];
+  }
+
   const session = await input.prisma.hostedConnectedAppsSession.findUnique({
     select: { memberId: true },
     where: { memberId: input.memberId },
   });
-  if (!session) {
+  const inFlightAccountIds = inFlightIntents
+    .map((intent) => intent.connectedAccountId)
+    .filter((accountId): accountId is string => !!accountId);
+  if (!session && inFlightAccountIds.length === 0) {
     return [];
   }
 
@@ -2268,6 +2282,7 @@ async function revokeConnectedAppsBestEffort(input: {
   }
 
   const results: HostedAccountProviderRevocationResult[] = [];
+  const listedAccountIds = new Set(accounts.map((account) => account.id));
   for (const account of accounts.filter(isComposioAccountDeletable)) {
     let status: HostedAccountProviderRevocationStatus = "not_needed";
     let warningCode: string | null = null;
@@ -2312,7 +2327,55 @@ async function revokeConnectedAppsBestEffort(input: {
     }
   }
 
+  for (const intent of inFlightIntents) {
+    if (!intent.connectedAccountId || listedAccountIds.has(intent.connectedAccountId)) {
+      continue;
+    }
+    try {
+      await client.deleteAccount(intent.connectedAccountId);
+      results.push({
+        connectionId: intent.connectedAccountId,
+        errorCode: null,
+        providerLabel: formatConnectedAppIntentProviderLabel(intent),
+        status: "not_needed",
+        warningCode: null,
+      });
+    } catch (error) {
+      results.push({
+        connectionId: intent.connectedAccountId,
+        errorCode: safeErrorCode(error),
+        providerLabel: formatConnectedAppIntentProviderLabel(intent),
+        status: "failed",
+        warningCode: null,
+      });
+    }
+  }
+
   return results;
+}
+
+async function listInFlightConnectedAppIntentsForDeletion(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<Array<{
+  alias: string | null;
+  connectedAccountId: string | null;
+  toolkit: string;
+}>> {
+  const now = new Date();
+  return await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    select: {
+      alias: true,
+      connectedAccountId: true,
+      toolkit: true,
+    },
+    where: {
+      completedAt: null,
+      expiresAt: { gt: now },
+      memberId: input.memberId,
+      startedAt: { not: null },
+    },
+  });
 }
 
 function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean {
@@ -2333,6 +2396,14 @@ function formatConnectedAppProviderLabel(account: ComposioConnectedAccount): str
     || formatHostedConnectedAppToolkitLabel(account.toolkit.slug);
   const qualifier = account.alias ?? account.wordId;
   return qualifier ? `${label} (${qualifier})` : label;
+}
+
+function formatConnectedAppIntentProviderLabel(input: {
+  alias: string | null;
+  toolkit: string;
+}): string {
+  const label = formatHostedConnectedAppToolkitLabel(input.toolkit);
+  return input.alias ? `${label} (${input.alias})` : label;
 }
 
 function assertProviderRevocationsAllowDeletion(
