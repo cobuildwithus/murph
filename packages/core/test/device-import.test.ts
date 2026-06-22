@@ -605,6 +605,86 @@ test("importDeviceBatch validates only target integration ingest shards while ap
   assert.equal((targetRows[0] as { id?: string }).id, result.ingestId);
 });
 
+test("importDeviceBatch streams target ingest duplicate checks without rehashing unrelated rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-stream-target-ingest-shard");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const targetShardPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, targetShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, targetShardPath),
+    `${JSON.stringify({
+      schemaVersion: "murph.integration-ingest.v1",
+      id: "xfm_existing_bad_integrity",
+      provider: "oura",
+      source: "device",
+      importedAt: "2026-03-01T00:00:00.000Z",
+      parts: [
+        {
+          role: "daily-summary:2026-03-01",
+          fileName: "daily-summary-2026-03-01.json",
+          mediaType: "application/json",
+          content: "{}",
+          byteSize: 999,
+          sha256: "bad",
+        },
+      ],
+      outputs: {
+        events: [],
+        eventIdsComplete: true,
+        sampleIds: [],
+        sampleIdsComplete: true,
+      },
+      counts: {
+        eventCount: 0,
+        sampleCount: 0,
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "oura",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    evidenceParts: [
+      {
+        role: "daily-summary:2026-03-16",
+        fileName: "daily-summary-2026-03-16.json",
+        content: { steps: 4321 },
+      },
+    ],
+  });
+
+  assert.equal(result.ingestShardPath, targetShardPath);
+  const rows = await readJsonlRecords({ vaultRoot, relativePath: targetShardPath });
+  assert.equal(rows.length, 2);
+  assert.equal((rows[1] as { id?: string }).id, result.ingestId);
+});
+
+test("importDeviceBatch fails closed on malformed target ingest shards while streaming", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-malformed-target-ingest-shard");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const targetShardPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, targetShardPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, targetShardPath), "{\"id\":\n", "utf8");
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "oura",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      evidenceParts: [
+        {
+          role: "daily-summary:2026-03-16",
+          fileName: "daily-summary-2026-03-16.json",
+          content: { steps: 4321 },
+        },
+      ],
+    }),
+    (error) => error instanceof VaultError && error.code === "VAULT_INVALID_JSONL",
+  );
+});
+
 test("importDeviceBatch accepts high-cardinality evidence within the total byte cap", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-many-evidence-parts");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });

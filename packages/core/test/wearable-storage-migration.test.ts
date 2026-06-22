@@ -22,6 +22,7 @@ import {
   hashWearableRawPayload,
   importDeviceBatch,
   initializeVault,
+  MAX_INTEGRATION_EVIDENCE_PART_BYTES,
   pruneWearableDenseRawTimeseries,
   readIntegrationIngestById,
   readJsonlRecords,
@@ -534,6 +535,33 @@ test("integration ingest migration fails closed on unverified legacy inputs", as
     assert.equal(await fileExists(path.join(vaultRoot, bundle.manifestPath)), true, testCase.label);
   }
 });
+
+test("integration ingest migration reports oversized legacy evidence as a blocker", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-oversized-legacy");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+  const bundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: IMPORT_ID,
+    importedAt: IMPORTED_AT,
+    resource: "heart_rate",
+  });
+  await replaceLegacyBundleArtifactText({
+    artifactPath: bundle.artifactPath,
+    bundle,
+    text: "a".repeat(MAX_INTEGRATION_EVIDENCE_PART_BYTES + 1),
+    vaultRoot,
+  });
+
+  const detection = await detectIntegrationIngestMigration({ vaultRoot });
+  assert.equal((detection.blockersByCode.MIGRATION_EVIDENCE_TOO_LARGE ?? 0) > 0, true);
+  assert.equal(detection.copiedBundleCount, 0);
+
+  const result = await runIntegrationIngestMigration({ vaultRoot, apply: true });
+  assert.equal(result.mutated, false);
+  assert.equal((result.blockersByCode.MIGRATION_EVIDENCE_TOO_LARGE ?? 0) > 0, true);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), LEGACY_VAULT_FORMAT_VERSION);
+}, 30_000);
 
 test("dense raw scoped passes do not mutate broader repair classes", async () => {
   const vaultRoot = await createRawArtifactFixture({
@@ -1592,6 +1620,30 @@ async function appendLegacyBundleArtifact(input: {
     "utf8",
   );
   return artifactPath;
+}
+
+async function replaceLegacyBundleArtifactText(input: {
+  artifactPath: string;
+  bundle: Awaited<ReturnType<typeof writeLegacyIntegrationBundle>>;
+  text: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await fs.writeFile(path.join(input.vaultRoot, input.artifactPath), input.text, "utf8");
+  const manifest = parseRawImportManifest(
+    JSON.parse(await fs.readFile(path.join(input.vaultRoot, input.bundle.manifestPath), "utf8")),
+  );
+  for (const artifact of manifest.artifacts) {
+    if (artifact.relativePath !== input.artifactPath) {
+      continue;
+    }
+    artifact.byteSize = Buffer.byteLength(input.text, "utf8");
+    artifact.sha256 = sha256Hex(input.text);
+  }
+  await fs.writeFile(
+    path.join(input.vaultRoot, input.bundle.manifestPath),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function writeConflictingIntegrationJournalRow(input: {

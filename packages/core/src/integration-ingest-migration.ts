@@ -20,6 +20,9 @@ import { REQUIRED_DIRECTORIES, VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { ensureVaultDirectory, pathExists, walkVaultFiles } from "./fs.ts";
 import {
+  MAX_INTEGRATION_EVIDENCE_PART_BYTES,
+  MAX_INTEGRATION_INGEST_BYTES,
+  MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES,
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
   buildIntegrationIngestRecord,
@@ -60,6 +63,7 @@ export type IntegrationIngestMigrationBlockerCode =
   | "LEGACY_RECEIPT_INVALID"
   | "LEGACY_REFERENCE_UNRESOLVED"
   | "LEGACY_UNMANIFESTED_FILE"
+  | "MIGRATION_EVIDENCE_TOO_LARGE"
   | "MIGRATION_READ_BUDGET_EXCEEDED"
   | "MIGRATION_UNSUPPORTED_CONTENT"
   | "JOURNAL_ROW_CONFLICT";
@@ -551,6 +555,10 @@ async function detectIntegrationIngestMigrationDetails(
     bundle.eventIdsComplete = eventCount === bundle.eventOutputs.length;
     bundle.referencedEventRowCount = referencedRowsByBundle.get(bundle.importId)?.size ?? 0;
     bundle.row = rebuildBundleRow(bundle);
+    if (!validateMigratedJournalRowSize(state, bundle.rawDirectory, bundle.row)) {
+      bundle.journalState = "conflict";
+      continue;
+    }
     const existing = journalById.get(bundle.importId);
     if (!existing) {
       bundle.journalState = "absent";
@@ -782,15 +790,12 @@ async function readLegacyIntegrationBundle(input: {
       return null;
     }
   }
-  const parts = artifacts
-    .filter((entry) => !entry.artifact.role.startsWith("wearable-raw-receipt:"))
-    .map((entry) => buildIntegrationEvidencePart({
-      role: entry.artifact.role,
-      fileName: entry.artifact.originalFileName,
-      mediaType: entry.artifact.mediaType,
-      content: entry.content,
-      metadata: entry.metadata,
-    }));
+  const parts = buildLegacyEvidenceParts({
+    artifacts,
+    rawDirectory: input.rawDirectory,
+    state: input.state,
+  });
+  if (!parts) return null;
   const eventCount = readManifestCount(manifest, "eventCount") ?? 0;
   const sampleCount = readManifestCount(manifest, "sampleCount") ?? 0;
   const row = buildIntegrationIngestRecord({
@@ -809,6 +814,7 @@ async function readLegacyIntegrationBundle(input: {
     sampleCount,
     provenance: readManifestOperatorMetadata(manifest),
   });
+  if (!validateMigratedJournalRowSize(input.state, input.rawDirectory, row)) return null;
   return {
     importId,
     provider,
@@ -825,6 +831,67 @@ async function readLegacyIntegrationBundle(input: {
     journalState: "absent",
     referencedEventRowCount: 0,
   };
+}
+
+function buildLegacyEvidenceParts(input: {
+  artifacts: readonly LegacyArtifactSnapshot[];
+  rawDirectory: string;
+  state: MutableDetectionState;
+}): IntegrationEvidencePart[] | null {
+  const evidenceArtifacts = input.artifacts.filter((entry) =>
+    !entry.artifact.role.startsWith("wearable-raw-receipt:")
+  );
+  let totalBytes = 0;
+  let valid = true;
+  for (const entry of evidenceArtifacts) {
+    const byteSize = Buffer.byteLength(entry.content, "utf8");
+    if (byteSize > MAX_INTEGRATION_EVIDENCE_PART_BYTES) {
+      valid = false;
+      addBlocker(input.state, {
+        code: "MIGRATION_EVIDENCE_TOO_LARGE",
+        relativePath: entry.artifact.relativePath,
+        message:
+          `Legacy evidence role "${entry.artifact.role}" exceeds the `
+          + `${MAX_INTEGRATION_EVIDENCE_PART_BYTES}-byte v2 evidence part limit.`,
+      });
+    }
+    totalBytes += byteSize;
+  }
+  if (totalBytes > MAX_INTEGRATION_INGEST_BYTES) {
+    valid = false;
+    addBlocker(input.state, {
+      code: "MIGRATION_EVIDENCE_TOO_LARGE",
+      relativePath: input.rawDirectory,
+      message:
+        `Legacy integration bundle exceeds the ${MAX_INTEGRATION_INGEST_BYTES}-byte v2 evidence limit.`,
+    });
+  }
+  if (!valid) return null;
+
+  return evidenceArtifacts.map((entry) => buildIntegrationEvidencePart({
+    role: entry.artifact.role,
+    fileName: entry.artifact.originalFileName,
+    mediaType: entry.artifact.mediaType,
+    content: entry.content,
+    metadata: entry.metadata,
+  }));
+}
+
+function validateMigratedJournalRowSize(
+  state: MutableDetectionState,
+  relativePath: string,
+  row: IntegrationIngestRecord,
+): boolean {
+  const rowBytes = Buffer.byteLength(`${JSON.stringify(row)}\n`, "utf8");
+  if (rowBytes <= MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) return true;
+  addBlocker(state, {
+    code: "MIGRATION_EVIDENCE_TOO_LARGE",
+    relativePath,
+    message:
+      `Migrated integration ingest row would exceed the `
+      + `${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte v2 journal row limit.`,
+  });
+  return false;
 }
 
 function rebuildBundleRow(bundle: LegacyIntegrationBundle): IntegrationIngestRecord {

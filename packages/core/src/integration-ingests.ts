@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 
 import {
   integrationIngestReceiptSchema,
@@ -18,6 +20,7 @@ import { resolveVaultPath } from "./path-safety.ts";
 export const MAX_INTEGRATION_INGEST_PARTS = 10_000;
 export const MAX_INTEGRATION_EVIDENCE_PART_BYTES = 100 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_BYTES = 100 * 1024 * 1024;
+export const MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES = 128 * 1024 * 1024;
 
 export interface BuildIntegrationEvidencePartInput {
   role: string;
@@ -265,6 +268,81 @@ async function readIntegrationIngestEntriesFromPaths(
   return entries;
 }
 
+async function readIntegrationIngestEntriesByIdFromPaths(
+  vaultRoot: string,
+  paths: readonly string[],
+  ids: ReadonlySet<string>,
+): Promise<StoredIntegrationIngestEntry[]> {
+  if (ids.size === 0) return [];
+  const entries: StoredIntegrationIngestEntry[] = [];
+  const seen = new Map<string, string>();
+
+  for (const relativePath of [...paths].sort()) {
+    const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
+    if (!(await pathExists(absolutePath))) {
+      continue;
+    }
+    const lines = createInterface({
+      input: createReadStream(absolutePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+    let lineNumber = 0;
+    for await (const line of lines) {
+      lineNumber += 1;
+      if (line.length === 0) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch (error) {
+        throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
+          relativePath,
+          lineNumber,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.importedAt !== "string") {
+        throw new VaultError(
+          "INTEGRATION_INGEST_INVALID",
+          `Integration ingest record in "${relativePath}" is missing id or importedAt.`,
+          { relativePath, lineNumber },
+        );
+      }
+      const expectedPath = integrationIngestShardPath(raw.importedAt);
+      if (expectedPath !== relativePath) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_SHARD_INVALID",
+          `Integration ingest "${raw.id}" belongs in "${expectedPath}", not "${relativePath}".`,
+          { relativePath },
+        );
+      }
+      if (!ids.has(raw.id)) {
+        continue;
+      }
+      const parsed = integrationIngestRecordSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_INVALID",
+          `Integration ingest record in "${relativePath}" failed contract validation.`,
+          { errors: parsed.error.issues.map((issue) => issue.message), relativePath },
+        );
+      }
+      assertIntegrationIngestRecordIntegrity(parsed.data);
+      const previousPath = seen.get(parsed.data.id);
+      if (previousPath) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_DUPLICATE_ID",
+          `Integration ingest id "${parsed.data.id}" appears more than once.`,
+          { previousPath, relativePath },
+        );
+      }
+      seen.set(parsed.data.id, relativePath);
+      entries.push({ relativePath, record: parsed.data });
+    }
+  }
+
+  return entries;
+}
+
 export async function buildIntegrationIngestAppendPlan(
   vaultRoot: string,
   records: readonly IntegrationIngestRecord[],
@@ -272,8 +350,9 @@ export async function buildIntegrationIngestAppendPlan(
   const targetShardPaths = [
     ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
   ].sort();
+  const requestedIds = new Set(records.map((record) => record.id));
   const existingById = new Map(
-    (await readIntegrationIngestEntriesFromPaths(vaultRoot, targetShardPaths)).map((entry) =>
+    (await readIntegrationIngestEntriesByIdFromPaths(vaultRoot, targetShardPaths, requestedIds)).map((entry) =>
       [entry.record.id, entry.record] as const,
     ),
   );
@@ -298,7 +377,16 @@ export async function buildIntegrationIngestAppendPlan(
     pendingById.set(record.id, record);
     appendedIds.push(record.id);
     const relativePath = integrationIngestShardPath(record.importedAt);
-    payloads.set(relativePath, `${payloads.get(relativePath) ?? ""}${JSON.stringify(record)}\n`);
+    const rowPayload = `${JSON.stringify(record)}\n`;
+    const rowPayloadBytes = Buffer.byteLength(rowPayload, "utf8");
+    if (rowPayloadBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ROW_TOO_LARGE",
+        `Integration ingest row "${record.id}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
+        { ingestId: record.id, rowPayloadBytes },
+      );
+    }
+    payloads.set(relativePath, `${payloads.get(relativePath) ?? ""}${rowPayload}`);
   }
 
   return { appendedIds, payloads, targetShardPaths };
@@ -352,4 +440,8 @@ function stableSortJson(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
