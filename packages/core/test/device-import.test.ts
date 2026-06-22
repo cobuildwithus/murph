@@ -1958,6 +1958,58 @@ test("importDeviceBatch updates changed provider records across month shards by 
   );
 });
 
+test("importDeviceBatch rejects kind rewrites through a shared externalRef", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-externalref-kind-stability");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const baseEvent = buildJunctionStyleWorkoutEvent();
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [baseEvent],
+  });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "jxn_acct_stable",
+      importedAt: "2026-06-04T21:00:00.000Z",
+      events: [
+        {
+          kind: "observation",
+          occurredAt: "2026-06-04T19:55:00.000Z",
+          recordedAt: "2026-06-04T20:30:00.000Z",
+          title: "Workout distance",
+          externalRef: baseEvent.externalRef,
+          fields: {
+            metric: "distance",
+            observationGrain: "summary" as const,
+            unit: "km",
+            value: 5,
+          },
+        },
+      ],
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_KIND_MISMATCH");
+      assert.match(vaultError.message, /already belongs to kind "activity_session"/u);
+      return true;
+    },
+  );
+
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.equal(eventRecords.length, 1);
+  assert.equal(eventRecords[0]?.kind, "activity_session");
+});
+
 test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotently", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-hr-zone-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

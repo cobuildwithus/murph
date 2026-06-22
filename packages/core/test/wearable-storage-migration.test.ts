@@ -288,6 +288,74 @@ test("integration ingest migration bounds legacy bundle processing per pass", as
   assert.equal((await readVaultMetadataFormatVersion(vaultRoot)), CURRENT_VAULT_FORMAT_VERSION);
 });
 
+test("integration ingest migration treats cumulative read budget exhaustion as a page boundary", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-read-budget");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+
+  const firstBundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_11111111111111111111111111",
+    importedAt: "2026-05-01T00:00:00.000Z",
+    resource: "heart_rate",
+  });
+  const secondBundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_22222222222222222222222222",
+    importedAt: "2026-05-02T00:00:00.000Z",
+    resource: "steps",
+  });
+  const payloadText = `${JSON.stringify({ values: "x".repeat(2048) })}\n`;
+  await replaceLegacyBundleArtifactText({
+    artifactPath: firstBundle.artifactPath,
+    bundle: firstBundle,
+    text: payloadText,
+    vaultRoot,
+  });
+  await replaceLegacyBundleArtifactText({
+    artifactPath: secondBundle.artifactPath,
+    bundle: secondBundle,
+    text: payloadText,
+    vaultRoot,
+  });
+  const maxBytes = Buffer.byteLength(payloadText, "utf8") + 1;
+
+  const detection = await detectIntegrationIngestMigration({ vaultRoot, maxBytes, maxBundles: 10 });
+  assert.equal(detection.candidateBundleCount, 1);
+  assert.equal(detection.blockerCount, 0);
+  assert.equal(detection.hasMore, true);
+
+  const firstResult = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+    maxBytes,
+    maxBundles: 10,
+  });
+
+  assert.equal(firstResult.appendedBundleCount, 1);
+  assert.equal(firstResult.deletedFileCount, 2);
+  assert.equal(firstResult.blockerCount, 0);
+  assert.equal(firstResult.finalized, false);
+  assert.ok(await readIntegrationIngestById(vaultRoot, firstBundle.importId));
+  assert.equal(await fileExists(path.join(vaultRoot, firstBundle.manifestPath)), false);
+  assert.equal(await fileExists(path.join(vaultRoot, secondBundle.manifestPath)), true);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), LEGACY_VAULT_FORMAT_VERSION);
+
+  const secondResult = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+    maxBytes,
+    maxBundles: 10,
+  });
+
+  assert.equal(secondResult.appendedBundleCount, 1);
+  assert.equal(secondResult.deletedFileCount, 2);
+  assert.equal(secondResult.blockerCount, 0);
+  assert.equal(secondResult.finalized, true);
+  assert.ok(await readIntegrationIngestById(vaultRoot, secondBundle.importId));
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), CURRENT_VAULT_FORMAT_VERSION);
+});
+
 test("integration ingest migration finalizes empty legacy vaults and is idempotent", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-empty-finalize");
   await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });

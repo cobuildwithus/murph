@@ -1637,6 +1637,18 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    // externalRef identity does not include kind. Event spines are kind-stable,
+    // so device reconciliation must reject under-faceted provider refs instead
+    // of rewriting an existing event id as a different event kind.
+    if (latest.kind !== entry.record.kind) {
+      throw new VaultError(
+        "EVENT_KIND_MISMATCH",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
+          `"${latest.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+      );
+    }
+
     if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
       skippedDuplicateCount += 1;
       records.push(latest);

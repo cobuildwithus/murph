@@ -575,6 +575,7 @@ async function detectIntegrationIngestMigrationDetails(
     const manifestFiles = manifestPathsByDirectory.get(rawDirectory) ?? [];
     const bundle = await readLegacyIntegrationBundle({
       vaultRoot: input.vaultRoot,
+      allowBudgetBoundary: bundles.length > 0,
       rawDirectory,
       manifestPaths: manifestFiles,
       maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
@@ -672,6 +673,7 @@ async function detectIntegrationIngestMigrationDetails(
 }
 
 async function readLegacyIntegrationBundle(input: {
+  allowBudgetBoundary: boolean;
   vaultRoot: string;
   rawDirectory: string;
   manifestPaths: string[];
@@ -788,11 +790,13 @@ async function readLegacyIntegrationBundle(input: {
       }
       if (input.state.sourceBytes + stats.size > input.maxBytes) {
         input.state.budgetExceeded = true;
-        addBlocker(input.state, {
-          code: "MIGRATION_READ_BUDGET_EXCEEDED",
-          relativePath: artifact.relativePath,
-          message: "Integration migration read budget was exhausted.",
-        });
+        if (!input.allowBudgetBoundary) {
+          addBlocker(input.state, {
+            code: "MIGRATION_READ_BUDGET_EXCEEDED",
+            relativePath: artifact.relativePath,
+            message: "Integration migration read budget was exhausted.",
+          });
+        }
         break;
       }
       const bytes = await fs.readFile(resolved.absolutePath);

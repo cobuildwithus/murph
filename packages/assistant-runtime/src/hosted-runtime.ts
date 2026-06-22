@@ -303,7 +303,6 @@ const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as con
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
-const HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES = 100;
 
 interface HostedInitialMailboxImportPlan {
   bootstrapRequired: boolean;
@@ -344,7 +343,7 @@ async function ensureHostedVaultFormatCurrentForRuntime(vaultRoot: string): Prom
     return;
   }
 
-  for (let pass = 0; pass < HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES; pass += 1) {
+  while (true) {
     const result = await runIntegrationIngestMigration({
       vaultRoot,
       apply: true,
@@ -359,20 +358,14 @@ async function ensureHostedVaultFormatCurrentForRuntime(vaultRoot: string): Prom
         { blockersByCode: result.blockersByCode },
       );
     }
-    if (!result.mutated && !result.hasMore) {
+    if (!result.mutated) {
       throw new VaultError(
         "HOSTED_VAULT_FORMAT_MIGRATION_STALLED",
         "Hosted vault format migration made no progress before the workspace could be served.",
-        { storedFormatVersion: result.storedFormatVersion },
+        { hasMore: result.hasMore, storedFormatVersion: result.storedFormatVersion },
       );
     }
   }
-
-  throw new VaultError(
-    "HOSTED_VAULT_FORMAT_MIGRATION_PASS_LIMIT_EXCEEDED",
-    "Hosted vault format migration exceeded the bounded pass limit before the workspace could be served.",
-    { maxPasses: HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES },
-  );
 }
 
 async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<number> {
