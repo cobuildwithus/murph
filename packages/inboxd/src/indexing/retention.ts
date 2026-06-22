@@ -35,6 +35,7 @@ const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RETENTION_REASON = "inbox_media_retention" as const;
 
 export interface RunInboxMediaRetentionInput {
+  materializeCandidatePaths?: (storedPaths: readonly string[]) => Promise<void>;
   maxAttachments?: number;
   now?: Date | string;
   protectedAttachmentIds?: Iterable<string>;
@@ -54,6 +55,7 @@ export interface InboxMediaRetentionResult {
 interface InboxMediaRetentionCandidate {
   attachment: InboxCaptureAttachmentRecord;
   capture: InboxCaptureRecord;
+  materialize: boolean;
   storedPath: string;
 }
 
@@ -120,11 +122,10 @@ export async function runInboxMediaRetention(
       }
 
       const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
-      if (
-        integrity.kind !== "ok" ||
-        integrity.byteSize !== (attachment.byteSize ?? integrity.byteSize) ||
-        integrity.sha256 !== attachment.sha256
-      ) {
+      if (integrity.kind === "missing" && !input.materializeCandidatePaths) {
+        continue;
+      }
+      if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
         continue;
       }
 
@@ -135,6 +136,7 @@ export async function runInboxMediaRetention(
       candidates.push({
         attachment,
         capture,
+        materialize: integrity.kind === "missing",
         storedPath,
       });
     }
@@ -145,6 +147,17 @@ export async function runInboxMediaRetention(
       hasMoreEligibleAttachments,
       nextEligibleAt,
     });
+  }
+
+  const pathsToMaterialize = uniqueRetentionStoredPaths(
+    candidates
+      .filter((candidate) => candidate.materialize)
+      .map((candidate) => candidate.storedPath),
+  );
+  if (pathsToMaterialize.length > 0) {
+    throwIfRetentionAborted(input.signal);
+    await input.materializeCandidatePaths?.(pathsToMaterialize);
+    throwIfRetentionAborted(input.signal);
   }
 
   return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
@@ -180,11 +193,7 @@ export async function runInboxMediaRetention(
           candidate.storedPath,
           input.signal,
         );
-        if (
-          integrity.kind !== "ok" ||
-          integrity.byteSize !== (candidate.attachment.byteSize ?? integrity.byteSize) ||
-          integrity.sha256 !== candidate.attachment.sha256
-        ) {
+        if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
           continue;
         }
 
@@ -235,7 +244,7 @@ export async function runInboxMediaRetention(
       }
 
       for (const storedPath of storedPathsToDelete) {
-        await deleteVaultFileIfPresent(input.vaultRoot, storedPath, input.signal);
+        await deleteVaultFileIfPresent(input.vaultRoot, storedPath);
       }
 
       return {
@@ -249,6 +258,19 @@ export async function runInboxMediaRetention(
       await lock.release();
     }
   });
+}
+
+function isExpectedInboxMediaIntegrity(
+  integrity: Awaited<ReturnType<typeof hashExistingVaultFile>>,
+  attachment: InboxCaptureAttachmentRecord,
+): integrity is { kind: "ok"; byteSize: number; sha256: string } {
+  return integrity.kind === "ok" &&
+    integrity.byteSize === (attachment.byteSize ?? integrity.byteSize) &&
+    integrity.sha256 === attachment.sha256;
+}
+
+function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {
+  return [...new Set(paths)];
 }
 
 export function buildInboxAttachmentRetentionLedgerPath(purgedAt: string): string {

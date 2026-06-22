@@ -52,6 +52,7 @@ export type HostedIdleMaintenanceOutcome =
 // idle-time maintenance belongs here as additional plain statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  materializeRetentionCandidatePaths?: ((storedPaths: readonly string[]) => Promise<void>) | null;
   memberId: string;
   model: string | null;
   pendingWork: boolean;
@@ -95,14 +96,15 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.vaultRoot) {
       try {
         const retentionResult = await runInboxMediaRetention({
+          materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
           protectedAttachmentIds: input.protectedAttachmentIds,
           protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
         retentionWake = resolveInboxMediaRetentionWake(retentionResult);
-      } catch {
-        if (abortController.signal.aborted) {
+      } catch (error) {
+        if (isInboxMediaRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
             shutdownSignal: input.shutdownSignal,
             wakeInterrupted,
@@ -213,6 +215,20 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function isInboxMediaRetentionAbortError(
+  error: unknown,
+  signal: AbortSignal,
+): boolean {
+  if (!signal.aborted) {
+    return false;
+  }
+  if (signal.reason instanceof Error) {
+    return error === signal.reason;
+  }
+
+  return error instanceof Error && error.message === "Inbox media retention aborted.";
 }
 
 function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {

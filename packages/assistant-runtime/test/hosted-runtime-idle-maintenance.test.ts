@@ -160,6 +160,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       });
 
       expect(runInboxMediaRetention).toHaveBeenCalledWith({
+        materializeCandidatePaths: undefined,
         protectedAttachmentIds: undefined,
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),
@@ -180,6 +181,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   });
 
   it("passes active pending attachment protections to inbox media retention", async () => {
+    const materializeRetentionCandidatePaths = vi.fn(async () => {});
     runInboxMediaRetention.mockResolvedValue({
       expiredAttachments: 0,
       expiredBytes: 0,
@@ -195,6 +197,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      materializeRetentionCandidatePaths,
       memberId: "member_1",
       model: "gpt-5.5",
       pendingWork: false,
@@ -209,6 +212,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
 
     expect(runInboxMediaRetention).toHaveBeenCalledWith({
+      materializeCandidatePaths: materializeRetentionCandidatePaths,
       protectedAttachmentIds: ["att_pending"],
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),

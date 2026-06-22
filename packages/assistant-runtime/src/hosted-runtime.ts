@@ -1507,6 +1507,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             });
         const idleMaintenance = await runHostedIdleCheckpointMaintenance({
           pendingWork: idleMaintenancePendingWork,
+          materializeRetentionCandidatePaths: async (storedPaths) => {
+            await restored.materializeWorkspaceArtifacts(storedPaths);
+          },
           protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
           protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
           // The compact call rides the same warm-process credential as turns,

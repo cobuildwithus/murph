@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   appendJsonlRecord,
@@ -386,6 +386,62 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   assert.equal(await fileExists(vaultRoot, duplicatePath), false);
 });
 
+test("runInboxMediaRetention materializes bounded missing candidates before hashing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-materialize");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_lazy_media",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WA",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: {
+      source: "telegram",
+      externalId: "msg-lazy-media",
+      thread: {
+        id: "thread-lazy",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      text: "lazy old media",
+      attachments: [
+        {
+          kind: "image",
+          mime: "image/png",
+          fileName: "lazy.png",
+          data: imageBytes,
+        },
+      ],
+      raw: {},
+    },
+  });
+  const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(imagePath);
+  const storedImageBytes = await fs.readFile(path.join(vaultRoot, imagePath));
+  await fs.unlink(path.join(vaultRoot, imagePath));
+
+  const materializedPaths: string[][] = [];
+  const result = await runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+      assert.deepEqual([...storedPaths], [imagePath]);
+      await writeVaultBytes(vaultRoot, imagePath, storedImageBytes);
+    },
+    now: "2026-07-05T00:00:00.000Z",
+    vaultRoot,
+  });
+
+  assert.deepEqual(materializedPaths, [[imagePath]]);
+  assert.equal(result.expiredAttachments, 1);
+  assert.equal(result.records[0]?.storedPath, imagePath);
+  assert.equal(await fileExists(vaultRoot, imagePath), false);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
 test("runInboxMediaRetention honors the per-pass attachment limit", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-limit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
@@ -450,6 +506,79 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
   assert.equal(secondPass.hasMoreEligibleAttachments, false);
   assert.equal(secondPass.nextEligibleAt, null);
   assert.equal(await fileExists(vaultRoot, secondPath), false);
+});
+
+test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-delete-abort");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_delete_abort",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WB",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: {
+      source: "telegram",
+      externalId: "msg-delete-abort",
+      thread: {
+        id: "thread-delete-abort",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      text: "delete abort media",
+      attachments: [
+        {
+          kind: "image",
+          mime: "image/png",
+          fileName: "first.png",
+          data: imageBytes,
+        },
+        {
+          kind: "image",
+          mime: "image/png",
+          fileName: "second.png",
+          data: imageBytes,
+        },
+      ],
+      raw: {},
+    },
+  });
+  const firstPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  const secondPath = persisted.stored.attachments[1]?.storedPath ?? "";
+  assert.ok(firstPath);
+  assert.ok(secondPath);
+
+  const controller = new AbortController();
+  const originalUnlink = fs.unlink.bind(fs);
+  let unlinkCount = 0;
+  const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (...args) => {
+    unlinkCount += 1;
+    if (unlinkCount === 1) {
+      controller.abort(new Error("foreground wake"));
+    }
+    await originalUnlink(...args);
+  });
+
+  try {
+    const result = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      signal: controller.signal,
+      vaultRoot,
+    });
+
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(result.expiredAttachments, 2);
+    assert.equal(unlinkCount, 2);
+    assert.equal(await fileExists(vaultRoot, firstPath), false);
+    assert.equal(await fileExists(vaultRoot, secondPath), false);
+    assert.equal((await validateVault({ vaultRoot })).valid, true);
+  } finally {
+    unlinkSpy.mockRestore();
+  }
 });
 
 async function writeVaultFile(vaultRoot: string, relativePath: string, content: string): Promise<void> {

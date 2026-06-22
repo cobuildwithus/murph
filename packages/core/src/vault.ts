@@ -518,19 +518,13 @@ async function validateJsonlValidationFamily(
   vaultRoot: string,
   family: VaultJsonlValidationFamilyDescriptor,
 ): Promise<ValidationIssue[]> {
+  const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
   return validateJsonlFamily({
     vaultRoot,
     relativeDirectory: family.directory,
     schema: family.validation.schema,
     code: family.validation.issueCode,
-    postValidateRecord: async (record, context) =>
-      validateJsonlRecordAgainstVault({
-        familyId: family.id,
-        index: context.index,
-        record,
-        relativePath: context.relativePath,
-        vaultRoot,
-      }),
+    postValidateRecord,
   });
 }
 
