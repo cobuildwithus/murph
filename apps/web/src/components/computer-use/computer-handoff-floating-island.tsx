@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { cn } from "@/src/lib/utils";
 
-const STORAGE_KEY = "murph.computer-handoff.island-offset";
+const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset";
 const VIEWPORT_MARGIN = 12;
 
 type Offset = { x: number; y: number };
@@ -24,9 +24,11 @@ interface DragState {
 export function ComputerHandoffFloatingIsland({
   handle,
   children,
+  persistKey = DEFAULT_STORAGE_KEY,
 }: {
   handle: ReactNode;
   children: ReactNode;
+  persistKey?: string | null;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -34,8 +36,9 @@ export function ComputerHandoffFloatingIsland({
   const [grabbing, setGrabbing] = useState(false);
 
   useEffect(() => {
+    if (!persistKey) return;
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(persistKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<Offset>;
       if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
@@ -44,7 +47,7 @@ export function ComputerHandoffFloatingIsland({
     } catch {
       // ignore corrupted storage
     }
-  }, []);
+  }, [persistKey]);
 
   const reclampToViewport = useCallback(() => {
     const el = rootRef.current;
@@ -113,9 +116,10 @@ export function ComputerHandoffFloatingIsland({
     if (!state || state.pointerId !== event.pointerId) return;
     dragRef.current = null;
     setGrabbing(false);
+    if (!persistKey) return;
     try {
       window.localStorage.setItem(
-        STORAGE_KEY,
+        persistKey,
         JSON.stringify({
           x: state.baseX + (event.clientX - state.startX),
           y: state.baseY + (event.clientY - state.startY),
