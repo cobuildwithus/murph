@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import type { MetricPoint } from "../src/metrics/index.ts";
 import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
@@ -236,7 +237,7 @@ test("browser vault replicas validate schema", () => {
   );
 });
 
-test("browser vault replica keeps only browser-supported adherence targets", async () => {
+test("browser vault replica keeps metric adherence targets", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "c".repeat(64),
@@ -295,8 +296,58 @@ test("browser vault replica keeps only browser-supported adherence targets", asy
   assert.ok(runPlan && typeof runPlan === "object" && !Array.isArray(runPlan));
   const targets = (runPlan as Record<string, unknown>).adherenceTargets;
   assert.ok(Array.isArray(targets));
-  assert.equal(targets.length, 1);
+  assert.equal(targets.length, 2);
   assert.equal((targets[0] as Record<string, unknown>).targetId, "sauna");
+  assert.equal((targets[1] as Record<string, unknown>).targetId, "steps");
+});
+
+test("browser vault replica keeps old anchored metric points by contributing record id", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-01T12:00:00.000Z",
+    metricPoints: [
+      createMetricPoint({
+        biomarkerKey: "biomarker:resting-heart-rate",
+        contributingRecordIds: ["sample_anchor_rhr_baseline"],
+        effectiveDate: "2025-01-01",
+        metricKey: "resting-heart-rate",
+        recordId: "summary_rhr_baseline",
+        unit: "bpm",
+        value: 62,
+      }),
+    ],
+    sourceBundleHash: "d".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("experiment", "exp_anchor_rhr", {
+          frontmatter: {
+            analysisPlan: {
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+              measurementAnchors: [{
+                role: "baseline",
+                kind: "wearable_summary",
+                recordId: "sample_anchor_rhr_baseline",
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+              }],
+            },
+            runPlan: {
+              baselineStart: "2026-05-01",
+              baselineEnd: "2026-05-07",
+              interventionStart: "2026-05-08",
+              interventionEnd: "2026-05-14",
+            },
+          },
+          kind: "experiment",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const row = replica.metricRows.find((entry) => entry.metricKey === "resting-heart-rate");
+  assert.ok(row);
+  assert.equal(row.date, "2025-01-01");
+  assert.equal(row.recordIds.includes("sample_anchor_rhr_baseline"), true);
 });
 
 test("browser vault replica projects experiment event fields only for relevant event kinds", async () => {
@@ -543,6 +594,54 @@ function createEntity(
     stream,
     tags: overrides.tags ?? [],
     title,
+  };
+}
+
+function createMetricPoint(input: {
+  biomarkerKey: string | null;
+  contributingRecordIds?: readonly string[];
+  effectiveDate: string;
+  metricKey: string;
+  recordId: string;
+  unit: string;
+  value: number;
+}): MetricPoint {
+  return {
+    biomarkerKey: input.biomarkerKey,
+    canonicalUnit: input.unit,
+    canonicalValue: input.value,
+    comparator: null,
+    confidence: "medium",
+    context: input.contributingRecordIds
+      ? { contributingRecordIds: input.contributingRecordIds.slice() }
+      : {},
+    effectiveDate: input.effectiveDate,
+    grain: "day",
+    id: `metric-point:${input.metricKey}:${input.effectiveDate}`,
+    metricKey: input.metricKey,
+    observedAt: `${input.effectiveDate}T00:00:00.000Z`,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Wearable summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "derived",
+      kind: "wearable-summary",
+      path: "",
+      recordId: input.recordId,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: input.unit,
+    value: input.value,
   };
 }
 

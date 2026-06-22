@@ -555,25 +555,7 @@ function readAdherenceTargets(
     return [];
   }
 
-  const supported = result.data.filter(isBrowserSupportedAdherenceTarget);
-  if (supported.length < result.data.length) {
-    diagnostics.push({
-      code: "invalid_schedule",
-      message: "Some adherence targets are not supported by browser Results and were left out.",
-      severity: "warning",
-    });
-  }
-
-  return supported;
-}
-
-function isBrowserSupportedAdherenceTarget(
-  target: ExperimentAdherenceTarget,
-): boolean {
-  return (
-    target.evidence.kind === "linkedEventCount" &&
-    target.evidence.eventKind === "intervention_session"
-  );
+  return result.data;
 }
 
 function selectExperimentEvents(

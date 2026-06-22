@@ -1502,6 +1502,9 @@ describe("record service seams", () => {
       listMetricPoints: vi.fn(async () => {
         throw new Error("Experiment follow-up should not read metric points.");
       }),
+      listMetricPointsBatch: vi.fn(async () => {
+        throw new Error("Experiment follow-up should not read metric points.");
+      }),
       decideExperimentFollowupDue: vi.fn(() => ({
         schema: "murph.experiment-followup-due.v1",
         kind: "missed-log",
@@ -1657,6 +1660,10 @@ describe("record service seams", () => {
         anchoredMetricPointFilters.push(filters);
         return [];
       }),
+      listMetricPointsBatch: vi.fn(async (_vault: string, filtersList: readonly unknown[]) => {
+        anchoredMetricPointFilters.push(...filtersList);
+        return [];
+      }),
       normalizeMetricKey: queryRuntime.normalizeMetricKey,
       resolveMetricDefinition: queryRuntime.resolveMetricDefinition,
       resolveMetricDefinitionForBiomarker: queryRuntime.resolveMetricDefinitionForBiomarker,
@@ -1786,6 +1793,7 @@ describe("record service seams", () => {
           frontmatter: null,
         })),
         listMetricPoints: vi.fn(async () => []),
+        listMetricPointsBatch: vi.fn(async () => []),
         analyzeExperimentOutcome: vi.fn(() => ({
           schemaVersion: "murph.experiment-outcome.v1",
           asOf: "2026-04-08",

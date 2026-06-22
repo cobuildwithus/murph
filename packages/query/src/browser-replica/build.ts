@@ -255,12 +255,28 @@ function isAnchoredBrowserMetricPoint(
   point: MetricPoint,
   anchoredRecords: ReadonlyMap<string, ReadonlySet<string>>,
 ): boolean {
-  const biomarkerKeys = anchoredRecords.get(point.source.recordId);
-  if (!biomarkerKeys || !point.biomarkerKey) {
+  const biomarkerKey = point.biomarkerKey;
+  if (!biomarkerKey) {
     return false;
   }
 
-  return biomarkerKeys.has(point.biomarkerKey);
+  return browserMetricPointRecordIds(point).some((recordId) =>
+    anchoredRecords.get(recordId)?.has(biomarkerKey) ?? false
+  );
+}
+
+function browserMetricPointRecordIds(point: MetricPoint): string[] {
+  const contributingRecordIds = point.context.contributingRecordIds;
+  if (!Array.isArray(contributingRecordIds)) {
+    return [point.source.recordId];
+  }
+
+  return [...new Set([
+    ...contributingRecordIds.filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    ),
+    point.source.recordId,
+  ])];
 }
 
 function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[]): BrowserVaultRequestedMetric[] {
@@ -421,61 +437,10 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "value",
   ]) {
     if (source[key] !== undefined && isBrowserSafeJson(source[key])) {
-      allowed[key] = key === "runPlan"
-        ? projectSafeRunPlan(source[key])
-        : cloneJson(source[key]);
+      allowed[key] = cloneJson(source[key]);
     }
   }
 
-  return allowed;
-}
-
-function projectSafeRunPlan(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return cloneJson(value);
-  }
-
-  const source = value as Record<string, unknown>;
-  const projected = cloneRecord(source);
-  if (Array.isArray(source.adherenceTargets)) {
-    const targets = source.adherenceTargets
-      .map(projectBrowserSafeAdherenceTarget)
-      .filter((target): target is Record<string, unknown> => target !== null);
-    if (targets.length > 0) {
-      projected.adherenceTargets = targets;
-    } else {
-      delete projected.adherenceTargets;
-    }
-  }
-
-  return projected;
-}
-
-function projectBrowserSafeAdherenceTarget(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const target = value as Record<string, unknown>;
-  const evidence = target.evidence;
-  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
-    return null;
-  }
-
-  const evidenceRecord = evidence as Record<string, unknown>;
-  if (
-    evidenceRecord.kind !== "linkedEventCount" ||
-    evidenceRecord.eventKind !== "intervention_session"
-  ) {
-    return null;
-  }
-
-  const allowed: Record<string, unknown> = {};
-  for (const key of ["targetId", "label", "phase", "calendar", "evidence", "grace", "rollup"]) {
-    if (target[key] !== undefined && isBrowserSafeJson(target[key])) {
-      allowed[key] = cloneJson(target[key]);
-    }
-  }
   return allowed;
 }
 
@@ -659,18 +624,6 @@ function previewText(value: string | null, limit: number): string | null {
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
-}
-
-function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
-  const output: Record<string, unknown> = {};
-
-  for (const [key, entry] of Object.entries(value)) {
-    if (isBrowserSafeJson(entry)) {
-      output[key] = cloneJson(entry);
-    }
-  }
-
-  return output;
 }
 
 function cloneJson(value: unknown): unknown {

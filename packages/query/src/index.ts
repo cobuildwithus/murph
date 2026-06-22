@@ -372,6 +372,14 @@ export async function listMetricPoints(
   return mod.listMetricPointsRuntime(vaultRoot, filters);
 }
 
+export async function listMetricPointsBatch(
+  vaultRoot: string,
+  filtersList: readonly QueryMetricPointFilters[],
+): Promise<import("@murphai/health-metrics").MetricPoint[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listMetricPointsBatchRuntime(vaultRoot, filtersList);
+}
+
 export async function selectMetric(input: {
   biomarkerKey?: string;
   metricKey?: string;

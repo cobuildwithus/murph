@@ -2037,14 +2037,7 @@ async function readExperimentJournalMetricPoints(input: {
   }
 
   try {
-    const pointsById = new Map<string, Awaited<ReturnType<QueryRuntimeModule['listMetricPoints']>>[number]>()
-    for (const filter of filters) {
-      for (const point of await input.query.listMetricPoints(input.vault, filter)) {
-        pointsById.set(point.id, point)
-      }
-    }
-
-    return [...pointsById.values()]
+    return await input.query.listMetricPointsBatch(input.vault, filters)
   } catch (error) {
     throw toVaultMetadataCliError(error)
   }

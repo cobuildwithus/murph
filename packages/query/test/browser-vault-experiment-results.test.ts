@@ -1144,7 +1144,7 @@ test("returns null schedule when the run has no structured schedule", () => {
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
 });
 
-test("does not synthesize a legacy schedule when explicit browser targets are unsupported", () => {
+test("uses explicit metric adherence targets instead of legacy schedule synthesis", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       entities: [
@@ -1184,8 +1184,9 @@ test("does not synthesize a legacy schedule when explicit browser targets are un
   const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
 
   assert.ok(result);
-  assert.equal(result.schedule, null);
-  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
+  assert.ok(result.schedule);
+  assert.equal(result.schedule.cells.every((cell) => cell.targetId === "step-floor"), true);
+  assert.equal(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"), false);
 });
 
 test("uses adherence target rollups for browser progress targets", () => {
@@ -1251,6 +1252,74 @@ test("uses adherence target rollups for browser progress targets", () => {
   assert.equal(result.schedule?.plannedSessions, 3);
   assert.equal(result.schedule?.cells.length, 6);
   assert.equal(result.schedule?.cells.filter((cell) => cell.targetId === "sauna").length, 3);
+});
+
+test("does not replace metric adherence rollups with auxiliary session targets", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-10T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-08",
+            adherenceTargets: [
+              {
+                targetId: "step-floor",
+                label: "Step floor",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "metricThreshold",
+                  metricKey: "steps",
+                  op: ">=",
+                  value: 8000,
+                  missing: "unknown",
+                },
+                rollup: {
+                  targetCompletions: 1,
+                  minimumUsefulCompletions: 1,
+                },
+              },
+              {
+                targetId: "session-marker",
+                label: "Session marker",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+              },
+            ],
+          },
+        }),
+        sessionEvent("2026-04-08", "completed"),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.schedule?.cells.length, 2);
+  assert.equal(result.schedule?.cells.find((cell) => cell.targetId === "session-marker")?.kind, "completed");
+  assert.equal(result.schedule?.completedSessions, 0);
+  assert.equal(result.schedule?.unknownSessions, 1);
+  assert.equal(result.schedule?.plannedSessions, 1);
+  assert.equal(result.progress?.adherence.completedSessions, 0);
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
+  assert.equal(result.progress?.adherence.targetSessions, 1);
+  assert.equal(result.progress?.adherence.status, "not_started");
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {
