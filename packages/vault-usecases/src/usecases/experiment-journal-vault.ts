@@ -17,6 +17,7 @@ import {
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type ExperimentFrontmatter,
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
@@ -25,6 +26,7 @@ import { z } from 'zod'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
+  type QueryMetricPointFilters,
   type QueryRuntimeModule,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -1428,7 +1430,12 @@ export async function showExperimentProgress(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
-  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const progress = query.summarizeExperimentProgress(readModel, slug, {
     asOf: input.asOf,
@@ -1456,7 +1463,12 @@ export async function showExperimentProgressCard(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
-  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
@@ -1486,12 +1498,10 @@ export async function showExperimentFollowupDue(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
-  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
 
   const decision = query.decideExperimentFollowupDue(readModel, slug, {
     kind: input.kind,
     date: input.date,
-    metricPoints,
   })
 
   return {
@@ -1514,7 +1524,12 @@ export async function analyzeExperimentOutcomeRecord(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
-  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
+  const metricPoints = await readExperimentJournalMetricPoints({
+    asOf: input.asOf,
+    frontmatter: requireExperimentFrontmatter(entity),
+    query,
+    vault: input.vault,
+  })
 
   const outcome = query.analyzeExperimentOutcome(readModel, slug, {
     asOf: input.asOf,
@@ -2010,15 +2025,123 @@ async function readExperimentJournalVault(vault: string) {
   }
 }
 
-async function readExperimentJournalMetricPoints(
-  query: QueryRuntimeModule,
-  vault: string,
-) {
+async function readExperimentJournalMetricPoints(input: {
+  asOf?: string
+  frontmatter: ExperimentFrontmatter
+  query: QueryRuntimeModule
+  vault: string
+}) {
+  const filters = buildExperimentMetricPointFilters(input.query, input.frontmatter, input.asOf)
+  if (filters.length === 0) {
+    return []
+  }
+
   try {
-    return await query.listMetricPoints(vault, { limit: null })
+    const pointsById = new Map<string, Awaited<ReturnType<QueryRuntimeModule['listMetricPoints']>>[number]>()
+    for (const filter of filters) {
+      for (const point of await input.query.listMetricPoints(input.vault, filter)) {
+        pointsById.set(point.id, point)
+      }
+    }
+
+    return [...pointsById.values()]
   } catch (error) {
     throw toVaultMetadataCliError(error)
   }
+}
+
+function buildExperimentMetricPointFilters(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+  asOf?: string,
+): QueryMetricPointFilters[] {
+  const metricKeys = collectExperimentMetricKeys(query, frontmatter)
+  if (metricKeys.length === 0) {
+    return []
+  }
+
+  const dateFilter = buildExperimentMetricPointDateFilter(frontmatter, asOf)
+  return metricKeys.map((metricKey) => ({
+    ...dateFilter,
+    limit: null,
+    metricKey,
+  }))
+}
+
+function collectExperimentMetricKeys(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+): string[] {
+  const metricKeys = new Set<string>()
+  const analysisPlan = frontmatter.analysisPlan
+  for (const biomarkerKey of [
+    analysisPlan?.primaryBiomarkerKey,
+    ...(analysisPlan?.secondaryBiomarkerKeys ?? []),
+  ]) {
+    if (!biomarkerKey) {
+      continue
+    }
+
+    const metricKey =
+      query.resolveMetricDefinitionForBiomarker(biomarkerKey)?.key ??
+      query.resolveMetricDefinition(biomarkerKey.split(':').at(-1) ?? biomarkerKey)?.key
+    if (metricKey) {
+      metricKeys.add(metricKey)
+    }
+  }
+
+  for (const target of frontmatter.runPlan?.adherenceTargets ?? []) {
+    if (
+      target.evidence.kind !== 'metricPresence' &&
+      target.evidence.kind !== 'metricThreshold'
+    ) {
+      continue
+    }
+
+    const metricKey =
+      query.resolveMetricDefinition(target.evidence.metricKey)?.key ??
+      target.evidence.metricKey.trim().toLowerCase().replaceAll('_', '-')
+    if (metricKey.length > 0) {
+      metricKeys.add(metricKey)
+    }
+  }
+
+  return [...metricKeys].sort((left, right) => left.localeCompare(right))
+}
+
+function buildExperimentMetricPointDateFilter(
+  frontmatter: ExperimentFrontmatter,
+  asOf?: string,
+): Pick<QueryMetricPointFilters, 'from' | 'to'> {
+  const starts: string[] = []
+  const ends: string[] = []
+  const addRange = (start: string | null | undefined, end: string | null | undefined) => {
+    if (start) {
+      starts.push(start)
+    }
+    if (end) {
+      ends.push(end)
+    }
+  }
+
+  addRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd)
+  addRange(
+    frontmatter.runPlan?.interventionStart,
+    frontmatter.runPlan?.interventionEnd ?? asOf,
+  )
+
+  for (const measurement of frontmatter.analysisPlan?.plannedMeasurements ?? []) {
+    addRange(measurement.targetWindow?.start, measurement.targetWindow?.end)
+  }
+
+  return {
+    ...(starts.length > 0 ? { from: sortedIsoDates(starts)[0] } : {}),
+    ...(ends.length > 0 ? { to: sortedIsoDates(ends).at(-1) } : {}),
+  }
+}
+
+function sortedIsoDates(values: readonly string[]) {
+  return [...values].sort((left, right) => left.localeCompare(right))
 }
 
 async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJournalVaultCoreRuntime> {

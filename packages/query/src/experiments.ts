@@ -33,7 +33,7 @@ import {
   type MetricWindowSummary,
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
-import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
+import { summarizeWearableDay, type WearableDaySummary } from "./wearables.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
@@ -232,6 +232,11 @@ interface ExperimentSummaryContext {
   summariesByDate: Map<string, WearableDaySummary | null>;
 }
 
+type ExperimentFollowupContext = Pick<
+  ExperimentSummaryContext,
+  "events" | "frontmatter" | "progressPhase"
+>;
+
 interface ExperimentMetricPointOptions {
   metricPoints?: readonly MetricPoint[];
 }
@@ -401,15 +406,11 @@ export function decideExperimentFollowupDue(
   options: {
     date?: string;
     kind: ExperimentFollowupKind;
-    metricPoints?: readonly MetricPoint[];
     now?: string | number | Date;
   },
 ): ExperimentFollowupDueDecision {
   const date = options.date ?? resolveVaultLocalDate(vault, options.now ?? new Date());
-  const context = buildExperimentSummaryContext(vault, slug, {
-    asOf: date,
-    metricPoints: options.metricPoints,
-  });
+  const context = buildExperimentFollowupContext(vault, slug, date);
 
   if (options.kind === "weekly-digest") {
     return decideWeeklyDigestDue(context, date);
@@ -461,6 +462,24 @@ function buildExperimentSummaryContext(
     metricPoints: options.metricPoints ?? buildMetricProjection(vault).metricPoints,
     progressPhase,
     summariesByDate,
+  };
+}
+
+function buildExperimentFollowupContext(
+  vault: VaultReadModel,
+  slug: string,
+  asOf: string,
+): ExperimentFollowupContext {
+  const experiment = getExperiment(vault, slug);
+  if (!experiment) {
+    throw new Error(`Experiment "${slug}" was not found in the query read model.`);
+  }
+
+  const frontmatter = requireExperimentFrontmatter(experiment);
+  return {
+    events: findExperimentEvents(vault, experiment, frontmatter, asOf),
+    frontmatter,
+    progressPhase: resolveProgressPhase(frontmatter, asOf),
   };
 }
 
@@ -559,7 +578,7 @@ function resolveExpectedDirection(
 export function collectExperimentAdherenceCalendar(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentAdherenceCalendarResult | null {
   return buildAdherenceCalendarFromContext(
     buildExperimentSummaryContext(vault, slug, options),
@@ -669,15 +688,17 @@ function buildAdherenceObservations(
       case "metricPresence":
       case "metricThreshold":
         const metricEvidence = target.evidence;
-        for (const [date, summary] of context.summariesByDate) {
-          const metric = resolveAdherenceMetric(metricEvidence.metricKey, summary);
-          if (!metric || typeof metric.selection.value !== "number") {
+        for (const point of context.metricPoints) {
+          if (!matchesAdherenceMetric(metricEvidence.metricKey, point)) {
             continue;
           }
-          const value = metric.selection.value;
+          const value = point.canonicalValue ?? point.value;
+          if (typeof value !== "number" || !Number.isFinite(value)) {
+            continue;
+          }
           observations.push({
-            evidenceId: metric.selection.recordIds[0] ?? `${metricEvidence.metricKey}:${date}`,
-            localDate: date,
+            evidenceId: point.id,
+            localDate: point.effectiveDate,
             metricKey: metricEvidence.metricKey,
             targetId: target.targetId,
             value,
@@ -688,6 +709,35 @@ function buildAdherenceObservations(
   }
 
   return observations;
+}
+
+function matchesAdherenceMetric(metricKey: string, point: MetricPoint): boolean {
+  const trimmedMetricKey = metricKey.trim();
+  const normalizedMetricKey = trimmedMetricKey.toLowerCase().replaceAll("_", "-");
+  const definition = resolveMetricDefinition(trimmedMetricKey);
+  const biomarkerDefinition = resolveMetricDefinitionForBiomarker(trimmedMetricKey);
+  const candidateMetricKeys = new Set([
+    trimmedMetricKey,
+    normalizedMetricKey,
+    definition?.key,
+    biomarkerDefinition?.key,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
+
+  if (candidateMetricKeys.has(point.metricKey)) {
+    return true;
+  }
+
+  const candidateBiomarkerKeys = new Set([
+    trimmedMetricKey,
+    normalizedMetricKey,
+    normalizedMetricKey.startsWith("biomarker:")
+      ? normalizedMetricKey
+      : `biomarker:${normalizedMetricKey}`,
+    definition?.biomarkerKey,
+    biomarkerDefinition?.biomarkerKey,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
+
+  return point.biomarkerKey !== null && candidateBiomarkerKeys.has(point.biomarkerKey);
 }
 
 function buildCoverageSummary(input: {
@@ -991,7 +1041,7 @@ function buildWindowSummary(
 }
 
 function buildFollowupBase(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
   kind: ExperimentFollowupKind,
   reason: ExperimentFollowupReason,
@@ -1026,7 +1076,7 @@ function buildFollowupBase(
 }
 
 function decideMissedLogDue(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
 ): ExperimentFollowupDueDecision {
   const assistantSupport = context.frontmatter.assistantSupport;
@@ -1087,7 +1137,7 @@ function decideMissedLogDue(
 }
 
 function decideWeeklyDigestDue(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
 ): ExperimentFollowupDueDecision {
   if (context.frontmatter.status !== "active") {
@@ -1515,65 +1565,6 @@ function metricWindowRangeFromDates(
     start: dates[0] ?? null,
     totalDays: dates.length,
   };
-}
-
-function resolveBiomarkerMetric(
-  biomarkerKey: string,
-  summary: WearableDaySummary | null,
-): WearableResolvedMetric | null {
-  if (!summary) {
-    return null;
-  }
-
-  const normalized = biomarkerKey.trim().toLowerCase();
-  if (normalized.includes("resting-heart-rate")) {
-    return summary.recovery?.restingHeartRate ?? null;
-  }
-
-  if (normalized.includes("hrv")) {
-    return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
-  }
-
-  if (normalized.includes("sleep-efficiency")) {
-    return summary.sleep?.sleepEfficiency ?? null;
-  }
-
-  if (normalized.includes("deep-sleep")) {
-    return summary.sleep?.deepMinutes ?? null;
-  }
-
-  if (normalized.includes("respiratory-rate")) {
-    return summary.recovery?.respiratoryRate ?? summary.sleep?.respiratoryRate ?? null;
-  }
-
-  if (normalized.includes("temperature")) {
-    return summary.recovery?.temperatureDeviation ?? summary.bodyState?.temperature ?? null;
-  }
-
-  return null;
-}
-
-function resolveAdherenceMetric(
-  metricKey: string,
-  summary: WearableDaySummary | null,
-): WearableResolvedMetric | null {
-  if (!summary) {
-    return null;
-  }
-
-  switch (metricKey.trim()) {
-    case "steps":
-      return summary.activity?.steps ?? null;
-    case "resting-heart-rate":
-    case "resting_heart_rate":
-      return summary.recovery?.restingHeartRate ?? null;
-    case "hrv":
-      return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
-    case "sleep-efficiency":
-      return summary.sleep?.sleepEfficiency ?? null;
-    default:
-      return resolveBiomarkerMetric(metricKey, summary);
-  }
 }
 
 function readStringAttribute(entity: CanonicalEntity, key: string): string | null {

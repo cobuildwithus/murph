@@ -60,7 +60,10 @@ export function buildExperimentProgressCard(
     asOf: options.asOf,
     metricPoints: options.metricPoints,
   });
-  const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: options.asOf });
+  const calendar = collectExperimentAdherenceCalendar(vault, slug, {
+    asOf: options.asOf,
+    metricPoints: options.metricPoints,
+  });
   const windows = progress.windows;
   const runStart = windows.baselineStart ?? windows.interventionStart;
   if (!runStart) {

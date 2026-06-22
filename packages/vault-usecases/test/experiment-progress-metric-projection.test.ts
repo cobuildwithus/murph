@@ -50,6 +50,24 @@ runPlan:
   baselineEnd: 2026-06-03
   interventionStart: 2026-06-04
   interventionEnd: 2026-06-06
+  targetSessions: 3
+  minimumUsefulSessions: 2
+  adherenceTargets:
+    - targetId: sleep-efficiency-threshold
+      label: Sleep efficiency threshold
+      phase: intervention
+      calendar:
+        kind: daily
+        timeZone: UTC
+      evidence:
+        kind: metricThreshold
+        metricKey: sleep-efficiency
+        op: ">="
+        value: 90
+        missing: unknown
+      rollup:
+        targetCompletions: 3
+        minimumUsefulCompletions: 2
 analysisPlan:
   primaryBiomarkerKey: biomarker:sleep-onset-latency
   secondaryBiomarkerKeys:
@@ -136,6 +154,9 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(progress.progress.dataCoverage.interventionDaysAvailable, 3);
   assert.equal(progress.progress.dataCoverage.primaryMetricDaysAvailable, 0);
   assert.equal(progress.progress.dataCoverage.status, "partial");
+  assert.equal(progress.progress.adherence.completedSessions, 3);
+  assert.equal(progress.progress.adherence.expectedSessionsByNow, 3);
+  assert.equal(progress.progress.adherence.status, "met_target");
 
   const outcome = await analyzeExperimentOutcomeRecord({
     vault: vaultRoot,
@@ -158,4 +179,6 @@ test("experiment progress usecases read metrics from the query metric projection
   });
   assert.equal(card.card.movers.length, 1);
   assert.equal(card.card.movers[0]?.label, "Sleep Efficiency");
+  assert.equal(card.card.sessions.logged, 3);
+  assert.equal(card.card.weeks[0]?.cells, "CCCOOOO");
 });

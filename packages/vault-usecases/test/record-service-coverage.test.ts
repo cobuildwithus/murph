@@ -1499,6 +1499,30 @@ describe("record service seams", () => {
         family: "experiment",
         kind: "experiment",
       })]),
+      listMetricPoints: vi.fn(async () => {
+        throw new Error("Experiment follow-up should not read metric points.");
+      }),
+      decideExperimentFollowupDue: vi.fn(() => ({
+        schema: "murph.experiment-followup-due.v1",
+        kind: "missed-log",
+        action: "notify",
+        reason: "planned_session_log_missing",
+        date: "2026-04-08",
+        dedupeKey: "experiment-followup:exp_1:missed-log:2026-04-08",
+        experiment: {
+          id: "exp_1",
+          slug: "focus-sprint",
+          status: "active",
+          title: "Focus Sprint",
+        },
+        window: {
+          sessionDate: "2026-04-08",
+          baselineStart: null,
+          baselineEnd: null,
+          interventionStart: null,
+          interventionEnd: null,
+        },
+      })),
       showVaultSummary: vi.fn(async () => ({ title: "Vault", timezone: "UTC" })),
       showVaultStats: vi.fn(async () => ({ vault: "./vault" })),
     };
@@ -1564,6 +1588,21 @@ describe("record service seams", () => {
         },
       ],
     });
+    expect(await journal.showExperimentFollowupDue({
+      vault: "./vault",
+      lookup: "exp_1",
+      kind: "missed-log",
+      date: "2026-04-08",
+    })).toMatchObject({
+      experimentId: "exp_1",
+      lookupId: "exp_1",
+      slug: "focus-sprint",
+      kind: "missed-log",
+      decision: {
+        action: "notify",
+      },
+    });
+    expect(journalQuery.listMetricPoints).not.toHaveBeenCalled();
     assert.deepEqual(await journal.showVaultSummary("./vault"), {
       vault: "./vault",
       formatVersion: 1,
