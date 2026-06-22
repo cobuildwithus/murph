@@ -237,6 +237,7 @@ export interface HostedExecutionLinqConversationMessage {
   isFromMe: boolean;
   messageId: string;
   parts: HostedExecutionLinqConversationMessagePart[];
+  reactionEligible?: boolean | null;
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
   service?: string | null;

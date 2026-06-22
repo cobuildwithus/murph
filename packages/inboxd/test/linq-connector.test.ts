@@ -67,6 +67,7 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
     link_part_count: 0,
     media_part_count: 1,
     voice_memo_part_count: 0,
+    reaction_eligible: false,
     attachments: [
       {
         type: "media",
@@ -317,6 +318,7 @@ test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hos
     link_part_count: 0,
     media_part_count: 0,
     voice_memo_part_count: 0,
+    reaction_eligible: true,
   });
 });
 
@@ -469,6 +471,7 @@ test("normalizeHostedLinqConversationMessage preserves reply metadata and metada
     link_part_count: 0,
     media_part_count: 0,
     voice_memo_part_count: 1,
+    reaction_eligible: false,
     attachments: [
       {
         type: "voice_memo",

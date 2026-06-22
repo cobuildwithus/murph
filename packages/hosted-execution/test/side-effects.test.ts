@@ -333,6 +333,38 @@ describe("hosted assistant delivery contracts", () => {
     expect(record.delivery.targetKind).toBe("participant");
   });
 
+  it("parses Linq message reaction delivery records", () => {
+    const record = parseHostedAssistantDeliveryRecord({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "idem-reaction-1",
+        kind: "message-reaction",
+        reaction: "heart",
+        sentAt: "2026-04-08T00:00:00.000Z",
+        target: "linq-chat-1",
+        targetKind: "thread",
+        targetMessageId: "linq-message-1",
+      },
+      effectId: "intent-reaction-1",
+      fingerprint: "dedupe-reaction-1",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent",
+    });
+
+    expect(record.state).toBe("sent");
+    if (record.state !== "sent") {
+      throw new Error("Expected a sent assistant delivery record.");
+    }
+
+    expect(record.delivery).toMatchObject({
+      channel: "linq",
+      kind: "message-reaction",
+      reaction: "heart",
+      targetMessageId: "linq-message-1",
+    });
+  });
+
   it("builds and parses pending, sending, sent, and failed records", () => {
     const pending = buildHostedAssistantDeliveryPendingRecord({
       dedupeKey: "dedupe-1",

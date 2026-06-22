@@ -63,6 +63,7 @@ import {
 import type {
   AssistantChannelDependencies,
 } from '../src/assistant/channels/types.ts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -1140,6 +1141,332 @@ describe('assistant outbox runtime', () => {
         },
       })
     expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches Linq reaction operations through the channel adapter', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-reaction-')
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      explicitTarget: 'linq-chat-123',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction',
+      targetMessageId: 'linq-message-45',
+      turnId: 'turn-linq-reaction',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'heart',
+    })
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      channel: 'linq',
+      reaction: 'heart',
+      target: 'linq-chat-123',
+      targetKind: 'thread',
+      targetMessageId: 'linq-message-45',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledWith({
+      reaction: 'heart',
+      signal: undefined,
+      target: 'linq-chat-123',
+      targetMessageId: 'linq-message-45',
+    })
+
+    const queuedDirect = await createAssistantOutboxIntent({
+      channel: 'linq',
+      explicitTarget: 'linq-chat-456',
+      message: 'ignored for reaction',
+      operation: {
+        kind: 'message-reaction',
+        reaction: 'laugh',
+      },
+      replyToMessageId: 'linq-message-67',
+      sessionId: 'session-linq-reaction-direct',
+      turnId: 'turn-linq-reaction-direct',
+      vault: vaultRoot,
+    })
+    expect(queuedDirect.deliveryTransportIdempotent).toBe(false)
+    expect(queuedDirect.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'laugh',
+    })
+  })
+
+  it('keeps deduped Linq reaction updates non-idempotent', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-update-',
+    )
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'linq-reaction-slot',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-update',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-update',
+      targetMessageId: 'linq-message-old',
+      turnId: 'turn-linq-reaction-update',
+      vault: vaultRoot,
+    })
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.deliveryTransportIdempotent).toBe(false)
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_LINQ_REACTION_FAILED',
+        message: 'old reaction failed',
+      },
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'linq-reaction-slot',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      explicitTarget: 'linq-chat-update',
+      reaction: 'laugh',
+      sessionId: retryable.sessionId,
+      targetMessageId: 'linq-message-new',
+      turnId: retryable.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'laugh',
+    })
+    expect(sent.intent.replyToMessageId).toBe('linq-message-new')
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.toMatchObject({
+      deliveryTransportIdempotent: false,
+      operation: {
+        kind: 'message-reaction',
+        reaction: 'laugh',
+      },
+      replyToMessageId: 'linq-message-new',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('rederives Linq reaction idempotency on unchanged dedupe hits', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-dedupe-idempotency-',
+    )
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'linq-reaction-same-slot',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-same',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-same',
+      targetMessageId: 'linq-message-same',
+      turnId: 'turn-linq-reaction-same',
+      vault: vaultRoot,
+    })
+    expect(queued.kind).toBe('queued')
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_LINQ_REACTION_FAILED',
+        message: 'legacy idempotency flag',
+      },
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'linq-reaction-same-slot',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      explicitTarget: 'linq-chat-same',
+      reaction: 'heart',
+      sessionId: retryable.sessionId,
+      targetMessageId: 'linq-message-same',
+      turnId: retryable.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.toMatchObject({
+      deliveryTransportIdempotent: false,
+      operation: {
+        kind: 'message-reaction',
+        reaction: 'heart',
+      },
+      replyToMessageId: 'linq-message-same',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed instead of redispatching stale non-idempotent Linq reactions', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-stale-sending-',
+    )
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-stale',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-stale',
+      targetMessageId: 'linq-message-stale',
+      turnId: 'turn-linq-reaction-stale',
+      vault: vaultRoot,
+    })
+    expect(queued.intent.deliveryTransportIdempotent).toBe(false)
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: null,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const failed = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      intentId: queued.intent.intentId,
+      now: new Date('2026-04-08T01:20:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(failed.intent.status).toBe('failed')
+    expect(failed.intent.deliveryTransportIdempotent).toBe(false)
+    expect(failed.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(setLinqMessageReaction).not.toHaveBeenCalled()
+  })
+
+  it('abandons post-dispatch Linq reaction transport ambiguity without retrying', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-transport-ambiguous-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-ambiguous',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-ambiguous',
+      targetMessageId: 'linq-message-ambiguous',
+      turnId: 'turn-linq-reaction-ambiguous',
+      vault: vaultRoot,
+    })
+    expect(queued.intent.deliveryTransportIdempotent).toBe(false)
+
+    const setLinqMessageReaction = vi.fn(async () => {
+      throw Object.assign(
+        new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Linq request POST /messages/linq-message-ambiguous/reactions failed before a response was returned.',
+          {
+            failureStage: 'transport',
+            operation: 'set_message_reaction',
+            provider: 'linq',
+            retryable: false,
+          },
+        ),
+        {
+          deliveryMayHaveSucceeded: true,
+        },
+      )
+    })
+
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-04-08T01:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(abandoned.intent.status).toBe('abandoned')
+    expect(abandoned.intent.deliveryConfirmationPending).toBe(false)
+    expect(abandoned.intent.deliveryTransportIdempotent).toBe(false)
+    expect(abandoned.intent.nextAttemptAt).toBeNull()
+    expect(abandoned.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
   })
 
   it('updates an unsent deduped reaction intent before dispatching it', async () => {

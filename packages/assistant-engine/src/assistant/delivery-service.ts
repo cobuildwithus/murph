@@ -211,13 +211,15 @@ export async function deliverAssistantReaction(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  if (normalizeNullableString(deliveryFields.channel)?.toLowerCase() !== 'telegram') {
+  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
+  const channelAdapter = getAssistantChannelAdapter(channel)
+  if (!channelAdapter?.setMessageReaction) {
     return {
       kind: 'failed',
       error: normalizeAssistantDeliveryError(
         new VaultCliError(
           'ASSISTANT_REACTION_CHANNEL_UNSUPPORTED',
-          'Assistant reactions are only supported for Telegram delivery.',
+          'Assistant reactions are not supported for this delivery channel.',
         ),
       ),
       intentId: null,
@@ -231,7 +233,21 @@ export async function deliverAssistantReaction(input: {
       error: normalizeAssistantDeliveryError(
         new VaultCliError(
           'ASSISTANT_REACTION_TARGET_REQUIRED',
-          'Assistant reaction delivery requires a current inbound Telegram message id.',
+          'Assistant reaction delivery requires a current inbound message id.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
+  if (!supportsAssistantCurrentAudienceMessageReaction(input)) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_TARGET_UNAVAILABLE',
+          'Assistant reactions are not available for the current inbound message.',
         ),
       ),
       intentId: null,
@@ -256,7 +272,6 @@ export async function deliverAssistantReaction(input: {
     ...deliveryFields,
     dedupeToken: reactionDedupeToken,
     deliveryIdempotencyKey: reactionDedupeToken,
-    deliveryTransportIdempotent: true,
     dispatchMode: input.input.deliveryDispatchMode,
     reaction: input.reaction,
     targetMessageId: deliveryFields.replyToMessageId,
@@ -549,16 +564,23 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): boolean {
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields(input)
+  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
   if (
-    normalizeNullableString(deliveryFields.channel)?.toLowerCase() !==
-      'telegram' ||
+    !getAssistantChannelAdapter(channel)?.setMessageReaction ||
     normalizeNullableString(deliveryFields.replyToMessageId) === null
   ) {
     return false
   }
 
+  if (
+    channel === 'linq' &&
+    input.input.deliveryMessageReactionsAvailable !== true
+  ) {
+    return false
+  }
+
   const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
-  if (!explicitTarget) {
+  if (channel !== 'telegram' || !explicitTarget) {
     return true
   }
 

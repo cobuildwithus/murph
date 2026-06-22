@@ -173,6 +173,12 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "msg_synthetic_projection_failure",
       threadId: "chat_synthetic",
     });
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "linq",
+      partCount: 2,
+      reactionEligible: false,
+      service: null,
+    });
     assert.ok(replyTarget);
     assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
@@ -990,6 +996,7 @@ describe("hosted mailbox conversation import adapter", () => {
               value: "hello from email",
             },
           ],
+          reactionEligible: true,
           service: "iMessage",
         },
         phoneLookupKey: null,
@@ -1041,6 +1048,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.threadId, expectedThreadId);
     assert.equal(event.replyTarget?.threadId, "chat_email_identity");
     assert.equal(event.replyTarget?.messageId, "msg_email_identity");
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "linq",
+      partCount: 1,
+      reactionEligible: true,
+      service: "iMessage",
+    });
   });
 
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {

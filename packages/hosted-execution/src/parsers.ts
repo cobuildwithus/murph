@@ -542,6 +542,14 @@ function parseHostedExecutionLinqConversationMessage(
     parts: requireArray(record.parts, `${label} parts`).map((entry, index) =>
       parseHostedExecutionLinqConversationMessagePart(entry, `${label} parts[${index}]`)
     ),
+    ...(record.reactionEligible === undefined
+      ? {}
+      : {
+          reactionEligible: requireBoolean(
+            record.reactionEligible,
+            `${label} reactionEligible`,
+          ),
+        }),
     ...(record.replyToMessageId === undefined
       ? {}
       : {
