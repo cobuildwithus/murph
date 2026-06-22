@@ -223,6 +223,256 @@ export function ImagePreview({
   );
 }
 
+export type ScheduleEntry = {
+  day: string;
+  time: string;
+  what: string;
+};
+
+export function CalendarMock({
+  entries,
+  label = "Weekly cadence",
+}: {
+  entries: readonly ScheduleEntry[];
+  label?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex flex-col divide-y divide-[#2d3436]/8">
+        {entries.map((entry, index) => (
+          <div
+            key={index}
+            className="flex items-baseline gap-3 px-4 py-2.5 text-[12.5px]"
+          >
+            <span className="w-9 shrink-0 font-mono text-[11px] tracking-[0.06em] text-[#736a58] uppercase">
+              {entry.day}
+            </span>
+            <span className="w-16 shrink-0 font-mono tabular-nums text-[#2d3436]">
+              {entry.time}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[#4d453b]">
+              {entry.what}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function MetricCardMock({
+  caption,
+  delta,
+  label,
+  sparkline,
+  title,
+  value,
+}: {
+  caption?: string;
+  delta?: { direction: "up" | "down"; text: string };
+  label: string;
+  sparkline: readonly number[];
+  title: string;
+  value: string;
+}) {
+  const isUp = delta?.direction === "up";
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
+          {title}
+        </p>
+        <div className="flex items-end justify-between gap-4">
+          <div className="flex items-baseline gap-2">
+            <span className="font-serif text-[1.85rem] font-semibold leading-none text-[#3a4a1e] tabular-nums">
+              {value}
+            </span>
+            {delta ? (
+              <span
+                className={`font-mono text-[11px] tabular-nums ${
+                  isUp ? "text-[#3a4a1e]" : "text-[#a36b3f]"
+                }`}
+              >
+                {isUp ? "↑" : "↓"} {delta.text}
+              </span>
+            ) : null}
+          </div>
+          <Sparkline values={sparkline} />
+        </div>
+        {caption ? (
+          <p className="font-mono text-[10.5px] tracking-[0.04em] text-[#736a58]">
+            {caption}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Sparkline({ values }: { values: readonly number[] }) {
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const width = 64;
+  const height = 22;
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+  const points = values
+    .map(
+      (v, i) =>
+        `${(i * step).toFixed(2)},${(height - ((v - min) / range) * height).toFixed(2)}`,
+    )
+    .join(" ");
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-[22px] w-[64px]"
+      aria-hidden="true"
+    >
+      <polyline
+        fill="none"
+        stroke="#5a6e32"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points}
+      />
+    </svg>
+  );
+}
+
+export type DeviceStatus = "connected" | "reconnect" | "syncing";
+
+export type DeviceEntry = {
+  color: string;
+  initial: string;
+  name: string;
+  status: DeviceStatus;
+};
+
+export function DeviceList({
+  devices,
+  label = "Wearables",
+}: {
+  devices: readonly DeviceEntry[];
+  label?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex flex-col divide-y divide-[#2d3436]/8">
+        {devices.map((device) => (
+          <div
+            key={device.name}
+            className="flex items-center gap-3 px-4 py-2.5"
+          >
+            <span
+              aria-hidden="true"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
+              style={{ backgroundColor: device.color }}
+            >
+              {device.initial}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[#2d3436]">
+              {device.name}
+            </span>
+            <DeviceStatusBadge status={device.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DeviceStatusBadge({ status }: { status: DeviceStatus }) {
+  if (status === "connected") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#3a4a1e]/8 px-2 py-0.5 font-mono text-[10px] tracking-[0.04em] text-[#3a4a1e]">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-[#5a6e32]" />
+        Connected
+      </span>
+    );
+  }
+  if (status === "syncing") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#c4a882]/15 px-2 py-0.5 font-mono text-[10px] tracking-[0.04em] text-[#736a58]">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-[#a39684]" />
+        Syncing
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#a36b3f]/12 px-2 py-0.5 font-mono text-[10px] tracking-[0.04em] text-[#8b4f2c]">
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-[#a36b3f]" />
+      Reconnect
+    </span>
+  );
+}
+
+export type ChecklistItem = {
+  done: boolean;
+  label: string;
+};
+
+export function ChecklistMock({
+  items,
+  label = "Next steps",
+}: {
+  items: readonly ChecklistItem[];
+  label?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex flex-col gap-2 p-4">
+        {items.map((item, index) => (
+          <div key={index} className="flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className={`inline-flex size-4 shrink-0 items-center justify-center rounded-full border ${
+                item.done
+                  ? "border-[#3a4a1e] bg-[#3a4a1e] text-[#f5f0e8]"
+                  : "border-[#c4a882]/60 bg-transparent text-transparent"
+              }`}
+            >
+              <svg
+                viewBox="0 0 12 12"
+                className="size-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="M2.5 6.5l2.5 2.5L9.5 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span
+              className={`min-w-0 flex-1 truncate text-[12.5px] ${
+                item.done ? "text-[#736a58] line-through" : "text-[#2d3436]"
+              }`}
+            >
+              {item.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export type EmailMockProps = {
   from: string;
   subject: string;

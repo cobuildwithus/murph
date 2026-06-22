@@ -60,7 +60,6 @@ export function StickyNav({
         {[
           { href: "/#how", label: "How it works" },
           { href: "/#faq", label: "FAQ" },
-          { href: "/changelog", label: "Changelog" },
           { href: "/security", label: "Security" },
         ].map(({ href, label }) => (
           <a

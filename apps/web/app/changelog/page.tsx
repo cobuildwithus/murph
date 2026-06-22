@@ -18,8 +18,12 @@ import { StickyNav } from "../sticky-nav";
 import { TryItButton } from "./try-it-button";
 import {
   AppGrid,
+  CalendarMock,
+  ChecklistMock,
+  DeviceList,
   EmailMock,
   ImagePreview,
+  MetricCardMock,
   StatBlock,
   TerminalMock,
   VoiceBubble,
@@ -135,8 +139,6 @@ const VISUALS: Record<string, ReactNode> = {
       apps={[
         { name: "Gmail", color: "#ea4335" },
         { name: "Google Calendar", color: "#1a73e8" },
-        { name: "Notion", color: "#2d3436" },
-        { name: "Linear", color: "#5e6ad2" },
       ]}
       caption="and more — apps you live in"
     />
@@ -267,6 +269,82 @@ const VISUALS: Record<string, ReactNode> = {
           from: "murph",
           body: "Booked at Atlas Barbers for Tue 6:00 PM. Confirmation email landed.",
         },
+      ]}
+    />
+  ),
+  "managed-health-cadence": (
+    <CalendarMock
+      entries={[
+        { day: "Sun", time: "12:00 PM", what: "Weekly health insight" },
+        { day: "Wed", time: "1:00 PM", what: "Research scout" },
+      ]}
+    />
+  ),
+  "telegram-reminder-delivery": (
+    <CalendarMock
+      label="Scheduled reminders"
+      entries={[
+        { day: "Mon", time: "8:00 AM", what: "Morning supplements" },
+        { day: "Wed", time: "8:00 AM", what: "Morning supplements" },
+        { day: "Fri", time: "8:00 AM", what: "Morning supplements" },
+      ]}
+    />
+  ),
+  "experiment-progress-cards": (
+    <MetricCardMock
+      label="Experiment in progress"
+      title="Protein floor — day 5 of 14"
+      value="137g"
+      delta={{ direction: "up", text: "11g vs baseline" }}
+      sparkline={[112, 118, 121, 126, 130, 137]}
+      caption="Murph sends this as an image in chat."
+    />
+  ),
+  "home-experiments-from-vault": (
+    <MetricCardMock
+      label="In progress"
+      title="Zone-2 minutes — week 2"
+      value="88 min"
+      delta={{ direction: "up", text: "22 vs week 1" }}
+      sparkline={[12, 14, 18, 22, 16, 20, 25]}
+      caption="Visible on home as soon as you start."
+    />
+  ),
+  "junction-direct-provider-link": (
+    <DeviceList
+      devices={[
+        { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
+        { name: "Oura", initial: "O", color: "#5a6e32", status: "connected" },
+        { name: "Garmin", initial: "G", color: "#0078b8", status: "connected" },
+      ]}
+    />
+  ),
+  "junction-source-reconnect": (
+    <DeviceList
+      devices={[
+        { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
+        { name: "Oura", initial: "O", color: "#5a6e32", status: "reconnect" },
+        { name: "Garmin", initial: "G", color: "#0078b8", status: "connected" },
+      ]}
+    />
+  ),
+  "biomarkers-onboarding-callout": (
+    <ChecklistMock
+      label="Connect your data"
+      items={[
+        { label: "Sync a wearable", done: true },
+        { label: "Upload labs", done: false },
+        { label: "Pick an experiment", done: false },
+      ]}
+    />
+  ),
+  "auto-pulse-trial-enrollment": (
+    <ChecklistMock
+      label="What you get"
+      items={[
+        { label: "Sign in", done: true },
+        { label: "Trial active automatically", done: true },
+        { label: "No credit card needed", done: true },
       ]}
     />
   ),
