@@ -305,25 +305,14 @@ export async function startHostedLocalTelegramStub(input: {
   }
 
   function createTelegramSendMessageMatcher(userId: string): ObservedTelegramRequestMatcher {
-    const expectedMessageIdPrefix = buildTelegramMessageId(userId);
-
     return (request) => {
       const parsed = parseObservedTelegramJson(request.body);
-      const replyToMessageId =
-        parsed && "reply_to_message_id" in parsed
-          ? parsed.reply_to_message_id
-          : null;
-
       return Boolean(
         parsed
         && parsed.chat_id === buildTelegramThreadId(userId)
-        && (
-          typeof replyToMessageId === "number"
-            ? String(replyToMessageId).startsWith(expectedMessageIdPrefix)
-            : false
-        )
         && typeof parsed.text === "string"
-        && parsed.text.length > 0,
+        && parsed.text.length > 0
+        && !("reply_to_message_id" in parsed),
       );
     };
   }
