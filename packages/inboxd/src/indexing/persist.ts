@@ -746,7 +746,7 @@ async function readRetainedParserProjection(input: {
   }
 
   const paths = expectOptionalRecord(manifest.paths);
-  const plainTextPath = normalizeRetainedParserArtifactPath({
+  const plainTextPath = normalizeParserArtifactPath({
     attachmentId: input.attachment.attachmentId,
     captureId,
     pathValue: paths?.plainTextPath,
@@ -780,18 +780,6 @@ async function resolveRetainedParserManifestPath(input: {
   attachment: InboxAttachmentRetentionRecord;
   vaultRoot: string;
 }): Promise<string | null> {
-  const derivative = input.attachment.retainedDerivative;
-  if (derivative?.kind === "parser-manifest") {
-    const manifestPath = normalizeRetainedParserManifestPath({
-      attachmentId: input.attachment.attachmentId,
-      captureId: input.attachment.captureId,
-      pathValue: derivative.path,
-    });
-    if (manifestPath) {
-      return manifestPath;
-    }
-  }
-
   return await findLatestInboxParserManifestPath({
     attachmentId: input.attachment.attachmentId,
     captureId: input.attachment.captureId,
@@ -799,19 +787,7 @@ async function resolveRetainedParserManifestPath(input: {
   });
 }
 
-function normalizeRetainedParserManifestPath(input: {
-  attachmentId: string;
-  captureId: string;
-  pathValue: unknown;
-}): string | null {
-  const normalized = normalizeRetainedParserArtifactPath(input);
-  if (!normalized || path.posix.basename(normalized) !== "manifest.json") {
-    return null;
-  }
-  return normalized;
-}
-
-function normalizeRetainedParserArtifactPath(input: {
+function normalizeParserArtifactPath(input: {
   attachmentId: string;
   captureId: string;
   pathValue: unknown;

@@ -38,6 +38,7 @@ export type {
 export {
   buildInboxAttachmentRetentionLedgerPath,
   runInboxMediaRetention,
+  type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
   type RunInboxMediaRetentionInput,
 } from "./indexing/retention.ts";

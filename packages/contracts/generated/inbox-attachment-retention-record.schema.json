@@ -84,31 +84,6 @@
     "reason": {
       "type": "string",
       "const": "inbox_media_retention"
-    },
-    "retainedDerivative": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "parser-manifest"
-            },
-            "path": {
-              "type": "string",
-              "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))[A-Za-z0-9._/-]+$"
-            }
-          },
-          "required": [
-            "kind",
-            "path"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "null"
-        }
-      ]
     }
   },
   "required": [

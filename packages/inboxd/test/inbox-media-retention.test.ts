@@ -215,7 +215,6 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
     result.records.map((record) => record.storedPath).sort(),
     [audioPath, imagePath].sort(),
   );
-  assert.equal(result.records.find((record) => record.storedPath === audioPath)?.retainedDerivative?.path, audioManifestPath);
 
   const retentionRecords = await readJsonlRecords({
     vaultRoot,
@@ -516,6 +515,77 @@ test("runInboxMediaRetention materializes bounded missing candidates before hash
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
+test("runInboxMediaRetention protects audio while its parser job is nonterminal", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-parser-job");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const captureId = "cap_retention_parser_job";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VH",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: {
+      source: "telegram",
+      externalId: "msg-parser-job-media",
+      thread: {
+        id: "thread-parser-job",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      text: "old audio waiting for parser",
+      attachments: [
+        {
+          kind: "audio",
+          mime: "audio/mp4",
+          fileName: "voice.m4a",
+          data: Buffer.from("audio-bytes"),
+        },
+      ],
+      raw: {},
+    },
+  });
+  const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(audioPath);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ vaultRoot, runtime });
+    const pendingJob = runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0];
+    assert.ok(pendingJob);
+    assert.equal(pendingJob.state, "pending");
+
+    const protectedResult = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(await fileExists(vaultRoot, audioPath), true);
+
+    const runningJob = runtime.claimNextAttachmentParseJob({
+      attachmentId: pendingJob.attachmentId,
+    });
+    assert.ok(runningJob);
+    runtime.failAttachmentParseJob({
+      attempt: runningJob.attempts,
+      errorMessage: "parser unavailable",
+      jobId: runningJob.jobId,
+    });
+
+    const expiredResult = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(expiredResult.expiredAttachments, 1);
+    assert.equal(await fileExists(vaultRoot, audioPath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
 test.skipIf(process.platform === "win32")(
   "runInboxMediaRetention does not follow symlinked raw media ancestors",
   async () => {
@@ -763,6 +833,61 @@ test("runInboxMediaRetention skips missing already-tombstoned media before batch
   assert.equal(await fileExists(vaultRoot, laterPath), false);
 });
 
+test("runInboxMediaRetention does not let unmaterializable media consume the batch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-missing-materialize");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const now = "2026-07-05T00:00:00.000Z";
+
+  const first = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_missing_materialize_1",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VM",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-missing-materialize-1",
+      imageBytes,
+      text: "first missing media",
+      threadId: "thread-missing-materialize",
+    }),
+  });
+  const second = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_missing_materialize_2",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VK",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-missing-materialize-2",
+      imageBytes,
+      text: "second present media",
+      threadId: "thread-missing-materialize",
+    }),
+  });
+  const missingPath = first.stored.attachments[0]?.storedPath ?? "";
+  const presentPath = second.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(missingPath);
+  assert.ok(presentPath);
+  await fs.unlink(path.join(vaultRoot, missingPath));
+
+  const materializedPaths: string[][] = [];
+  const result = await runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+      return { missingStoredPaths: storedPaths };
+    },
+    maxAttachments: 1,
+    now,
+    vaultRoot,
+  });
+
+  assert.deepEqual(materializedPaths, [[missingPath]]);
+  assert.equal(result.expiredAttachments, 1);
+  assert.equal(result.hasMoreEligibleAttachments, false);
+  assert.equal(result.records[0]?.storedPath, presentPath);
+  assert.equal(await fileExists(vaultRoot, missingPath), false);
+  assert.equal(await fileExists(vaultRoot, presentPath), false);
+});
+
 test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-delete-abort");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
@@ -836,11 +961,10 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
   }
 });
 
-test("runInboxMediaRetention aborts before tombstone commit when a wake arrives during derivative lookup", async () => {
+test("runInboxMediaRetention aborts before tombstone commit when a wake arrives before append", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-precommit-abort");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const captureId = "cap_retention_precommit_abort";
-  const attachmentId = `att_${captureId}_01`;
   const now = "2026-07-05T00:00:00.000Z";
 
   const persisted = await persistCanonicalInboxCapture({
@@ -873,34 +997,22 @@ test("runInboxMediaRetention aborts before tombstone commit when a wake arrives 
   });
   const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
   assert.ok(audioPath);
-  const attemptsDirectory = `derived/inbox/${captureId}/attachments/${attachmentId}/attempts`;
-  await writeVaultFile(
-    vaultRoot,
-    `${attemptsDirectory}/0001/manifest.json`,
-    `${JSON.stringify({ schema: "murph.parser-manifest.v1" })}\n`,
-  );
 
   const controller = new AbortController();
   const abortReason = new Error("foreground wake");
-  const attemptsAbsolutePath = path.join(
-    vaultRoot,
-    "derived",
-    "inbox",
-    captureId,
-    "attachments",
-    attachmentId,
-    "attempts",
-  );
-  const originalReaddir = fs.readdir.bind(fs);
-  const readdirSpy = vi.spyOn(fs, "readdir").mockImplementation(async (...args) => {
+  let lstatCount = 0;
+  const audioAbsolutePath = path.join(vaultRoot, audioPath);
+  const originalLstat = fs.lstat.bind(fs);
+  const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (...args) => {
     if (
       !controller.signal.aborted &&
       typeof args[0] === "string" &&
-      args[0].startsWith(attemptsAbsolutePath)
+      args[0] === audioAbsolutePath &&
+      ++lstatCount === 2
     ) {
       controller.abort(abortReason);
     }
-    return await originalReaddir(...args);
+    return await originalLstat(...args);
   });
 
   try {
@@ -916,7 +1028,7 @@ test("runInboxMediaRetention aborts before tombstone commit when a wake arrives 
     assert.equal(await fileExists(vaultRoot, audioPath), true);
     assert.equal(await fileExists(vaultRoot, buildInboxAttachmentRetentionLedgerPath(now)), false);
   } finally {
-    readdirSpy.mockRestore();
+    lstatSpy.mockRestore();
   }
 });
 
@@ -961,38 +1073,56 @@ test("rebuildRuntimeFromVault derives retained audio transcript when the tombsto
   assert.ok(audioPath);
   assert.ok(audio.sha256);
 
-  const attemptDirectory = `derived/inbox/${captureId}/attachments/${attachmentId}/attempts/0001`;
-  const manifestPath = `${attemptDirectory}/manifest.json`;
-  const plainTextPath = `${attemptDirectory}/plain.txt`;
-  const markdownPath = `${attemptDirectory}/normalized.md`;
-  const chunksPath = `${attemptDirectory}/chunks.jsonl`;
-  await writeVaultFile(vaultRoot, plainTextPath, `${transcriptText}\n`);
-  await writeVaultFile(vaultRoot, markdownPath, `${transcriptText}\n`);
-  await writeVaultFile(vaultRoot, chunksPath, "");
-  await writeVaultFile(
-    vaultRoot,
-    manifestPath,
-    `${JSON.stringify({
-      schema: "murph.parser-manifest.v1",
-      providerId: "test-parser",
-      createdAt: "2026-06-01T00:01:00.000Z",
-      artifact: {
-        attachmentId,
-        captureId,
-        fileName: "voice.m4a",
-        kind: "audio",
-        mime: "audio/mp4",
-        storedPath: audioPath,
-      },
-      metadata: {},
-      paths: {
-        chunksPath,
-        markdownPath,
-        plainTextPath,
-        tablesPath: null,
-      },
-    })}\n`,
+  const writeParserAttempt = async (
+    attempt: string,
+    text: string,
+    createdAt: string,
+  ): Promise<string> => {
+    const attemptDirectory = `derived/inbox/${captureId}/attachments/${attachmentId}/attempts/${attempt}`;
+    const manifestPath = `${attemptDirectory}/manifest.json`;
+    const plainTextPath = `${attemptDirectory}/plain.txt`;
+    const markdownPath = `${attemptDirectory}/normalized.md`;
+    const chunksPath = `${attemptDirectory}/chunks.jsonl`;
+    await writeVaultFile(vaultRoot, plainTextPath, `${text}\n`);
+    await writeVaultFile(vaultRoot, markdownPath, `${text}\n`);
+    await writeVaultFile(vaultRoot, chunksPath, "");
+    await writeVaultFile(
+      vaultRoot,
+      manifestPath,
+      `${JSON.stringify({
+        schema: "murph.parser-manifest.v1",
+        providerId: "test-parser",
+        createdAt,
+        artifact: {
+          attachmentId,
+          captureId,
+          fileName: "voice.m4a",
+          kind: "audio",
+          mime: "audio/mp4",
+          storedPath: audioPath,
+        },
+        metadata: {},
+        paths: {
+          chunksPath,
+          markdownPath,
+          plainTextPath,
+          tablesPath: null,
+        },
+      })}\n`,
+    );
+    return manifestPath;
+  };
+  const manifestPath = await writeParserAttempt(
+    "0001",
+    transcriptText,
+    "2026-06-01T00:01:00.000Z",
   );
+  const removedManifestPath = await writeParserAttempt(
+    "0002",
+    "Removed newer transcript attempt.",
+    "2026-06-01T00:02:00.000Z",
+  );
+  await fs.unlink(path.join(vaultRoot, removedManifestPath));
   await fs.unlink(path.join(vaultRoot, audioPath));
   await appendJsonlRecord({
     vaultRoot,
@@ -1012,7 +1142,6 @@ test("rebuildRuntimeFromVault derives retained audio transcript when the tombsto
       recordedAt: "2026-06-01T00:00:00.000Z",
       purgedAt: "2026-07-05T00:00:00.000Z",
       reason: "inbox_media_retention",
-      retainedDerivative: null,
     },
   });
 

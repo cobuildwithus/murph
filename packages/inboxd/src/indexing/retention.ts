@@ -23,7 +23,7 @@ import {
   withCanonicalWriteLockScope,
   walkVaultFiles,
 } from "@murphai/core";
-import { findLatestInboxParserManifestPath } from "./parser-derivatives.js";
+import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
 const INBOX_MEDIA_RETENTION_DAYS = 14;
 const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -37,7 +37,9 @@ const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RETENTION_REASON = "inbox_media_retention" as const;
 
 export interface RunInboxMediaRetentionInput {
-  materializeCandidatePaths?: (storedPaths: readonly string[]) => Promise<void>;
+  materializeCandidatePaths?: (
+    storedPaths: readonly string[]
+  ) => Promise<InboxMediaRetentionMaterializeResult | void>;
   maxAttachments?: number;
   now?: Date | string;
   protectedAttachmentIds?: Iterable<string>;
@@ -45,6 +47,10 @@ export interface RunInboxMediaRetentionInput {
   protectedStoredPaths?: Iterable<string>;
   signal?: AbortSignal | null;
   vaultRoot: string;
+}
+
+export interface InboxMediaRetentionMaterializeResult {
+  missingStoredPaths?: Iterable<string>;
 }
 
 export interface InboxMediaRetentionResult {
@@ -87,187 +93,213 @@ export async function runInboxMediaRetention(
     initialRetentionRecords.map((record) => record.storedPath),
   );
   const candidates: InboxMediaRetentionCandidate[] = [];
+  let activeParserJobProtector: ActiveAttachmentParseJobProtector | null = null;
   let hasMoreEligibleAttachments = false;
   let nextEligibleAt: string | null = null;
 
-  captureLoop:
-  for (const capture of captureRecords) {
-    throwIfRetentionAborted(input.signal);
-    const recordedAtMs = Date.parse(capture.recordedAt);
-    if (!Number.isFinite(recordedAtMs)) {
-      continue;
-    }
-    if (protectedCaptureIds.has(capture.captureId)) {
-      continue;
-    }
+  const hasActiveParserJob = async (attachmentId: string): Promise<boolean> => {
+    activeParserJobProtector ??= await openActiveAttachmentParseJobProtector(input.vaultRoot);
+    return activeParserJobProtector.hasActiveJob(attachmentId);
+  };
 
-    for (const attachment of capture.attachments) {
+  try {
+    let presentCandidateCount = 0;
+
+    captureLoop:
+    for (const capture of captureRecords) {
       throwIfRetentionAborted(input.signal);
-      const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
-      if (!storedPath || !attachment.sha256 || !RETAINABLE_INBOX_MEDIA_KINDS.has(attachment.kind)) {
+      const recordedAtMs = Date.parse(capture.recordedAt);
+      if (!Number.isFinite(recordedAtMs)) {
         continue;
       }
-      if (
-        protectedAttachmentIds.has(attachment.attachmentId) ||
-        protectedStoredPaths.has(storedPath) ||
-        durableRawInboxRefs.has(storedPath)
-      ) {
+      if (protectedCaptureIds.has(capture.captureId)) {
         continue;
       }
 
-      const alreadyRetained =
-        initiallyRetainedAttachmentIds.has(attachment.attachmentId) ||
-        initiallyRetainedStoredPaths.has(storedPath);
-      if (recordedAtMs > cutoffMs) {
-        if (!alreadyRetained) {
-          nextEligibleAt = selectEarliestRetentionWake(
-            nextEligibleAt,
-            new Date(recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString(),
-          );
-        }
-        continue;
-      }
-
-      if (candidates.length >= maxAttachments) {
-        hasMoreEligibleAttachments = true;
-        break captureLoop;
-      }
-      const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
-      if (integrity.kind === "missing") {
-        if (alreadyRetained || !input.materializeCandidatePaths) {
+      for (const attachment of capture.attachments) {
+        throwIfRetentionAborted(input.signal);
+        const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
+        if (!storedPath || !attachment.sha256 || !RETAINABLE_INBOX_MEDIA_KINDS.has(attachment.kind)) {
           continue;
         }
-      }
-      if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
-        continue;
-      }
-      candidates.push({
-        attachment,
-        capture,
-        materialize: integrity.kind === "missing",
-        storedPath,
-      });
-    }
-  }
-
-  if (candidates.length === 0) {
-    return emptyRetentionResult({
-      hasMoreEligibleAttachments,
-      nextEligibleAt,
-    });
-  }
-
-  const pathsToMaterialize = uniqueRetentionStoredPaths(
-    candidates
-      .filter((candidate) => candidate.materialize)
-      .map((candidate) => candidate.storedPath),
-  );
-  if (pathsToMaterialize.length > 0) {
-    throwIfRetentionAborted(input.signal);
-    await input.materializeCandidatePaths?.(pathsToMaterialize);
-    throwIfRetentionAborted(input.signal);
-  }
-
-  return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
-    const lock = await acquireCanonicalWriteLock(input.vaultRoot);
-
-    try {
-      throwIfRetentionAborted(input.signal);
-      const [existingRetentionRecords, latestDurableRawInboxRefs] = await Promise.all([
-        listInboxAttachmentRetentionRecords(input.vaultRoot),
-        listDurableRawInboxReferences(input.vaultRoot),
-      ]);
-      const alreadyRetainedAttachmentIds = new Set(
-        existingRetentionRecords.map((record) => record.attachmentId),
-      );
-      const alreadyRetainedStoredPaths = new Set(
-        existingRetentionRecords.map((record) => record.storedPath),
-      );
-      const records: InboxAttachmentRetentionRecord[] = [];
-      const storedPathsToDelete: string[] = [];
-
-      for (const candidate of candidates) {
-        throwIfRetentionAborted(input.signal);
         if (
-          latestDurableRawInboxRefs.has(candidate.storedPath) ||
-          protectedCaptureIds.has(candidate.capture.captureId) ||
-          protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
-          protectedStoredPaths.has(candidate.storedPath)
+          protectedAttachmentIds.has(attachment.attachmentId) ||
+          protectedStoredPaths.has(storedPath) ||
+          durableRawInboxRefs.has(storedPath)
         ) {
           continue;
         }
 
-        const integrity = await hashExistingVaultFile(
-          input.vaultRoot,
-          candidate.storedPath,
-          input.signal,
-        );
-        if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
+        const alreadyRetained =
+          initiallyRetainedAttachmentIds.has(attachment.attachmentId) ||
+          initiallyRetainedStoredPaths.has(storedPath);
+        if (recordedAtMs > cutoffMs) {
+          if (!alreadyRetained) {
+            nextEligibleAt = selectEarliestRetentionWake(
+              nextEligibleAt,
+              new Date(recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString(),
+            );
+          }
           continue;
         }
 
-        const alreadyRetained =
-          alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
-          alreadyRetainedStoredPaths.has(candidate.storedPath);
-        if (!alreadyRetained) {
-          records.push(
-            buildRetentionRecord({
-              attachment: candidate.attachment,
-              capture: candidate.capture,
-              purgedAt: now,
-              retainedDerivative: await buildRetainedParserDerivative({
-                attachmentId: candidate.attachment.attachmentId,
-                captureId: candidate.capture.captureId,
-                vaultRoot: input.vaultRoot,
-              }),
-              storedPath: candidate.storedPath,
-            }),
-          );
+        if (presentCandidateCount >= maxAttachments) {
+          hasMoreEligibleAttachments = true;
+          break captureLoop;
         }
-        storedPathsToDelete.push(candidate.storedPath);
-      }
+        if (await hasActiveParserJob(attachment.attachmentId)) {
+          continue;
+        }
 
-      if (storedPathsToDelete.length === 0) {
-        return emptyRetentionResult({
-          hasMoreEligibleAttachments,
-          nextEligibleAt,
+        const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
+        if (integrity.kind === "missing") {
+          if (alreadyRetained || !input.materializeCandidatePaths) {
+            continue;
+          }
+        }
+        if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
+          continue;
+        }
+        candidates.push({
+          attachment,
+          capture,
+          materialize: integrity.kind === "missing",
+          storedPath,
         });
+        if (integrity.kind !== "missing") {
+          presentCandidateCount += 1;
+        }
       }
+    }
 
-      const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
-      if (records.length > 0) {
-        throwIfRetentionAborted(input.signal);
-        await runCanonicalWrite({
-          vaultRoot: input.vaultRoot,
-          operationType: "inbox_media_retention",
-          summary: `Record ${records.length} raw inbox media attachment expiration${records.length === 1 ? "" : "s"}.`,
-          occurredAt: now,
-          mutate: async ({ batch }) => {
-            for (const record of records) {
-              await batch.stageJsonlAppend(
-                buildInboxAttachmentRetentionLedgerPath(record.purgedAt),
-                `${JSON.stringify(record)}\n`,
-              );
-            }
-          },
-        });
-      }
-
-      for (const storedPath of storedPathsToDelete) {
-        await deleteVaultFileIfPresent(input.vaultRoot, storedPath);
-      }
-
-      return {
-        expiredAttachments: records.length,
-        expiredBytes,
+    if (candidates.length === 0) {
+      return emptyRetentionResult({
         hasMoreEligibleAttachments,
         nextEligibleAt,
-        records,
-      };
-    } finally {
-      await lock.release();
+      });
     }
+
+    const pathsToMaterialize = uniqueRetentionStoredPaths(
+      candidates
+        .filter((candidate) => candidate.materialize)
+        .map((candidate) => candidate.storedPath),
+    );
+    const missingAfterMaterialization = new Set<string>();
+    if (pathsToMaterialize.length > 0) {
+      throwIfRetentionAborted(input.signal);
+      const materializeResult = await input.materializeCandidatePaths?.(pathsToMaterialize);
+      for (const storedPath of normalizeMaterializedMissingStoredPaths(materializeResult)) {
+        missingAfterMaterialization.add(storedPath);
+      }
+      throwIfRetentionAborted(input.signal);
+    }
+
+    return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
+      const lock = await acquireCanonicalWriteLock(input.vaultRoot);
+
+      try {
+        throwIfRetentionAborted(input.signal);
+        const [existingRetentionRecords, latestDurableRawInboxRefs] = await Promise.all([
+          listInboxAttachmentRetentionRecords(input.vaultRoot),
+          listDurableRawInboxReferences(input.vaultRoot),
+        ]);
+        const alreadyRetainedAttachmentIds = new Set(
+          existingRetentionRecords.map((record) => record.attachmentId),
+        );
+        const alreadyRetainedStoredPaths = new Set(
+          existingRetentionRecords.map((record) => record.storedPath),
+        );
+        const records: InboxAttachmentRetentionRecord[] = [];
+        const storedPathsToDelete: string[] = [];
+        let selectedCandidateCount = 0;
+
+        for (const candidate of candidates) {
+          throwIfRetentionAborted(input.signal);
+          if (
+            missingAfterMaterialization.has(candidate.storedPath) ||
+            latestDurableRawInboxRefs.has(candidate.storedPath) ||
+            protectedCaptureIds.has(candidate.capture.captureId) ||
+            protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
+            protectedStoredPaths.has(candidate.storedPath) ||
+            await hasActiveParserJob(candidate.attachment.attachmentId)
+          ) {
+            continue;
+          }
+
+          const integrity = await hashExistingVaultFile(
+            input.vaultRoot,
+            candidate.storedPath,
+            input.signal,
+          );
+          if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
+            continue;
+          }
+          if (selectedCandidateCount >= maxAttachments) {
+            hasMoreEligibleAttachments = true;
+            break;
+          }
+          selectedCandidateCount += 1;
+
+          const alreadyRetained =
+            alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
+            alreadyRetainedStoredPaths.has(candidate.storedPath);
+          if (!alreadyRetained) {
+            records.push(
+              buildRetentionRecord({
+                attachment: candidate.attachment,
+                capture: candidate.capture,
+                purgedAt: now,
+                storedPath: candidate.storedPath,
+              }),
+            );
+          }
+          storedPathsToDelete.push(candidate.storedPath);
+        }
+
+        if (storedPathsToDelete.length === 0) {
+          return emptyRetentionResult({
+            hasMoreEligibleAttachments,
+            nextEligibleAt,
+          });
+        }
+
+        const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
+        if (records.length > 0) {
+          throwIfRetentionAborted(input.signal);
+          await runCanonicalWrite({
+            vaultRoot: input.vaultRoot,
+            operationType: "inbox_media_retention",
+            summary: `Record ${records.length} raw inbox media attachment expiration${records.length === 1 ? "" : "s"}.`,
+            occurredAt: now,
+            mutate: async ({ batch }) => {
+              for (const record of records) {
+                await batch.stageJsonlAppend(
+                  buildInboxAttachmentRetentionLedgerPath(record.purgedAt),
+                  `${JSON.stringify(record)}\n`,
+                );
+              }
+            },
+          });
+        }
+
+        for (const storedPath of storedPathsToDelete) {
+          await deleteVaultFileIfPresent(input.vaultRoot, storedPath);
+        }
+
+        return {
+          expiredAttachments: records.length,
+          expiredBytes,
+          hasMoreEligibleAttachments,
+          nextEligibleAt,
+          records,
+        };
+      } finally {
+        await lock.release();
+      }
   });
+  } finally {
+    closeActiveAttachmentParseJobProtector(activeParserJobProtector);
+  }
 }
 
 function isExpectedInboxMediaIntegrity(
@@ -283,6 +315,19 @@ function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {
   return [...new Set(paths)];
 }
 
+function normalizeMaterializedMissingStoredPaths(
+  result: InboxMediaRetentionMaterializeResult | void,
+): Set<string> {
+  const output = new Set<string>();
+  for (const storedPath of result?.missingStoredPaths ?? []) {
+    const normalized = normalizeRawInboxMediaPath(storedPath);
+    if (normalized) {
+      output.add(normalized);
+    }
+  }
+  return output;
+}
+
 export function buildInboxAttachmentRetentionLedgerPath(purgedAt: string): string {
   return toMonthlyShardRelativePath(
     VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory,
@@ -295,7 +340,6 @@ function buildRetentionRecord(input: {
   attachment: InboxCaptureAttachmentRecord;
   capture: InboxCaptureRecord;
   purgedAt: string;
-  retainedDerivative: InboxAttachmentRetentionRecord["retainedDerivative"];
   storedPath: string;
 }): InboxAttachmentRetentionRecord {
   const record = assertContract<InboxAttachmentRetentionRecord>(
@@ -315,7 +359,6 @@ function buildRetentionRecord(input: {
       recordedAt: input.capture.recordedAt,
       purgedAt: input.purgedAt,
       reason: RETENTION_REASON,
-      retainedDerivative: input.retainedDerivative ?? null,
     },
     "inbox attachment retention record",
   );
@@ -385,15 +428,6 @@ async function listDurableRawInboxReferences(vaultRoot: string): Promise<Set<str
   return references;
 }
 
-async function buildRetainedParserDerivative(input: {
-  attachmentId: string;
-  captureId: string;
-  vaultRoot: string;
-}): Promise<InboxAttachmentRetentionRecord["retainedDerivative"]> {
-  const latest = await findLatestInboxParserManifestPath(input);
-  return latest ? { kind: "parser-manifest", path: latest } : null;
-}
-
 function normalizeRetentionNow(now: Date | string | undefined): string {
   if (now instanceof Date) {
     return now.toISOString();
@@ -457,6 +491,49 @@ function normalizeRawInboxMediaPath(value: string | null | undefined): string | 
   } catch {
     return null;
   }
+}
+
+interface ActiveAttachmentParseJobProtector {
+  close(): void;
+  hasActiveJob(attachmentId: string): boolean;
+}
+
+function closeActiveAttachmentParseJobProtector(
+  protector: ActiveAttachmentParseJobProtector | null,
+): void {
+  protector?.close();
+}
+
+async function openActiveAttachmentParseJobProtector(
+  vaultRoot: string,
+): Promise<ActiveAttachmentParseJobProtector> {
+  const runtime = await openInboxRuntime({ vaultRoot });
+  return {
+    close() {
+      runtime.close();
+    },
+    hasActiveJob(attachmentId) {
+      return hasActiveAttachmentParseJob(runtime, attachmentId);
+    },
+  };
+}
+
+function hasActiveAttachmentParseJob(
+  runtime: InboxRuntimeStore,
+  attachmentId: string,
+): boolean {
+  return (
+    runtime.listAttachmentParseJobs({
+      attachmentId,
+      limit: 1,
+      state: "pending",
+    }).length > 0 ||
+    runtime.listAttachmentParseJobs({
+      attachmentId,
+      limit: 1,
+      state: "running",
+    }).length > 0
+  );
 }
 
 async function hashExistingVaultFile(

@@ -3318,7 +3318,6 @@ test("validateVault rejects event rawRefs that point at retention-expired inbox 
       recordedAt: "2026-06-01T00:00:00.000Z",
       purgedAt: "2026-07-05T00:00:00.000Z",
       reason: "inbox_media_retention",
-      retainedDerivative: null,
     },
   });
 
@@ -3439,7 +3438,6 @@ test("validateVault accepts expired raw inbox media for the matching inbox captu
       recordedAt: "2026-06-01T00:00:00.000Z",
       purgedAt: "2026-07-05T00:00:00.000Z",
       reason: "inbox_media_retention",
-      retainedDerivative: null,
     },
   });
 

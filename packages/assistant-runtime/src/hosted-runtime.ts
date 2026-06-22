@@ -1510,7 +1510,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const idleMaintenance = await runHostedIdleCheckpointMaintenance({
           pendingWork: idleMaintenancePendingWork,
           materializeRetentionCandidatePaths: async (storedPaths) => {
-            await restored.materializeWorkspaceArtifacts(storedPaths);
+            const materialized = await restored.materializeWorkspaceArtifacts(storedPaths);
+            return {
+              missingStoredPaths: [...materialized.missingArtifactPaths]
+                .map((artifactPath) =>
+                  artifactPath.startsWith("vault:")
+                    ? artifactPath.slice("vault:".length)
+                    : artifactPath
+                ),
+            };
           },
           protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
           protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,

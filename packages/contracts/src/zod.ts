@@ -1647,13 +1647,6 @@ export const inboxCaptureRecordSchema = withContractMetadata(
   "Murph Inbox Capture Record",
 );
 
-const inboxAttachmentRetentionDerivativeSchema = z
-  .object({
-    kind: z.literal("parser-manifest"),
-    path: patternedString(RELATIVE_PATH_PATTERN),
-  })
-  .strict();
-
 export const inboxAttachmentRetentionRecordSchema = withContractMetadata(
   z
     .object({
@@ -1671,7 +1664,6 @@ export const inboxAttachmentRetentionRecordSchema = withContractMetadata(
       recordedAt: isoDateTimeString(),
       purgedAt: isoDateTimeString(),
       reason: z.literal("inbox_media_retention"),
-      retainedDerivative: inboxAttachmentRetentionDerivativeSchema.nullable().optional(),
     })
     .strict(),
   "@murphai/contracts/inbox-attachment-retention-record.schema.json",

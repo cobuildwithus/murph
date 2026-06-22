@@ -15,6 +15,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   runInboxMediaRetention,
+  type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
 } from "@murphai/inboxd";
 
@@ -52,7 +53,9 @@ export type HostedIdleMaintenanceOutcome =
 // idle-time maintenance belongs here as additional plain statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
-  materializeRetentionCandidatePaths?: ((storedPaths: readonly string[]) => Promise<void>) | null;
+  materializeRetentionCandidatePaths?: ((
+    storedPaths: readonly string[]
+  ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
   memberId: string;
   model: string | null;
   pendingWork: boolean;
