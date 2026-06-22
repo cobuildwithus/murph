@@ -1428,9 +1428,11 @@ export async function showExperimentProgress(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
 
   const progress = query.summarizeExperimentProgress(readModel, slug, {
     asOf: input.asOf,
+    metricPoints,
   })
 
   return {
@@ -1454,10 +1456,12 @@ export async function showExperimentProgressCard(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
 
   const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
     confounders: input.confounders,
+    metricPoints,
   })
 
   return {
@@ -1482,10 +1486,12 @@ export async function showExperimentFollowupDue(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
 
   const decision = query.decideExperimentFollowupDue(readModel, slug, {
     kind: input.kind,
     date: input.date,
+    metricPoints,
   })
 
   return {
@@ -1508,9 +1514,11 @@ export async function analyzeExperimentOutcomeRecord(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const metricPoints = await readExperimentJournalMetricPoints(query, input.vault)
 
   const outcome = query.analyzeExperimentOutcome(readModel, slug, {
     asOf: input.asOf,
+    metricPoints,
   })
 
   return {
@@ -1997,6 +2005,17 @@ async function readExperimentJournalVault(vault: string) {
 
   try {
     return await query.readVault(vault)
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
+}
+
+async function readExperimentJournalMetricPoints(
+  query: QueryRuntimeModule,
+  vault: string,
+) {
+  try {
+    return await query.listMetricPoints(vault, { limit: null })
   } catch (error) {
     throw toVaultMetadataCliError(error)
   }

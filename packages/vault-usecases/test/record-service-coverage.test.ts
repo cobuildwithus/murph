@@ -1627,6 +1627,7 @@ describe("record service seams", () => {
           tags: [],
           frontmatter: null,
         })),
+        listMetricPoints: vi.fn(async () => []),
         analyzeExperimentOutcome: vi.fn(() => ({
           schemaVersion: "murph.experiment-outcome.v1",
           asOf: "2026-04-08",

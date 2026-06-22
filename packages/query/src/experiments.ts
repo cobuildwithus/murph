@@ -227,9 +227,13 @@ interface ExperimentSummaryContext {
   experiment: CanonicalEntity;
   frontmatter: QueryExperimentFrontmatter;
   interventionDates: string[];
-  metricPoints: MetricPoint[];
+  metricPoints: readonly MetricPoint[];
   progressPhase: ExperimentProgressPhase;
   summariesByDate: Map<string, WearableDaySummary | null>;
+}
+
+interface ExperimentMetricPointOptions {
+  metricPoints?: readonly MetricPoint[];
 }
 
 interface MetricWindowPair {
@@ -253,7 +257,7 @@ interface MetricWindowSelection {
 export function summarizeExperimentProgress(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentProgressSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
   const signals = buildMetricResults(context);
@@ -264,12 +268,17 @@ export function summarizeExperimentProgress(
   const primaryBiomarkerKey = context.frontmatter.analysisPlan?.primaryBiomarkerKey ?? null;
   const hasPrimarySignal =
     primaryBiomarkerKey !== null && primarySignal?.biomarkerKey === primaryBiomarkerKey;
-  const baselineDaysAvailable = hasPrimarySignal
-    ? primarySignal.baselineDayCount
-    : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
-  const interventionDaysAvailable = hasPrimarySignal
-    ? primarySignal.interventionDayCount
-    : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
+  const metricDaysAvailable = summarizeSignalDayCoverage(signals);
+  const baselineDaysAvailable = metricDaysAvailable.baselineDaysAvailable > 0
+    ? metricDaysAvailable.baselineDaysAvailable
+    : hasPrimarySignal
+      ? primarySignal.baselineDayCount
+      : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
+  const interventionDaysAvailable = metricDaysAvailable.interventionDaysAvailable > 0
+    ? metricDaysAvailable.interventionDaysAvailable
+    : hasPrimarySignal
+      ? primarySignal.interventionDayCount
+      : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
   const adherence = {
     ...buildAdherenceSummary(context),
     sessionEventIds: completedSessionEventIds,
@@ -280,6 +289,7 @@ export function summarizeExperimentProgress(
     primarySignal,
     progressPhase: context.progressPhase,
     frontmatter: context.frontmatter,
+    signals,
     summariesByDate: context.summariesByDate,
   });
   const setupReadiness = buildSetupReadiness(context.frontmatter);
@@ -332,7 +342,7 @@ export function summarizeExperimentProgress(
 export function analyzeExperimentOutcome(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentOutcomeSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
   const metricResults = buildMetricResults(context);
@@ -391,11 +401,15 @@ export function decideExperimentFollowupDue(
   options: {
     date?: string;
     kind: ExperimentFollowupKind;
+    metricPoints?: readonly MetricPoint[];
     now?: string | number | Date;
   },
 ): ExperimentFollowupDueDecision {
   const date = options.date ?? resolveVaultLocalDate(vault, options.now ?? new Date());
-  const context = buildExperimentSummaryContext(vault, slug, { asOf: date });
+  const context = buildExperimentSummaryContext(vault, slug, {
+    asOf: date,
+    metricPoints: options.metricPoints,
+  });
 
   if (options.kind === "weekly-digest") {
     return decideWeeklyDigestDue(context, date);
@@ -407,7 +421,7 @@ export function decideExperimentFollowupDue(
 function buildExperimentSummaryContext(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string },
+  options: { asOf?: string } & ExperimentMetricPointOptions,
 ): ExperimentSummaryContext {
   const experiment = getExperiment(vault, slug);
   if (!experiment) {
@@ -444,7 +458,7 @@ function buildExperimentSummaryContext(
       frontmatter.runPlan?.interventionStart,
       minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
     ),
-    metricPoints: buildMetricProjection(vault).metricPoints,
+    metricPoints: options.metricPoints ?? buildMetricProjection(vault).metricPoints,
     progressPhase,
     summariesByDate,
   };
@@ -682,11 +696,18 @@ function buildCoverageSummary(input: {
   frontmatter: ExperimentFrontmatter;
   primarySignal: ExperimentMetricResult | null;
   progressPhase: ExperimentProgressPhase;
+  signals: readonly ExperimentMetricResult[];
   summariesByDate: Map<string, WearableDaySummary | null>;
 }): ExperimentProgressSummary["dataCoverage"] {
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
     (input.primarySignal?.interventionDayCount ?? 0);
+  const anySignalMetricData = input.signals.some(
+    (signal) => signal.baselineDayCount + signal.interventionDayCount > 0,
+  );
+  const anyWearableSummaryData = [...input.summariesByDate.values()].some(
+    (summary) => summary !== null && summary.providers.length > 0,
+  );
   let status: ExperimentCoverageStatus = "insufficient";
 
   const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
@@ -698,7 +719,9 @@ function buildCoverageSummary(input: {
   if (
     input.primarySignal !== null &&
     hasCompleteMetricWindow &&
-    primaryMetricDaysAvailable === 0
+    primaryMetricDaysAvailable === 0 &&
+    !anySignalMetricData &&
+    !anyWearableSummaryData
   ) {
     status = "no_wearable_data";
   } else if (
@@ -717,7 +740,7 @@ function buildCoverageSummary(input: {
     (input.primarySignal?.interventionDayCount ?? 0) >= 2
   ) {
     status = "sufficient_for_progress";
-  } else if (primaryMetricDaysAvailable > 0) {
+  } else if (primaryMetricDaysAvailable > 0 || anySignalMetricData) {
     status = "partial";
   } else {
     status = "insufficient";
@@ -735,6 +758,25 @@ function buildCoverageSummary(input: {
     status,
     wearableProviders,
   };
+}
+
+function summarizeSignalDayCoverage(signals: readonly ExperimentMetricResult[]) {
+  return signals.reduce(
+    (summary, signal) => ({
+      baselineDaysAvailable: Math.max(
+        summary.baselineDaysAvailable,
+        signal.baselineDayCount,
+      ),
+      interventionDaysAvailable: Math.max(
+        summary.interventionDaysAvailable,
+        signal.interventionDayCount,
+      ),
+    }),
+    {
+      baselineDaysAvailable: 0,
+      interventionDaysAvailable: 0,
+    },
+  );
 }
 
 function readinessResult(blockingReasons: ExperimentProgressReadinessReason[]) {

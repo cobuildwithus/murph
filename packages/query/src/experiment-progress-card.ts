@@ -18,6 +18,7 @@ import {
   type ExperimentMetricResult,
   type ExperimentProgressSummary,
 } from "./experiments.ts";
+import type { MetricPoint } from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 
 /**
@@ -39,6 +40,7 @@ export interface ExperimentProgressCardConfounderInput {
 export interface BuildExperimentProgressCardOptions {
   asOf?: string;
   confounders?: readonly ExperimentProgressCardConfounderInput[];
+  metricPoints?: readonly MetricPoint[];
 }
 
 export interface ExperimentProgressCardBuildResult {
@@ -54,7 +56,10 @@ export function buildExperimentProgressCard(
   options: BuildExperimentProgressCardOptions = {},
 ): ExperimentProgressCardBuildResult {
   const warnings: string[] = [];
-  const progress = summarizeExperimentProgress(vault, slug, { asOf: options.asOf });
+  const progress = summarizeExperimentProgress(vault, slug, {
+    asOf: options.asOf,
+    metricPoints: options.metricPoints,
+  });
   const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: options.asOf });
   const windows = progress.windows;
   const runStart = windows.baselineStart ?? windows.interventionStart;
