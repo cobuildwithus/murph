@@ -1,4 +1,7 @@
+import { experimentAdherenceTargetsSchema } from "@murphai/contracts";
+
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { resolveExperimentMetricIdentity } from "../experiment-metrics.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -185,6 +188,7 @@ function collectRequestedBrowserVaultMetrics(entities: readonly CanonicalEntity[
 function collectExplicitBrowserVaultMetrics(entities: readonly CanonicalEntity[]): BrowserVaultRequestedMetric[] {
   return dedupeRequestedMetrics([
     ...entities.flatMap(privateMetricBindingRequests),
+    ...collectExperimentAdherenceMetricRequests(entities),
     ...entities.filter(isActiveGoalEntity).flatMap((entity) =>
       parseGoalMetricTargets(entity).map((target) => ({
         metricKey: target.metricKey,
@@ -192,6 +196,42 @@ function collectExplicitBrowserVaultMetrics(entities: readonly CanonicalEntity[]
       }))
     ),
   ]);
+}
+
+function collectExperimentAdherenceMetricRequests(
+  entities: readonly CanonicalEntity[],
+): BrowserVaultRequestedMetric[] {
+  return entities
+    .filter((entity) => entity.family === "experiment")
+    .flatMap((entity) => {
+      const source = entity.frontmatter ?? entity.attributes;
+      const runPlan = source.runPlan;
+      if (!runPlan || typeof runPlan !== "object" || Array.isArray(runPlan)) {
+        return [];
+      }
+
+      const targets = (runPlan as Record<string, unknown>).adherenceTargets;
+      if (targets === undefined || targets === null) {
+        return [];
+      }
+
+      const result = experimentAdherenceTargetsSchema.safeParse(targets);
+      if (!result.success) {
+        return [];
+      }
+
+      return result.data.flatMap((target): BrowserVaultRequestedMetric[] => {
+        if (target.evidence.kind !== "metricPresence" && target.evidence.kind !== "metricThreshold") {
+          return [];
+        }
+
+        const identity = resolveExperimentMetricIdentity(target.evidence.metricKey);
+        return [{
+          metricKey: identity.metricKey,
+          biomarkerKey: identity.biomarkerKey,
+        }];
+      });
+    });
 }
 
 function privateMetricBindingRequests(entity: CanonicalEntity): BrowserVaultRequestedMetric[] {

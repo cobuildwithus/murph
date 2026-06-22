@@ -4,6 +4,7 @@ import type {
   ExperimentRunPlan,
   ExperimentRunScheduleIntent,
 } from "@murphai/contracts";
+import type { MetricComparator } from "./metrics/index.ts";
 
 export type ExperimentAdherenceCellStatus =
   | "scheduled"
@@ -21,6 +22,7 @@ export interface ExperimentAdherenceWindows {
 }
 
 export interface ExperimentAdherenceObservation {
+  comparator?: MetricComparator | null;
   evidenceId: string;
   eventKind?: string | null;
   localDate: string;
@@ -355,19 +357,31 @@ function evaluateMetricThresholdExpectation(input: {
   if (evidence.kind !== "metricThreshold") {
     throw new TypeError("Metric-threshold adherence expectation received non-threshold evidence.");
   }
-  const observations = input.observations.filter((candidate) => typeof candidate.value === "number");
-  if (observations.length === 0) {
+  const numericObservations = input.observations.filter((candidate) => typeof candidate.value === "number");
+  const exactObservations = numericObservations.filter((candidate) => !candidate.comparator);
+  if (numericObservations.length === 0) {
     return missingCell(input);
   }
 
-  const passingObservation = observations.find((observation) =>
+  const passingObservation = exactObservations.find((observation) =>
     typeof observation.value === "number" && metricValueSatisfiesRule(observation.value, evidence)
   );
   if (passingObservation) {
     return cell(input.expectation, "satisfied", 1, 1, [passingObservation], "Metric value meets the target.");
   }
 
-  return cell(input.expectation, "failed", 0, 1, observations, "Metric value did not meet the planned target.");
+  if (exactObservations.length === 0) {
+    return cell(
+      input.expectation,
+      "unknown",
+      null,
+      numericObservations.length,
+      numericObservations,
+      "Metric value is bounded by a comparator.",
+    );
+  }
+
+  return cell(input.expectation, "failed", 0, 1, exactObservations, "Metric value did not meet the planned target.");
 }
 
 function missingCell(input: {

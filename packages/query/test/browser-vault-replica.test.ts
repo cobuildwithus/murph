@@ -301,6 +301,62 @@ test("browser vault replica keeps metric adherence targets", async () => {
   assert.equal((targets[1] as Record<string, unknown>).targetId, "steps");
 });
 
+test("browser vault replica includes custom metric adherence target rows", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "d".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("experiment", "exp_custom_metric_adherence", {
+          frontmatter: {
+            runPlan: {
+              baselineStart: "2026-04-01",
+              baselineEnd: "2026-04-07",
+              interventionStart: "2026-04-08",
+              interventionEnd: "2026-04-14",
+              adherenceTargets: [{
+                targetId: "custom-score",
+                label: "Custom score",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "UTC",
+                },
+                evidence: {
+                  kind: "metricThreshold",
+                  metricKey: "custom-reaction-time",
+                  op: "<=",
+                  value: 300,
+                  missing: "unknown",
+                },
+              }],
+            },
+          },
+        }),
+        createEntity("sample", "smp_custom_reaction_time", {
+          attributes: {
+            metric: "custom-reaction-time",
+            source: "manual",
+            unit: "ms",
+            value: 280,
+          },
+          kind: "metric_sample",
+          occurredAt: "2026-04-08T08:00:00.000Z",
+          path: "ledger/metric-samples/custom-reaction-time/2026/2026-04.jsonl",
+          stream: "custom-reaction-time",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  assert.ok(replica.metricRows.some((row) =>
+    row.metricKey === "custom-reaction-time" &&
+    row.recordIds.includes("smp_custom_reaction_time")
+  ));
+});
+
 test("browser vault replica keeps old anchored metric points by contributing record id", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-06-01T12:00:00.000Z",

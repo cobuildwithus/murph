@@ -13,6 +13,7 @@ import {
   type ExperimentAdherenceCellStatus,
   type ExperimentAdherenceObservation,
 } from "../experiment-adherence.ts";
+import { matchesExperimentMetricIdentity } from "../experiment-metrics.ts";
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
@@ -1197,11 +1198,12 @@ function buildAdherenceObservations(
       case "metricThreshold":
         const metricEvidence = target.evidence;
         observations.push(...metricRows
-          .filter((row) => row.metricKey === metricEvidence.metricKey)
+          .filter((row) => matchesExperimentMetricIdentity(metricEvidence.metricKey, row))
           .map((row) => ({
+            comparator: row.comparator ?? null,
             evidenceId: row.id,
             localDate: row.date,
-            metricKey: row.metricKey,
+            metricKey: metricEvidence.metricKey,
             targetId: target.targetId,
             value: row.value,
           })));

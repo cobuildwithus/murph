@@ -20,6 +20,7 @@ import {
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
+import { matchesExperimentMetricIdentity } from "./experiment-metrics.ts";
 import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,
@@ -703,6 +704,7 @@ function buildAdherenceObservations(
         const metricEvidence = target.evidence;
         for (const row of selectMetricAdherenceRows(context, metricEvidence.metricKey)) {
           observations.push({
+            comparator: row.comparator,
             evidenceId: row.id,
             localDate: row.date,
             metricKey: metricEvidence.metricKey,
@@ -720,9 +722,9 @@ function buildAdherenceObservations(
 function selectMetricAdherenceRows(
   context: ExperimentSummaryContext,
   metricKey: string,
-): Array<{ date: string; id: string; value: number }> {
+): Array<{ comparator: MetricPoint["comparator"]; date: string; id: string; value: number }> {
   const points = context.metricPoints.filter((point) =>
-    point.effectiveDate <= context.asOf && matchesAdherenceMetric(metricKey, point)
+    point.effectiveDate <= context.asOf && matchesExperimentMetricIdentity(metricKey, point)
   );
   const selectedMetricKey = points[0]?.metricKey ?? normalizeMetricKey(metricKey);
   return selectMetricSeries({
@@ -731,45 +733,13 @@ function selectMetricAdherenceRows(
   }).rows.flatMap((row) =>
     typeof row.value === "number" && Number.isFinite(row.value)
       ? [{
+          comparator: row.comparator ?? null,
           date: row.date,
           id: row.id ?? row.pointIds?.[0] ?? `metric-series:${row.metricKey}:${row.date}`,
           value: row.value,
         }]
       : []
   );
-}
-
-function matchesAdherenceMetric(metricKey: string, point: MetricPoint): boolean {
-  const trimmedMetricKey = metricKey.trim();
-  const normalizedMetricKey = normalizeMetricKey(trimmedMetricKey);
-  const metricSlug = trimmedMetricKey.split(":").at(-1) ?? trimmedMetricKey;
-  const definition = resolveMetricDefinition(trimmedMetricKey);
-  const biomarkerDefinition = resolveMetricDefinitionForBiomarker(trimmedMetricKey);
-  const slugDefinition = resolveMetricDefinition(metricSlug);
-  const candidateMetricKeys = new Set([
-    trimmedMetricKey,
-    normalizedMetricKey,
-    definition?.key,
-    biomarkerDefinition?.key,
-    slugDefinition?.key,
-    normalizeMetricKey(metricSlug),
-  ].filter((value): value is string => typeof value === "string" && value.length > 0));
-
-  if (candidateMetricKeys.has(point.metricKey)) {
-    return true;
-  }
-
-  const candidateBiomarkerKeys = new Set([
-    trimmedMetricKey,
-    normalizedMetricKey,
-    normalizedMetricKey.startsWith("biomarker:")
-      ? normalizedMetricKey
-      : `biomarker:${normalizedMetricKey}`,
-    definition?.biomarkerKey,
-    biomarkerDefinition?.biomarkerKey,
-  ].filter((value): value is string => typeof value === "string" && value.length > 0));
-
-  return point.biomarkerKey !== null && candidateBiomarkerKeys.has(point.biomarkerKey);
 }
 
 function buildCoverageSummary(input: {

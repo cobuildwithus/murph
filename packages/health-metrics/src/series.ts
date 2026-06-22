@@ -152,6 +152,7 @@ function aggregateMetricSeriesPoints(
 
     return [{
       biomarkerKey: first.biomarkerKey,
+      comparator: null,
       confidence: highestMetricConfidence(datePoints.map((point) => point.confidence)),
       context: {
         aggregatePointCount: datePoints.length,
@@ -179,6 +180,7 @@ function aggregateMetricSeriesPoints(
 function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefinition): MetricSeriesPoint {
   return {
     biomarkerKey: point.biomarkerKey,
+    comparator: point.comparator,
     confidence: point.confidence,
     context: point.context,
     date: point.effectiveDate,

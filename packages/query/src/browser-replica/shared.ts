@@ -10,6 +10,7 @@ import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
 import type {
   MetricConfidence,
+  MetricComparator,
   MetricGoalProgressStatus,
   MetricGrain,
   MetricPoint,
@@ -97,6 +98,7 @@ export interface BrowserVaultSummaryConfidence {
 
 export interface BrowserVaultMetricRow {
   biomarkerKey: string | null;
+  comparator?: MetricComparator | null;
   confidence: MetricConfidence;
   context: Record<string, unknown>;
   date: string;

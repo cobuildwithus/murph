@@ -12,7 +12,10 @@ import {
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
-import { buildExperimentAdherenceCalendar } from "../src/experiment-adherence.ts";
+import {
+  buildExperimentAdherenceCalendar,
+  type ExperimentAdherenceObservation,
+} from "../src/experiment-adherence.ts";
 
 test("returns null when no matching private run exists", () => {
   const client = createBrowserVaultQueryClient(createReplica());
@@ -1187,6 +1190,104 @@ test("uses explicit metric adherence targets instead of legacy schedule synthesi
   assert.ok(result.schedule);
   assert.equal(result.schedule.cells.every((cell) => cell.targetId === "step-floor"), true);
   assert.equal(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"), false);
+});
+
+test("matches browser metric adherence targets through biomarker aliases", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-10T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-08",
+            adherenceTargets: [{
+              targetId: "sleep-efficiency-floor",
+              label: "Sleep efficiency floor",
+              phase: "intervention",
+              calendar: {
+                kind: "daily",
+                timeZone: "America/New_York",
+              },
+              evidence: {
+                kind: "metricThreshold",
+                metricKey: "biomarker:sleep-efficiency",
+                op: ">=",
+                value: 90,
+                missing: "unknown",
+              },
+              rollup: {
+                minimumUsefulCompletions: 1,
+                targetCompletions: 1,
+              },
+            }],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:sleep-efficiency",
+          date: "2026-04-08",
+          metricKey: "sleep-efficiency",
+          unit: "%",
+          value: 91,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.schedule?.cells[0]?.kind, "completed");
+  assert.equal(result.schedule?.completedSessions, 1);
+  assert.equal(result.progress?.adherence.completedSessions, 1);
+  assert.equal(result.progress?.adherence.status, "met_target");
+});
+
+test("keeps comparator-bounded metric thresholds unknown", () => {
+  const target = {
+    targetId: "glucose-ceiling",
+    label: "Glucose ceiling",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "UTC",
+    },
+    evidence: {
+      kind: "metricThreshold",
+      metricKey: "glucose",
+      op: "<=",
+      value: 100,
+      missing: "unknown",
+    },
+  } satisfies ExperimentAdherenceTarget;
+  const observations: Array<ExperimentAdherenceObservation & { comparator: ">" }> = [{
+    comparator: ">",
+    evidenceId: "evt_glucose_1",
+    localDate: "2026-04-08",
+    metricKey: "glucose",
+    targetId: "glucose-ceiling",
+    value: 100,
+  }];
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-10",
+    observations,
+    targets: [target],
+    windows: {
+      baselineEnd: null,
+      baselineStart: null,
+      interventionEnd: "2026-04-08",
+      interventionStart: "2026-04-08",
+    },
+  });
+
+  assert.equal(result.cells[0]?.status, "unknown");
+  assert.equal(result.cells[0]?.score, null);
+  assert.deepEqual(result.cells[0]?.evidenceIds, ["evt_glucose_1"]);
 });
 
 test("uses adherence target rollups for browser progress targets", () => {
