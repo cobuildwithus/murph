@@ -18,6 +18,7 @@ import type { HostedWorkspaceCheckpointResponse } from "@murphai/hosted-executio
 import {
   decodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -243,6 +244,9 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           if (request.ref.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
             throw new RangeError("Hosted workspace snapshot restore exceeds the single-part size guard.");
           }
+          if (request.ref.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+            throw new RangeError("Hosted workspace snapshot restore exceeds the total plain size guard.");
+          }
         },
         step: "size_guard",
       });
@@ -359,7 +363,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             durableRoot: request.durableRoot,
             encryptedFilePath,
             ref: request.ref,
-            scratchRoot: request.scratchRoot ?? null,
           }),
           step: "archive_restore",
         });

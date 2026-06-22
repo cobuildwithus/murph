@@ -129,7 +129,6 @@ describe("hosted runtime checkpoint baseline", () => {
       durableRoot: restoreRoot,
       encryptedFilePath,
       ref: snapshotRef,
-      scratchRoot: encryptedScratchRoot,
     });
     await expect(readFile(path.join(restoreRoot, "note.md"), "utf8"))
       .resolves.toBe("idle compacted state\n");

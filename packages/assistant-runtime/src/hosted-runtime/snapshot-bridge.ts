@@ -71,6 +71,7 @@ import {
 import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
@@ -415,6 +416,9 @@ async function createHostedWorkspaceV2Snapshot(
             archivePlan,
             hashSecret: input.snapshotDiagnosticsHashSecret,
           });
+        if (archivePlan.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+          throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
+        }
         return await input.snapshotArchiveBuilder.buildEncryptedSnapshot({
           aad: activeSnapshotSession.encryption.aad,
           archiveEntries: archivePlan.entries,
