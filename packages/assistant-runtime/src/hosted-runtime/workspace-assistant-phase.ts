@@ -142,6 +142,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
+const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 
@@ -263,9 +264,10 @@ export async function runHostedWorkspaceAssistantPhase(
     ) {
       return systemMailboxMaintenance.result;
     }
-    const continuingSystemMailboxResult = shouldContinueAssistantLane
+    let continuingSystemMailboxResult = shouldContinueAssistantLane
       ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
       : managedAutomationsResult;
+    let deviceSyncMaintenanceRan = systemMailboxMaintenance.deviceSyncMaintenanceRan;
     const initialProviderCleanupCheckpoint =
       systemMailboxMaintenance.initialProviderCleanupCheckpoint;
     const mergeContinuingSystemMailboxResult = (
@@ -309,11 +311,6 @@ export async function runHostedWorkspaceAssistantPhase(
       });
     };
     const assistantMetrics = await runAutomationLane();
-    const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
-      deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
-      input,
-      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
-    });
     const currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     const foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -321,6 +318,37 @@ export async function runHostedWorkspaceAssistantPhase(
       currentTurnDeliveryIntentIds,
       hasFreshConversationInput,
       input,
+    });
+    const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+      input,
+      nextWakeAt: assistantMetrics.nextWakeAt,
+    });
+    const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
+      assistantNextWakeAt,
+    });
+    const deferredPendingSystemMailboxMaintenance =
+      await runBackgroundMaintenanceAfterDeferredPendingAssistantInput({
+        assistantMetrics,
+        assistantNextWakeAt,
+        executionContext,
+        foregroundAssistantPass,
+        hasFreshConversationInput,
+        input,
+        systemMailboxMaintenance,
+        wake,
+      });
+    if (deferredPendingSystemMailboxMaintenance) {
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
+        deferredPendingSystemMailboxMaintenance.result,
+      );
+      deviceSyncMaintenanceRan = deviceSyncMaintenanceRan
+        || deferredPendingSystemMailboxMaintenance.deviceSyncMaintenanceRan;
+    }
+    const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
+      deviceSyncMaintenanceRan,
+      input,
+      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
     const systemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
@@ -468,13 +496,6 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
-    });
-    const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-      input,
-      nextWakeAt: assistantMetrics.nextWakeAt,
-    });
-    const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
-      assistantNextWakeAt,
     });
     const nextWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
@@ -1349,12 +1370,16 @@ function systemMailboxPreparationRanDeviceSync(
 }
 
 function shouldRunIdleDeviceSyncMaintenance(input: {
+  pendingAssistantInputBlocksMaintenance: boolean;
   pendingAssistantInputWakeAt: string | null;
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   shouldYieldAfterSystemMailboxPreparation: boolean;
   systemMailboxPreparation: HostedSystemMailboxPreparation | null;
 }): boolean {
-  if (input.pendingAssistantInputWakeAt) {
+  if (
+    input.pendingAssistantInputWakeAt
+    && input.pendingAssistantInputBlocksMaintenance
+  ) {
     return false;
   }
   if (input.shouldYieldAfterSystemMailboxPreparation) {
@@ -1582,6 +1607,7 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
   deviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  pendingAssistantInputWakeAt: string | null;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
   const dirtyDeviceSyncWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(
@@ -1594,6 +1620,10 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
     ),
     createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation),
     input.assistantCronWake,
+    createHostedRuntimeWakeCandidate(
+      input.pendingAssistantInputWakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
   ]);
   const nextWakeAt = dirtyDeviceSyncWake.at;
   const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics.postCheckpointRecord
@@ -1635,10 +1665,78 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
   };
 }
 
+async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  assistantNextWakeAt: string | null;
+  executionContext: AssistantExecutionContext;
+  foregroundAssistantPass: boolean;
+  hasFreshConversationInput: boolean;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>> | null> {
+  if (!shouldRunBackgroundMaintenanceAfterDeferredPendingAssistantInput(input)) {
+    return null;
+  }
+
+  const pendingAssistantInputWakeAt = resolveDeferredPendingAssistantInputWakeAt(input);
+  return await runSystemMailboxMaintenancePhase({
+    executionContext: input.executionContext,
+    hasFreshConversationInput: input.hasFreshConversationInput,
+    input: input.input,
+    pendingAssistantInputBlocksMaintenance: false,
+    pendingAssistantInputWakeAt,
+    wake: input.wake,
+  });
+}
+
+function shouldRunBackgroundMaintenanceAfterDeferredPendingAssistantInput(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  assistantNextWakeAt: string | null;
+  foregroundAssistantPass: boolean;
+  hasFreshConversationInput: boolean;
+  systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+}): boolean {
+  if (
+    input.hasFreshConversationInput
+    || input.foregroundAssistantPass
+    || !input.systemMailboxMaintenance.pendingAssistantInputWakeAt
+  ) {
+    return false;
+  }
+
+  if (input.assistantNextWakeAt !== null) {
+    return true;
+  }
+
+  return input.assistantMetrics.assistantAutomationProgressed !== true;
+}
+
+function resolveDeferredPendingAssistantInputWakeAt(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  assistantNextWakeAt: string | null;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): string | null {
+  if (input.assistantNextWakeAt !== null) {
+    return input.assistantNextWakeAt;
+  }
+
+  if (input.assistantMetrics.assistantAutomationProgressed === true) {
+    return null;
+  }
+
+  return new Date(
+    resolveHostedAssistantPhaseNowMs(input.input)
+      + HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS,
+  ).toISOString();
+}
+
 async function runSystemMailboxMaintenancePhase(input: {
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  pendingAssistantInputBlocksMaintenance?: boolean;
+  pendingAssistantInputWakeAt?: string | null;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<{
   continueAssistantLane: boolean;
@@ -1674,8 +1772,12 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
     return state;
   };
-  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
-  if (pendingAssistantInputWakeAt) {
+  const pendingAssistantInputWakeAt = Object.hasOwn(input, "pendingAssistantInputWakeAt")
+    ? input.pendingAssistantInputWakeAt ?? null
+    : await resolvePendingAssistantInputWakeAt(phaseInput);
+  const pendingAssistantInputBlocksMaintenance =
+    input.pendingAssistantInputBlocksMaintenance ?? true;
+  if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
     return {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
@@ -1685,7 +1787,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
 
-  if (shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)) {
+  if (
+    pendingAssistantInputBlocksMaintenance
+    && shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)
+  ) {
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();
     if (preflightAssistantCronWakeState.dueNow) {
       return {
@@ -1713,6 +1818,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
   const shouldRunDirtyDeviceSyncWorkSource = shouldRunIdleDeviceSyncMaintenance({
     phaseInput,
+    pendingAssistantInputBlocksMaintenance,
     pendingAssistantInputWakeAt,
     shouldYieldAfterSystemMailboxPreparation,
     systemMailboxPreparation,
@@ -1732,7 +1838,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     })
     : null;
   if (!systemMailboxPreparation) {
-    if (pendingAssistantInputWakeAt) {
+    if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
       return {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
@@ -1756,6 +1862,7 @@ async function runSystemMailboxMaintenancePhase(input: {
           deviceActivityAutomation: dirtyDeviceActivityAutomation,
           dirtyDeviceSyncMetrics,
           input: phaseInput,
+          pendingAssistantInputWakeAt,
         }),
       };
     }
