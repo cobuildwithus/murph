@@ -595,7 +595,6 @@ test("write batches emit exact hosted canonical write receipts", async () => {
     kind: "delete",
     targetRelativePath: deletePath,
     existedBefore: true,
-    allowRaw: false,
   });
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(receiptRoot, `${batch.operationId}.json`), "utf8")),

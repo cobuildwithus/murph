@@ -374,6 +374,14 @@ export async function listIntegrationIngestsForEvent(input: {
   eventId: string;
   vaultRoot: string;
 }): Promise<IntegrationIngestEventSummary[]> {
+  return (await listIntegrationIngestEventSummaries({
+    vaultRoot: input.vaultRoot,
+  })).filter((summary) => summary.eventId === input.eventId);
+}
+
+export async function listIntegrationIngestEventSummaries(input: {
+  vaultRoot: string;
+}): Promise<IntegrationIngestEventSummary[]> {
   const summaries: IntegrationIngestEventSummary[] = [];
   const shardPaths = await readAllIntegrationIngestShardPaths(input.vaultRoot);
 
@@ -382,37 +390,36 @@ export async function listIntegrationIngestsForEvent(input: {
       vaultRoot: input.vaultRoot,
       relativePath: shardPath,
     })) {
-      const output = record.outputs?.events?.find((event) => event.id === input.eventId);
-      if (!output) {
-        continue;
+      for (const output of record.outputs?.events ?? []) {
+        const roles = new Set(output.roles);
+        summaries.push({
+          accountId: record.accountId,
+          eventId: output.id,
+          id: record.id,
+          importedAt: record.importedAt,
+          parts: record.parts
+            .filter((part) => roles.has(part.role))
+            .map((part) => ({
+              byteSize: part.byteSize,
+              fileName: part.fileName,
+              mediaType: part.mediaType,
+              relativePath: part.relativePath,
+              role: part.role,
+              sha256: part.sha256,
+            })),
+          provider: record.provider,
+          roles: [...roles].sort(),
+          shardPath,
+          source: record.source,
+        });
       }
-
-      const roles = new Set(output.roles);
-      summaries.push({
-        accountId: record.accountId,
-        eventId: input.eventId,
-        id: record.id,
-        importedAt: record.importedAt,
-        parts: record.parts
-          .filter((part) => roles.has(part.role))
-          .map((part) => ({
-            byteSize: part.byteSize,
-            fileName: part.fileName,
-            mediaType: part.mediaType,
-            relativePath: part.relativePath,
-            role: part.role,
-            sha256: part.sha256,
-          })),
-        provider: record.provider,
-        roles: [...roles].sort(),
-        shardPath,
-        source: record.source,
-      });
     }
   }
 
   return summaries.sort((left, right) =>
-    left.importedAt.localeCompare(right.importedAt) || left.id.localeCompare(right.id),
+    left.eventId.localeCompare(right.eventId)
+    || left.importedAt.localeCompare(right.importedAt)
+    || left.id.localeCompare(right.id),
   );
 }
 
@@ -591,10 +598,24 @@ export async function parseIntegrationEvidencePartJson(input: {
     return null;
   }
 
-  const manifestBinding = await validateIntegrationEvidencePartManifestBinding({
+  return await parseIntegrationEvidencePartSummaryJson({
     ingestId: match.record.id,
     part,
     provider: match.record.provider,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+export async function parseIntegrationEvidencePartSummaryJson(input: {
+  ingestId: string;
+  part: IntegrationIngestPartSummary;
+  provider: string;
+  vaultRoot: string;
+}): Promise<unknown | null> {
+  const manifestBinding = await validateIntegrationEvidencePartManifestBinding({
+    ingestId: input.ingestId,
+    part: input.part,
+    provider: input.provider,
     vaultRoot: input.vaultRoot,
   });
   if (!manifestBinding.ok) {
@@ -603,23 +624,23 @@ export async function parseIntegrationEvidencePartJson(input: {
     });
   }
 
-  const resolved = resolveVaultPath(input.vaultRoot, part.relativePath);
+  const resolved = resolveVaultPath(input.vaultRoot, input.part.relativePath);
   let bytes: Uint8Array;
   try {
     bytes = await fs.readFile(resolved.absolutePath);
   } catch (error) {
     throw new VaultError(
       "INTEGRATION_INGEST_PART_MISSING",
-      `Integration ingest "${input.ingestId}" part "${input.role}" raw artifact is missing.`,
-      { cause: error instanceof Error ? error.message : String(error), relativePath: part.relativePath },
+      `Integration ingest "${input.ingestId}" part "${input.part.role}" raw artifact is missing.`,
+      { cause: error instanceof Error ? error.message : String(error), relativePath: input.part.relativePath },
     );
   }
 
-  if (bytes.byteLength !== part.byteSize || sha256Hex(bytes) !== part.sha256) {
+  if (bytes.byteLength !== input.part.byteSize || sha256Hex(bytes) !== input.part.sha256) {
     throw new VaultError(
       "INTEGRATION_INGEST_PART_INTEGRITY",
-      `Integration ingest "${input.ingestId}" part "${input.role}" raw artifact failed integrity verification.`,
-      { relativePath: part.relativePath },
+      `Integration ingest "${input.ingestId}" part "${input.part.role}" raw artifact failed integrity verification.`,
+      { relativePath: input.part.relativePath },
     );
   }
 
@@ -628,7 +649,7 @@ export async function parseIntegrationEvidencePartJson(input: {
   } catch (error) {
     throw new VaultError(
       "INTEGRATION_INGEST_PART_NOT_JSON",
-      `Integration ingest "${input.ingestId}" part "${input.role}" is not valid JSON.`,
+      `Integration ingest "${input.ingestId}" part "${input.part.role}" is not valid JSON.`,
       { cause: error instanceof Error ? error.message : String(error) },
     );
   }

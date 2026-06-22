@@ -18,6 +18,7 @@ import {
   importDeviceBatch,
   initializeVault,
   pruneWearableDenseRawTimeseries,
+  readIntegrationIngestById,
   runWearableStorageMigrationPass,
   validateVault,
 } from "../src/index.ts";
@@ -295,12 +296,6 @@ test("pruneWearableDenseRawTimeseries preserves integration ingest evidence byte
         role: denseRole,
         fileName: "heart-rate-timeseries.json",
         mediaType: "application/json",
-        metadata: {
-          artifactClass: "dense_provider_timeseries",
-          resource: "heart_rate",
-          resourceCategory: "timeseries",
-          retentionClass: "debug_temporary",
-        },
         content: {
           resource: "heart_rate",
           sampleValues: Array.from({ length: 512 }, (_, index) => index),
@@ -336,6 +331,73 @@ test("pruneWearableDenseRawTimeseries preserves integration ingest evidence byte
 
   assert.equal(prune.tombstonedDenseRawArtifactCount, 0);
   assert.equal(await fs.readFile(path.join(vaultRoot, densePart.relativePath), "utf8"), before);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("pruneWearableDenseRawTimeseries tombstones debug temporary ingest raw outside the journal catalog", async () => {
+  const vaultRoot = await makeTempDirectory("murph-dense-raw-debug-temporary");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const denseRole = "junction-timeseries-heartrate";
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-01T00:00:00.000Z",
+    evidenceParts: [
+      {
+        role: denseRole,
+        fileName: "heart-rate-timeseries.json",
+        mediaType: "application/json",
+        metadata: {
+          artifactClass: "dense_provider_timeseries",
+          resource: "heart_rate",
+          resourceCategory: "timeseries",
+          retentionClass: "debug_temporary",
+        },
+        content: {
+          resource: "heart_rate",
+          sampleValues: Array.from({ length: 512 }, (_, index) => index),
+        },
+      },
+      {
+        role: "wearable-raw-receipt:device-batch",
+        fileName: "raw-ingest-receipt.json",
+        mediaType: "application/json",
+        content: {
+          schemaVersion: "wearable.raw_ingest_receipt.v1",
+          payloadHash: "payload_hash",
+          rawArtifactCount: 1,
+          rawArtifactRoles: [denseRole],
+        },
+      },
+    ],
+  });
+  const densePart = result.evidenceParts.find((part) => part.role === denseRole);
+  assert.ok(densePart);
+  const ingest = await readIntegrationIngestById({
+    id: result.importId,
+    vaultRoot,
+  });
+  assert.ok(ingest);
+  assert.equal(ingest.record.parts.some((part) => part.role === denseRole), false);
+  assert.equal(
+    (await detectWearableStorageMigrationCandidates({
+      now: REPAIR_NOW,
+      vaultRoot,
+    })).retentionEligibleDenseProviderRawTimeseriesCount,
+    1,
+  );
+
+  const prune = await pruneWearableDenseRawTimeseries({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(prune.tombstonedDenseRawArtifactCount, 1);
+  const rawTombstone = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, densePart.relativePath), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 

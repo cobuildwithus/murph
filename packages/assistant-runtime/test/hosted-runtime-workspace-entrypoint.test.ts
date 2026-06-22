@@ -6789,10 +6789,9 @@ describe("hosted workspace runtime entrypoint", () => {
             targetRelativePath: "journal/2026-04-28.md",
           },
           {
-            allowRaw: true,
             existedBefore: true,
             kind: "delete",
-            targetRelativePath: legacyRawRelativePath,
+            targetRelativePath: "note.md",
           },
         ],
         committedAt: TEST_NOW,
@@ -6918,7 +6917,7 @@ describe("hosted workspace runtime entrypoint", () => {
         receiptHash,
         exactPayloadHash,
       ]);
-      assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
+      await assert.rejects(readFile(path.join(vaultRoot, "note.md"), "utf8"));
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),
         "restored exact hosted note\n",

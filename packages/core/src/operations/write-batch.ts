@@ -99,7 +99,6 @@ export type HostedCanonicalWriteReceiptAction =
   | {
       kind: "delete";
       targetRelativePath: string;
-      allowRaw?: boolean;
       existedBefore: boolean;
     };
 
@@ -251,7 +250,6 @@ type StoredWriteAction =
       kind: "delete";
       state: WriteOperationActionState;
       targetRelativePath: string;
-      allowRaw: boolean;
       effect?: "delete";
       existedBefore?: boolean;
       backupRelativePath?: string;
@@ -527,7 +525,6 @@ export async function applyHostedCanonicalWriteReceipt(input: {
       }
       case "delete":
         await applyHostedCanonicalDeleteReceiptAction({
-          allowRaw: action.allowRaw,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -679,13 +676,11 @@ async function applyHostedCanonicalRawReceiptAction(input: {
 }
 
 async function applyHostedCanonicalDeleteReceiptAction(input: {
-  allowRaw?: boolean;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
   const target = await prepareVerifiedDeleteTarget(input.vaultRoot, input.targetRelativePath, {
     allowAppendOnlyJsonl: true,
-    allowRaw: input.allowRaw,
     kind: "delete",
   });
   await fs.rm(target.absolutePath, { force: true });
@@ -847,7 +842,6 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       return {
         kind: "delete",
         ...base,
-        allowRaw: record.allowRaw === true,
         backupRelativePath,
         effect: record.effect === "delete" ? record.effect : undefined,
       };
@@ -1466,7 +1460,6 @@ export class WriteBatch {
     targetRelativePath: string,
     options: {
       allowAppendOnlyJsonl?: boolean;
-      allowRaw?: boolean;
     } = {},
   ): Promise<string> {
     this.assertMutable();
@@ -1474,7 +1467,6 @@ export class WriteBatch {
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
       kind: "delete",
       allowAppendOnlyJsonl: options.allowAppendOnlyJsonl,
-      allowRaw: options.allowRaw,
       messages: {
         appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
         rawDisallowed: "Use stageRawCopy for raw artifacts.",
@@ -1484,7 +1476,6 @@ export class WriteBatch {
       kind: "delete",
       state: "staged",
       targetRelativePath: normalizedTarget,
-      allowRaw: options.allowRaw ?? false,
     });
     await this.persist();
     return normalizedTarget;
@@ -1871,7 +1862,6 @@ export class WriteBatch {
         return {
           kind: "delete",
           targetRelativePath: action.targetRelativePath,
-          allowRaw: action.allowRaw,
           existedBefore: action.existedBefore ?? false,
         };
     }
@@ -2358,7 +2348,6 @@ export class WriteBatch {
       },
       prepareTarget: async () =>
         await prepareVerifiedDeleteTarget(this.vaultRoot, action.targetRelativePath, {
-          allowRaw: action.allowRaw,
           kind: "delete",
         }),
     });

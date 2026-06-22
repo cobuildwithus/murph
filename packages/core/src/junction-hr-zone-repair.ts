@@ -15,8 +15,9 @@ import {
   type EventSpineEntry,
 } from "./history/event-spine.ts";
 import {
-  listIntegrationIngestsForEvent,
-  parseIntegrationEvidencePartJson,
+  listIntegrationIngestEventSummaries,
+  parseIntegrationEvidencePartSummaryJson,
+  type IntegrationIngestEventSummary,
 } from "./integration-ingests.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
@@ -202,6 +203,7 @@ async function collectJunctionHrZoneRepairCandidates(
   }
 
   const candidates: JunctionWorkoutHeartRateZoneRepairCandidate[] = [];
+  const integrationIngestEventIndex = await buildIntegrationIngestEventIndex(vaultRoot);
 
   for (const [id, entries] of entriesById) {
     if (idsWithInvalidRevisions.has(id)) {
@@ -231,7 +233,11 @@ async function collectJunctionHrZoneRepairCandidates(
     if (!isJunctionHrZoneRepairShapeCandidate(latestActivity)) {
       continue;
     }
-    if (!await hasPrimitiveNumericHrZoneEvidence(vaultRoot, latestActivity)) {
+    if (!await hasPrimitiveNumericHrZoneEvidence({
+      integrationIngestEventIndex,
+      record: latestActivity,
+      vaultRoot,
+    })) {
       unverifiedCandidateCount += 1;
       continue;
     }
@@ -289,12 +295,15 @@ function isJunctionWorkoutExternalRef(record: ActivitySessionEventRecord): boole
 }
 
 async function hasPrimitiveNumericHrZoneEvidence(
-  vaultRoot: string,
-  record: ActivitySessionEventRecord,
+  input: {
+    integrationIngestEventIndex: IntegrationIngestEventIndex | null;
+    record: ActivitySessionEventRecord;
+    vaultRoot: string;
+  },
 ): Promise<boolean> {
-  const sourceWorkoutId = record.workout?.sourceWorkoutId;
-  const expectedProviderSlug = slugifyProvider(record.workout?.sourceApp);
-  const storedZones = record.workout?.heartRateZones;
+  const sourceWorkoutId = input.record.workout?.sourceWorkoutId;
+  const expectedProviderSlug = slugifyProvider(input.record.workout?.sourceApp);
+  const storedZones = input.record.workout?.heartRateZones;
 
   if (
     !sourceWorkoutId
@@ -306,9 +315,11 @@ async function hasPrimitiveNumericHrZoneEvidence(
   }
 
   const sameIdRows = await collectSameIdWorkoutRowsFromIntegrationIngests({
-    eventId: record.id,
+    ingests: input.integrationIngestEventIndex === null
+      ? null
+      : input.integrationIngestEventIndex.get(input.record.id),
     sourceWorkoutId,
-    vaultRoot,
+    vaultRoot: input.vaultRoot,
   });
   if (sameIdRows) {
     return rawEvidenceVerifiesStoredRow(sameIdRows, expectedProviderSlug, storedZones);
@@ -316,42 +327,57 @@ async function hasPrimitiveNumericHrZoneEvidence(
 
   return rawEvidenceVerifiesStoredRow(
     await collectSameIdWorkoutRowsFromLegacyRawRefs({
-      rawRefs: record.rawRefs,
+      rawRefs: input.record.rawRefs,
       sourceWorkoutId,
-      vaultRoot,
+      vaultRoot: input.vaultRoot,
     }),
     expectedProviderSlug,
     storedZones,
   );
 }
 
+type IntegrationIngestEventIndex = Map<string, IntegrationIngestEventSummary[]>;
+
+async function buildIntegrationIngestEventIndex(vaultRoot: string): Promise<IntegrationIngestEventIndex | null> {
+  try {
+    const index: IntegrationIngestEventIndex = new Map();
+    for (const summary of await listIntegrationIngestEventSummaries({ vaultRoot })) {
+      const entries = index.get(summary.eventId) ?? [];
+      entries.push(summary);
+      index.set(summary.eventId, entries);
+    }
+    return index;
+  } catch {
+    return null;
+  }
+}
+
 async function collectSameIdWorkoutRowsFromIntegrationIngests(input: {
-  eventId: string;
+  ingests: readonly IntegrationIngestEventSummary[] | null | undefined;
   sourceWorkoutId: string;
   vaultRoot: string;
 }): Promise<RawSameIdWorkoutRow[] | null> {
-  let ingests: Awaited<ReturnType<typeof listIntegrationIngestsForEvent>>;
-  try {
-    ingests = await listIntegrationIngestsForEvent({
-      eventId: input.eventId,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch {
+  if (input.ingests === null) {
     return [];
   }
 
-  if (ingests.length === 0) {
+  if (input.ingests === undefined) {
+    return null;
+  }
+
+  if (input.ingests.length === 0) {
     return null;
   }
 
   const sameIdRows: RawSameIdWorkoutRow[] = [];
-  for (const ingest of ingests) {
+  for (const ingest of input.ingests) {
     for (const part of ingest.parts) {
       let payload: unknown | null;
       try {
-        payload = await parseIntegrationEvidencePartJson({
+        payload = await parseIntegrationEvidencePartSummaryJson({
           ingestId: ingest.id,
-          role: part.role,
+          part,
+          provider: ingest.provider,
           vaultRoot: input.vaultRoot,
         });
       } catch {

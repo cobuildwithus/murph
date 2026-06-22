@@ -1213,6 +1213,82 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(sampleRecords.length, 1);
 });
 
+test("importDeviceBatch retries without importedAt reuse the same raw evidence identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-retry-no-imported-at");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const input = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        content: {
+          provider: "whoop",
+          score: 67,
+        },
+      },
+    ],
+  } as const;
+
+  const first = await importDeviceBatch(input);
+  const second = await importDeviceBatch(input);
+  const ingestRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.ingestShardPath,
+  })) as IntegrationIngestRecord[];
+
+  assert.equal(first.importId, second.importId);
+  assert.equal(first.importedAt, "2026-03-12T12:00:00.000Z");
+  assert.equal(second.importedAt, first.importedAt);
+  assert.equal(first.evidenceParts[0]?.relativePath, second.evidenceParts[0]?.relativePath);
+  assert.equal(ingestRows.filter((record) => record.id === first.importId).length, 1);
+});
+
+test("importDeviceBatch rejects event rawRefs to debug temporary dense evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-debug-rawref");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "junction",
+        importedAt: "2026-05-01T00:00:00.000Z",
+        events: [
+          {
+            kind: "observation",
+            occurredAt: "2026-05-01T00:00:00.000Z",
+            rawArtifactRoles: ["junction-timeseries-heartrate"],
+            title: "debug dense raw reference",
+            fields: {
+              metric: "heart-rate",
+              value: 72,
+              unit: "bpm",
+            },
+          },
+        ],
+        evidenceParts: [
+          {
+            role: "junction-timeseries-heartrate",
+            fileName: "heart-rate-timeseries.json",
+            metadata: {
+              artifactClass: "dense_provider_timeseries",
+              resourceCategory: "timeseries",
+              retentionClass: "debug_temporary",
+            },
+            content: {
+              sampleValues: [72, 73],
+            },
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_EVIDENCE_ROLE_MISSING",
+  );
+});
+
 test("importDeviceBatch falls back to the sole evidence part when events omit explicit roles", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-single-raw");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

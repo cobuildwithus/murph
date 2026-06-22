@@ -358,6 +358,7 @@ interface NormalizedDeviceBatchInputs {
   provider: string;
   accountId?: string;
   importedAt: string;
+  importedAtWasProvided: boolean;
   source: string;
   defaultTimeZone?: string;
   provenance: LooseRecord;
@@ -390,6 +391,7 @@ interface DeviceBatchPlan {
   preparedEvents: PreparedDeviceEventEntry[];
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedEvidenceParts: PreparedDeviceEvidencePart[];
+  preparedDurableEvidenceParts: PreparedDeviceEvidencePart[];
   ingestReceipt?: IntegrationIngestReceipt;
 }
 
@@ -1391,7 +1393,8 @@ function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
 function normalizeDeviceBatchInputs({
   provider,
   accountId,
-  importedAt = new Date(),
+  importedAt,
+  defaultImportedAt,
   defaultTimeZone: fallbackTimeZone,
   source = "device",
   events = [],
@@ -1401,11 +1404,16 @@ function normalizeDeviceBatchInputs({
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
+  defaultImportedAt?: DateInput;
   defaultTimeZone?: string;
 }): NormalizedDeviceBatchInputs {
   const normalizedProvider = sanitizePathSegment(provider, "provider");
   const normalizedAccountId = typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
-  const normalizedImportedAt = toIsoTimestamp(importedAt, "importedAt");
+  const importedAtWasProvided = importedAt !== undefined;
+  const normalizedImportedAt = toIsoTimestamp(
+    importedAtWasProvided ? importedAt : defaultImportedAt ?? new Date(),
+    "importedAt",
+  );
   const defaultTimeZone = normalizeTimeZone(fallbackTimeZone);
   const normalizedProvenance = normalizeLooseRecord(
     provenance,
@@ -1451,6 +1459,7 @@ function normalizeDeviceBatchInputs({
     provider: normalizedProvider,
     accountId: normalizedAccountId,
     importedAt: normalizedImportedAt,
+    importedAtWasProvided,
     source,
     defaultTimeZone,
     provenance: normalizedProvenance,
@@ -1491,6 +1500,14 @@ function prepareDeviceEvidenceParts(
     byteSize: artifact.byteSize,
     sha256: artifact.sha256,
   }));
+}
+
+function isDebugTemporaryDenseEvidencePart(part: {
+  metadata?: Record<string, unknown>;
+}): boolean {
+  return part.metadata?.artifactClass === "dense_provider_timeseries"
+    && part.metadata.resourceCategory === "timeseries"
+    && part.metadata.retentionClass === "debug_temporary";
 }
 
 function prepareDeviceEventEntries(
@@ -2142,7 +2159,8 @@ function dedupeNormalizedDeviceSamplesByRecordId(
 function prepareDeviceBatchPlan({
   provider,
   accountId,
-  importedAt = new Date(),
+  importedAt,
+  defaultImportedAt,
   defaultTimeZone: fallbackTimeZone,
   source = "device",
   events = [],
@@ -2152,12 +2170,14 @@ function prepareDeviceBatchPlan({
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
+  defaultImportedAt?: DateInput;
   defaultTimeZone?: string;
 }): DeviceBatchPlan {
   const normalizedInputs = normalizeDeviceBatchInputs({
     provider,
     accountId,
     importedAt,
+    defaultImportedAt,
     defaultTimeZone: fallbackTimeZone,
     source,
     events,
@@ -2181,7 +2201,7 @@ function prepareDeviceBatchPlan({
     stableStringify({
       provider: normalizedInputs.provider,
       accountId: normalizedInputs.accountId ?? null,
-      importedAt: normalizedInputs.importedAt,
+      ...(normalizedInputs.importedAtWasProvided ? { importedAt: normalizedInputs.importedAt } : {}),
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: uniqueSamples.map(({ recordId }) => recordId),
       evidenceParts: normalizedInputs.evidenceParts.map((artifact) => ({
@@ -2199,7 +2219,10 @@ function prepareDeviceBatchPlan({
     provider: normalizedInputs.provider,
   });
   const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts, rawDirectory);
-  const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedEvidenceParts);
+  const preparedDurableEvidenceParts = preparedEvidenceParts.filter((part) =>
+    !isDebugTemporaryDenseEvidencePart(part)
+  );
+  const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedDurableEvidenceParts);
   const preparedSamples = prepareDeviceSampleEntries(uniqueSamples);
 
   return {
@@ -2213,6 +2236,7 @@ function prepareDeviceBatchPlan({
     preparedEvents,
     preparedSamples,
     preparedEvidenceParts,
+    preparedDurableEvidenceParts,
     ingestReceipt: normalizedInputs.ingestReceipt,
   };
 }
@@ -2695,7 +2719,7 @@ export async function importDeviceBatch({
   vaultRoot,
   provider,
   accountId,
-  importedAt = new Date(),
+  importedAt,
   source = "device",
   events = [],
   samples = [],
@@ -2710,6 +2734,7 @@ export async function importDeviceBatch({
     provider,
     accountId,
     importedAt,
+    defaultImportedAt: vault.metadata.createdAt,
     defaultTimeZone: vault.metadata.timezone,
     source,
     events,
@@ -2742,7 +2767,7 @@ export async function importDeviceBatch({
     source: deviceBatchPlan.source,
     importedAt: deviceBatchPlan.importedAt,
     receipt: deviceBatchPlan.ingestReceipt,
-    parts: deviceBatchPlan.preparedEvidenceParts,
+    parts: deviceBatchPlan.preparedDurableEvidenceParts,
     outputs: {
       events: buildIntegrationIngestEventOutputs({
         preparedEvents: deviceBatchPlan.preparedEvents,
