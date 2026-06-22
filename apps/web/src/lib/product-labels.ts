@@ -478,7 +478,7 @@ async function loadProductContaminantSummaries(
     ? "linked_labels.product_id"
     : `product_tests.${productColumnSql}`;
   const servingGramsSql = useCanonicalAliases
-    ? "selected_labels.serving_grams"
+    ? "linked_labels.serving_grams"
     : "labels.serving_grams";
   const lookupTargetsSql = useCanonicalAliases
     ? `
@@ -486,19 +486,11 @@ async function loadProductContaminantSummaries(
       SELECT *
       FROM unnest($1::text[], $2::text[]) AS target(product_id, canonical_key)
     ),
-    selected_labels AS MATERIALIZED (
-      SELECT
-        lookup_targets.product_id,
-        labels.serving_grams
-      FROM lookup_targets
-      JOIN ${tableSql} labels
-        ON labels.id = lookup_targets.product_id
-        AND ${productLabelSourceFilterSql("labels.data_origin")}
-    ),
     linked_labels AS MATERIALIZED (
       SELECT DISTINCT
         lookup_targets.product_id,
-        labels.id AS label_id
+        labels.id AS label_id,
+        labels.serving_grams
       FROM lookup_targets
       JOIN ${tableSql} labels
         ON labels.canonical_key = lookup_targets.canonical_key
@@ -509,9 +501,7 @@ async function loadProductContaminantSummaries(
     ? `
     FROM linked_labels
     JOIN product_tests
-      ON product_tests.${productColumnSql} = linked_labels.label_id
-    JOIN selected_labels
-      ON selected_labels.product_id = linked_labels.product_id`
+      ON product_tests.${productColumnSql} = linked_labels.label_id`
     : `
     FROM product_tests
     JOIN ${tableSql} labels

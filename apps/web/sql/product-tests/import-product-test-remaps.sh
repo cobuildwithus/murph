@@ -14,11 +14,12 @@ Required env:
 Optional env:
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
-The TSV columns are: source_key, tested_source_product_id, food_id,
-supplement_id, match_method, review_note. Use source_only with blank product ids
-to intentionally unlink a source product. Use exact_upc, exact_source_id, or
-manual_confirmed with exactly one product id to attach every matching source
-product test to a real Murph label row.
+The TSV columns are: source_key, tested_source_product_id, tested_product_name,
+tested_product_brand, tested_product_upc, food_id, supplement_id, match_method,
+review_note. Use source_only with blank product ids to intentionally unlink a
+source product. Use exact_upc, exact_source_id, or manual_confirmed with exactly
+one product id to attach every matching source product test to a real Murph
+label row.
 
 The runner never prints the database URL or passes it to psql argv.
 USAGE

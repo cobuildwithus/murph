@@ -1,0 +1,30 @@
+entity_type	label_id	serving_grams	evidence_url	evidence_note
+food	safeway:960127250	240	https://www.plasticlist.org/product/26	PlasticList products 26 and 27 list serving size 240 g, serving unit 1 cup, for the linked Clover whole milk tests.
+food	fdc:1301823	370	https://www.plasticlist.org/product/71	PlasticList product 71 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Diet Coke tests.
+food	fdc:2663955	450	https://www.plasticlist.org/product/59	PlasticList product 59 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power Elite vanilla tests.
+food	wfm:b00iae9y5a	355	https://www.plasticlist.org/product/101	PlasticList product 101 lists serving size 355 g, serving unit 12 fl oz, for the linked Fiji water tests.
+food	brand_site:driscolls-non-organic-strawberries	140	https://www.plasticlist.org/product/81	PlasticList product 81 lists serving size 140 g, serving unit 1 cup, for the linked Driscoll's strawberry tests.
+food	brand_site:good-farms-organic-strawberries	140	https://www.plasticlist.org/product/82	PlasticList product 82 lists serving size 140 g, serving unit 1 cup, for the linked Good Farms strawberry tests.
+food	brand_site:nespresso-medium-roast-black-capsule-coffee	237	https://www.plasticlist.org/product/17	PlasticList product 17 lists serving size 237 g, serving unit 8 fl oz, for the linked Nespresso coffee tests.
+food	brand_site:o-organics-organic-eggs-large-brown	100	https://www.plasticlist.org/product/316	PlasticList product 316 lists serving size 100 g, serving unit 2 eggs, for the linked O Organics egg tests.
+food	fdc:1168556	366	https://www.plasticlist.org/product/991	PlasticList product 991 lists serving size 366 g, serving unit 12 fl oz, for the linked Gatorade Cool Blue tests.
+food	fdc:170700	450	https://www.plasticlist.org/product/151	PlasticList product 151 lists serving size 450 g, serving unit 14 fl oz, for the linked Burger King vanilla shake tests.
+food	fdc:1965636	450	https://www.plasticlist.org/product/61	PlasticList product 61 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power chocolate tests.
+food	fdc:2198090	170	https://www.plasticlist.org/product/117	PlasticList product 117 lists serving size 170 g, serving unit 3/4 cup, for the linked Straus Greek yogurt tests.
+food	fdc:2203038	370	https://www.plasticlist.org/product/70	PlasticList product 70 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Coca-Cola original tests.
+food	fdc:2418882	370	https://www.plasticlist.org/product/69	PlasticList product 69 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Guayaki Bluephoria tests.
+food	fdc:2519549	370	https://www.plasticlist.org/product/72	PlasticList product 72 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Coca-Cola Zero tests.
+food	fdc:2663953	450	https://www.plasticlist.org/product/62	PlasticList product 62 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power strawberry banana tests.
+food	fdc:2663962	450	https://www.plasticlist.org/product/60	PlasticList product 60 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power Elite strawberry tests.
+food	fdc:2663963	450	https://www.plasticlist.org/product/63	PlasticList product 63 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power vanilla tests.
+food	fdc:2668980	450	https://www.plasticlist.org/product/231	PlasticList product 231 lists serving size 450 g, serving unit 14 fl oz, for the linked Fairlife Core Power Elite chocolate tests.
+food	kroger_site:0083514300104	370	https://www.plasticlist.org/product/79	PlasticList product 79 lists serving size 370 g, serving unit 12 fl oz, for the linked Ito En Oi Ocha tests.
+food	safeway:960127068	240	https://www.plasticlist.org/product/57	PlasticList product 57 lists serving size 240 g, serving unit 1 cup, for the linked Almond Breeze almond milk tests.
+food	brand_site:rishi-english-breakfast-organic-black-tea	300	https://www.plasticlist.org/product/931	PlasticList product 931 lists serving size 300 g, serving unit 1 teabag / 1 cup, for the linked Rishi black tea tests.
+food	brand_site:tazo-awake-english-breakfast-black-tea	300	https://www.plasticlist.org/product/930	PlasticList product 930 lists serving size 300 g, serving unit 1 teabag / 1 cup, for the linked Tazo black tea tests.
+food	fdc:1086537	370	https://www.plasticlist.org/product/78	PlasticList product 78 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Red Bull tests.
+food	tj:072774	114	https://www.eatthismuch.com/calories/steamed-peeled-baby-beets-1827039	Eat This Much nutrition page lists serving size 3/4 cup (114 g) for Trader Joe's Steamed & Peeled Baby Beets; use serving mass, not 8 oz package mass.
+supplement	271503	370	https://www.plasticlist.org/product/77	PlasticList product 77 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Celsius Kiwi Guava tests.
+supplement	280356	1.5	https://www.plasticlist.org/product/89	PlasticList product 89 lists serving size 1.5 g, serving unit 1 softgel, for the linked Nature Made prenatal tests.
+supplement	40351	370	https://www.plasticlist.org/product/76	PlasticList product 76 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Celsius Orange tests.
+supplement	40352	370	https://www.plasticlist.org/product/75	PlasticList product 75 lists serving size 370 g, serving unit 1 can (12 fl oz), for the linked Celsius Wild Berry tests.

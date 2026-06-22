@@ -34,6 +34,7 @@ esac
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
 product_tests_script_dir_abs="$repo_root/apps/web/sql/product-tests"
+export REVIEWED_SERVING_GRAMS_TSV_PATH="${REVIEWED_SERVING_GRAMS_TSV_PATH:-$product_tests_script_dir_abs/reviewed-serving-grams.tsv}"
 
 # shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
 . "$product_tests_script_dir_abs/labels-db-psql.sh"
