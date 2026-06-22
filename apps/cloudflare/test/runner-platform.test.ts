@@ -1102,6 +1102,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
@@ -1344,6 +1349,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
@@ -1463,6 +1473,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
