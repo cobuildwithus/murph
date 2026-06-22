@@ -889,11 +889,10 @@ function createSuccessfulReplyGroupOutcome(
 function createFailedGroupOutcome(input: {
   advanceCursor: boolean
   error: unknown
-  failure?: AssistantAutoReplyFailureSnapshot
   nextWakeAt?: string | null
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
-  const failure = input.failure ?? describeAssistantAutoReplyFailure(input.error)
+  const failure = describeAssistantAutoReplyFailure(input.error)
   const failureContext = normalizeAssistantSafeFailureContext(failure.context)
 
   return {

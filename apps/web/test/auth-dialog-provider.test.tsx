@@ -48,6 +48,7 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  mocks.authDialogProps = null;
 });
 
 test("AuthProvider resumes a pending device connect intent after sign-in completion", async () => {
@@ -161,6 +162,27 @@ test("AuthProvider resumes a private computer handoff after sign-in completion",
 
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("ComputerHandoffAuthRequiredState opens the shared auth dialog on mount", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { ComputerHandoffAuthRequiredState } = await import(
+    "@/src/components/computer-use/computer-handoff-auth-required"
+  );
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, {
+      authenticated: false,
+    }, createElement(ComputerHandoffAuthRequiredState)),
+    { requireButton: false },
+  );
+
+  expect(rendered.container.textContent).toContain("Sign in to open this browser handoff");
+  expect(mocks.authDialogProps?.open).toBe(true);
 
   await rendered.cleanup();
 });
