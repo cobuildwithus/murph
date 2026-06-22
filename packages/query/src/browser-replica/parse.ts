@@ -99,6 +99,7 @@ function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
+    comparator: readNullableMetricComparator(record.comparator, `${label}.comparator`),
     confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
     context: requireRecord(record.context, `${label}.context`),
     date: requireString(record.date, `${label}.date`),
@@ -290,6 +291,12 @@ function requireMetricStatistic(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "value" || text === "latest" || text === "mean" || text === "median" || text === "min" || text === "max" || text === "sum" || text === "count") return text;
   throw new TypeError(`${label} must be a metric statistic.`);
+}
+function readNullableMetricComparator(value: unknown, label: string) {
+  if (value === null || value === undefined) return null;
+  const text = requireString(value, label);
+  if (text === "<" || text === "<=" || text === ">" || text === ">=") return text;
+  throw new TypeError(`${label} must be a metric comparator.`);
 }
 function requireMetricSelectionStatus(value: unknown, label: string) {
   const text = requireString(value, label);

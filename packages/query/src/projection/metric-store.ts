@@ -158,6 +158,13 @@ export function listStoredMetricPoints(
   location: QueryProjectionLocation,
   filters: QueryMetricPointFilters,
 ): MetricPoint[] {
+  return listStoredMetricPointsBatch(location, [filters]);
+}
+
+export function listStoredMetricPointsBatch(
+  location: QueryProjectionLocation,
+  filtersList: readonly QueryMetricPointFilters[],
+): MetricPoint[] {
   const database = openQueryProjectionDatabase(location, {
     create: false,
     readOnly: true,
@@ -166,68 +173,81 @@ export function listStoredMetricPoints(
   try {
     assertQueryProjectionTables(database, location);
 
-    const whereClauses: string[] = [];
-    const parameters: Array<string | number> = [];
-
-    if (filters.metricKey) {
-      whereClauses.push("metric_key = ?");
-      parameters.push(filters.metricKey);
+    const pointsById = new Map<string, MetricPoint>();
+    for (const filters of filtersList) {
+      for (const point of queryStoredMetricPoints(database, filters)) {
+        pointsById.set(point.id, point);
+      }
     }
-    if (filters.biomarkerKey) {
-      whereClauses.push("biomarker_key = ?");
-      parameters.push(filters.biomarkerKey);
-    }
-    if (filters.from) {
-      whereClauses.push("effective_date >= ?");
-      parameters.push(filters.from);
-    }
-    if (filters.to) {
-      whereClauses.push("effective_date <= ?");
-      parameters.push(filters.to);
-    }
-
-    const limit = filters.limit === null ? null : normalizeMetricPointLimit(filters.limit ?? 1_000);
-    const limitSql = limit === null ? "" : "LIMIT ?";
-    if (limit !== null) {
-      parameters.push(limit);
-    }
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-    const rows = database.prepare(`
-      SELECT
-        id,
-        metric_key,
-        biomarker_key,
-        value,
-        text_value,
-        comparator,
-        unit,
-        canonical_value,
-        canonical_unit,
-        observed_at,
-        effective_date,
-        recorded_at,
-        reported_at,
-        grain,
-        statistic,
-        source_family,
-        source_kind,
-        source_record_id,
-        source_result_index,
-        source_path,
-        confidence,
-        metric_point_json
-      FROM query_metric_points
-      ${whereSql}
-      ORDER BY effective_date DESC, observed_at DESC, id ASC
-      ${limitSql}
-    `).all(...parameters);
-
-    return rows
-      .map(decodeStoredMetricPoint)
-      .filter((point): point is MetricPoint => point !== null);
+    return [...pointsById.values()];
   } finally {
     database.close();
   }
+}
+
+function queryStoredMetricPoints(
+  database: DatabaseSync,
+  filters: QueryMetricPointFilters,
+): MetricPoint[] {
+  const whereClauses: string[] = [];
+  const parameters: Array<string | number> = [];
+
+  if (filters.metricKey) {
+    whereClauses.push("metric_key = ?");
+    parameters.push(filters.metricKey);
+  }
+  if (filters.biomarkerKey) {
+    whereClauses.push("biomarker_key = ?");
+    parameters.push(filters.biomarkerKey);
+  }
+  if (filters.from) {
+    whereClauses.push("effective_date >= ?");
+    parameters.push(filters.from);
+  }
+  if (filters.to) {
+    whereClauses.push("effective_date <= ?");
+    parameters.push(filters.to);
+  }
+
+  const limit = filters.limit === null ? null : normalizeMetricPointLimit(filters.limit ?? 1_000);
+  const limitSql = limit === null ? "" : "LIMIT ?";
+  if (limit !== null) {
+    parameters.push(limit);
+  }
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const rows = database.prepare(`
+    SELECT
+      id,
+      metric_key,
+      biomarker_key,
+      value,
+      text_value,
+      comparator,
+      unit,
+      canonical_value,
+      canonical_unit,
+      observed_at,
+      effective_date,
+      recorded_at,
+      reported_at,
+      grain,
+      statistic,
+      source_family,
+      source_kind,
+      source_record_id,
+      source_result_index,
+      source_path,
+      confidence,
+      metric_point_json
+    FROM query_metric_points
+    ${whereSql}
+    ORDER BY effective_date DESC, observed_at DESC, id ASC
+    ${limitSql}
+  `).all(...parameters);
+
+  return rows
+    .map(decodeStoredMetricPoint)
+    .filter((point): point is MetricPoint => point !== null);
 }
 
 export function normalizeMetricPointFilters(filters: QueryMetricPointFilters): QueryMetricPointFilters {

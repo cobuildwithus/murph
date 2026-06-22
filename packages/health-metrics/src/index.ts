@@ -1,6 +1,7 @@
 export * from "./types.ts";
 export * from "./catalog.ts";
 export * from "./normalize.ts";
+export * from "./record-ids.ts";
 export * from "./selectors.ts";
 export * from "./series.ts";
 export * from "./goals.ts";

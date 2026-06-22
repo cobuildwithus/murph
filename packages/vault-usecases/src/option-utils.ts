@@ -237,7 +237,7 @@ function normalizeInternalRecordIdField(value: string, optionName: string) {
     /[\\/@]/u.test(normalized) ||
     normalized.includes('://') ||
     normalized.includes('..') ||
-    !/^(?:evt|sample|batch|metric_sample)_[A-Za-z0-9][A-Za-z0-9_-]*$|^sample-summary:[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Za-z0-9_-]+:[A-Za-z0-9_.%/-]+$/u.test(normalized)
+    !/^(?:evt|sample|batch|metric_sample)_[A-Za-z0-9][A-Za-z0-9_-]*$|^sample-summary:[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Za-z0-9_-]+:[A-Za-z0-9_.%/-]+$|^sample-summary:[A-Za-z0-9_-]+:[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(normalized)
   ) {
     throw new VaultCliError(
       'invalid_option',

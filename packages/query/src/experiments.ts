@@ -15,10 +15,16 @@ import {
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
+  resolveExperimentAdherenceRollupTarget,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
+import {
+  matchesExperimentMetricIdentity,
+  resolveExperimentMetricIdentity,
+} from "./experiment-metrics.ts";
+import { metricPointRecordIds } from "./metrics/index.ts";
 import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,
@@ -26,6 +32,7 @@ import {
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  normalizeMetricKey,
   selectMetricSeries,
   selectMetricValue,
   selectMetricWindowComparison,
@@ -33,7 +40,7 @@ import {
   type MetricWindowSummary,
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
-import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
+import { summarizeWearableDay, type WearableDaySummary } from "./wearables.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
@@ -227,9 +234,18 @@ interface ExperimentSummaryContext {
   experiment: CanonicalEntity;
   frontmatter: QueryExperimentFrontmatter;
   interventionDates: string[];
-  metricPoints: MetricPoint[];
+  metricPoints: readonly MetricPoint[];
   progressPhase: ExperimentProgressPhase;
   summariesByDate: Map<string, WearableDaySummary | null>;
+}
+
+type ExperimentFollowupContext = Pick<
+  ExperimentSummaryContext,
+  "events" | "frontmatter" | "progressPhase"
+>;
+
+interface ExperimentMetricPointOptions {
+  metricPoints?: readonly MetricPoint[];
 }
 
 interface MetricWindowPair {
@@ -253,7 +269,7 @@ interface MetricWindowSelection {
 export function summarizeExperimentProgress(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentProgressSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
   const signals = buildMetricResults(context);
@@ -264,12 +280,17 @@ export function summarizeExperimentProgress(
   const primaryBiomarkerKey = context.frontmatter.analysisPlan?.primaryBiomarkerKey ?? null;
   const hasPrimarySignal =
     primaryBiomarkerKey !== null && primarySignal?.biomarkerKey === primaryBiomarkerKey;
-  const baselineDaysAvailable = hasPrimarySignal
-    ? primarySignal.baselineDayCount
-    : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
-  const interventionDaysAvailable = hasPrimarySignal
-    ? primarySignal.interventionDayCount
-    : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
+  const metricDaysAvailable = summarizeSignalDayCoverage(signals);
+  const baselineDaysAvailable = metricDaysAvailable.baselineDaysAvailable > 0
+    ? metricDaysAvailable.baselineDaysAvailable
+    : hasPrimarySignal
+      ? primarySignal.baselineDayCount
+      : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
+  const interventionDaysAvailable = metricDaysAvailable.interventionDaysAvailable > 0
+    ? metricDaysAvailable.interventionDaysAvailable
+    : hasPrimarySignal
+      ? primarySignal.interventionDayCount
+      : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
   const adherence = {
     ...buildAdherenceSummary(context),
     sessionEventIds: completedSessionEventIds,
@@ -280,6 +301,7 @@ export function summarizeExperimentProgress(
     primarySignal,
     progressPhase: context.progressPhase,
     frontmatter: context.frontmatter,
+    signals,
     summariesByDate: context.summariesByDate,
   });
   const setupReadiness = buildSetupReadiness(context.frontmatter);
@@ -332,7 +354,7 @@ export function summarizeExperimentProgress(
 export function analyzeExperimentOutcome(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentOutcomeSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
   const metricResults = buildMetricResults(context);
@@ -395,7 +417,7 @@ export function decideExperimentFollowupDue(
   },
 ): ExperimentFollowupDueDecision {
   const date = options.date ?? resolveVaultLocalDate(vault, options.now ?? new Date());
-  const context = buildExperimentSummaryContext(vault, slug, { asOf: date });
+  const context = buildExperimentFollowupContext(vault, slug, date);
 
   if (options.kind === "weekly-digest") {
     return decideWeeklyDigestDue(context, date);
@@ -407,7 +429,7 @@ export function decideExperimentFollowupDue(
 function buildExperimentSummaryContext(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string },
+  options: { asOf?: string } & ExperimentMetricPointOptions,
 ): ExperimentSummaryContext {
   const experiment = getExperiment(vault, slug);
   if (!experiment) {
@@ -444,9 +466,27 @@ function buildExperimentSummaryContext(
       frontmatter.runPlan?.interventionStart,
       minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
     ),
-    metricPoints: buildMetricProjection(vault).metricPoints,
+    metricPoints: options.metricPoints ?? buildMetricProjection(vault).metricPoints,
     progressPhase,
     summariesByDate,
+  };
+}
+
+function buildExperimentFollowupContext(
+  vault: VaultReadModel,
+  slug: string,
+  asOf: string,
+): ExperimentFollowupContext {
+  const experiment = getExperiment(vault, slug);
+  if (!experiment) {
+    throw new Error(`Experiment "${slug}" was not found in the query read model.`);
+  }
+
+  const frontmatter = requireExperimentFrontmatter(experiment);
+  return {
+    events: findExperimentEvents(vault, experiment, frontmatter, asOf),
+    frontmatter,
+    progressPhase: resolveProgressPhase(frontmatter, asOf),
   };
 }
 
@@ -545,7 +585,7 @@ function resolveExpectedDirection(
 export function collectExperimentAdherenceCalendar(
   vault: VaultReadModel,
   slug: string,
-  options: { asOf?: string } = {},
+  options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentAdherenceCalendarResult | null {
   return buildAdherenceCalendarFromContext(
     buildExperimentSummaryContext(vault, slug, options),
@@ -581,18 +621,27 @@ function buildAdherenceCalendarFromContext(
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
   const targets = resolveAdherenceTargets(context);
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
   const targetSessions =
-    targets[0]?.rollup?.targetCompletions ??
-    context.frontmatter.runPlan?.targetSessions ??
-    null;
+    rollupTarget?.rollup?.targetCompletions ??
+    (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.targetSessions ?? null);
   const minimumUsefulSessions =
-    targets[0]?.rollup?.minimumUsefulCompletions ??
-    context.frontmatter.runPlan?.minimumUsefulSessions ??
-    null;
+    rollupTarget?.rollup?.minimumUsefulCompletions ??
+    (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const completedSessions = adherenceCalendar?.summary.satisfiedCount ?? context.completedSessions;
-  const expectedSessionsByNow = adherenceCalendar
-    ? adherenceCalendar.cells.filter((cell) => cell.status !== "scheduled").length
+  const rollupCells = rollupTarget && adherenceCalendar
+    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
+    : null;
+  const completedSessions = hasAmbiguousTargets
+    ? 0
+    : rollupCells
+    ? rollupCells.filter((cell) => cell.status === "satisfied").length
+    : context.completedSessions;
+  const expectedSessionsByNow = hasAmbiguousTargets
+    ? null
+    : adherenceCalendar
+    ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
     : computeExpectedSessionsByNow(
         context.frontmatter,
         context.asOf,
@@ -600,7 +649,9 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
       );
 
   let status: ExperimentAdherenceStatus = "unknown";
-  if (completedSessions === 0) {
+  if (hasAmbiguousTargets) {
+    status = "unknown";
+  } else if (completedSessions === 0) {
     status = "not_started";
   } else if (targetSessions !== null && completedSessions >= targetSessions) {
     status = "met_target";
@@ -655,18 +706,14 @@ function buildAdherenceObservations(
       case "metricPresence":
       case "metricThreshold":
         const metricEvidence = target.evidence;
-        for (const [date, summary] of context.summariesByDate) {
-          const metric = resolveAdherenceMetric(metricEvidence.metricKey, summary);
-          if (!metric || typeof metric.selection.value !== "number") {
-            continue;
-          }
-          const value = metric.selection.value;
+        for (const row of selectMetricAdherenceRows(context, metricEvidence.metricKey)) {
           observations.push({
-            evidenceId: metric.selection.recordIds[0] ?? `${metricEvidence.metricKey}:${date}`,
-            localDate: date,
+            comparator: row.comparator,
+            evidenceId: row.id,
+            localDate: row.date,
             metricKey: metricEvidence.metricKey,
             targetId: target.targetId,
-            value,
+            value: row.value,
           });
         }
         break;
@@ -676,17 +723,47 @@ function buildAdherenceObservations(
   return observations;
 }
 
+function selectMetricAdherenceRows(
+  context: ExperimentSummaryContext,
+  metricKey: string,
+): Array<{ comparator: MetricPoint["comparator"]; date: string; id: string; value: number }> {
+  const selectedMetricKey = resolveExperimentMetricIdentity(metricKey).metricKey;
+  const points = context.metricPoints.filter((point) =>
+    point.effectiveDate <= context.asOf && matchesExperimentMetricIdentity(metricKey, point)
+  );
+  return selectMetricSeries({
+    metricKey: selectedMetricKey,
+    points,
+  }).rows.flatMap((row) =>
+    typeof row.value === "number" && Number.isFinite(row.value)
+      ? [{
+          comparator: row.comparator ?? null,
+          date: row.date,
+          id: row.id ?? row.pointIds?.[0] ?? `metric-series:${row.metricKey}:${row.date}`,
+          value: row.value,
+        }]
+      : []
+  );
+}
+
 function buildCoverageSummary(input: {
   baselineDaysAvailable: number;
   interventionDaysAvailable: number;
   frontmatter: ExperimentFrontmatter;
   primarySignal: ExperimentMetricResult | null;
   progressPhase: ExperimentProgressPhase;
+  signals: readonly ExperimentMetricResult[];
   summariesByDate: Map<string, WearableDaySummary | null>;
 }): ExperimentProgressSummary["dataCoverage"] {
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
     (input.primarySignal?.interventionDayCount ?? 0);
+  const anySignalMetricData = input.signals.some(
+    (signal) => signal.baselineDayCount + signal.interventionDayCount > 0,
+  );
+  const anyWearableSummaryData = [...input.summariesByDate.values()].some(
+    (summary) => summary !== null && summary.providers.length > 0,
+  );
   let status: ExperimentCoverageStatus = "insufficient";
 
   const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
@@ -698,7 +775,9 @@ function buildCoverageSummary(input: {
   if (
     input.primarySignal !== null &&
     hasCompleteMetricWindow &&
-    primaryMetricDaysAvailable === 0
+    primaryMetricDaysAvailable === 0 &&
+    !anySignalMetricData &&
+    !anyWearableSummaryData
   ) {
     status = "no_wearable_data";
   } else if (
@@ -717,7 +796,7 @@ function buildCoverageSummary(input: {
     (input.primarySignal?.interventionDayCount ?? 0) >= 2
   ) {
     status = "sufficient_for_progress";
-  } else if (primaryMetricDaysAvailable > 0) {
+  } else if (primaryMetricDaysAvailable > 0 || anySignalMetricData) {
     status = "partial";
   } else {
     status = "insufficient";
@@ -735,6 +814,25 @@ function buildCoverageSummary(input: {
     status,
     wearableProviders,
   };
+}
+
+function summarizeSignalDayCoverage(signals: readonly ExperimentMetricResult[]) {
+  return signals.reduce(
+    (summary, signal) => ({
+      baselineDaysAvailable: Math.max(
+        summary.baselineDaysAvailable,
+        signal.baselineDayCount,
+      ),
+      interventionDaysAvailable: Math.max(
+        summary.interventionDaysAvailable,
+        signal.interventionDayCount,
+      ),
+    }),
+    {
+      baselineDaysAvailable: 0,
+      interventionDaysAvailable: 0,
+    },
+  );
 }
 
 function readinessResult(blockingReasons: ExperimentProgressReadinessReason[]) {
@@ -949,7 +1047,7 @@ function buildWindowSummary(
 }
 
 function buildFollowupBase(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
   kind: ExperimentFollowupKind,
   reason: ExperimentFollowupReason,
@@ -984,7 +1082,7 @@ function buildFollowupBase(
 }
 
 function decideMissedLogDue(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
 ): ExperimentFollowupDueDecision {
   const assistantSupport = context.frontmatter.assistantSupport;
@@ -1045,7 +1143,7 @@ function decideMissedLogDue(
 }
 
 function decideWeeklyDigestDue(
-  context: ExperimentSummaryContext,
+  context: ExperimentFollowupContext,
   date: string,
 ): ExperimentFollowupDueDecision {
   if (context.frontmatter.status !== "active") {
@@ -1344,7 +1442,6 @@ function collectRunMetricWindows(
     comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
     metricKey,
     points: selectMetricSeries({
-      duplicatePolicy: "keep-all",
       metricKey,
       points: context.metricPoints,
     }).rows,
@@ -1407,22 +1504,34 @@ function collectAnchoredMetricWindow(
     return null;
   }
 
+  const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
   const values: number[] = [];
   let unit: string | null = null;
   for (const anchor of anchors) {
+    const anchoredPoints = context.metricPoints.filter(
+      (point) =>
+        point.effectiveDate <= context.asOf &&
+        metricPointRecordIds(point).includes(anchor.recordId) &&
+        (metricKey ? point.metricKey === metricKey : point.biomarkerKey === biomarkerKey),
+    );
     const selection = selectMetricValue({
       biomarkerKey,
       now: context.asOf,
-      points: context.metricPoints.filter(
-        (point) => point.source.recordId === anchor.recordId,
-      ),
+      points: anchoredPoints,
     });
-    if (typeof selection.value !== "number" || !Number.isFinite(selection.value)) {
+    const fallbackPoint = anchoredPoints.find((point) =>
+      typeof point.canonicalValue === "number" &&
+      Number.isFinite(point.canonicalValue) &&
+      typeof point.canonicalUnit === "string" &&
+      point.canonicalUnit.length > 0
+    );
+    const value = typeof selection.value === "number" ? selection.value : fallbackPoint?.canonicalValue ?? null;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
       continue;
     }
 
-    values.push(selection.value);
-    unit ??= selection.unit ?? null;
+    values.push(value);
+    unit ??= typeof selection.value === "number" ? selection.unit : fallbackPoint?.canonicalUnit ?? null;
   }
 
   return metricWindowSelectionFromValues(values, anchors.length, unit);
@@ -1473,65 +1582,6 @@ function metricWindowRangeFromDates(
     start: dates[0] ?? null,
     totalDays: dates.length,
   };
-}
-
-function resolveBiomarkerMetric(
-  biomarkerKey: string,
-  summary: WearableDaySummary | null,
-): WearableResolvedMetric | null {
-  if (!summary) {
-    return null;
-  }
-
-  const normalized = biomarkerKey.trim().toLowerCase();
-  if (normalized.includes("resting-heart-rate")) {
-    return summary.recovery?.restingHeartRate ?? null;
-  }
-
-  if (normalized.includes("hrv")) {
-    return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
-  }
-
-  if (normalized.includes("sleep-efficiency")) {
-    return summary.sleep?.sleepEfficiency ?? null;
-  }
-
-  if (normalized.includes("deep-sleep")) {
-    return summary.sleep?.deepMinutes ?? null;
-  }
-
-  if (normalized.includes("respiratory-rate")) {
-    return summary.recovery?.respiratoryRate ?? summary.sleep?.respiratoryRate ?? null;
-  }
-
-  if (normalized.includes("temperature")) {
-    return summary.recovery?.temperatureDeviation ?? summary.bodyState?.temperature ?? null;
-  }
-
-  return null;
-}
-
-function resolveAdherenceMetric(
-  metricKey: string,
-  summary: WearableDaySummary | null,
-): WearableResolvedMetric | null {
-  if (!summary) {
-    return null;
-  }
-
-  switch (metricKey.trim()) {
-    case "steps":
-      return summary.activity?.steps ?? null;
-    case "resting-heart-rate":
-    case "resting_heart_rate":
-      return summary.recovery?.restingHeartRate ?? null;
-    case "hrv":
-      return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
-    case "sleep-efficiency":
-      return summary.sleep?.sleepEfficiency ?? null;
-    default:
-      return resolveBiomarkerMetric(metricKey, summary);
-  }
 }
 
 function readStringAttribute(entity: CanonicalEntity, key: string): string | null {

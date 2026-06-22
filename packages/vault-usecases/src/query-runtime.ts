@@ -10,6 +10,7 @@ import type {
   MealNutritionTotals as SharedMealNutritionTotals,
   MealNutritionTotalsOptions as SharedMealNutritionTotalsOptions,
   MealNutritionTotalsResult as SharedMealNutritionTotalsResult,
+  QueryMetricPointFilters as SharedQueryMetricPointFilters,
   QueryProjectionStatus as SharedQueryProjectionStatus,
   RebuildQueryProjectionResult as SharedQueryProjectionRebuildResult,
   SearchCitation as SharedSearchCitation,
@@ -47,6 +48,7 @@ export type QuerySearchFilters = SharedSearchFilters
 export type QuerySearchResult = SharedSearchResult
 export type QueryProjectionStatus = SharedQueryProjectionStatus
 export type QueryProjectionRebuildResult = SharedQueryProjectionRebuildResult
+export type QueryMetricPointFilters = SharedQueryMetricPointFilters
 export type QueryTimelineFilters = SharedTimelineFilters
 export type QueryTimelineEntry = SharedTimelineEntry
 export type QueryExportPackFile = SharedExportPackFile
