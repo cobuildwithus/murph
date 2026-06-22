@@ -321,6 +321,36 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
   });
 
+  it("pre-claims non-idempotent Linq reaction effects before provider dispatch", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation.preparedDispatches).toEqual([
+      expect.objectContaining({
+        intentId: "intent_123",
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      }),
+    ]);
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
   it("pre-claims non-idempotent voice memo delivery effects before provider dispatch", async () => {
     const previousDispatchState = createPreparedPreviousDispatchState();
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
@@ -4058,6 +4088,77 @@ describe("hosted runtime callbacks", () => {
     expect(capturedError).toMatchObject({
       code: "LINQ_API_REQUEST_FAILED",
       deliveryMayHaveSucceeded: true,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("marks post-success Linq reaction liveness aborts as possibly committed", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    let capturedError: unknown = null;
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("aborted after Linq reaction response"));
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.setLinqMessageReaction({
+          reaction: "heart",
+          target: "linq_chat_123",
+          targetMessageId: "linq_message_1",
+        });
+      } catch (error) {
+        capturedError = error;
+        return createDispatchResult(
+          {
+            intentId: "intent_123",
+            lastError: {
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Ambiguous Linq reaction delivery.",
+            },
+            status: "abandoned",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
+          },
+        );
+      }
+
+      throw new Error("expected post-success Linq reaction liveness failure");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: true,
+      message: "aborted after Linq reaction response",
     });
     expect(outcomes).toEqual([
       expect.objectContaining({

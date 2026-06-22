@@ -765,6 +765,7 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
   return effect.payload.transportIdempotent
+    || isHostedAssistantReactionOnlyEffect(effect)
     || hasHostedAssistantVoiceMemoMedia(effect.payload)
     || isHostedSignupWelcomeDeliveryPayload(effect.payload);
 }
@@ -1229,7 +1230,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             }
             throw error;
           });
-          await assertHostedDeliveryLiveNow(input);
+          try {
+            await assertHostedDeliveryLiveNow(input);
+          } catch (error) {
+            throw markHostedDeliveryMayHaveSucceeded(error);
+          }
           return {
             ...result,
             target: request.target,
