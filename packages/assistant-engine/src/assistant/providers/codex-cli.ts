@@ -199,6 +199,7 @@ export async function executeCodexAssistantTurnAttempt(
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
     allowMessageReactions: input.allowMessageReactions ?? false,
     approvalPolicy,
+    connectedAppsAvailable: input.connectedAppsAvailable ?? false,
     developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
@@ -505,6 +506,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
     computerToolsAvailable:
       input.input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.input.progressDelivery != null,
+    connectedAppsAvailable: input.input.connectedAppsAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

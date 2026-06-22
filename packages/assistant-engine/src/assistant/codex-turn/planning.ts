@@ -523,6 +523,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     computerToolsAvailable:
       input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.progressDelivery != null,
+    connectedAppsAvailable:
+      input.executionContext?.hosted?.connectedAppsAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

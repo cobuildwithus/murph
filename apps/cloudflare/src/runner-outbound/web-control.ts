@@ -133,6 +133,8 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isComputerUseRequest = policy.operation === "computer_use"
     && input.request.method === "POST";
+  const isConnectedAppsRequest = policy.operation === "connected_apps"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -142,6 +144,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isRuntimeLatencyTraceRequest
     || isVaultShareDeliverRequest
     || isComputerUseRequest
+    || isConnectedAppsRequest
   ) {
     try {
       writeAuthority = await (

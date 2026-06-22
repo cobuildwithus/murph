@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createCipheriv, createDecipheriv, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, type DecipherGCM, type Hash } from "node:crypto";
 import { createReadStream, createWriteStream, type Stats } from "node:fs";
 import {
   access,
@@ -7,7 +7,6 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  open,
   realpath,
   rename,
   rm,
@@ -16,7 +15,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { Transform, type Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import {
@@ -337,20 +336,37 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   durableRoot: string;
   encryptedFilePath: string;
   ref: HostedWorkspaceSnapshotV2Ref;
-  scratchRoot?: string | null;
 }): Promise<RestoreEncryptedWorkspaceSnapshotTimings> {
-  if (input.ref.archive.compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
-    throw new Error("Hosted workspace snapshot restore only supports zstd archives.");
-  }
   const encryptedFilePath = path.resolve(input.encryptedFilePath);
   const encryptedStat = await stat(encryptedFilePath);
   if (encryptedStat.size !== input.ref.archive.encryptedByteSize) {
     throw new Error("Hosted workspace snapshot encrypted size does not match its ref.");
   }
-  if (encryptedStat.size <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
+
+  return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+    dataKey: input.dataKey,
+    durableRoot: input.durableRoot,
+    encryptedStream: createReadStream(encryptedFilePath),
+    ref: input.ref,
+  });
+}
+
+export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input: {
+  dataKey: string;
+  durableRoot: string;
+  encryptedStream: AsyncIterable<Uint8Array>;
+  ref: HostedWorkspaceSnapshotV2Ref;
+  signal?: AbortSignal | null;
+}): Promise<RestoreEncryptedWorkspaceSnapshotTimings> {
+  assertHostedWorkspaceSnapshotRestoreLive(input.signal);
+  if (input.ref.archive.compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
+    throw new Error("Hosted workspace snapshot restore only supports zstd archives.");
+  }
+  const expectedEncryptedByteSize = input.ref.archive.encryptedByteSize;
+  if (expectedEncryptedByteSize <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
     throw new Error("Hosted workspace snapshot encrypted object is too small.");
   }
-  if (encryptedStat.size >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+  if (expectedEncryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
     throw new RangeError("Hosted workspace snapshot exceeds the single-part size limit.");
   }
   if (input.ref.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
@@ -359,27 +375,13 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
 
   const durableRoot = path.resolve(input.durableRoot);
   const durableParent = path.dirname(durableRoot);
-  const scratchRoot = input.scratchRoot ? path.resolve(input.scratchRoot) : null;
-  if (scratchRoot && isSameOrDescendantPath(scratchRoot, durableRoot)) {
-    throw new Error("Hosted workspace snapshot restore scratchRoot must be outside durableRoot.");
-  }
   await mkdir(durableParent, { mode: 0o700, recursive: true });
-  if (scratchRoot) {
-    await mkdir(scratchRoot, { mode: 0o700, recursive: true });
-    await assertHostedWorkspaceSnapshotPathOutsideRoot({
-      candidate: scratchRoot,
-      message: "Hosted workspace snapshot restore scratchRoot must be outside durableRoot.",
-      root: durableRoot,
-    });
-  }
   await assertHostedWorkspaceSnapshotZstdCliAvailable();
   const restoreTempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
-  const scratchTempDir = scratchRoot
-    ? await mkdtemp(path.join(scratchRoot, "workspace-snapshot-restore-"))
-    : restoreTempDir;
   const restoreRoot = path.join(restoreTempDir, "durable-root");
   const backupRoot = path.join(restoreTempDir, "previous-durable-root");
   let dataKey: Uint8Array | null = null;
+  let plaintextArchiveBuffer: Buffer | null = null;
   let decryptMs = 0;
   let archiveExtractMs = 0;
   let durableRootReplaceMs = 0;
@@ -387,12 +389,9 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   let extractMs = 0;
 
   try {
+    assertHostedWorkspaceSnapshotRestoreLive(input.signal);
     const decryptStartedAt = Date.now();
     await mkdir(restoreRoot, { mode: 0o700, recursive: true });
-    const authTag = await readHostedWorkspaceSnapshotAuthTag(
-      encryptedFilePath,
-      encryptedStat.size,
-    );
     dataKey = decodeHostedWorkspaceSnapshotV2DataKey(input.dataKey);
     const decipher = createDecipheriv(
       "aes-256-gcm",
@@ -400,23 +399,29 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       Buffer.from(input.ref.encryption.ivBase64, "base64url"),
     );
     decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.ref.encryption.aad)));
-    decipher.setAuthTag(authTag);
 
     const encryptedObjectHash = createHash("sha256");
     const plaintextArchiveHash = createHash("sha256");
-    const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.zst");
-    await pipeline(
-      createReadStream(encryptedFilePath, {
-        end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
-        start: 0,
-      }),
-      createHashTransform(encryptedObjectHash),
-      decipher,
-      createHashTransform(plaintextArchiveHash),
-      createWriteStream(plaintextArchivePath, { mode: 0o600 }),
-    );
+    const plaintextArchiveCollector = createFixedSizeArchiveBufferCollector({
+      byteLength: expectedEncryptedByteSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES,
+      hash: plaintextArchiveHash,
+    });
+    let plaintextArchive: Buffer;
+    try {
+      await decryptHostedWorkspaceSnapshotEncryptedStream({
+        decipher,
+        encryptedObjectHash,
+        encryptedStream: input.encryptedStream,
+        expectedEncryptedByteSize,
+        plaintextArchiveCollector,
+      });
+      plaintextArchive = plaintextArchiveCollector.readBuffer();
+      plaintextArchiveBuffer = plaintextArchive;
+    } catch (error) {
+      plaintextArchiveCollector.clear();
+      throw error;
+    }
 
-    encryptedObjectHash.update(authTag);
     const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
     if (encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
       throw new Error("Hosted workspace snapshot encrypted digest does not match its ref.");
@@ -425,6 +430,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
+    assertHostedWorkspaceSnapshotRestoreLive(input.signal);
     decryptMs = Date.now() - decryptStartedAt;
 
     const extractStartedAt = Date.now();
@@ -432,9 +438,8 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     const zstd = spawn("zstd", [
       "-d",
       "--stdout",
-      plaintextArchivePath,
     ], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     const tar = spawn("tar", [
       "-C",
@@ -448,12 +453,20 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     });
     const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    let zstdInputPipe: Promise<void> | null = null;
+    let archivePipe: Promise<void> | null = null;
     try {
       if (!zstd.stdout || !tar.stdin) {
         throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
       }
+      if (!zstd.stdin) {
+        throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
+      }
+      zstdInputPipe = pipeline(Readable.from([plaintextArchive]), zstd.stdin);
+      archivePipe = pipeline(zstd.stdout, tar.stdin);
       await Promise.all([
-        pipeline(zstd.stdout, tar.stdin),
+        zstdInputPipe,
+        archivePipe,
         zstdExit,
         tarExit,
       ]);
@@ -464,6 +477,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
         zstdExit,
         tarExit,
       ]);
+      await Promise.allSettled([zstdInputPipe, archivePipe].filter((promise) => promise !== null));
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -473,6 +487,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       throw error;
     }
     archiveExtractMs = Date.now() - archiveExtractStartedAt;
+    assertHostedWorkspaceSnapshotRestoreLive(input.signal);
 
     const durableRootReplaceStartedAt = Date.now();
     await replaceHostedWorkspaceSnapshotDurableRoot({
@@ -483,12 +498,10 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     durableRootReplaceMs = Date.now() - durableRootReplaceStartedAt;
     extractMs = Date.now() - extractStartedAt;
   } finally {
+    plaintextArchiveBuffer?.fill(0);
     dataKey?.fill(0);
     const cleanupStartedAt = Date.now();
     try {
-      if (scratchTempDir !== restoreTempDir) {
-        await rm(scratchTempDir, { force: true, recursive: true });
-      }
       await rm(restoreTempDir, { force: true, recursive: true });
     } finally {
       cleanupMs = Date.now() - cleanupStartedAt;
@@ -502,6 +515,74 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     cleanupMs,
     extractMs,
   };
+}
+
+async function decryptHostedWorkspaceSnapshotEncryptedStream(input: {
+  decipher: DecipherGCM;
+  encryptedObjectHash: Hash;
+  encryptedStream: AsyncIterable<Uint8Array>;
+  expectedEncryptedByteSize: number;
+  plaintextArchiveCollector: {
+    clear(): void;
+    readBuffer(): Buffer;
+    append(chunk: Buffer): void;
+  };
+}): Promise<void> {
+  let encryptedByteCount = 0;
+  let encryptedTail = Buffer.alloc(0);
+  try {
+    for await (const rawChunk of input.encryptedStream) {
+      const chunk = Buffer.isBuffer(rawChunk)
+        ? rawChunk
+        : Buffer.from(rawChunk);
+      if (chunk.byteLength === 0) {
+        continue;
+      }
+      encryptedByteCount += chunk.byteLength;
+      if (encryptedByteCount > input.expectedEncryptedByteSize) {
+        throw new Error("Hosted workspace snapshot encrypted stream exceeded its ref byte count.");
+      }
+      input.encryptedObjectHash.update(chunk);
+
+      const encrypted = encryptedTail.byteLength > 0
+        ? Buffer.concat([encryptedTail, chunk])
+        : chunk;
+      if (encrypted.byteLength <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
+        encryptedTail = Buffer.from(encrypted);
+        continue;
+      }
+
+      const ciphertextEnd =
+        encrypted.byteLength - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES;
+      encryptedTail = Buffer.from(encrypted.subarray(ciphertextEnd));
+      input.plaintextArchiveCollector.append(
+        input.decipher.update(encrypted.subarray(0, ciphertextEnd)),
+      );
+    }
+
+    if (encryptedByteCount !== input.expectedEncryptedByteSize) {
+      throw new Error("Hosted workspace snapshot encrypted stream byte count does not match its ref.");
+    }
+    if (encryptedTail.byteLength !== HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
+      throw new Error("Hosted workspace snapshot auth tag is incomplete.");
+    }
+
+    input.decipher.setAuthTag(encryptedTail);
+    input.plaintextArchiveCollector.append(input.decipher.final());
+  } finally {
+    encryptedTail.fill(0);
+  }
+}
+
+function assertHostedWorkspaceSnapshotRestoreLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace snapshot restore was aborted.");
 }
 
 interface HostedWorkspaceSnapshotDurableRootState {
@@ -873,7 +954,7 @@ function decodeHostedWorkspaceSnapshotIv(value: string): Buffer {
   return iv;
 }
 
-function createHashTransform(hash: ReturnType<typeof createHash>): Transform {
+function createHashTransform(hash: Hash): Transform {
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       hash.update(chunk);
@@ -882,26 +963,42 @@ function createHashTransform(hash: ReturnType<typeof createHash>): Transform {
   });
 }
 
-async function readHostedWorkspaceSnapshotAuthTag(
-  filePath: string,
-  encryptedSize: number,
-): Promise<Buffer> {
-  const handle = await open(filePath, "r");
-  try {
-    const authTag = Buffer.alloc(HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES);
-    const result = await handle.read(
-      authTag,
-      0,
-      HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES,
-      encryptedSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES,
-    );
-    if (result.bytesRead !== HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
-      throw new Error("Hosted workspace snapshot auth tag is incomplete.");
-    }
-    return authTag;
-  } finally {
-    await handle.close();
+function createFixedSizeArchiveBufferCollector(input: {
+  byteLength: number;
+  hash: Hash;
+}): {
+  append(chunk: Buffer): void;
+  clear(): void;
+  readBuffer(): Buffer;
+} {
+  if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0) {
+    throw new Error("Hosted workspace snapshot decrypted archive size is unsafe.");
   }
+  const buffer = Buffer.allocUnsafe(input.byteLength);
+  let offset = 0;
+  return {
+    append: (chunk) => {
+      if (chunk.byteLength === 0) {
+        return;
+      }
+      const nextOffset = offset + chunk.byteLength;
+      if (nextOffset > buffer.byteLength) {
+        throw new Error("Hosted workspace snapshot decrypted archive size accounting failed.");
+      }
+      input.hash.update(chunk);
+      chunk.copy(buffer, offset);
+      offset = nextOffset;
+    },
+    clear: () => {
+      buffer.fill(0);
+    },
+    readBuffer: () => {
+      if (offset !== buffer.byteLength) {
+        throw new Error("Hosted workspace snapshot decrypted archive size accounting failed.");
+      }
+      return buffer;
+    },
+  };
 }
 
 async function replaceHostedWorkspaceSnapshotDurableRoot(input: {

@@ -96,10 +96,11 @@ describe("hosted workspace restore Codex continuity", () => {
       const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
       const artifactGetCalls: string[] = [];
       const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const restoreSignal = new AbortController().signal;
       const restoreCalls: Array<{
         durableRoot: string;
         ref: HostedWorkspaceSnapshotV2Ref;
-        scratchRoot?: string | null;
+        signal?: AbortSignal | null;
       }> = [];
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -126,6 +127,7 @@ describe("hosted workspace restore Codex continuity", () => {
             },
           },
         }),
+        signal: restoreSignal,
         vaultRoot: restoredVaultRoot,
         workspace: createWorkspaceState({
           snapshotRef,
@@ -135,7 +137,7 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(restoreCalls.length, 1);
       assert.equal(restoreCalls[0]?.ref, snapshotRef);
-      assert.equal(restoreCalls[0]?.scratchRoot, path.join(workspaceRoot, "restored-vault-scratch"));
+      assert.equal(restoreCalls[0]?.signal, restoreSignal);
       assert.equal(
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
         "restored from v2\n",
@@ -215,7 +217,6 @@ describe("hosted workspace restore Codex continuity", () => {
               return {
                 sizeGuardMs: 1,
                 dataKeyUnwrapMs: 2,
-                scratchPrepareMs: 3,
                 presignGetMs: 4,
                 objectFetchMs: 5,
                 decryptMs: 6,
@@ -240,7 +241,6 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.deepEqual(coldRestored.restoreTiming, {
         sizeGuardMs: 1,
         dataKeyUnwrapMs: 2,
-        scratchPrepareMs: 3,
         presignGetMs: 4,
         objectFetchMs: 5,
         decryptMs: 6,

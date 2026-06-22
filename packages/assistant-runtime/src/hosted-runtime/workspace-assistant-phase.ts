@@ -194,6 +194,8 @@ export async function runHostedWorkspaceAssistantPhase(
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
+        connectedAppsAvailable:
+          input.runtime.platform.connectedAppsAvailable === true,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,

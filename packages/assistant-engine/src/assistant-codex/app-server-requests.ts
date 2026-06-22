@@ -108,6 +108,7 @@ function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
     computerToolsAvailable:
       input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.progressDelivery != null,
+    connectedAppsAvailable: input.connectedAppsAvailable === true,
   })
 }
 

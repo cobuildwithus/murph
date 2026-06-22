@@ -434,6 +434,8 @@ async function executeAssistantCodexAttempt(input: {
         session: attemptPlan.session,
         sharedPlan: executionPlan.sharedPlan,
       }),
+      connectedAppsAvailable:
+        executionPlan.executionContext?.hosted?.connectedAppsAvailable ?? false,
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:

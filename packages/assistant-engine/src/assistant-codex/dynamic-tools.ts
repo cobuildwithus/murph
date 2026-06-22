@@ -48,6 +48,12 @@ import {
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
+  executeConnectedAppsDynamicTool,
+  MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
+  readConnectedAppsDynamicToolRequest,
+  type ConnectedAppsDynamicToolRequest,
+} from './dynamic-tools/connected-apps.js'
+import {
   executeGenerateVoiceMemoDynamicTool,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   parseGenerateVoiceMemoArguments,
@@ -350,6 +356,7 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
 export const MURPH_DYNAMIC_TOOLS = [
   ...MURPH_BASE_DYNAMIC_TOOLS,
   ...MURPH_COMPUTER_DYNAMIC_TOOLS,
+  ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
 ] as const
 
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
@@ -359,6 +366,7 @@ export function resolveMurphDynamicTools(input: {
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
+  connectedAppsAvailable?: boolean | null
 }): readonly MurphDynamicTool[] {
   return MURPH_DYNAMIC_TOOLS.filter((tool) => {
     if (tool === MURPH_SEND_PROGRESS_UPDATE_TOOL) {
@@ -377,6 +385,14 @@ export function resolveMurphDynamicTools(input: {
       MURPH_COMPUTER_DYNAMIC_TOOLS.some((computerTool) => computerTool === tool)
     ) {
       return input.computerToolsAvailable === true
+    }
+
+    if (
+      MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.some(
+        (connectedAppsTool) => connectedAppsTool === tool,
+      )
+    ) {
+      return input.connectedAppsAvailable === true
     }
 
     return true
@@ -549,6 +565,7 @@ interface ParsedDynamicToolCallRequest {
 }
 
 export type MurphDynamicToolRequest =
+  | ConnectedAppsDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -644,6 +661,14 @@ export function readMurphDynamicToolRequest(
       namespace: request.namespace,
       tool: request.tool,
     }
+  }
+
+  const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (connectedAppsRequest) {
+    return connectedAppsRequest
   }
 
   switch (request.tool) {
@@ -863,6 +888,7 @@ function currentHostedDeliveryContext(
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
+  connectedAppsAvailable?: boolean | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -886,6 +912,8 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
+    case 'invalid-connected-apps-arguments':
+      return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
@@ -979,6 +1007,15 @@ export async function executeMurphDynamicToolRequest(input: {
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
+    case 'connected-apps-manage':
+    case 'connected-apps-search':
+    case 'connected-apps-execute':
+      return await executeConnectedAppsDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        available: input.connectedAppsAvailable === true,
+        fetchImpl: input.fetchImpl,
+        request: input.request,
+      })
     case 'computer-start-run': {
       return await executeHostedComputerStartRunTool({
         abortSignal: input.abortSignal ?? null,
