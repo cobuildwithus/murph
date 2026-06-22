@@ -12,11 +12,13 @@ import {
 } from "@murphai/core";
 import {
   buildInboxAttachmentRetentionLedgerPath,
+  createInboxPipeline,
   openInboxRuntime,
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
   runInboxMediaRetention,
 } from "../src/index.ts";
+import type { InboundCapture } from "../src/contracts/capture.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -442,6 +444,47 @@ test("runInboxMediaRetention materializes bounded missing candidates before hash
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
+test.skipIf(process.platform === "win32")(
+  "runInboxMediaRetention does not follow symlinked raw media ancestors",
+  async () => {
+    const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-symlink");
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+    const imageBytes = await createPngBytes();
+
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: "cap_retention_symlink_media",
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WC",
+      storedAt: "2026-06-01T00:00:00.000Z",
+      input: buildOldImageCaptureInput({
+        externalId: "msg-symlink-media",
+        imageBytes,
+        text: "symlink old media",
+        threadId: "thread-symlink",
+      }),
+    });
+    const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
+    assert.ok(imagePath);
+    const storedImageBytes = await fs.readFile(path.join(vaultRoot, imagePath));
+    const attachmentDirectory = path.dirname(path.join(vaultRoot, imagePath));
+    const attachmentFileName = path.basename(imagePath);
+    const externalDirectory = await makeTempDirectory("murph-inbox-media-retention-external");
+    const externalPath = path.join(externalDirectory, attachmentFileName);
+    await fs.writeFile(externalPath, storedImageBytes);
+    await fs.rm(attachmentDirectory, { recursive: true, force: true });
+    await fs.symlink(externalDirectory, attachmentDirectory, "dir");
+
+    const result = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(result.expiredAttachments, 0);
+    assert.equal(result.records.length, 0);
+    assert.equal(await fileExists(externalDirectory, attachmentFileName), true);
+  },
+);
+
 test("runInboxMediaRetention honors the per-pass attachment limit", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-limit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
@@ -506,6 +549,75 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
   assert.equal(secondPass.hasMoreEligibleAttachments, false);
   assert.equal(secondPass.nextEligibleAt, null);
   assert.equal(await fileExists(vaultRoot, secondPath), false);
+});
+
+test("runInboxMediaRetention skips missing already-tombstoned media before batch admission", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-tombstoned-missing");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const now = "2026-07-05T00:00:00.000Z";
+
+  await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_tombstoned_missing_1",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WD",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-tombstoned-missing-1",
+      imageBytes,
+      text: "first tombstoned media",
+      threadId: "thread-tombstoned-missing",
+    }),
+  });
+  await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_tombstoned_missing_2",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WE",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-tombstoned-missing-2",
+      imageBytes,
+      text: "second tombstoned media",
+      threadId: "thread-tombstoned-missing",
+    }),
+  });
+  const initial = await runInboxMediaRetention({
+    maxAttachments: 2,
+    now,
+    vaultRoot,
+  });
+  assert.equal(initial.expiredAttachments, 2);
+
+  const later = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_tombstoned_missing_3",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WF",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-tombstoned-missing-3",
+      imageBytes,
+      text: "later media should still be reached",
+      threadId: "thread-tombstoned-missing",
+    }),
+  });
+  const laterPath = later.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(laterPath);
+  const materializedPaths: string[][] = [];
+
+  const result = await runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+    },
+    maxAttachments: 2,
+    now,
+    vaultRoot,
+  });
+
+  assert.deepEqual(materializedPaths, []);
+  assert.equal(result.expiredAttachments, 1);
+  assert.equal(result.hasMoreEligibleAttachments, false);
+  assert.equal(result.records[0]?.storedPath, laterPath);
+  assert.equal(await fileExists(vaultRoot, laterPath), false);
 });
 
 test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {
@@ -580,6 +692,84 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
     unlinkSpy.mockRestore();
   }
 });
+
+test("processCapture preserves retention-expired attachment state on dedupe replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-dedupe");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const inbound = buildOldImageCaptureInput({
+    externalId: "msg-retention-dedupe",
+    imageBytes,
+    text: "dedupe replay after retention",
+    threadId: "thread-retention-dedupe",
+  });
+  const runtime = await openInboxRuntime({ vaultRoot });
+
+  try {
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: "cap_retention_dedupe",
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WG",
+      storedAt: "2026-06-01T00:00:00.000Z",
+      input: inbound,
+    });
+    const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
+    assert.ok(imagePath);
+    const result = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(result.expiredAttachments, 1);
+    await rebuildRuntimeFromVault({ vaultRoot, runtime });
+    assert.equal(runtime.getCapture(persisted.stored.captureId)?.attachments[0]?.storedPath, null);
+    assert.equal(
+      runtime.getCapture(persisted.stored.captureId)?.attachments[0]?.contentStatus,
+      "retention_expired",
+    );
+
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+    const replayed = await pipeline.processCapture(inbound);
+
+    assert.equal(replayed.deduped, true);
+    assert.equal(runtime.getCapture(persisted.stored.captureId)?.attachments[0]?.storedPath, null);
+    assert.equal(
+      runtime.getCapture(persisted.stored.captureId)?.attachments[0]?.contentStatus,
+      "retention_expired",
+    );
+  } finally {
+    runtime.close();
+  }
+});
+
+function buildOldImageCaptureInput(input: {
+  externalId: string;
+  imageBytes: Uint8Array;
+  text: string;
+  threadId: string;
+}): InboundCapture {
+  return {
+    source: "telegram",
+    externalId: input.externalId,
+    thread: {
+      id: input.threadId,
+      isDirect: true,
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    text: input.text,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        fileName: "photo.png",
+        data: input.imageBytes,
+      },
+    ],
+    raw: {},
+  };
+}
 
 async function writeVaultFile(vaultRoot: string, relativePath: string, content: string): Promise<void> {
   const absolutePath = path.join(vaultRoot, relativePath);

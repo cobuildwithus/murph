@@ -14,8 +14,9 @@ import {
 import {
   normalizeRelativeVaultPath,
   acquireCanonicalWriteLock,
+  isVaultError,
   readJsonlRecords,
-  resolveVaultPath,
+  resolveVaultPathOnDisk,
   runCanonicalWrite,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
@@ -122,8 +123,10 @@ export async function runInboxMediaRetention(
       }
 
       const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
-      if (integrity.kind === "missing" && !input.materializeCandidatePaths) {
-        continue;
+      if (integrity.kind === "missing") {
+        if (alreadyRetained || !input.materializeCandidatePaths) {
+          continue;
+        }
       }
       if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
         continue;
@@ -501,7 +504,10 @@ async function hashExistingVaultFile(
   | { kind: "ok"; byteSize: number; sha256: string }
 > {
   throwIfRetentionAborted(signal);
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  const resolved = await resolveRetentionVaultPathOnDisk(vaultRoot, relativePath);
+  if (!resolved) {
+    return { kind: "invalid" };
+  }
   let stats: Awaited<ReturnType<typeof fs.lstat>>;
   try {
     stats = await fs.lstat(resolved.absolutePath);
@@ -529,7 +535,10 @@ async function deleteVaultFileIfPresent(
   signal?: AbortSignal | null,
 ): Promise<void> {
   throwIfRetentionAborted(signal);
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  const resolved = await resolveRetentionVaultPathOnDisk(vaultRoot, relativePath);
+  if (!resolved) {
+    return;
+  }
   try {
     await fs.unlink(resolved.absolutePath);
   } catch (error) {
@@ -539,6 +548,20 @@ async function deleteVaultFileIfPresent(
     throw error;
   }
   throwIfRetentionAborted(signal);
+}
+
+async function resolveRetentionVaultPathOnDisk(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<Awaited<ReturnType<typeof resolveVaultPathOnDisk>> | null> {
+  try {
+    return await resolveVaultPathOnDisk(vaultRoot, relativePath);
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_PATH_SYMLINK") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function sha256File(absolutePath: string, signal?: AbortSignal | null): Promise<string> {

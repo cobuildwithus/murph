@@ -542,7 +542,16 @@ export async function findStoredCaptureEnvelope(input: {
   });
 
   if (storedRecord) {
-    return inboxCaptureRecordToStoredCaptureEnvelope(storedRecord);
+    const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
+    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(storedRecord, retainedAttachments);
+    return {
+      ...envelope,
+      stored: await hydrateRetainedAttachmentParserProjections({
+        retainedAttachments,
+        stored: envelope.stored,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
   }
 
   const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
@@ -607,10 +616,7 @@ export async function rebuildRuntimeFromVault(input: {
   runtime: InboxRuntimeStore;
 }): Promise<void> {
   const canonicalRecords = await listCanonicalInboxCaptureRecords(input.vaultRoot);
-  const retainedAttachments = new Map(
-    (await listInboxAttachmentRetentionRecords(input.vaultRoot))
-      .map((record) => [record.attachmentId, record]),
-  );
+  const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
   const restoredIdentityKeys = new Set<string>();
   const projectionEntries: Array<{
     captureId: string;
@@ -659,6 +665,15 @@ export async function rebuildRuntimeFromVault(input: {
     databasePath: input.runtime.databasePath,
     entries: projectionEntries,
   });
+}
+
+async function readRetainedAttachmentMap(
+  vaultRoot: string,
+): Promise<Map<string, InboxAttachmentRetentionRecord>> {
+  return new Map(
+    (await listInboxAttachmentRetentionRecords(vaultRoot))
+      .map((record) => [record.attachmentId, record]),
+  );
 }
 
 async function hydrateRetainedAttachmentParserProjections(input: {
