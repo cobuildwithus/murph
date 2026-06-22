@@ -3947,6 +3947,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
 
   const rebuiltRuntime = await openInboxRuntime({ vaultRoot });
   await rebuildRuntimeFromVault({
+    enqueueParserJobs: true,
     vaultRoot,
     runtime: rebuiltRuntime,
   });

@@ -156,6 +156,7 @@ export async function rebuildRuntime(
 
   try {
     await inboxd.rebuildRuntimeFromVault({
+      enqueueParserJobs: false,
       vaultRoot: paths.absoluteVaultRoot,
       runtime,
     })

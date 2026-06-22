@@ -71,7 +71,7 @@ export type InboxCaptureProjectionStoredCapture = Omit<StoredCapture, "attachmen
 interface ProjectionReplacementStore {
   replaceCaptureProjection(
     entries: ReadonlyArray<InboxCaptureProjectionEntry>,
-    options?: { enqueueParserJobs?: boolean },
+    options: { enqueueParserJobs: boolean },
   ): void;
 }
 
@@ -556,9 +556,7 @@ function createInboxRuntimeStore(
     `,
   );
   const deleteCaptureStatement = database.prepare("delete from capture where capture_id = ?");
-  const deleteAllCapturesStatement = database.prepare("delete from capture");
   const deleteCaptureSearchIndexStatement = database.prepare("delete from capture_fts where capture_id = ?");
-  const deleteAllCaptureSearchIndexStatement = database.prepare("delete from capture_fts");
   const incrementMutationCounterStatement = database.prepare(
     `
       update capture_mutation_counter
@@ -714,6 +712,39 @@ function createInboxRuntimeStore(
           parser_state = ?,
           parse_updated_at = ?
       where attachment_id = ?
+    `,
+  );
+  const deleteTerminalAttachmentParseJobsStatement = database.prepare(
+    `
+      delete from attachment_parse_job
+      where attachment_id = ?
+        and state not in ('pending', 'running')
+    `,
+  );
+  const clearAttachmentParseProjectionStatement = database.prepare(
+    `
+      update capture_attachment
+      set extracted_text = null,
+          transcript_text = null,
+          derived_path = null,
+          parser_provider_id = null,
+          parser_state = null,
+          parse_updated_at = null
+      where attachment_id = ?
+        and (
+          extracted_text is not null
+          or transcript_text is not null
+          or derived_path is not null
+          or parser_provider_id is not null
+          or parser_state is not null
+          or parse_updated_at is not null
+        )
+        and not exists (
+          select 1
+          from attachment_parse_job
+          where attachment_parse_job.attachment_id = capture_attachment.attachment_id
+            and attachment_parse_job.state in ('pending', 'running')
+        )
     `,
   );
   const listCapturesAscendingStatement = database.prepare(
@@ -875,7 +906,10 @@ function createInboxRuntimeStore(
 
   function upsertCaptureProjection(
     input: InboxCaptureProjectionEntry,
-    options?: { recordCollisionTombstone?: boolean },
+    options?: {
+      recordCollisionTombstone?: boolean;
+      replaceParserState?: boolean;
+    },
   ): string {
     const normalizedAccountId = normalizeAccountKey(input.input.accountId);
     const normalizedAttachments = normalizeRuntimeAttachments(
@@ -931,6 +965,9 @@ function createInboxRuntimeStore(
         attachment.byteSize ?? null,
         input.stored.storedAt,
       );
+      if (options?.replaceParserState === true) {
+        deleteTerminalAttachmentParseJobsStatement.run(attachment.attachmentId);
+      }
       if (hasAttachmentParseProjection(attachment)) {
         updateAttachmentParseProjectionStatement.run(
           normalizeNullable(attachment.extractedText),
@@ -941,6 +978,8 @@ function createInboxRuntimeStore(
           normalizeNullable(attachment.parseUpdatedAt),
           attachment.attachmentId,
         );
+      } else if (options?.replaceParserState === true) {
+        clearAttachmentParseProjectionStatement.run(attachment.attachmentId);
       }
     }
 
@@ -1140,7 +1179,7 @@ function createInboxRuntimeStore(
           }
         : null;
     },
-    replaceCaptureProjection(entries, options = {}) {
+    replaceCaptureProjection(entries, options) {
       const normalizedEntries = entries.map((entry) => ({
         ...entry,
         stored: {
@@ -1166,14 +1205,12 @@ function createInboxRuntimeStore(
         );
         const replayedCaptureIds = new Set<string>();
 
-        deleteAllCaptureSearchIndexStatement.run();
-        deleteAllCapturesStatement.run();
         setMutationCounterStatement.run(previousNextCursor);
 
         for (const entry of normalizedEntries) {
           replayedCaptureIds.add(entry.captureId);
-          upsertCaptureProjection(entry);
-          if (options.enqueueParserJobs === true) {
+          upsertCaptureProjection(entry, { replaceParserState: true });
+          if (options.enqueueParserJobs) {
             enqueueAttachmentParseJobsForProjection({
               captureId: entry.captureId,
               attachments: entry.stored.attachments,
@@ -1187,7 +1224,7 @@ function createInboxRuntimeStore(
             continue;
           }
 
-          recordCaptureTombstone(captureId);
+          deleteCaptureProjectionRow(captureId, { recordTombstone: true });
         }
       });
     },
@@ -1196,7 +1233,7 @@ function createInboxRuntimeStore(
 
 export function replaceInboxCaptureProjection(input: {
   databasePath: string;
-  enqueueParserJobs?: boolean;
+  enqueueParserJobs: boolean;
   entries: ReadonlyArray<InboxCaptureProjectionEntry>;
 }): void {
   const database = openInboxRuntimeDatabaseForPath(input.databasePath);
@@ -1204,7 +1241,7 @@ export function replaceInboxCaptureProjection(input: {
 
   try {
     runtime.replaceCaptureProjection(input.entries, {
-      enqueueParserJobs: input.enqueueParserJobs === true,
+      enqueueParserJobs: input.enqueueParserJobs,
     });
   } finally {
     runtime.close();

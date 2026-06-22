@@ -235,6 +235,7 @@ export interface InboxRuntimeModule {
     baseUrl?: string
   }): EmailDriver
   rebuildRuntimeFromVault(input: {
+    enqueueParserJobs: boolean
     vaultRoot: string
     runtime: RuntimeStore
   }): Promise<void>

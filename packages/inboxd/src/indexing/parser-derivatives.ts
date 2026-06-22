@@ -5,11 +5,11 @@ import {
   walkVaultFiles,
 } from "@murphai/core";
 
-export async function findLatestInboxParserManifestPath(input: {
+export async function listInboxParserManifestPathsNewestFirst(input: {
   attachmentId: string;
   captureId: string;
   vaultRoot: string;
-}): Promise<string | null> {
+}): Promise<string[]> {
   const attemptsDirectory = normalizeRelativeVaultPath(
     path.posix.join(
       "derived/inbox",
@@ -23,5 +23,5 @@ export async function findLatestInboxParserManifestPath(input: {
     extension: ".json",
   })).filter((relativePath) => path.posix.basename(relativePath) === "manifest.json");
 
-  return manifests.sort().at(-1) ?? null;
+  return manifests.sort().reverse();
 }

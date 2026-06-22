@@ -1495,12 +1495,15 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
-  await recordReplacedWorkspaceSnapshotOrphanCandidate({
+  const replacedSnapshotCleanupOk = await deleteReplacedWorkspaceSnapshotObject({
+    bucket: input.bucket,
     checkpoint,
     env: input.env,
     snapshotRef,
-    userId: input.userId,
   });
+  if (!replacedSnapshotCleanupOk) {
+    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 502);
+  }
 
   return json({
     checkpoint,
@@ -1509,25 +1512,64 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   });
 }
 
-async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
+async function deleteReplacedWorkspaceSnapshotObject(input: {
+  bucket: WorkspaceSnapshotR2BucketLike | null;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-  userId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
   if (
     !isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
     || hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, input.snapshotRef)
+    || !(await isHostedWorkspaceSnapshotV2RefOwnedByUser({
+      snapshotRef: replacedSnapshotRef,
+      userId: input.snapshotRef.userId,
+    }))
   ) {
-    return;
+    return true;
   }
-  await recordWorkspaceSnapshotOrphanCandidate({
+  let recordedOrphanCandidate = false;
+  try {
+    await recordWorkspaceSnapshotOrphanCandidate({
+      env: input.env,
+      objectKey: replacedSnapshotRef.objectKey,
+      snapshotId: replacedSnapshotRef.snapshotId,
+      userId: replacedSnapshotRef.userId,
+    });
+    recordedOrphanCandidate = true;
+  } catch {
+    // Direct deletion below can still complete cleanup without a retry record.
+  }
+  const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
+    bucket: input.bucket,
     env: input.env,
     objectKey: replacedSnapshotRef.objectKey,
-    snapshotId: replacedSnapshotRef.snapshotId,
+  });
+  if (!deleted && !recordedOrphanCandidate) {
+    return false;
+  }
+  return true;
+}
+
+async function isHostedWorkspaceSnapshotV2RefOwnedByUser(input: {
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+  userId: string;
+}): Promise<boolean> {
+  const aad = input.snapshotRef.encryption.aad;
+  if (
+    input.snapshotRef.userId !== input.userId
+    || aad.userId !== input.userId
+    || aad.snapshotId !== input.snapshotRef.snapshotId
+    || aad.objectKey !== input.snapshotRef.objectKey
+  ) {
+    return false;
+  }
+  const expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+    snapshotId: input.snapshotRef.snapshotId,
     userId: input.userId,
-  }).catch(() => undefined);
+  });
+  return input.snapshotRef.objectKey === expectedObjectKey;
 }
 
 function hostedWorkspaceSnapshotV2RefsMatch(
@@ -1612,20 +1654,22 @@ async function deleteWorkspaceSnapshotObjectBestEffort(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
   env: RunnerOutboundEnvironmentSource;
   objectKey: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
     bucket: input.bucket,
     env: input.env,
   });
   if (!snapshotObjectStore.delete) {
-    return;
+    return false;
   }
   try {
     await snapshotObjectStore.delete(input.objectKey);
+    return true;
   } catch {
     // The critical durability outcome is the checkpoint CAS. Failed object
     // cleanup is retried by later owner cleanup instead of changing the
     // complete-route result.
+    return false;
   }
 }
 

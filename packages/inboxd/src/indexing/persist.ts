@@ -52,7 +52,7 @@ import {
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
-import { findLatestInboxParserManifestPath } from "./parser-derivatives.js";
+import { listInboxParserManifestPathsNewestFirst } from "./parser-derivatives.js";
 import { listInboxAttachmentRetentionRecords } from "./retention.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
@@ -90,7 +90,7 @@ interface RecoverableInboxCaptureOperation {
 
 type StoredWriteOperation = Awaited<ReturnType<typeof readStoredWriteOperation>>;
 
-interface RetainedParserProjection {
+interface ParserProjection {
   derivedPath: string;
   extractedText: string | null;
   parseState: "succeeded";
@@ -547,7 +547,7 @@ export async function findStoredCaptureEnvelope(input: {
     const envelope = inboxCaptureRecordToStoredCaptureEnvelope(storedRecord, retainedAttachments);
     return {
       ...envelope,
-      stored: await hydrateRetainedAttachmentParserProjections({
+      stored: await hydrateAttachmentParserProjections({
         retainedAttachments,
         stored: envelope.stored,
         vaultRoot: input.vaultRoot,
@@ -613,7 +613,7 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
 }
 
 export async function rebuildRuntimeFromVault(input: {
-  enqueueParserJobs?: boolean;
+  enqueueParserJobs: boolean;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
 }): Promise<void> {
@@ -633,7 +633,7 @@ export async function rebuildRuntimeFromVault(input: {
       captureId: envelope.captureId,
       eventId: envelope.eventId,
       input: envelope.input,
-      stored: await hydrateRetainedAttachmentParserProjections({
+      stored: await hydrateAttachmentParserProjections({
         retainedAttachments,
         stored: envelope.stored,
         vaultRoot: input.vaultRoot,
@@ -665,7 +665,7 @@ export async function rebuildRuntimeFromVault(input: {
 
   replaceInboxCaptureProjection({
     databasePath: input.runtime.databasePath,
-    enqueueParserJobs: input.enqueueParserJobs === true,
+    enqueueParserJobs: input.enqueueParserJobs,
     entries: projectionEntries,
   });
 }
@@ -679,7 +679,7 @@ async function readRetainedAttachmentMap(
   );
 }
 
-async function hydrateRetainedAttachmentParserProjections(input: {
+async function hydrateAttachmentParserProjections(input: {
   retainedAttachments: ReadonlyMap<string, InboxAttachmentRetentionRecord>;
   stored: StoredCapture;
   vaultRoot: string;
@@ -688,14 +688,10 @@ async function hydrateRetainedAttachmentParserProjections(input: {
 
   for (const attachment of input.stored.attachments) {
     const retained = input.retainedAttachments.get(attachment.attachmentId);
-    const retentionExpired = attachment.contentStatus === "retention_expired";
-    if (!retained || !retentionExpired) {
-      attachments.push(attachment);
-      continue;
-    }
-
-    const parserProjection = await readRetainedParserProjection({
-      attachment: retained,
+    const parserProjection = await readAttachmentParserProjection({
+      attachment,
+      captureId: input.stored.captureId,
+      fallbackUpdatedAt: retained?.purgedAt ?? null,
       vaultRoot: input.vaultRoot,
     });
     attachments.push({
@@ -710,24 +706,43 @@ async function hydrateRetainedAttachmentParserProjections(input: {
   };
 }
 
-async function readRetainedParserProjection(input: {
-  attachment: InboxAttachmentRetentionRecord;
+async function readAttachmentParserProjection(input: {
+  attachment: Pick<StoredAttachment, "attachmentId" | "kind">;
+  captureId: string;
+  fallbackUpdatedAt: string | null;
   vaultRoot: string;
-}): Promise<RetainedParserProjection | null> {
-  const manifestPath = await resolveRetainedParserManifestPath({
-    attachment: input.attachment,
+}): Promise<ParserProjection | null> {
+  const manifestPaths = await listInboxParserManifestPathsNewestFirst({
+    attachmentId: input.attachment.attachmentId,
+    captureId: input.captureId,
     vaultRoot: input.vaultRoot,
   });
-  if (!manifestPath) {
-    return null;
+  for (const manifestPath of manifestPaths) {
+    const projection = await readAttachmentParserProjectionFromManifest({
+      ...input,
+      manifestPath,
+    });
+    if (projection) {
+      return projection;
+    }
   }
 
+  return null;
+}
+
+async function readAttachmentParserProjectionFromManifest(input: {
+  attachment: Pick<StoredAttachment, "attachmentId" | "kind">;
+  captureId: string;
+  fallbackUpdatedAt: string | null;
+  manifestPath: string;
+  vaultRoot: string;
+}): Promise<ParserProjection | null> {
   let manifest: Record<string, unknown>;
   try {
-    const manifestAbsolutePath = await resolveVaultPath(input.vaultRoot, manifestPath);
+    const manifestAbsolutePath = await resolveVaultPath(input.vaultRoot, input.manifestPath);
     manifest = expectRecord(
       JSON.parse(await readFile(manifestAbsolutePath, "utf8")),
-      `retained parser manifest at ${manifestPath}`,
+      `retained parser manifest at ${input.manifestPath}`,
     );
   } catch {
     return null;
@@ -738,10 +753,9 @@ async function readRetainedParserProjection(input: {
   }
 
   const artifact = expectOptionalRecord(manifest.artifact);
-  const captureId = input.attachment.captureId;
   if (
     !artifact ||
-    artifact.captureId !== captureId ||
+    artifact.captureId !== input.captureId ||
     artifact.attachmentId !== input.attachment.attachmentId
   ) {
     return null;
@@ -750,7 +764,7 @@ async function readRetainedParserProjection(input: {
   const paths = expectOptionalRecord(manifest.paths);
   const plainTextPath = normalizeParserArtifactPath({
     attachmentId: input.attachment.attachmentId,
-    captureId,
+    captureId: input.captureId,
     pathValue: paths?.plainTextPath,
   });
   if (!plainTextPath) {
@@ -769,24 +783,13 @@ async function readRetainedParserProjection(input: {
 
   const transcriptOnly = input.attachment.kind === "audio" || input.attachment.kind === "video";
   return {
-    derivedPath: manifestPath,
+    derivedPath: input.manifestPath,
     extractedText: transcriptOnly ? null : plainText,
     parseState: "succeeded",
-    parseUpdatedAt: typeof manifest.createdAt === "string" ? manifest.createdAt : input.attachment.purgedAt ?? null,
+    parseUpdatedAt: typeof manifest.createdAt === "string" ? manifest.createdAt : input.fallbackUpdatedAt,
     parserProviderId: typeof manifest.providerId === "string" ? manifest.providerId : null,
     transcriptText: transcriptOnly ? plainText : null,
   };
-}
-
-async function resolveRetainedParserManifestPath(input: {
-  attachment: InboxAttachmentRetentionRecord;
-  vaultRoot: string;
-}): Promise<string | null> {
-  return await findLatestInboxParserManifestPath({
-    attachmentId: input.attachment.attachmentId,
-    captureId: input.attachment.captureId,
-    vaultRoot: input.vaultRoot,
-  });
 }
 
 function normalizeParserArtifactPath(input: {
