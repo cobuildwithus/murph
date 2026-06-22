@@ -227,7 +227,7 @@ export async function deliverAssistantReaction(input: {
       session: input.session,
     }
   }
-  if (!deliveryFields.reactionTargetMessageId) {
+  if (!deliveryFields.replyToMessageId) {
     return {
       kind: 'failed',
       error: normalizeAssistantDeliveryError(
@@ -274,7 +274,7 @@ export async function deliverAssistantReaction(input: {
     deliveryIdempotencyKey: reactionDedupeToken,
     dispatchMode: input.input.deliveryDispatchMode,
     reaction: input.reaction,
-    targetMessageId: deliveryFields.reactionTargetMessageId,
+    targetMessageId: deliveryFields.replyToMessageId,
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,
     vault: input.input.vault,
@@ -430,15 +430,19 @@ export async function deliverAssistantProgressUpdate(input: {
     ordinal: input.ordinal,
     turnId: input.turnId,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
 
   await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
-    ...pickAssistantCurrentAudienceMessageDeliveryFields(deliveryFields),
+    ...messageDeliveryFields,
     deliveryIdempotencyKey,
     media: [],
     message: input.text,
-    replyToMessageId: deliveryFields.replyToMessageId,
-    subject: deliveryFields.subject,
+    replyToMessageId: messageDeliveryFields.replyToMessageId,
+    subject: messageDeliveryFields.subject,
     turnId: input.turnId,
     vault: input.input.vault,
     signal: input.signal,
@@ -471,7 +475,6 @@ export interface AssistantCurrentAudienceDeliveryFields {
   >
   explicitTarget: string | null
   identityId: string | null
-  reactionTargetMessageId: string | null
   replyToMessageId: string | null
   sessionId: string
   subject: string | null
@@ -546,16 +549,6 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
           ? audience?.explicitTarget ?? null
           : message.deliveryTarget,
     identityId,
-    reactionTargetMessageId:
-      precedence === 'audience-first'
-        ? audience?.reactionTargetMessageId ??
-          resolveAssistantMessageReactionTargetMessageId(message) ??
-          null
-        : message.deliveryReactionTargetMessageId === undefined
-          ? message.deliveryReplyToMessageId === undefined
-            ? audience?.reactionTargetMessageId ?? null
-            : message.deliveryReplyToMessageId
-          : message.deliveryReactionTargetMessageId,
     replyToMessageId:
       precedence === 'audience-first'
         ? audience?.replyToMessageId ?? message.deliveryReplyToMessageId ?? null
@@ -578,7 +571,7 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
   if (
     !getAssistantChannelAdapter(channel)?.setMessageReaction ||
-    normalizeNullableString(deliveryFields.reactionTargetMessageId) === null
+    normalizeNullableString(deliveryFields.replyToMessageId) === null
   ) {
     return false
   }
@@ -599,30 +592,33 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   return !target?.businessConnectionId
 }
 
-function resolveAssistantMessageReactionTargetMessageId(
-  input: AssistantMessageInput,
-): string | null | undefined {
-  return input.deliveryReactionTargetMessageId === undefined
-    ? input.deliveryReplyToMessageId
-    : input.deliveryReactionTargetMessageId
+function resolveAssistantCurrentAudienceTextDeliveryFields(input: {
+  deliveryFields: AssistantCurrentAudienceDeliveryFields
+  input: AssistantMessageInput
+}): AssistantCurrentAudienceDeliveryFields {
+  if (
+    !shouldSuppressAssistantNativeTextReplyToMessageId({
+      channel: input.deliveryFields.channel,
+      turnTrigger: input.input.turnTrigger ?? null,
+    })
+  ) {
+    return input.deliveryFields
+  }
+
+  return {
+    ...input.deliveryFields,
+    replyToMessageId: null,
+  }
 }
 
-function pickAssistantCurrentAudienceMessageDeliveryFields(
-  input: AssistantCurrentAudienceDeliveryFields,
-): Omit<AssistantCurrentAudienceDeliveryFields, 'reactionTargetMessageId'> {
-  return {
-    actorId: input.actorId,
-    bindingDelivery: input.bindingDelivery,
-    channel: input.channel,
-    deliverySource: input.deliverySource,
-    explicitTarget: input.explicitTarget,
-    identityId: input.identityId,
-    replyToMessageId: input.replyToMessageId,
-    sessionId: input.sessionId,
-    subject: input.subject,
-    threadId: input.threadId,
-    threadIsDirect: input.threadIsDirect,
-  }
+function shouldSuppressAssistantNativeTextReplyToMessageId(input: {
+  channel: string | null
+  turnTrigger: AssistantMessageInput['turnTrigger'] | null
+}): boolean {
+  return (
+    normalizeNullableString(input.channel)?.toLowerCase() === 'telegram' &&
+    input.turnTrigger === 'automation-auto-reply'
+  )
 }
 
 function resolveAssistantHintedBindingDelivery(input: {
@@ -728,8 +724,12 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
   const outcome = await state.outbox.deliverMessage({
-    ...pickAssistantCurrentAudienceMessageDeliveryFields(deliveryFields),
+    ...messageDeliveryFields,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

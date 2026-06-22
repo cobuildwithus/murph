@@ -112,12 +112,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
     expect(sendIndex).toBeGreaterThan(typingIndices[0]);
 
-    const sendRequestBody = requireTelegramStub().parseObservedJson(sendRequest.body);
-    expect(sendRequestBody).toMatchObject({
+    expect(requireTelegramStub().parseObservedJson(sendRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(userId),
       text: HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
     });
-    expect("reply_to_message_id" in (sendRequestBody ?? {})).toBe(false);
+    expect(requireTelegramStub().parseObservedJson(sendRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -258,12 +258,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: reactionUserId,
     });
     const replyRequest = replyRequests.at(-1)!;
-    const replyRequestBody = requireTelegramStub().parseObservedJson(replyRequest.body);
-    expect(replyRequestBody).toMatchObject({
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(reactionUserId),
       text: reactionReplyText,
     });
-    expect("reply_to_message_id" in (replyRequestBody ?? {})).toBe(false);
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
   }, 300_000);
 
   it("still sends the Telegram reply when the reaction request fails", async () => {
@@ -326,12 +326,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: reactionFailureUserId,
     });
     const replyRequest = replyRequests.at(-1)!;
-    const replyRequestBody = requireTelegramStub().parseObservedJson(replyRequest.body);
-    expect(replyRequestBody).toMatchObject({
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(reactionFailureUserId),
       text: reactionReplyText,
     });
-    expect("reply_to_message_id" in (replyRequestBody ?? {})).toBe(false);
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body))
+      .not.toHaveProperty("reply_to_message_id");
   }, 300_000);
 });
 

@@ -347,8 +347,7 @@ describe('assistant protocol index planning', () => {
       executionContext: null,
       input: {
         ...createMessageInput(),
-        deliveryReactionTargetMessageId: 'message-1',
-        deliveryReplyToMessageId: null,
+        deliveryReplyToMessageId: 'message-1',
       },
       profile,
       promptTimeContext,
@@ -1753,7 +1752,6 @@ function createSharedPlan(
         effectiveThreadIsDirect: null,
         explicitTarget: null,
         identityId: null,
-        reactionTargetMessageId: null,
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,

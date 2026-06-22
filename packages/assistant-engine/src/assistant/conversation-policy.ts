@@ -23,7 +23,6 @@ export interface AssistantConversationAudience {
   effectiveThreadIsDirect: boolean | null
   explicitTarget: string | null
   identityId: string | null
-  reactionTargetMessageId: string | null
   replyToMessageId: string | null
   threadId: string | null
   threadIsDirect: boolean | null
@@ -40,7 +39,6 @@ export function resolveAssistantConversationPolicy(input: {
     | 'conversation'
     | 'channel'
     | 'deliverResponse'
-    | 'deliveryReactionTargetMessageId'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
     | 'operatorAuthority'
@@ -69,7 +67,6 @@ export function resolveAssistantConversationAudience(input: {
     | 'conversation'
     | 'channel'
     | 'deliverResponse'
-    | 'deliveryReactionTargetMessageId'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
     | 'operatorAuthority'
@@ -101,10 +98,6 @@ export function resolveAssistantConversationAudience(input: {
   const replyToMessageId = normalizeNullableString(
     input.message.deliveryReplyToMessageId,
   )
-  const reactionTargetMessageId =
-    input.message.deliveryReactionTargetMessageId === undefined
-      ? replyToMessageId
-      : normalizeNullableString(input.message.deliveryReactionTargetMessageId)
   const threadIsDirect =
     typeof input.message.threadIsDirect === 'boolean'
       ? input.message.threadIsDirect
@@ -138,7 +131,6 @@ export function resolveAssistantConversationAudience(input: {
     }),
     explicitTarget,
     identityId,
-    reactionTargetMessageId,
     replyToMessageId,
     threadId,
     threadIsDirect,

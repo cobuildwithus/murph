@@ -2553,8 +2553,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryReactionTargetMessageId: '123',
-        deliveryReplyToMessageId: null,
+        deliveryReplyToMessageId: '123',
         operatorAuthority: 'direct-operator',
         receiptMetadata: {
           autoReplyInputId: expect.stringMatching(/^ain_[0-9a-f]{32}$/u),
@@ -3584,8 +3583,7 @@ describe('assistant auto-reply runtime', () => {
           }),
         ])
         expect(admitted).toMatchObject({
-          deliveryReactionTargetMessageId: 'late_msg_1',
-          deliveryReplyToMessageId: null,
+          deliveryReplyToMessageId: 'late_msg_1',
           deliveryTarget: 'late_thread_1',
         })
         expect(admitted.transcriptText).toBe('User sent an attachment.')
@@ -3879,8 +3877,7 @@ describe('assistant auto-reply runtime', () => {
           id: hostedInput.event.inputId,
         }),
       ],
-      deliveryReplyToMessageId: null,
-      deliveryReactionTargetMessageId: 'msg_4',
+      deliveryReplyToMessageId: 'msg_4',
       kind: 'accepted',
       prompt: expect.stringContaining('late hosted text'),
       receiptMetadata: {
@@ -3973,21 +3970,23 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
       deliveryReplyToMessageId?: string | null
-      deliveryReactionTargetMessageId?: string | null
     }) => {
-      expect(input.deliveryReplyToMessageId).toBeNull()
-      expect(input.deliveryReactionTargetMessageId).toBe('initial_msg_1')
+      expect(input.deliveryReplyToMessageId).toBe('initial_msg_1')
       const admitted = await input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
       })
       expect(admitted).toMatchObject({
-        deliveryReactionTargetMessageId: null,
-        deliveryReplyToMessageId: null,
         kind: 'accepted',
         prompt: expect.stringContaining('late text without message id'),
       })
+      expect(
+        Object.prototype.hasOwnProperty.call(
+          admitted as Record<string, unknown>,
+          'deliveryReplyToMessageId',
+        ),
+      ).toBe(false)
       await input.activeTurnCheckpoint?.({
         acceptedInputIds: [hostedInput.event.inputId],
         providerRequestOrdinal: 0,
@@ -4138,8 +4137,7 @@ describe('assistant auto-reply runtime', () => {
           }),
         ],
         deliveryTarget: 'thread-1',
-        deliveryReactionTargetMessageId: 'newer_msg',
-        deliveryReplyToMessageId: null,
+        deliveryReplyToMessageId: 'newer_msg',
         kind: 'accepted',
       })
       await input.activeTurnCheckpoint?.({
@@ -6052,8 +6050,7 @@ describe('assistant auto-reply runtime', () => {
           threadId: 'hid_thread_telegram_initial',
         }),
         deliveryTarget: '6001234567',
-        deliveryReactionTargetMessageId: '7001234567',
-        deliveryReplyToMessageId: null,
+        deliveryReplyToMessageId: '7001234567',
       }),
     )
   })

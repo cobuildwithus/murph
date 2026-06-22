@@ -3552,7 +3552,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         effectiveThreadIsDirect: null,
         explicitTarget: null,
         identityId: null,
-        reactionTargetMessageId: null,
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,

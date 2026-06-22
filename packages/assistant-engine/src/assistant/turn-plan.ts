@@ -38,7 +38,6 @@ export async function resolveAssistantTurnSharedPlan(
       channel: input.channel,
       conversation: input.conversation,
       deliverResponse: input.deliverResponse,
-      deliveryReactionTargetMessageId: input.deliveryReactionTargetMessageId,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       deliveryTarget: input.deliveryTarget,
       operatorAuthority: input.operatorAuthority,
