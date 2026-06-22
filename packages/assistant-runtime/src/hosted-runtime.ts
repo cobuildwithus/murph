@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -11,8 +12,14 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  detectVaultMetadataFormatVersion,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
+import {
+  CURRENT_VAULT_FORMAT_VERSION,
+  runIntegrationIngestMigration,
+  VaultError,
+} from "@murphai/core";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
@@ -296,6 +303,7 @@ const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as con
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
+const HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES = 100;
 
 interface HostedInitialMailboxImportPlan {
   bootstrapRequired: boolean;
@@ -325,6 +333,59 @@ function resolveHostedInitialMailboxImportPlan(input: {
 
 function hasHostedVaultMetadata(vaultRoot: string): boolean {
   return existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata));
+}
+
+async function ensureHostedVaultFormatCurrentForRuntime(vaultRoot: string): Promise<void> {
+  if (!hasHostedVaultMetadata(vaultRoot)) {
+    return;
+  }
+
+  if (await readHostedVaultStoredFormatVersion(vaultRoot) === CURRENT_VAULT_FORMAT_VERSION) {
+    return;
+  }
+
+  for (let pass = 0; pass < HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES; pass += 1) {
+    const result = await runIntegrationIngestMigration({
+      vaultRoot,
+      apply: true,
+    });
+    if (result.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
+      return;
+    }
+    if (result.blockerCount > 0) {
+      throw new VaultError(
+        "HOSTED_VAULT_FORMAT_MIGRATION_BLOCKED",
+        "Hosted vault format migration is blocked; repair the legacy integration ingest data before serving the workspace.",
+        { blockersByCode: result.blockersByCode },
+      );
+    }
+    if (!result.mutated && !result.hasMore) {
+      throw new VaultError(
+        "HOSTED_VAULT_FORMAT_MIGRATION_STALLED",
+        "Hosted vault format migration made no progress before the workspace could be served.",
+        { storedFormatVersion: result.storedFormatVersion },
+      );
+    }
+  }
+
+  throw new VaultError(
+    "HOSTED_VAULT_FORMAT_MIGRATION_PASS_LIMIT_EXCEEDED",
+    "Hosted vault format migration exceeded the bounded pass limit before the workspace could be served.",
+    { maxPasses: HOSTED_VAULT_FORMAT_MIGRATION_MAX_PASSES },
+  );
+}
+
+async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<number> {
+  const rawMetadata = JSON.parse(
+    await readFile(path.join(vaultRoot, VAULT_LAYOUT.metadata), "utf8"),
+  ) as unknown;
+  const result = detectVaultMetadataFormatVersion(rawMetadata, {
+    relativePath: VAULT_LAYOUT.metadata,
+  });
+  if (!result.success) {
+    throw new VaultError(result.error.code, result.error.message, result.error.details);
+  }
+  return result.storedFormatVersion;
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
@@ -772,6 +833,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "workspace.restore",
       status: "done",
     });
+    assertRuntimeNotAborted();
+    await raceHostedRuntimeCancellation(
+      ensureHostedVaultFormatCurrentForRuntime(restored.vaultRoot),
+      runtimeAbortController.signal,
+    );
     assertRuntimeNotAborted();
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;

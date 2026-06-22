@@ -14,7 +14,7 @@ import {
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { toMonthlyShardRelativePath } from "./jsonl.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
 export const MAX_INTEGRATION_INGEST_PARTS = 10_000;
@@ -56,6 +56,12 @@ export interface IntegrationIngestAppendPlan {
 export interface StoredIntegrationIngestEntry {
   relativePath: string;
   record: IntegrationIngestRecord;
+}
+
+interface RawIntegrationIngestJsonlRow {
+  lineNumber: number;
+  raw: unknown;
+  relativePath: string;
 }
 
 export function integrationIngestShardPath(importedAt: string): string {
@@ -230,40 +236,12 @@ async function readIntegrationIngestEntriesFromPaths(
   const entries: StoredIntegrationIngestEntry[] = [];
   const seen = new Map<string, string>();
 
-  for (const relativePath of [...paths].sort()) {
-    const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
-    if (!(await pathExists(absolutePath))) {
-      continue;
-    }
-    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
-      const parsed = integrationIngestRecordSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_INVALID",
-          `Integration ingest record in "${relativePath}" failed contract validation.`,
-          { errors: parsed.error.issues.map((issue) => issue.message), relativePath },
-        );
-      }
-      assertIntegrationIngestRecordIntegrity(parsed.data);
-      const expectedPath = integrationIngestShardPath(parsed.data.importedAt);
-      if (expectedPath !== relativePath) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_SHARD_INVALID",
-          `Integration ingest "${parsed.data.id}" belongs in "${expectedPath}", not "${relativePath}".`,
-          { relativePath },
-        );
-      }
-      const previousPath = seen.get(parsed.data.id);
-      if (previousPath) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_DUPLICATE_ID",
-          `Integration ingest id "${parsed.data.id}" appears more than once.`,
-          { previousPath, relativePath },
-        );
-      }
-      seen.set(parsed.data.id, relativePath);
-      entries.push({ relativePath, record: parsed.data });
-    }
+  for await (const { raw, relativePath } of readIntegrationIngestJsonlRows(vaultRoot, paths)) {
+    const record = parseIntegrationIngestRecord(raw, relativePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, relativePath);
+    assertIntegrationIngestRecordIntegrity(record);
+    assertUniqueIntegrationIngestId(seen, record.id, relativePath);
+    entries.push({ relativePath, record });
   }
   return entries;
 }
@@ -307,36 +285,14 @@ async function readIntegrationIngestEntriesByIdFromPaths(
           { relativePath, lineNumber },
         );
       }
-      const expectedPath = integrationIngestShardPath(raw.importedAt);
-      if (expectedPath !== relativePath) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_SHARD_INVALID",
-          `Integration ingest "${raw.id}" belongs in "${expectedPath}", not "${relativePath}".`,
-          { relativePath },
-        );
-      }
+      assertIntegrationIngestShard(raw.id, raw.importedAt, relativePath);
       if (!ids.has(raw.id)) {
         continue;
       }
-      const parsed = integrationIngestRecordSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_INVALID",
-          `Integration ingest record in "${relativePath}" failed contract validation.`,
-          { errors: parsed.error.issues.map((issue) => issue.message), relativePath },
-        );
-      }
-      assertIntegrationIngestRecordIntegrity(parsed.data);
-      const previousPath = seen.get(parsed.data.id);
-      if (previousPath) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_DUPLICATE_ID",
-          `Integration ingest id "${parsed.data.id}" appears more than once.`,
-          { previousPath, relativePath },
-        );
-      }
-      seen.set(parsed.data.id, relativePath);
-      entries.push({ relativePath, record: parsed.data });
+      const record = parseIntegrationIngestRecord(raw, relativePath);
+      assertIntegrationIngestRecordIntegrity(record);
+      assertUniqueIntegrationIngestId(seen, record.id, relativePath);
+      entries.push({ relativePath, record });
     }
   }
 
@@ -408,16 +364,32 @@ export async function listIntegrationIngestsForEvent(
   vaultRoot: string,
   eventId: string,
 ): Promise<StoredIntegrationIngestEntry[]> {
-  return (await readIntegrationIngestEntries(vaultRoot)).filter((entry) =>
-    entry.record.outputs.events.some((output) => output.id === eventId)
-  );
+  const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const entries: StoredIntegrationIngestEntry[] = [];
+  const seen = new Map<string, string>();
+  for await (const { raw, relativePath } of readIntegrationIngestJsonlRows(vaultRoot, paths.sort())) {
+    const record = parseIntegrationIngestRecord(raw, relativePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, relativePath);
+    if (!record.outputs.events.some((output) => output.id === eventId)) {
+      continue;
+    }
+    assertIntegrationIngestRecordIntegrity(record);
+    assertUniqueIntegrationIngestId(seen, record.id, relativePath);
+    entries.push({ relativePath, record });
+  }
+  return entries;
 }
 
 export async function readIntegrationIngestById(
   vaultRoot: string,
   ingestId: string,
 ): Promise<StoredIntegrationIngestEntry | null> {
-  return (await readIntegrationIngestEntries(vaultRoot)).find((entry) => entry.record.id === ingestId) ?? null;
+  const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  return (await readIntegrationIngestEntriesByIdFromPaths(vaultRoot, paths.sort(), new Set([ingestId])))[0] ?? null;
 }
 
 export function readIntegrationEvidencePart(
@@ -440,6 +412,84 @@ function stableSortJson(value: unknown): unknown {
     );
   }
   return value;
+}
+
+async function* readIntegrationIngestJsonlRows(
+  vaultRoot: string,
+  paths: readonly string[],
+): AsyncGenerator<RawIntegrationIngestJsonlRow> {
+  for (const relativePath of [...paths].sort()) {
+    const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
+    if (!(await pathExists(absolutePath))) {
+      continue;
+    }
+    const lines = createInterface({
+      input: createReadStream(absolutePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+    let lineNumber = 0;
+    for await (const line of lines) {
+      lineNumber += 1;
+      if (line.length === 0) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch (error) {
+        throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
+          relativePath,
+          lineNumber,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+      }
+      yield { lineNumber, raw, relativePath };
+    }
+  }
+}
+
+function parseIntegrationIngestRecord(
+  raw: unknown,
+  relativePath: string,
+): IntegrationIngestRecord {
+  const parsed = integrationIngestRecordSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      `Integration ingest record in "${relativePath}" failed contract validation.`,
+      { errors: parsed.error.issues.map((issue) => issue.message), relativePath },
+    );
+  }
+  return parsed.data;
+}
+
+function assertIntegrationIngestShard(
+  id: string,
+  importedAt: string,
+  relativePath: string,
+): void {
+  const expectedPath = integrationIngestShardPath(importedAt);
+  if (expectedPath !== relativePath) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_SHARD_INVALID",
+      `Integration ingest "${id}" belongs in "${expectedPath}", not "${relativePath}".`,
+      { relativePath },
+    );
+  }
+}
+
+function assertUniqueIntegrationIngestId(
+  seen: Map<string, string>,
+  id: string,
+  relativePath: string,
+): void {
+  const previousPath = seen.get(id);
+  if (previousPath) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_DUPLICATE_ID",
+      `Integration ingest id "${id}" appears more than once.`,
+      { previousPath, relativePath },
+    );
+  }
+  seen.set(id, relativePath);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

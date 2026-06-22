@@ -13,6 +13,7 @@ import {
   findEventByExternalRef,
   importDeviceBatch,
   initializeVault,
+  listIntegrationIngestsForEvent,
   readIntegrationIngestById,
   readJsonlRecords,
   repairJunctionWorkoutHeartRateZones,
@@ -656,9 +657,79 @@ test("importDeviceBatch streams target ingest duplicate checks without rehashing
   });
 
   assert.equal(result.ingestShardPath, targetShardPath);
+  const entry = await readIntegrationIngestById(vaultRoot, result.ingestId);
+  assert.equal(entry?.record.id, result.ingestId);
   const rows = await readJsonlRecords({ vaultRoot, relativePath: targetShardPath });
   assert.equal(rows.length, 2);
   assert.equal((rows[1] as { id?: string }).id, result.ingestId);
+});
+
+test("listIntegrationIngestsForEvent streams provenance lookup without rehashing unrelated rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-stream-event-provenance");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const targetShardPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, targetShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, targetShardPath),
+    `${JSON.stringify({
+      schemaVersion: "murph.integration-ingest.v1",
+      id: "xfm_existingbadintegrityforotherevent",
+      provider: "junction",
+      source: "device",
+      importedAt: "2026-03-01T00:00:00.000Z",
+      parts: [
+        {
+          role: "junction-summary-workouts",
+          fileName: "junction-summary-workouts.json",
+          mediaType: "application/json",
+          content: "{}",
+          byteSize: 2,
+          sha256: "0".repeat(64),
+        },
+      ],
+      outputs: {
+        events: [
+          {
+            id: "evt_unrelated",
+            roles: ["junction-summary-workouts"],
+          },
+        ],
+        eventIdsComplete: true,
+        sampleIds: [],
+        sampleIdsComplete: true,
+      },
+      counts: {
+        eventCount: 1,
+        sampleCount: 0,
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({ resourceId: "workouts-stream-event-provenance" }),
+        evidenceRoles: ["junction-summary-workouts"],
+      },
+    ],
+    evidenceParts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: { id: "workouts-stream-event-provenance", sport: "running" },
+      },
+    ],
+  });
+
+  const entries = await listIntegrationIngestsForEvent(
+    vaultRoot,
+    result.events[0]?.id ?? "missing",
+  );
+  assert.deepEqual(entries.map((entry) => entry.record.id), [result.ingestId]);
 });
 
 test("importDeviceBatch fails closed on malformed target ingest shards while streaming", async () => {
