@@ -8,6 +8,15 @@ import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
+  ComposioConnectedAppsRequestError,
+  createComposioConnectedAppsClient,
+  type ComposioConnectedAccount,
+} from "../connected-apps/composio";
+import {
+  formatHostedConnectedAppToolkitLabel,
+  readHostedConnectedAppsConfig,
+} from "../connected-apps/config";
+import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
 } from "../device-sync/provider-label";
@@ -226,6 +235,20 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
   },
   {
+    slug: "prisma.hosted_connected_apps_session",
+    label: "Connected-app Tool Router sessions",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Revokes provider access through Composio before local Tool Router session references are deleted.",
+  },
+  {
+    slug: "prisma.hosted_connected_app_connect_intent",
+    label: "Connected-app connection intents",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes short-lived connected-app connection claims and account ids after provider revocation has been attempted.",
+  },
+  {
     slug: "prisma.device_sync_dirty_connection",
     label: "Device sync dirty state",
     deletion: "live-delete",
@@ -322,6 +345,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "best-effort-delete",
     export: "metadata-and-counts",
     note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
+  },
+  {
+    slug: "providers.composio_connected_apps",
+    label: "Composio connected-app provider revocation",
+    deletion: "best-effort-delete",
+    export: "documented-only",
+    note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -522,6 +552,8 @@ export async function buildHostedDataExport(input: {
     aiUsage,
     aiUsagePeriods,
     linqDailyStates,
+    connectedAppsSessions,
+    connectedAppConnectIntents,
   ] = await Promise.all([
     readHostedMemberSnapshot({ memberId, prisma }),
     countHostedAccountData({ memberId, prisma }),
@@ -845,6 +877,32 @@ export async function buildHostedDataExport(input: {
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
+    prisma.hostedConnectedAppsSession.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        createdAt: true,
+        memberId: true,
+        policyRevision: true,
+        updatedAt: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
+    prisma.hostedConnectedAppConnectIntent.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        alias: true,
+        completedAt: true,
+        connectedAccountId: true,
+        createdAt: true,
+        expiresAt: true,
+        memberId: true,
+        startedAt: true,
+        toolkit: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
   ]);
 
   if (!memberSnapshot) {
@@ -869,6 +927,8 @@ export async function buildHostedDataExport(input: {
   const limitedVaultShares = limitRowsForExport(vaultShares);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
+  const limitedConnectedAppsSessions = limitRowsForExport(connectedAppsSessions);
+  const limitedConnectedAppConnectIntents = limitRowsForExport(connectedAppConnectIntents);
   const aiUsagePeriodLedgerSpendByStartTime = new Map(
     await Promise.all(limitedAiUsagePeriods.rows.map(async (period) => {
       const ledgerSpend = await prisma.hostedAiUsage.aggregate({
@@ -927,6 +987,8 @@ export async function buildHostedDataExport(input: {
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
         aiUsage: limitedAiUsage.meta,
         aiUsagePeriods: limitedAiUsagePeriods.meta,
+        connectedAppConnectIntents: limitedConnectedAppConnectIntents.meta,
+        connectedAppsSessions: limitedConnectedAppsSessions.meta,
         vaultShares: limitedVaultShares.meta,
       },
     },
@@ -1039,6 +1101,30 @@ export async function buildHostedDataExport(input: {
         status: run.status,
         suggestedReply: run.suggestedReply,
         updatedAt: run.updatedAt,
+      })),
+    },
+    connectedApps: {
+      connectIntents: limitedConnectedAppConnectIntents.rows.map((intent) => ({
+        alias: intent.alias,
+        claimHashOmitted: true,
+        completedAt: intent.completedAt,
+        connectedAccountIdPresent: Boolean(intent.connectedAccountId),
+        createdAt: intent.createdAt,
+        expiresAt: intent.expiresAt,
+        memberId: intent.memberId,
+        startedAt: intent.startedAt,
+        toolkit: intent.toolkit,
+      })),
+      providerAccounts: {
+        exportMode: "documented-only",
+        note: "Provider-side connected account data is held by Composio and omitted from this export.",
+      },
+      sessions: limitedConnectedAppsSessions.rows.map((session) => ({
+        createdAt: session.createdAt,
+        memberId: session.memberId,
+        policyRevision: session.policyRevision,
+        remoteSessionIdOmitted: true,
+        updatedAt: session.updatedAt,
       })),
     },
     wearables: {
@@ -1487,6 +1573,12 @@ export async function deleteHostedAccountData(input: {
   const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
   const privyUserId = identity?.privyUserId ?? null;
 
+  const deletionStartedAt = new Date();
+  await markHostedMemberSuspendedForAccountDeletion({
+    memberId: input.memberId,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
   await terminateHostedUserRuntimeWorkflowBestEffort({
     reason: "account-deleted",
     userId: input.memberId,
@@ -1495,23 +1587,26 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const providerRevocations = await revokeDeviceProvidersBestEffort({
+  const deviceProviderRevocations = await revokeDeviceProvidersBestEffort({
     connections: providerRevocationConnectionIdentities,
     memberId: input.memberId,
     request: input.request,
   });
+  const connectedAppProviderCleanupStartedAt = new Date();
+  const connectedAppRevocations = await revokeConnectedAppsBestEffort({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const providerRevocations = [
+    ...deviceProviderRevocations,
+    ...connectedAppRevocations,
+  ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionForAccountDeletion({
     memberId: input.memberId,
     stripeSubscriptionId,
-  });
-  const deletionStartedAt = new Date();
-  await markHostedMemberSuspendedForAccountDeletion({
-    memberId: input.memberId,
-    now: deletionStartedAt,
-    prisma: input.prisma,
   });
   await deleteHostedComputerUseExternalStateForAccountDeletion({
     memberId: input.memberId,
@@ -1520,6 +1615,16 @@ export async function deleteHostedAccountData(input: {
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
+      prisma: tx,
+    });
+    await refreshHostedMemberAccountDeletionFenceTx({
+      memberId: input.memberId,
+      now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertNoConnectedAppWritesAfterProviderCleanupTx({
+      memberId: input.memberId,
+      providerCleanupStartedAt: connectedAppProviderCleanupStartedAt,
       prisma: tx,
     });
     await lockHostedComputerUseRowsForAccountDeletionTx({
@@ -1620,6 +1725,47 @@ async function markHostedMemberSuspendedForAccountDeletion(input: {
       },
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function refreshHostedMemberAccountDeletionFenceTx(input: {
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.hostedMember.updateMany({
+    data: {
+      suspendedAt: input.now,
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+}
+
+async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  providerCleanupStartedAt: Date;
+}): Promise<void> {
+  const writes = await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    select: { claimHash: true },
+    take: 1,
+    where: {
+      expiresAt: { gt: new Date() },
+      memberId: input.memberId,
+      startedAt: { gte: input.providerCleanupStartedAt },
+    },
+  });
+  if (writes.length === 0) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_CONNECTED_APP_WRITE_IN_PROGRESS",
+    httpStatus: 503,
+    message: "A connected-app connection changed during account deletion. Retry account deletion before local account records are removed.",
+    retryable: true,
+  });
 }
 
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
@@ -1743,6 +1889,8 @@ async function countHostedAccountData(input: {
     hostedMemberRouting,
     hostedMemberBillingRef,
     hostedMemberEmailAuthorization,
+    hostedConnectedAppsSession,
+    hostedConnectedAppConnectIntent,
     hostedMailboxItem,
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
@@ -1776,6 +1924,8 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMemberRouting.count({ where: { memberId } }),
     input.prisma.hostedMemberBillingRef.count({ where: { memberId } }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId } }),
+    input.prisma.hostedConnectedAppsSession.count({ where: { memberId } }),
+    input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId } }),
     input.prisma.hostedMailboxItem.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
@@ -1820,6 +1970,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
+    "prisma.hosted_connected_app_connect_intent": hostedConnectedAppConnectIntent,
+    "prisma.hosted_connected_apps_session": hostedConnectedAppsSession,
     "prisma.hosted_computer_handoff": hostedComputerHandoff,
     "prisma.hosted_computer_run": hostedComputerRun,
     "prisma.hosted_invite": hostedInvite,
@@ -1874,6 +2026,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_connected_apps_session", await input.prisma.hostedConnectedAppsSession.deleteMany({ where: { memberId } }));
 
   const webhookTraceWhere = buildDeviceWebhookTraceWhere(input.connectionIdentities);
   counts["prisma.device_webhook_trace"] = webhookTraceWhere
@@ -2131,6 +2285,177 @@ async function revokeDeviceProvidersBestEffort(input: {
   }
 
   return results;
+}
+
+async function revokeConnectedAppsBestEffort(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedAccountProviderRevocationResult[]> {
+  const inFlightIntents = await listInFlightConnectedAppIntentsForDeletion(input);
+  if (inFlightIntents.some((intent) => !intent.connectedAccountId)) {
+    return [{
+      connectionId: "composio_connected_app_connection_in_progress",
+      errorCode: "CONNECTED_APP_CONNECTION_IN_PROGRESS",
+      providerLabel: "Connected apps",
+      status: "failed",
+      warningCode: null,
+    }];
+  }
+
+  const session = await input.prisma.hostedConnectedAppsSession.findUnique({
+    select: { memberId: true },
+    where: { memberId: input.memberId },
+  });
+  const inFlightAccountIds = inFlightIntents
+    .map((intent) => intent.connectedAccountId)
+    .filter((accountId): accountId is string => !!accountId);
+  if (!session && inFlightAccountIds.length === 0) {
+    return [];
+  }
+
+  let accounts: ComposioConnectedAccount[];
+  let client: ReturnType<typeof createComposioConnectedAppsClient>;
+  try {
+    const config = readHostedConnectedAppsConfig();
+    client = createComposioConnectedAppsClient({ config });
+    accounts = await client.listAccounts({
+      statuses: null,
+      toolkits: null,
+      userId: input.memberId,
+    });
+  } catch (error) {
+    return [{
+      connectionId: "composio_connected_apps",
+      errorCode: safeErrorCode(error),
+      providerLabel: "Connected apps",
+      status: "failed",
+      warningCode: null,
+    }];
+  }
+
+  const results: HostedAccountProviderRevocationResult[] = [];
+  const listedAccountIds = new Set(accounts.map((account) => account.id));
+  for (const account of accounts.filter(isComposioAccountDeletable)) {
+    let status: HostedAccountProviderRevocationStatus = "not_needed";
+    let warningCode: string | null = null;
+
+    try {
+      if (isComposioAccountRevokable(account)) {
+        try {
+          await client.disconnectAccount(account.id);
+          status = "revoked";
+        } catch (error) {
+          if (!isNonBlockingComposioRevokeError(error)) {
+            results.push({
+              connectionId: account.id,
+              errorCode: safeErrorCode(error),
+              providerLabel: formatConnectedAppProviderLabel(account),
+              status: "failed",
+              warningCode: null,
+            });
+            continue;
+          }
+          status = "warning";
+          warningCode = safeErrorCode(error);
+        }
+      }
+
+      await client.deleteAccount(account.id);
+      results.push({
+        connectionId: account.id,
+        errorCode: null,
+        providerLabel: formatConnectedAppProviderLabel(account),
+        status,
+        warningCode,
+      });
+    } catch (error) {
+      results.push({
+        connectionId: account.id,
+        errorCode: safeErrorCode(error),
+        providerLabel: formatConnectedAppProviderLabel(account),
+        status: "failed",
+        warningCode: null,
+      });
+    }
+  }
+
+  for (const intent of inFlightIntents) {
+    if (!intent.connectedAccountId || listedAccountIds.has(intent.connectedAccountId)) {
+      continue;
+    }
+    try {
+      await client.deleteAccount(intent.connectedAccountId);
+      results.push({
+        connectionId: intent.connectedAccountId,
+        errorCode: null,
+        providerLabel: formatConnectedAppIntentProviderLabel(intent),
+        status: "not_needed",
+        warningCode: null,
+      });
+    } catch (error) {
+      results.push({
+        connectionId: intent.connectedAccountId,
+        errorCode: safeErrorCode(error),
+        providerLabel: formatConnectedAppIntentProviderLabel(intent),
+        status: "failed",
+        warningCode: null,
+      });
+    }
+  }
+
+  return results;
+}
+
+async function listInFlightConnectedAppIntentsForDeletion(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<Array<{
+  alias: string | null;
+  connectedAccountId: string | null;
+  toolkit: string;
+}>> {
+  const now = new Date();
+  return await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    select: {
+      alias: true,
+      connectedAccountId: true,
+      toolkit: true,
+    },
+    where: {
+      completedAt: null,
+      expiresAt: { gt: now },
+      memberId: input.memberId,
+      startedAt: { not: null },
+    },
+  });
+}
+
+function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean {
+  return account.status.toUpperCase() !== "DELETED";
+}
+
+function isComposioAccountRevokable(account: ComposioConnectedAccount): boolean {
+  return account.status.toUpperCase() === "ACTIVE";
+}
+
+function isNonBlockingComposioRevokeError(error: unknown): boolean {
+  return error instanceof ComposioConnectedAppsRequestError
+    && (error.status === 400 || error.status === 409);
+}
+
+function formatConnectedAppProviderLabel(account: ComposioConnectedAccount): string {
+  const label = account.toolkit.name
+    || formatHostedConnectedAppToolkitLabel(account.toolkit.slug);
+  const qualifier = account.alias ?? account.wordId;
+  return qualifier ? `${label} (${qualifier})` : label;
+}
+
+function formatConnectedAppIntentProviderLabel(input: {
+  alias: string | null;
+  toolkit: string;
+}): string {
+  const label = formatHostedConnectedAppToolkitLabel(input.toolkit);
+  return input.alias ? `${label} (${input.alias})` : label;
 }
 
 function assertProviderRevocationsAllowDeletion(

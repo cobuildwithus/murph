@@ -360,6 +360,7 @@ export interface HostedRuntimeVaultSharePort {
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
+  connectedAppsAvailable?: boolean | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;

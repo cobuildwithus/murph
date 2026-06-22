@@ -71,6 +71,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
+  connectedAppsAvailable?: boolean | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   issueDeviceConnectLink?(
@@ -118,6 +119,9 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
+      ...(hosted?.connectedAppsAvailable === true
+        ? { connectedAppsAvailable: true }
+        : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,

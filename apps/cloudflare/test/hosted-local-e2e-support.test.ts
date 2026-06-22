@@ -212,10 +212,13 @@ describe("expectAdvertisedMurphDynamicTools", () => {
   it("expects gated tools only when the scenario enables them", () => {
     const allToolNames = listMurphDynamicToolNames();
     const baseToolNames = allToolNames.filter((name) =>
-      !name.startsWith("murph.computer_") && name !== "murph.react_to_message"
+      !name.startsWith("murph.computer_")
+      && !name.startsWith("murph.connected_apps_")
+      && name !== "murph.react_to_message"
     );
     expect(allToolNames).toContain("murph.react_to_message");
     expect(allToolNames).toContain("murph.computer_start_run");
+    expect(allToolNames).toContain("murph.connected_apps_manage");
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
@@ -224,6 +227,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(allToolNames)],
       {
+        connectedAppsAvailable: true,
         computerToolsAvailable: true,
         messageReactionsAvailable: true,
       },
