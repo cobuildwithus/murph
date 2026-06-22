@@ -175,7 +175,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.doesNotMatch(markup, /Your wearable shows data/);
 });
 
-test("SecurityPage keeps the shared sticky nav on one auth button", async () => {
+test("SecurityPage splits the shared sticky nav into Log in + Signup when logged out", async () => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
@@ -193,7 +193,7 @@ test("SecurityPage keeps the shared sticky nav on one auth button", async () => 
       authenticated: false,
       context: "nav",
       authLabel: "Dashboard",
-      splitUnauthenticated: false,
+      splitUnauthenticated: true,
     },
     undefined
   );

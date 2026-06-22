@@ -73,7 +73,6 @@ export default async function HomePage() {
           authenticated={authenticated}
           githubStarCount={githubStarCount}
           preloadAuthPanel
-          splitUnauthenticatedAuth
         />
         <HeroSection authenticated={authenticated} />
         <TrustSection />

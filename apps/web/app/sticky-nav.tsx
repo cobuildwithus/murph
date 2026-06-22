@@ -12,7 +12,7 @@ export function StickyNav({
   authenticated,
   githubStarCount = null,
   preloadAuthPanel = false,
-  splitUnauthenticatedAuth = false,
+  splitUnauthenticatedAuth = true,
 }: {
   authenticated: boolean;
   githubStarCount?: number | null;
