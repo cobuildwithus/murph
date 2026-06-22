@@ -1298,9 +1298,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1342,9 +1339,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail", "ok"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1404,9 +1398,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail", "ok"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1466,9 +1457,6 @@ describe("ComputerUseService", () => {
       crypto: createFakeCrypto({
         decryptedRunSecret: null,
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1512,7 +1500,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "staging.alpha",
       },
       kernel,
@@ -1582,7 +1569,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
       },
       kernel,
@@ -1659,9 +1645,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1707,9 +1690,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1749,9 +1729,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1789,9 +1766,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1829,9 +1803,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       navigationDnsLookup: async () => [
         { address: "93.184.216.34" },
@@ -1853,34 +1824,6 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightCalls).toBe(0);
   });
 
-  it("fails closed before browser creation when live-view origins are not configured", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const store = new FakeComputerUseStore({
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:00:00.000Z"),
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
-        status: "completed",
-      }),
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
-    });
-    expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.deletedSessionIds).toEqual([]);
-  });
-
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -1895,7 +1838,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
       },
       kernel,
@@ -1947,7 +1889,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
       },
       kernel,
@@ -1991,7 +1932,6 @@ describe("ComputerUseService", () => {
 
     await new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod/foo",
       },
       kernel: createFakeKernel(),
@@ -2004,7 +1944,6 @@ describe("ComputerUseService", () => {
     });
     await new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod foo",
       },
       kernel: createFakeKernel(),
@@ -2033,11 +1972,11 @@ describe("ComputerUseService", () => {
         status: "completed",
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      liveViewUrlForBrowser: (browserCount) =>
+        `https://kernel.example.test/live/${browserCount}`,
+    });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2069,9 +2008,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2129,9 +2065,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2167,9 +2100,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2732,9 +2662,6 @@ describe("ComputerUseService", () => {
       crypto: createFakeCrypto({
         decryptedRunSecret: "https://kernel.example.test/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2765,11 +2692,8 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
-        decryptedRunSecret: "https://kernel.example.test/live/1",
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2916,11 +2840,8 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
-        decryptedRunSecret: "https://kernel.example.test/live/1",
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2933,7 +2854,7 @@ describe("ComputerUseService", () => {
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       kind: "open",
-      liveViewUrl: "https://kernel.example.test/live/1",
+      liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
       purpose: "login",
       suggestedReply: "done",
     });
@@ -3022,9 +2943,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3355,9 +3273,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3429,9 +3344,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3474,9 +3386,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3523,9 +3432,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3569,9 +3475,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3614,9 +3517,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3733,11 +3633,10 @@ describe("ComputerUseService", () => {
         url: "https://shop.example.test/account",
         visibleText: "Account",
       },
+      liveViewUrlForBrowser: (browserCount) =>
+        `https://kernel.example.test/live/${browserCount}`,
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3782,9 +3681,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3827,9 +3723,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -5969,6 +5862,7 @@ function createFakeKernel(input: {
   ) => unknown;
   executeResults?: unknown[];
   executeResult?: unknown;
+  liveViewUrlForBrowser?: (browserCount: number) => string;
   onExecutePlaywright?: (
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
@@ -6002,7 +5896,8 @@ function createFakeKernel(input: {
       browserCount += 1;
       this.createdSessionIds.push(`kernel-session-${browserCount}`);
       return {
-        liveViewUrl: `https://kernel.example.test/live/${browserCount}`,
+        liveViewUrl: input.liveViewUrlForBrowser?.(browserCount)
+          ?? `https://proxy.test-browser.onkernel.com:8443/live/${browserCount}`,
         sessionId: `kernel-session-${browserCount}`,
       };
     },

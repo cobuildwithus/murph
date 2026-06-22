@@ -438,7 +438,7 @@ test("resolveHostedPrivyOrigins prefers PRIVY_BASE_DOMAIN over hosted public sub
 
 test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
-    HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test, https://live.kernel.example",
+    HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
     NODE_ENV: "production",
     PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.custom.example.com",
   }));
@@ -456,11 +456,13 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
   assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
-  assert.match(csp, /frame-src [^;]*https:\/\/kernel\.example\.test/);
-  assert.match(csp, /frame-src [^;]*https:\/\/live\.kernel\.example/);
+  assert.match(csp, /frame-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
+  assert.doesNotMatch(csp, /https:\/\/kernel\.example\.test/);
   assert.match(csp, /frame-src [^;]*https:\/\/oauth\.telegram\.org/);
   assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
+  assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /upgrade-insecure-requests/);

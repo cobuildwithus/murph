@@ -645,7 +645,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step",
+      `computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
     );
   });
 

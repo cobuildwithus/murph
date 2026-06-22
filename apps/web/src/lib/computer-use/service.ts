@@ -19,10 +19,7 @@ import {
   type ComputerRunSecretField,
 } from "./crypto";
 import { createComputerHandoffToken, createComputerId, sha256Hex, shortHash } from "./ids";
-import {
-  isAllowedComputerLiveViewUrl,
-  readConfiguredComputerLiveViewOrigins,
-} from "./live-view-origin";
+import { isAllowedComputerLiveViewUrl } from "./live-view-origin";
 import {
   KernelComputerClient,
   type ComputerKernelClient,
@@ -200,7 +197,6 @@ export class ComputerUseService {
     }
 
     const kernel = this.requireKernel();
-    this.requireConfiguredLiveViewOrigins();
     const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
     });
@@ -1201,7 +1197,6 @@ export class ComputerUseService {
         runId: run.id,
       });
     }
-    this.requireConfiguredLiveViewOrigins();
     const browserName = buildKernelBrowserName({ runId: run.id });
     if (!run.kernelSessionId && !await this.deleteBrowserBestEffort(browserName)) {
       throw browserCleanupFailedError();
@@ -1867,28 +1862,15 @@ export class ComputerUseService {
     return this.kernel;
   }
 
-  private requireConfiguredLiveViewOrigins(): void {
-    if (readConfiguredComputerLiveViewOrigins(this.env).length > 0) {
-      return;
-    }
-
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
-      httpStatus: 503,
-      message: "Computer live-view origins are not configured.",
-      retryable: true,
-    });
-  }
-
   private assertAllowedLiveViewUrl(url: string): void {
-    if (isAllowedComputerLiveViewUrl({ env: this.env, url })) {
+    if (isAllowedComputerLiveViewUrl({ url })) {
       return;
     }
 
     throw computerUseError({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
       httpStatus: 502,
-      message: "Kernel live-view URL is not allowed by hosted computer-use configuration.",
+      message: "Kernel live-view URL is not allowed.",
       retryable: true,
     });
   }

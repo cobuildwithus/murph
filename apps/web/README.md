@@ -206,13 +206,15 @@ Required when hosted computer-use is enabled:
 - `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
   boundary. Keep production stable; previews should use a deployment/branch
   namespace or disable the persistent computer-use profile.
-- `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
-  list of allowed Kernel live-view origins for handoff iframes
 
 The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
 computer-use through signed `web-control.worker` callbacks; neither Cloudflare
 nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
 URLs.
+Kernel live-view iframe and WebSocket origins are code-owned from Kernel's
+documented CSP sources (`https://*.onkernel.com:8443` and
+`wss://*.onkernel.com:8443`) rather than operator-managed environment
+configuration.
 
 ## Product label databases
 

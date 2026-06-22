@@ -1356,7 +1356,13 @@ async function readHostedComputerApiError(input: {
       status: response.status,
       unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
     })) {
-      return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+      return {
+        text: appendHostedComputerApiErrorDetail(
+          HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
+          { code, message },
+        ),
+        unknownOutcome: true,
+      }
     }
     if (code && message) {
       return { text: `${fallback}: ${code}: ${message}`, unknownOutcome: false }
@@ -1377,6 +1383,25 @@ async function readHostedComputerApiError(input: {
   }
 
   return { text: fallback, unknownOutcome: false }
+}
+
+function appendHostedComputerApiErrorDetail(
+  text: string,
+  detail: {
+    code: string | null
+    message: string | null
+  },
+): string {
+  if (detail.code && detail.message) {
+    return `${text}; backend error: ${detail.code}: ${detail.message}`
+  }
+  if (detail.code) {
+    return `${text}; backend error: ${detail.code}`
+  }
+  if (detail.message) {
+    return `${text}; backend error: ${detail.message}`
+  }
+  return text
 }
 
 function isUnknownComputerOutcomeError(input: {
