@@ -9,6 +9,7 @@ import {
   summarizeDailySamples,
   type DailySampleSummary,
 } from "./summaries.ts";
+import { buildSampleSummaryId } from "./sample-summary-id.ts";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
@@ -243,10 +244,6 @@ function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
       sourcePaths: summary.sourcePaths,
     },
   };
-}
-
-function buildSampleSummaryId(summary: DailySampleSummary): string {
-  return `sample-summary:${summary.date}:${summary.stream}:${summary.unit ?? "none"}`;
 }
 
 function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): number {

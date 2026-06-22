@@ -402,13 +402,13 @@ analysisPlan:
   measurementAnchors:
     - role: baseline
       kind: wearable_summary
-      recordId: metric_sample_anchor_glucose_baseline_02
+      recordId: sample-summary:2026-06-01:glucose:mg_dL
       biomarkerKeys:
         - biomarker:blood-glucose
       observedOn: 2026-06-01
     - role: followup
       kind: wearable_summary
-      recordId: metric_sample_anchor_glucose_followup_02
+      recordId: sample-summary:2026-06-02:glucose:mg_dL
       biomarkerKeys:
         - biomarker:blood-glucose
       observedOn: 2026-06-02
@@ -419,10 +419,12 @@ analysisPlan:
   );
 
   const samples = [
-    ["metric_sample_anchor_glucose_baseline_01", "2026-06-01", "08:00:00", 92],
-    ["metric_sample_anchor_glucose_baseline_02", "2026-06-01", "12:00:00", 100],
-    ["metric_sample_anchor_glucose_followup_01", "2026-06-02", "08:00:00", 88],
-    ["metric_sample_anchor_glucose_followup_02", "2026-06-02", "12:00:00", 96],
+    ["smp_anchor_glucose_baseline_01", "2026-06-01", "08:00:00", 92],
+    ["smp_anchor_glucose_baseline_02", "2026-06-01", "12:00:00", 100],
+    ["smp_anchor_glucose_baseline_03", "2026-06-01", "18:00:00", 108],
+    ["smp_anchor_glucose_followup_01", "2026-06-02", "08:00:00", 88],
+    ["smp_anchor_glucose_followup_02", "2026-06-02", "12:00:00", 96],
+    ["smp_anchor_glucose_followup_03", "2026-06-02", "18:00:00", 104],
   ] as const;
   await writeFile(
     path.join(vaultRoot, "ledger/metric-samples/glucose/2026/2026-06.jsonl"),
@@ -432,9 +434,8 @@ analysisPlan:
       metric: "glucose",
       recordedAt: `${date}T${time}.000Z`,
       dayKey: date,
-      source: "import",
-      quality: "normalized",
-      qualifiers: { summary: true },
+      source: "device",
+      quality: "derived",
       value,
       unit: "mg_dL",
     })).join("\n")}\n`,
