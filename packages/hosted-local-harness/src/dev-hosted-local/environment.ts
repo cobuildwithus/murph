@@ -47,6 +47,7 @@ const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const HOSTED_LOCAL_WORKER_NAME = "murph-hosted";
 const HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX = "murph-hosted-e2e";
+const HOSTED_LOCAL_WORKTREE_WORKER_NAME_PREFIX = "murph-hosted-worktree";
 const LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE =
   /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u;
 
@@ -87,7 +88,34 @@ export function resolveHostedLocalPersistentCryptoStatePath(
     return null;
   }
 
+  const configuredPath = normalizeOptionalString(
+    env.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH,
+  );
+  if (configuredPath) {
+    return resolveHostedLocalTmpPath(
+      configuredPath,
+      "MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH",
+    );
+  }
+
   return path.join(repoRoot, HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE);
+}
+
+function resolveHostedLocalTmpPath(value: string, envName: string): string {
+  const tmpRoot = path.join(repoRoot, ".tmp");
+  const resolved = path.resolve(repoRoot, value);
+  const relative = path.relative(tmpRoot, resolved);
+
+  if (
+    relative.length === 0
+    || relative === "."
+    || relative.startsWith("..")
+    || path.isAbsolute(relative)
+  ) {
+    throw new Error(`${envName} must resolve inside the repo-local .tmp directory.`);
+  }
+
+  return resolved;
 }
 
 export async function readHostedLocalDevVarsText(
@@ -351,6 +379,7 @@ function resolveHostedLocalR2PresignEnvironment(
     !testRoutesEnabled
     && !isHostedLocalE2eEnvironment(env)
     && !(isHostedLocalDevProfile(env) && localPresignConfigured)
+    && !(isHostedLocalWorktreeEnvironment(env) && localPresignConfigured)
   ) {
     return {};
   }
@@ -534,6 +563,12 @@ function isHostedLocalDevProfile(
 ): boolean {
   const profile = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_PROFILE);
   return profile === "dev" || profile === "worker-only";
+}
+
+function isHostedLocalWorktreeEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return normalizeOptionalString(env.MURPH_HOSTED_LOCAL_PROFILE) === "worktree";
 }
 
 function buildCallbackSigningPublicKeyringJson(input: {
@@ -1055,7 +1090,10 @@ export function resolveWranglerLocalDevWorkerName(
 
   const localBuildId = buildHostedRunnerLocalBuildId(source[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]);
   const suffix = localBuildId.replace(/^sha256-/u, "");
-  return `${HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX}-${suffix}`;
+  const prefix = isHostedLocalWorktreeEnvironment(source)
+    ? HOSTED_LOCAL_WORKTREE_WORKER_NAME_PREFIX
+    : HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX;
+  return `${prefix}-${suffix}`;
 }
 
 function requiresIsolatedWranglerLocalDevWorkerName(
@@ -1064,7 +1102,8 @@ function requiresIsolatedWranglerLocalDevWorkerName(
   const profile = normalizeOptionalString(source.MURPH_HOSTED_LOCAL_PROFILE);
   return source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
-    || profile === "e2e:live";
+    || profile === "e2e:live"
+    || profile === "worktree";
 }
 
 export function buildHostedRunnerLocalBuildId(value: string | undefined): string {

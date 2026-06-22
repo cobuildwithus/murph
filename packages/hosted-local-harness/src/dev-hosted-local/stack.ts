@@ -1010,6 +1010,7 @@ export async function startHostedLocalDevStack(input: {
         if (linqWebhookSetup?.shouldRegister) {
           await registerHostedLocalLinqWebhookSubscription({
             env: runtimeEnv,
+            registrationCachePath: config.linqWebhookRegistrationCachePath,
             setup: linqWebhookSetup,
             stderrTarget: input.stderrTarget,
           });
@@ -1460,6 +1461,14 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
+function isHostedLocalWorktreeProfile(env: NodeJS.ProcessEnv): boolean {
+  return env.MURPH_HOSTED_LOCAL_PROFILE?.trim() === "worktree";
+}
+
+function usesHostedLocalIsolatedRunnerScope(env: NodeJS.ProcessEnv): boolean {
+  return requiresHostedLocalE2eIsolation(env) || isHostedLocalWorktreeProfile(env);
+}
+
 function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
   return requiresHostedLocalE2eIsolation(env)
     && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
@@ -1604,15 +1613,15 @@ function resolveDockerCliPluginSourceDirs(env: NodeJS.ProcessEnv): string[] {
 function resolvePreStartHostedRunnerContainerCleanupScope(
   env: NodeJS.ProcessEnv,
 ): HostedRunnerContainerCleanupScope {
-  return requiresHostedLocalE2eIsolation(env) ? "current-build" : "all-builds";
+  return usesHostedLocalIsolatedRunnerScope(env) ? "current-build" : "all-builds";
 }
 
 function shouldCleanupHostedRunnerImagesDuringStackLifecycle(env: NodeJS.ProcessEnv): boolean {
-  return !requiresHostedLocalE2eIsolation(env);
+  return !usesHostedLocalIsolatedRunnerScope(env);
 }
 
 function shouldUseGlobalCloudflareDevVarsSymlink(env: NodeJS.ProcessEnv): boolean {
-  return !requiresHostedLocalE2eIsolation(env);
+  return !usesHostedLocalIsolatedRunnerScope(env);
 }
 
 function resolveHostedWebHealthCommonsDevCachePaths(env: NodeJS.ProcessEnv): string[] {

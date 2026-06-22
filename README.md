@@ -245,9 +245,18 @@ That variant keeps the check off the default `apps/web/.next-dev` lock and defau
 Startup readiness also POSTs the internal deploy-smoke route with `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, so `pnpm dev` proves the local Worker can boot the runner container and observe the prepared runner bundle before printing ready. Set `MURPH_DEV_SKIP_RUNNER_SMOKE=1` for a focused Worker-only debugging loop.
 
 For secondary worktrees, do not rely on ports alone. Use the hosted-local
-worktree workflow in `agent-docs/operations/hosted-local-worktree-dev.md` so the
-database, generated local crypto state, Wrangler state, Next dist dir, optional
-MinIO data, and webhook tunnel target are isolated together.
+worktree helper so the database, generated local crypto state, Wrangler state,
+Next dist dir, optional MinIO data, and webhook tunnel target are isolated
+together:
+
+```bash
+pnpm hosted-local worktree doctor <slug>
+pnpm dev:worktree <slug>
+pnpm hosted-local worktree down <slug>
+```
+
+See `agent-docs/operations/hosted-local-worktree-dev.md` for the full contract
+and manual fallback.
 
 The repo verification baseline for docs/process-only and ordinary repo work remains:
 

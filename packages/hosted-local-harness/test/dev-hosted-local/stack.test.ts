@@ -45,6 +45,7 @@ const defaultConfig: HostedLocalDevConfig = {
   forceResetLocalDatabase: false,
   forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
+  linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
   linqWebhookTunnelName: "dev",
@@ -428,6 +429,9 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
       || profile === "e2e:live"
     ) {
       return null;
+    }
+    if (env.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH) {
+      return `/repo/${env.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH}`;
     }
     return "/tmp/murph-dev-crypto-state.dev.vars";
   }),
@@ -1119,6 +1123,55 @@ describe("hosted local dev stack", () => {
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",
     }));
+  });
+
+  it("isolates worktree profile runner cleanup and generated crypto state without E2E-only skips", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      webPort: 3101,
+      workerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
+      workerPort: 8801,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
+          ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+        MURPH_DEV_WEB_PORT: "3101",
+        MURPH_DEV_WORKER_PORT: "8801",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "feature-a",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(writeFile).toHaveBeenCalledWith(
+      "/repo/.tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+      'HOSTED_CRYPTO_ENV="local"\n',
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+    expect(symlink).not.toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
+      expect.stringContaining("apps/cloudflare/.dev.vars"),
+    );
+    expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      scope: "current-build",
+    }));
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
   it("falls back to host Docker CLI plugins when inherited Docker config is already isolated", async () => {
@@ -2179,6 +2232,7 @@ describe("hosted local dev stack", () => {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       }),
+      registrationCachePath: ".tmp/linq-webhook-registration.json",
       setup: expect.objectContaining({
         targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
       }),

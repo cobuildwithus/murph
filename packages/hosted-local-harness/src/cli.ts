@@ -50,6 +50,9 @@ export async function runHostedLocalCli(
     case "up":
       await runUp(args, io);
       return;
+    case "worktree":
+      await runWorktree(args, io);
+      return;
     case "run":
       await runCommand(args, io);
       return;
@@ -58,6 +61,74 @@ export async function runHostedLocalCli(
       return;
     default:
       throw new Error(`Unknown hosted-local command: ${command}`);
+  }
+}
+
+async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const [subcommand, slug, ...rest] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
+    printWorktreeHelp(io.stdout ?? process.stdout);
+    return;
+  }
+  if (!slug || slug === "--help" || slug === "-h") {
+    printWorktreeHelp(io.stdout ?? process.stdout);
+    return;
+  }
+
+  const {
+    ensureHostedLocalWorktreeDatabase,
+    formatHostedLocalWorktreeEnv,
+    resolveHostedLocalWorktreeConfig,
+    stopHostedLocalWorktreeResources,
+    writeHostedLocalWorktreeManifest,
+  } = await import("./dev-hosted-local/worktree.ts");
+
+  switch (subcommand) {
+    case "env": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        slug,
+      });
+      (io.stdout ?? process.stdout).write(formatHostedLocalWorktreeEnv(config));
+      return;
+    }
+    case "doctor": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        slug,
+      });
+      await writeHostedLocalWorktreeManifest(config);
+      await runDoctor(["--profile", "worktree", ...rest], {
+        ...io,
+        env: config.env,
+      });
+      return;
+    }
+    case "up": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        slug,
+      });
+      await writeHostedLocalWorktreeManifest(config);
+      await ensureHostedLocalWorktreeDatabase(config);
+      await runUp(["--profile", "worktree"], {
+        ...io,
+        env: config.env,
+      });
+      return;
+    }
+    case "down": {
+      await stopHostedLocalWorktreeResources({
+        env: io.env ?? process.env,
+        slug,
+      });
+      (io.stdout ?? process.stdout).write(
+        `Stopped hosted-local worktree resources for ${slug}.\n`,
+      );
+      return;
+    }
+    default:
+      throw new Error(`Unknown hosted-local worktree command: ${subcommand}`);
   }
 }
 
@@ -488,6 +559,10 @@ function printHelp(stdout: NodeJS.WritableStream): void {
       "",
       "Usage:",
       "  hosted-local up [--profile dev]",
+      "  hosted-local worktree up <slug>",
+      "  hosted-local worktree doctor <slug> [--json]",
+      "  hosted-local worktree env <slug>",
+      "  hosted-local worktree down <slug>",
       "  hosted-local e2e [scenario] [--profile e2e:stub] [--list]",
       "  hosted-local run [--profile dev] -- <command> [args...]",
       "  hosted-local doctor [--profile dev] [--json]",
@@ -509,6 +584,21 @@ function printProfiles(stdout: NodeJS.WritableStream): void {
 
 function printUpHelp(stdout: NodeJS.WritableStream): void {
   stdout.write("Usage: hosted-local up [--profile dev|worker-only]\n");
+}
+
+function printWorktreeHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write(
+    [
+      "Usage:",
+      "  hosted-local worktree up <slug>",
+      "  hosted-local worktree doctor <slug> [--json]",
+      "  hosted-local worktree env <slug>",
+      "  hosted-local worktree down <slug>",
+      "",
+      "Slugs must use lowercase letters, digits, and hyphens.",
+      "",
+    ].join("\n"),
+  );
 }
 
 function printE2eHelp(stdout: NodeJS.WritableStream): void {

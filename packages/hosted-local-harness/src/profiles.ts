@@ -1,6 +1,7 @@
 export type HostedLocalProfileName =
   | "dev"
   | "worker-only"
+  | "worktree"
   | "e2e:stub"
   | "e2e:live";
 
@@ -29,6 +30,16 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     },
     mode: "debug",
     name: "worker-only",
+  },
+  worktree: {
+    description:
+      "Interactive hosted local stack isolated for a secondary git worktree with per-slug ports, temp state, and runner cleanup.",
+    envDefaults: {
+      MURPH_DEV_TEMPORAL: "managed",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    mode: "dev",
+    name: "worktree",
   },
   "e2e:stub": {
     description:

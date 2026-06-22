@@ -221,7 +221,8 @@ function shouldStartHostedLocalMinio(env: NodeJS.ProcessEnv): boolean {
   const profile = env[HOSTED_LOCAL_PROFILE_ENV]?.trim();
   return isHostedLocalE2eProfileOrMarker(env, profile)
     || profile === "dev"
-    || profile === "worker-only";
+    || profile === "worker-only"
+    || profile === "worktree";
 }
 
 function buildHostedLocalR2MarkerEnv(env: NodeJS.ProcessEnv): Record<string, string> {

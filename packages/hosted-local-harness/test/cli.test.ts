@@ -2,6 +2,14 @@ import { Writable } from "node:stream";
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+const runDoctorCommand = vi.hoisted(() =>
+  vi.fn((command: string, args: readonly string[]) => ({
+    command: [command, ...args].join(" "),
+    ok: true,
+    stderr: "",
+    stdout: "",
+  })),
+);
 const runForegroundCommand = vi.hoisted(() => vi.fn(async () => undefined));
 const runHostedLocalE2eSuite = vi.hoisted(() =>
   vi.fn(async () => ({ terminationSignal: null as NodeJS.Signals | null })),
@@ -9,9 +17,19 @@ const runHostedLocalE2eSuite = vi.hoisted(() =>
 const startHostedLocalDevStack = vi.hoisted(() => vi.fn());
 const terminateKnownHostedLocalProcessResidue = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
+const ensureHostedLocalWorktreeDatabase = vi.hoisted(() => vi.fn(async () => {}));
+const formatHostedLocalWorktreeEnv = vi.hoisted(() =>
+  vi.fn(() => "export MURPH_DEV_DATABASE_URL='[redacted]'\n"),
+);
+const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
+  vi.fn(async () => createHostedLocalWorktreeConfig()),
+);
+const stopHostedLocalWorktreeResources = vi.hoisted(() => vi.fn(async () => {}));
+const writeHostedLocalWorktreeManifest = vi.hoisted(() => vi.fn(async () => ({})));
 const resolveHostedLocalDevConfig = vi.hoisted(() =>
   vi.fn(() => ({
     linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+    linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
     linqWebhookTunnelMode: "auto",
     linqWebhookTunnelName: "dev",
     skipHealthCommonsWatch: false,
@@ -26,6 +44,7 @@ const resolveHostedLocalDevConfig = vi.hoisted(() =>
     webHost: "localhost",
     webPort: 3000,
     workerHost: "127.0.0.1",
+    workerPersistDir: ".wrangler/state/dev-root",
     workerPort: 8787,
   })),
 );
@@ -43,7 +62,7 @@ const updateHostedLocalHarnessState = vi.hoisted(() =>
 );
 
 vi.mock("../src/process.ts", () => ({
-  runDoctorCommand: vi.fn(),
+  runDoctorCommand,
   runForegroundCommand,
 }));
 
@@ -54,6 +73,14 @@ vi.mock("../src/dev-hosted-local/stack.ts", () => ({
 
 vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
   cleanupHostedRunnerContainers,
+}));
+
+vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
+  ensureHostedLocalWorktreeDatabase,
+  formatHostedLocalWorktreeEnv,
+  resolveHostedLocalWorktreeConfig,
+  stopHostedLocalWorktreeResources,
+  writeHostedLocalWorktreeManifest,
 }));
 
 vi.mock("../src/dev-hosted-local/config.ts", () => ({
@@ -99,6 +126,165 @@ describe("hosted-local run CLI", () => {
     vi.clearAllMocks();
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
+    resolveHostedLocalWorktreeConfig.mockResolvedValue(createHostedLocalWorktreeConfig());
+    formatHostedLocalWorktreeEnv.mockReturnValue("export MURPH_DEV_DATABASE_URL='[redacted]'\n");
+    runDoctorCommand.mockImplementation((command: string, args: readonly string[]) => ({
+      command: [command, ...args].join(" "),
+      ok: true,
+      stderr: "",
+      stdout: "",
+    }));
+  });
+
+  test("prints top-level command help and profiles", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli([], {
+      env: {},
+      stdout: output.stdout,
+    });
+    await runHostedLocalCli(["profiles"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(output.text()).toContain("Run the local hosted Murph harness.");
+    expect(output.text()).toContain("hosted-local worktree up <slug>");
+    expect(output.text()).toContain("worktree");
+    expect(output.text()).toContain("secondary git worktree");
+  });
+
+  test("prints command-specific help without resolving runtime state", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["up", "--help"], {
+      env: {},
+      stdout: output.stdout,
+    });
+    await runHostedLocalCli(["run", "--help"], {
+      env: {},
+      stdout: output.stdout,
+    });
+    await runHostedLocalCli(["doctor", "--help"], {
+      env: {},
+      stdout: output.stdout,
+    });
+    await runHostedLocalCli(["e2e", "--help"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(output.text()).toContain("Usage: hosted-local up");
+    expect(output.text()).toContain("Usage: hosted-local run");
+    expect(output.text()).toContain("Usage: hosted-local doctor");
+    expect(output.text()).toContain("Usage: hosted-local e2e");
+    expect(createHostedLocalHarnessState).not.toHaveBeenCalled();
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
+  });
+
+  test("prints worktree help without resolving config", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["worktree"], {
+      env: {},
+      stdout: output.stdout,
+    });
+    await runHostedLocalCli(["worktree", "up", "--help"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(output.text()).toContain("hosted-local worktree up <slug>");
+    expect(output.text()).toContain("Slugs must use lowercase letters");
+    expect(resolveHostedLocalWorktreeConfig).not.toHaveBeenCalled();
+  });
+
+  test("prints the derived worktree env without starting the stack", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["worktree", "env", "feature-a"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(resolveHostedLocalWorktreeConfig).toHaveBeenCalledWith({
+      env: {},
+      slug: "feature-a",
+    });
+    expect(formatHostedLocalWorktreeEnv).toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(output.text()).toContain("MURPH_DEV_DATABASE_URL='[redacted]'");
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
+  });
+
+  test("writes worktree state before running doctor with the worktree profile", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["worktree", "doctor", "feature-a", "--json"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(writeHostedLocalWorktreeManifest).toHaveBeenCalledWith(
+      createHostedLocalWorktreeConfig(),
+    );
+    expect(runDoctorCommand).toHaveBeenCalledWith("node", ["--version"]);
+    expect(runDoctorCommand).toHaveBeenCalledWith("pnpm", ["--version"]);
+    expect(runDoctorCommand).toHaveBeenCalledWith("docker", ["info"]);
+    expect(runDoctorCommand).toHaveBeenCalledWith("createdb", ["--version"]);
+    expect(output.text()).toContain('"name": "worktree"');
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
+  });
+
+  test("prepares worktree state before delegating worktree up to the normal stack", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["worktree", "up", "feature-a"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(writeHostedLocalWorktreeManifest).toHaveBeenCalledWith(
+      createHostedLocalWorktreeConfig(),
+    );
+    expect(ensureHostedLocalWorktreeDatabase).toHaveBeenCalledWith(
+      createHostedLocalWorktreeConfig(),
+    );
+    expect(startHostedLocalDevStack).toHaveBeenCalledWith(expect.objectContaining({
+      env: expect.objectContaining({
+        MURPH_DEV_WEB_PORT: "3101",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      }),
+    }));
+  });
+
+  test("runs worktree down through slug-scoped cleanup", async () => {
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["worktree", "down", "feature-a"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(stopHostedLocalWorktreeResources).toHaveBeenCalledWith({
+      env: {},
+      slug: "feature-a",
+    });
+    expect(output.text()).toContain("Stopped hosted-local worktree resources for feature-a.");
+  });
+
+  test("rejects unknown worktree subcommands after printing no secrets", async () => {
+    const output = createBufferedStdout();
+
+    await expect(
+      runHostedLocalCli(["worktree", "status", "feature-a"], {
+        env: {},
+        stdout: output.stdout,
+      }),
+    ).rejects.toThrow("Unknown hosted-local worktree command: status");
+
+    expect(output.text()).toBe("");
+    expect(resolveHostedLocalWorktreeConfig).not.toHaveBeenCalled();
+    expect(formatHostedLocalWorktreeEnv).not.toHaveBeenCalled();
   });
 
   test("passes child command flags after the separator through unchanged", async () => {
@@ -293,5 +479,31 @@ function createHostedLocalStack(input: { ready?: Promise<void> } = {}) {
     })),
     webBaseUrl: "http://localhost:3000",
     workerBaseUrl: "http://127.0.0.1:8787",
+  };
+}
+
+function createHostedLocalWorktreeConfig() {
+  return {
+    buildId: "worktree-feature-a",
+    databaseName: "murph_dev_feature_a",
+    databaseUrl: "postgresql://postgres@127.0.0.1:5432/murph_dev_feature_a",
+    env: {
+      MURPH_DEV_WEB_PORT: "3101",
+      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+    },
+    manifestPath: ".tmp/hosted-local-worktrees/feature-a/manifest.json",
+    paths: {},
+    ports: {
+      minio: 9101,
+      temporal: 7301,
+      web: 3101,
+      worker: 8801,
+    },
+    profileName: "worktree",
+    slug: "feature-a",
+    urls: {
+      webBaseUrl: "http://127.0.0.1:3101",
+      workerBaseUrl: "http://127.0.0.1:8801",
+    },
   };
 }

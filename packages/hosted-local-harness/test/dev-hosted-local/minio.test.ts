@@ -275,6 +275,41 @@ describe("hosted-local MinIO sidecar", () => {
     );
   });
 
+  it("starts MinIO for the worktree profile with worktree-local data", async () => {
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "worktree-feature-a",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_DEV_MINIO_DATA_DIR: ".tmp/hosted-local-worktrees/feature-a/minio-r2",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+
+    expect(server?.process).toBe(child);
+    expect(server?.env).toEqual(expect.objectContaining({
+      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+    }));
+    expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
+    const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
+    const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
+    expect(volumeArg).toEqual(
+      expect.stringMatching(/[\\/]\.tmp[\\/]hosted-local-worktrees[\\/]feature-a[\\/]minio-r2:\/data$/u),
+    );
+    expect(dockerArgs).not.toContain("murph.hosted-local.e2e=1");
+  });
+
   it("accepts an exact Docker bridge gateway and marks the hosted-local R2 endpoint for private bridge presign", async () => {
     childProcessMocks.spawnResponses = [
       { stdout: "172.17.0.1\n" },

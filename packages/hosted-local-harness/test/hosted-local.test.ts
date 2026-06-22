@@ -62,6 +62,7 @@ describe("hosted-local harness", () => {
       "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     );
     expect(scripts["dev"]).toBe("pnpm hosted-local up");
+    expect(scripts["dev:worktree"]).toBe("pnpm hosted-local worktree up");
     expect(scripts["dev:reset"]).toBe(
       "MURPH_DEV_FORCE_RESET_LOCAL_DB=1 MURPH_DEV_FORCE_RESET_TEMPORAL=1 MURPH_DEV_TEMPORAL=managed pnpm hosted-local up",
     );
@@ -252,6 +253,19 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("dev");
     expect(result.env.MURPH_DEV_TEMPORAL).toBeUndefined();
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("auto");
+  });
+
+  test("keeps the worktree profile interactive while forcing managed Temporal", () => {
+    const result = applyHostedLocalProfile({
+      env: {},
+      profileName: "worktree",
+    });
+
+    expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("worktree");
+    expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBeUndefined();
+    expect(result.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBeUndefined();
+    expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
 
   test("keeps E2E profile defaults away from live tunnels and listeners", () => {

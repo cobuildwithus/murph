@@ -19,6 +19,7 @@ import {
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   resolveHostedLocalStripeEnvFilePath,
+  resolveWranglerLocalDevWorkerName,
   shouldSyncLocalDatabaseSchema,
 } from "../../src/dev-hosted-local/environment.ts";
 import type {
@@ -37,6 +38,7 @@ const localConfig: HostedLocalDevConfig = {
   forceResetLocalDatabase: false,
   forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
+  linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "auto",
   linqWebhookTunnelName: "dev",
@@ -836,6 +838,27 @@ describe("resolveHostedLocalPersistentCryptoStatePath", () => {
     })).toContain(".tmp/hosted-local-dev-crypto-state.dev.vars");
   });
 
+  it("uses the worktree-local crypto state path when configured", () => {
+    const statePath = resolveHostedLocalPersistentCryptoStatePath({
+      MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
+        ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+    });
+
+    expect(statePath).toContain(
+      ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+    );
+  });
+
+  it("rejects worktree crypto state outside repo-local .tmp", () => {
+    expect(() =>
+      resolveHostedLocalPersistentCryptoStatePath({
+        MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH: "../outside.dev.vars",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      })
+    ).toThrow("repo-local .tmp");
+  });
+
   it("does not persist generated crypto state for E2E profiles", () => {
     expect(resolveHostedLocalPersistentCryptoStatePath({
       MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
@@ -1417,6 +1440,13 @@ describe("buildWranglerLocalDevConfig", () => {
       },
       max_instances: 1,
     });
+  });
+
+  it("uses an isolated worker name for worktree profile runs", () => {
+    expect(resolveWranglerLocalDevWorkerName({
+      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+    })).toMatch(/^murph-hosted-worktree-[a-f0-9]{24}$/u);
   });
 
   it("re-roots generated paths to the temp config directory", () => {
