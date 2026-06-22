@@ -6,6 +6,8 @@ import { promises as fs } from "node:fs";
 import { test, vi } from "vitest";
 
 import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
   CONTRACT_SCHEMA_VERSION,
   CURRENT_VAULT_FORMAT_VERSION,
   LEGACY_VAULT_FORMAT_VERSION,
@@ -23,6 +25,7 @@ import {
   importDeviceBatch,
   initializeVault,
   MAX_INTEGRATION_EVIDENCE_PART_BYTES,
+  parseFrontmatterDocument,
   pruneWearableDenseRawTimeseries,
   readIntegrationIngestById,
   readJsonlRecords,
@@ -36,6 +39,10 @@ const IMPORT_ID = "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE";
 const IMPORTED_AT = "2026-05-01T00:00:00.000Z";
 const RAW_DIRECTORY = `raw/integrations/wearable-provider/2026/05/${IMPORT_ID}`;
 const REPAIR_NOW = new Date("2026-05-23T12:00:00.000Z");
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -313,6 +320,60 @@ test("integration ingest migration finalizes empty legacy vaults and is idempote
   assert.equal(rerun.hasWork, false);
   assert.equal(rerun.storedFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
   assert.deepEqual(rerun.auditPaths, []);
+});
+
+test("integration ingest migration normalizes legacy numeric Telegram automation targets before finalizing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-telegram-target");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+  await fs.writeFile(
+    path.join(vaultRoot, "bank/automations/10-pushups-reminder.md"),
+    [
+      "---",
+      `schemaVersion: ${AUTOMATION_SCHEMA_VERSION}`,
+      `docType: ${AUTOMATION_DOC_TYPE}`,
+      "automationId: automation_telegram_numeric_target",
+      "slug: 10-pushups-reminder",
+      "title: 10 pushups reminder",
+      "status: archived",
+      "schedule:",
+      "  kind: at",
+      "  at: 2026-06-21T14:26:35.000Z",
+      "route:",
+      "  channel: telegram",
+      "  deliverySource: null",
+      "  deliveryTarget: -1001234567890",
+      "  identityId: null",
+      "  participantId: null",
+      "  threadId: null",
+      "continuityPolicy: preserve",
+      "tags: []",
+      "createdAt: 2026-06-21T14:20:00.000Z",
+      "updatedAt: 2026-06-21T14:20:00.000Z",
+      "---",
+      "Send a brief reminder: do 10 pushups now.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+  });
+
+  assert.equal(result.finalized, true);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), CURRENT_VAULT_FORMAT_VERSION);
+
+  const migratedMarkdown = await fs.readFile(
+    path.join(vaultRoot, "bank/automations/10-pushups-reminder.md"),
+    "utf8",
+  );
+  const migratedDocument = parseFrontmatterDocument(migratedMarkdown);
+  const route = migratedDocument.attributes.route;
+  assert.ok(isRecord(route));
+  assert.equal(route.deliveryTarget, "-1001234567890");
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
 test("integration ingest migration restores legacy metadata when final validation fails", async () => {

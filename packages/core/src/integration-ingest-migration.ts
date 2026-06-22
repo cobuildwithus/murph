@@ -35,6 +35,7 @@ import {
   isRawManifestFileName,
   parseRawImportManifest,
 } from "./operations/raw-manifests.ts";
+import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import {
   acquireCanonicalWriteLock,
   withCanonicalWriteLockScope,
@@ -154,6 +155,11 @@ interface EventShardMigrationScanResult {
   eventShards: EventShardSnapshot[];
   outputRolesByBundle: Map<string, Map<string, Set<string>>>;
   referencedRowsByBundle: Map<string, Set<string>>;
+}
+
+interface LegacyAutomationRouteNormalization {
+  relativePath: string;
+  content: string;
 }
 
 interface DetectionDetails {
@@ -366,6 +372,7 @@ async function finalizeIntegrationIngestMigration(vaultRoot: string): Promise<{ 
 
     const metadata = await readLegacyVaultMetadata(vaultRoot);
     const createdDirectories = await ensureMissingRequiredDirectories(vaultRoot);
+    const automationNormalizations = await readLegacyAutomationRouteNormalizations(vaultRoot);
     const summary = "Finalize integration ingest journal migration and advance vault format to v2.";
     try {
       const finalizeResult = await runCanonicalWrite({
@@ -375,6 +382,9 @@ async function finalizeIntegrationIngestMigration(vaultRoot: string): Promise<{ 
         hostedCanonicalWritePort: null,
         hostedCanonicalWriteReceiptDirectory: null,
         mutate: async ({ batch }) => {
+          for (const normalization of automationNormalizations) {
+            await batch.stageTextWrite(normalization.relativePath, normalization.content, { overwrite: true });
+          }
           await batch.stageTextWrite(
             VAULT_LAYOUT.metadata,
             `${JSON.stringify({ ...metadata, formatVersion: CURRENT_VAULT_FORMAT_VERSION }, null, 2)}\n`,
@@ -386,7 +396,11 @@ async function finalizeIntegrationIngestMigration(vaultRoot: string): Promise<{ 
             action: "vault_repair",
             commandName: "core.runIntegrationIngestMigration.finalize",
             summary,
-            files: [VAULT_LAYOUT.metadata, ...createdDirectories],
+            files: [
+              VAULT_LAYOUT.metadata,
+              ...automationNormalizations.map((normalization) => normalization.relativePath),
+              ...createdDirectories,
+            ],
           });
           return { auditPath: audit.relativePath };
         },
@@ -448,6 +462,44 @@ async function restoreLegacyVaultMetadataAfterFailedFinalization(
       },
     );
   }
+}
+
+async function readLegacyAutomationRouteNormalizations(
+  vaultRoot: string,
+): Promise<LegacyAutomationRouteNormalization[]> {
+  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.automationsDirectory, { extension: ".md" });
+  const normalizations: LegacyAutomationRouteNormalization[] = [];
+
+  for (const relativePath of relativePaths.sort()) {
+    const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
+    const markdown = await fs.readFile(absolutePath, "utf8");
+    const document = parseFrontmatterDocument(markdown);
+    const route = isRecord(document.attributes.route) ? document.attributes.route : null;
+    if (!route || route.channel !== "telegram") {
+      continue;
+    }
+
+    const deliveryTarget = route.deliveryTarget;
+    if (typeof deliveryTarget !== "number" || !Number.isSafeInteger(deliveryTarget)) {
+      continue;
+    }
+
+    const content = stringifyFrontmatterDocument({
+      attributes: {
+        ...document.attributes,
+        route: {
+          ...route,
+          deliveryTarget: String(deliveryTarget),
+        },
+      },
+      body: document.body,
+    });
+    if (content !== markdown) {
+      normalizations.push({ relativePath, content });
+    }
+  }
+
+  return normalizations;
 }
 
 function summarizeMigrationError(error: unknown): string {
