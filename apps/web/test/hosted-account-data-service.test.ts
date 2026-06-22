@@ -306,6 +306,8 @@ describe("buildHostedDataExport", () => {
         },
       },
       counts: {
+        "prisma.hosted_connected_app_connect_intent": 1,
+        "prisma.hosted_connected_apps_session": 1,
         "prisma.hosted_computer_handoff": 1,
         "prisma.hosted_computer_run": 1,
         "prisma.hosted_mailbox_payload": 1,
@@ -375,6 +377,25 @@ describe("buildHostedDataExport", () => {
             source: "settings",
             status: "granted",
             lastEventIdPresent: true,
+          },
+        ],
+      },
+      connectedApps: {
+        connectIntents: [
+          {
+            alias: "work",
+            claimHashOmitted: true,
+            connectedAccountIdPresent: true,
+            toolkit: "gmail",
+          },
+        ],
+        providerAccounts: {
+          exportMode: "documented-only",
+        },
+        sessions: [
+          {
+            policyRevision: 12345,
+            remoteSessionIdOmitted: true,
           },
         ],
       },
@@ -539,6 +560,9 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("secret-handoff-token-hash");
     expect(serialized).not.toContain("secret-handoff-token");
     expect(serialized).not.toContain("/computer/handoff/secret-handoff-token");
+    expect(serialized).not.toContain("secret-connected-app-claim-hash");
+    expect(serialized).not.toContain("ca_secret_account_id");
+    expect(serialized).not.toContain("secret-tool-router-session");
   });
 
   it("uses wearable source labels instead of intermediary provider ids in export data", async () => {
@@ -1305,6 +1329,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.connectedAppsClient.listAccounts).toHaveBeenCalledWith({
       statuses: null,
+      toolkits: null,
       userId: "member_123",
     });
     expect(serviceMocks.connectedAppsClient.disconnectAccount).toHaveBeenCalledWith("ca_gmail");
@@ -1860,6 +1885,34 @@ async function createHostedAccountDataExportPrisma(input: {
       count,
       findMany: async () =>
         input.aiUsagePeriodRows ?? [makeHostedAiUsagePeriodRowForTest({ memberId })],
+    },
+    hostedConnectedAppConnectIntent: {
+      count,
+      findMany: async () => [
+        {
+          alias: "work",
+          claimHash: "secret-connected-app-claim-hash",
+          completedAt: null,
+          connectedAccountId: "ca_secret_account_id",
+          createdAt: new Date("2026-04-27T00:17:00.000Z"),
+          expiresAt: new Date("2026-04-27T00:32:00.000Z"),
+          memberId,
+          startedAt: new Date("2026-04-27T00:17:30.000Z"),
+          toolkit: "gmail",
+        },
+      ],
+    },
+    hostedConnectedAppsSession: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-04-27T00:16:00.000Z"),
+          memberId,
+          policyRevision: 12345,
+          remoteSessionId: "secret-tool-router-session",
+          updatedAt: new Date("2026-04-27T00:16:30.000Z"),
+        },
+      ],
     },
     hostedConsentEvent: {
       count,

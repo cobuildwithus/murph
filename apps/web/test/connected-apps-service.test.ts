@@ -414,6 +414,60 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(3);
   });
 
+  it("recreates stored Tool Router sessions when session-defining config changes", async () => {
+    const harness = installPrismaHarness();
+    const createdSessions: string[] = [];
+    const searchFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        const body = readJsonBody(init);
+        const sessionId = `trs_${createdSessions.length + 1}`;
+        createdSessions.push(sessionId);
+        return jsonResponse({ session_id: sessionId, toolkits: body.toolkits });
+      }
+      if (parsed.pathname.endsWith("/search")) {
+        return jsonResponse({ tools: [] });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "gmail");
+    await executeHostedConnectedAppsRequest({
+      fetchImpl: searchFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          query: "find mail",
+          toolkits: ["gmail"],
+        },
+        operation: "search",
+      },
+    });
+    const firstRevision = harness.sessions.get("hbm_member")?.policyRevision;
+
+    vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "gmail,googlecalendar");
+    await executeHostedConnectedAppsRequest({
+      fetchImpl: searchFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          query: "find calendar events",
+          toolkits: ["googlecalendar"],
+        },
+        operation: "search",
+      },
+    });
+
+    expect(createdSessions).toEqual(["trs_1", "trs_2"]);
+    expect(harness.sessions.get("hbm_member")).toMatchObject({
+      remoteSessionId: "trs_2",
+    });
+    expect(harness.sessions.get("hbm_member")?.policyRevision).not.toBe(firstRevision);
+  });
+
   it("rejects ambiguous execution account selectors before execution egress", async () => {
     installPrismaHarness();
     const executeFetch = vi.fn(async (

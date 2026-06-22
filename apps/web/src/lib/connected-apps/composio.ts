@@ -140,51 +140,45 @@ export function createComposioConnectedAppsClient(input: {
       accountIds?: readonly string[];
       statuses?: readonly string[] | null;
       toolkit?: string;
+      toolkits?: readonly string[] | null;
       userId: string;
     }): Promise<ComposioConnectedAccount[]> {
-      const query = new URLSearchParams();
-      query.set("account_type", "PRIVATE");
-      query.set("limit", "100");
-      if (inputList.statuses !== null) {
-        appendQueryValues(query, "statuses", inputList.statuses ?? ["ACTIVE"]);
-      }
-      appendQueryValues(query, "user_ids", [inputList.userId]);
-      if (inputList.accountIds?.length) {
-        appendQueryValues(query, "connected_account_ids", inputList.accountIds);
-      }
-      if (inputList.toolkit) {
-        appendQueryValues(query, "toolkit_slugs", [inputList.toolkit]);
-      } else {
-        appendQueryValues(query, "toolkit_slugs", input.config.toolkits);
-      }
-
-      const payload = await requestJson({
-        config: input.config,
-        fetchImpl,
-        method: "GET",
-        path: `/api/v3.1/connected_accounts?${query.toString()}`,
-      });
-      const items = asArray(asRecord(payload)?.items);
-      return items.flatMap((item) => {
-        const record = asRecord(item);
-        const toolkit = asRecord(record?.toolkit);
-        const id = readString(record, "id");
-        const toolkitSlug = readString(toolkit, "slug");
-        if (!id || !toolkitSlug) {
-          return [];
+      const accounts: ComposioConnectedAccount[] = [];
+      let cursor: string | null = null;
+      do {
+        const query = new URLSearchParams();
+        query.set("account_type", "PRIVATE");
+        query.set("limit", "100");
+        if (cursor) {
+          query.set("cursor", cursor);
         }
-        return [{
-          alias: readNullableString(record, "alias"),
-          id,
-          isDisabled: record?.is_disabled === true,
-          status: readString(record, "status") ?? "UNKNOWN",
-          toolkit: {
-            name: readString(toolkit, "name") ?? toolkitSlug,
-            slug: toolkitSlug,
-          },
-          wordId: readNullableString(record, "word_id"),
-        }];
-      });
+        if (inputList.statuses !== null) {
+          appendQueryValues(query, "statuses", inputList.statuses ?? ["ACTIVE"]);
+        }
+        appendQueryValues(query, "user_ids", [inputList.userId]);
+        if (inputList.accountIds?.length) {
+          appendQueryValues(query, "connected_account_ids", inputList.accountIds);
+        }
+        const toolkitSlugs = inputList.toolkit
+          ? [inputList.toolkit]
+          : inputList.toolkits === null
+            ? []
+            : inputList.toolkits ?? input.config.toolkits;
+        appendQueryValues(query, "toolkit_slugs", toolkitSlugs);
+
+        const payload = await requestJson({
+          config: input.config,
+          fetchImpl,
+          method: "GET",
+          path: `/api/v3.1/connected_accounts?${query.toString()}`,
+        });
+        const record = asRecord(payload);
+        const items = asArray(record?.items);
+        accounts.push(...items.flatMap(parseConnectedAccount));
+        cursor = readNullableString(record, "next_cursor");
+      } while (cursor);
+
+      return accounts;
     },
 
     async renameAccount(accountId: string, alias: string): Promise<void> {
@@ -206,6 +200,27 @@ export function createComposioConnectedAppsClient(input: {
       });
     },
   };
+}
+
+function parseConnectedAccount(item: unknown): ComposioConnectedAccount[] {
+  const record = asRecord(item);
+  const toolkit = asRecord(record?.toolkit);
+  const id = readString(record, "id");
+  const toolkitSlug = readString(toolkit, "slug");
+  if (!id || !toolkitSlug) {
+    return [];
+  }
+  return [{
+    alias: readNullableString(record, "alias"),
+    id,
+    isDisabled: record?.is_disabled === true,
+    status: readString(record, "status") ?? "UNKNOWN",
+    toolkit: {
+      name: readString(toolkit, "name") ?? toolkitSlug,
+      slug: toolkitSlug,
+    },
+    wordId: readNullableString(record, "word_id"),
+  }];
 }
 
 async function requestJson(input: {

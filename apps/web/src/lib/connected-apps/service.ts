@@ -14,8 +14,8 @@ import {
   type ComposioConnectedAccount,
 } from "./composio";
 import {
-  HOSTED_CONNECTED_APPS_POLICY_REVISION,
   assertHostedConnectedAppToolkit,
+  buildHostedConnectedAppsPolicyRevision,
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "./config";
@@ -71,6 +71,7 @@ export async function executeHostedConnectedAppsRequest(input: {
         );
         const sessionId = await ensureHostedConnectedAppsSession({
           client,
+          config,
           memberId: input.memberId,
           prisma,
         });
@@ -83,6 +84,7 @@ export async function executeHostedConnectedAppsRequest(input: {
       case "execute": {
         const sessionId = await ensureHostedConnectedAppsSession({
           client,
+          config,
           memberId: input.memberId,
           prisma,
         });
@@ -125,6 +127,7 @@ export async function startHostedConnectedAppConnection(input: {
   try {
     const sessionId = await ensureHostedConnectedAppsSession({
       client,
+      config,
       memberId: input.memberId,
       prisma,
     });
@@ -323,13 +326,15 @@ async function executeConnectedAppsManagement(input: {
 
 async function ensureHostedConnectedAppsSession(input: {
   client: ReturnType<typeof createComposioConnectedAppsClient>;
+  config: ReturnType<typeof readHostedConnectedAppsConfig>;
   memberId: string;
   prisma: PrismaClient;
 }): Promise<string> {
+  const policyRevision = buildHostedConnectedAppsPolicyRevision(input.config);
   const existing = await input.prisma.hostedConnectedAppsSession.findUnique({
     where: { memberId: input.memberId },
   });
-  if (existing?.policyRevision === HOSTED_CONNECTED_APPS_POLICY_REVISION) {
+  if (existing?.policyRevision === policyRevision) {
     return existing.remoteSessionId;
   }
 
@@ -340,11 +345,11 @@ async function ensureHostedConnectedAppsSession(input: {
     where: { memberId: input.memberId },
     create: {
       memberId: input.memberId,
-      policyRevision: HOSTED_CONNECTED_APPS_POLICY_REVISION,
+      policyRevision,
       remoteSessionId,
     },
     update: {
-      policyRevision: HOSTED_CONNECTED_APPS_POLICY_REVISION,
+      policyRevision,
       remoteSessionId,
     },
   });

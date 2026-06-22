@@ -16,7 +16,23 @@ const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
   googlecalendar: "Google Calendar",
 };
 
-export const HOSTED_CONNECTED_APPS_POLICY_REVISION = 1;
+const HOSTED_CONNECTED_APPS_POLICY_VERSION = 1;
+
+export const HOSTED_CONNECTED_APPS_POLICY_REVISION = HOSTED_CONNECTED_APPS_POLICY_VERSION;
+
+export function buildHostedConnectedAppsPolicyRevision(
+  config: HostedConnectedAppsConfig,
+): number {
+  return stablePositiveIntHash(JSON.stringify({
+    maxAccountsPerToolkit: config.maxAccountsPerToolkit,
+    policyVersion: HOSTED_CONNECTED_APPS_POLICY_VERSION,
+    tags: {
+      disable: ["destructiveHint"],
+      enable: ["readOnlyHint"],
+    },
+    toolkits: [...config.toolkits].sort(),
+  }));
+}
 
 export function readHostedConnectedAppsConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -125,4 +141,13 @@ function connectedAppsConfigurationError(_message: string) {
     message: "Connected apps are temporarily unavailable.",
     retryable: true,
   });
+}
+
+function stablePositiveIntHash(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 1) || 1;
 }

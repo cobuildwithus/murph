@@ -136,6 +136,58 @@ describe("Composio connected-app client", () => {
     await client.disconnectAccount("ca_work");
   });
 
+  it("paginates unfiltered owned account listing for deletion-time revocation", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(init?.method).toBe("GET");
+      const parsed = new URL(String(url));
+      expect(parsed.searchParams.getAll("statuses")).toEqual([]);
+      expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual([]);
+      expect(parsed.searchParams.getAll("user_ids")).toEqual(["hbm_member"]);
+      if (!parsed.searchParams.has("cursor")) {
+        return jsonResponse({
+          items: [
+            {
+              alias: "legacy calendar",
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: "quiet-forest",
+            },
+          ],
+          next_cursor: "page_2",
+        });
+      }
+      expect(parsed.searchParams.get("cursor")).toBe("page_2");
+      return jsonResponse({
+        items: [
+          {
+            alias: "work",
+            id: "ca_gmail",
+            is_disabled: false,
+            status: "ACTIVE",
+            toolkit: { name: "Gmail", slug: "gmail" },
+            word_id: "bright-river",
+          },
+        ],
+      });
+    });
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    await expect(client.listAccounts({
+      statuses: null,
+      toolkits: null,
+      userId: "hbm_member",
+    })).resolves.toMatchObject([
+      { id: "ca_calendar", toolkit: { slug: "googlecalendar" } },
+      { id: "ca_gmail", toolkit: { slug: "gmail" } },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("never includes provider response bodies or API keys in errors", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       new Response(JSON.stringify({

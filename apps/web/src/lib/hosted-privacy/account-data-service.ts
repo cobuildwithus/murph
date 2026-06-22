@@ -349,7 +349,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "providers.composio_connected_apps",
     label: "Composio connected-app provider revocation",
     deletion: "best-effort-delete",
-    export: "metadata-and-counts",
+    export: "documented-only",
     note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
   },
   {
@@ -551,6 +551,8 @@ export async function buildHostedDataExport(input: {
     aiUsage,
     aiUsagePeriods,
     linqDailyStates,
+    connectedAppsSessions,
+    connectedAppConnectIntents,
   ] = await Promise.all([
     readHostedMemberSnapshot({ memberId, prisma }),
     countHostedAccountData({ memberId, prisma }),
@@ -874,6 +876,32 @@ export async function buildHostedDataExport(input: {
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
+    prisma.hostedConnectedAppsSession.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        createdAt: true,
+        memberId: true,
+        policyRevision: true,
+        updatedAt: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
+    prisma.hostedConnectedAppConnectIntent.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        alias: true,
+        completedAt: true,
+        connectedAccountId: true,
+        createdAt: true,
+        expiresAt: true,
+        memberId: true,
+        startedAt: true,
+        toolkit: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
   ]);
 
   if (!memberSnapshot) {
@@ -898,6 +926,8 @@ export async function buildHostedDataExport(input: {
   const limitedVaultShares = limitRowsForExport(vaultShares);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
+  const limitedConnectedAppsSessions = limitRowsForExport(connectedAppsSessions);
+  const limitedConnectedAppConnectIntents = limitRowsForExport(connectedAppConnectIntents);
   const aiUsagePeriodLedgerSpendByStartTime = new Map(
     await Promise.all(limitedAiUsagePeriods.rows.map(async (period) => {
       const ledgerSpend = await prisma.hostedAiUsage.aggregate({
@@ -956,6 +986,8 @@ export async function buildHostedDataExport(input: {
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
         aiUsage: limitedAiUsage.meta,
         aiUsagePeriods: limitedAiUsagePeriods.meta,
+        connectedAppConnectIntents: limitedConnectedAppConnectIntents.meta,
+        connectedAppsSessions: limitedConnectedAppsSessions.meta,
         vaultShares: limitedVaultShares.meta,
       },
     },
@@ -1068,6 +1100,30 @@ export async function buildHostedDataExport(input: {
         status: run.status,
         suggestedReply: run.suggestedReply,
         updatedAt: run.updatedAt,
+      })),
+    },
+    connectedApps: {
+      connectIntents: limitedConnectedAppConnectIntents.rows.map((intent) => ({
+        alias: intent.alias,
+        claimHashOmitted: true,
+        completedAt: intent.completedAt,
+        connectedAccountIdPresent: Boolean(intent.connectedAccountId),
+        createdAt: intent.createdAt,
+        expiresAt: intent.expiresAt,
+        memberId: intent.memberId,
+        startedAt: intent.startedAt,
+        toolkit: intent.toolkit,
+      })),
+      providerAccounts: {
+        exportMode: "documented-only",
+        note: "Provider-side connected account data is held by Composio and omitted from this export.",
+      },
+      sessions: limitedConnectedAppsSessions.rows.map((session) => ({
+        createdAt: session.createdAt,
+        memberId: session.memberId,
+        policyRevision: session.policyRevision,
+        remoteSessionIdOmitted: true,
+        updatedAt: session.updatedAt,
       })),
     },
     wearables: {
@@ -1780,6 +1836,8 @@ async function countHostedAccountData(input: {
     hostedMemberRouting,
     hostedMemberBillingRef,
     hostedMemberEmailAuthorization,
+    hostedConnectedAppsSession,
+    hostedConnectedAppConnectIntent,
     hostedMailboxItem,
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
@@ -1813,6 +1871,8 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMemberRouting.count({ where: { memberId } }),
     input.prisma.hostedMemberBillingRef.count({ where: { memberId } }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId } }),
+    input.prisma.hostedConnectedAppsSession.count({ where: { memberId } }),
+    input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId } }),
     input.prisma.hostedMailboxItem.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
@@ -1857,6 +1917,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
+    "prisma.hosted_connected_app_connect_intent": hostedConnectedAppConnectIntent,
+    "prisma.hosted_connected_apps_session": hostedConnectedAppsSession,
     "prisma.hosted_computer_handoff": hostedComputerHandoff,
     "prisma.hosted_computer_run": hostedComputerRun,
     "prisma.hosted_invite": hostedInvite,
@@ -2191,6 +2253,7 @@ async function revokeConnectedAppsBestEffort(input: {
     client = createComposioConnectedAppsClient({ config });
     accounts = await client.listAccounts({
       statuses: null,
+      toolkits: null,
       userId: input.memberId,
     });
   } catch (error) {
