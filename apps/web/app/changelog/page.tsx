@@ -5,6 +5,8 @@ import { Link2 } from "lucide-react";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import {
+  buildAbsoluteChangelogUrl,
+  buildChangelogCardPath,
   type ChangelogItem,
   listChangelogEditions,
 } from "@/src/lib/changelog";
@@ -378,6 +380,24 @@ const VISUALS: Record<string, ReactNode> = {
 const DESCRIPTION =
   "See what is new in Murph, why it matters, and the simplest way to try each update.";
 
+const PREVIEW_CARD_ITEM_IDS = [
+  "connected-apps-tools",
+  "email-auto-reply",
+  "food-label-database",
+  "apple-health-expansion",
+  "thread-auto-compaction",
+] as const;
+
+const PREVIEW_CARD_IMAGE = {
+  alt: "What's new in Murph — recent features and improvements.",
+  height: 630,
+  type: "image/png",
+  url: buildAbsoluteChangelogUrl(
+    buildChangelogCardPath([...PREVIEW_CARD_ITEM_IDS]),
+  ),
+  width: 1200,
+} as const;
+
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Changelog · Murph",
   description: DESCRIPTION,
@@ -385,7 +405,11 @@ export const metadata: Metadata = createMurphPageMetadata({
     canonical: "/changelog",
   },
   openGraph: {
+    images: [PREVIEW_CARD_IMAGE],
     type: "article",
+  },
+  twitter: {
+    images: [PREVIEW_CARD_IMAGE],
   },
 });
 
