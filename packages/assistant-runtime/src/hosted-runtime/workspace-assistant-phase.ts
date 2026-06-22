@@ -3374,6 +3374,7 @@ function redactHostedRuntimeLogString(key: string, value: string): string | unde
   const redacted = normalized
     .replace(/<HOME_DIR>(?:\/[^\s)"']*)?/gu, "<REDACTED_PATH>")
     .replace(/file:\/\/[^\s)"']+/giu, "<REDACTED_PATH>")
+    .replace(/\bhttps?:\/\/[^\s)"']+/giu, "<REDACTED_URL>")
     .replace(/(^|[\s(])\/[^\s)"']+/gu, "$1<REDACTED_PATH>")
     .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(
@@ -3423,6 +3424,7 @@ function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
   return !(
     /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
+    || /\bhttps?:\/\//iu.test(value)
     || /\+\d[\d().\s-]{7,}\d/u.test(value)
     || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
       .test(value)

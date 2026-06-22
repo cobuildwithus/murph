@@ -338,6 +338,14 @@ export async function executeCodexAssistantTurnAttempt(
       }
     } else if (
       input.resume &&
+      isCodexNoSideEffectResumeTransportFailure(error, failureContext)
+    ) {
+      result = await runFreshThreadFallback(input.resume)
+      codexContinuation = {
+        kind: 'thread-start' as const,
+      }
+    } else if (
+      input.resume &&
       error instanceof VaultCliError &&
       invalidOutputResumeFailure
     ) {
@@ -660,6 +668,39 @@ function isCodexInvalidOutputResumeFailure(error: unknown): boolean {
     /\binput\.\d+\.output:\s*Invalid input\b/iu.test(
       readCodexDiagnosticErrorMessage(error) ?? '',
     )
+  )
+}
+
+function isCodexNoSideEffectResumeTransportFailure(
+  error: unknown,
+  failureContext: CodexAppServerTurnFailureContext | null,
+): boolean {
+  if (failureContext?.providerActionCount !== 0) {
+    return false
+  }
+
+  const errorCode = readCodexDiagnosticErrorCode(error)
+  if (
+    errorCode === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
+    errorCode === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED'
+  ) {
+    return true
+  }
+
+  if (
+    errorCode !== 'ASSISTANT_CODEX_FAILED' ||
+    isCodexInvalidOutputResumeFailure(error)
+  ) {
+    return false
+  }
+
+  const message = readCodexDiagnosticErrorMessage(error)?.toLowerCase() ?? ''
+  return (
+    /\bstream disconnected before completion\b/u.test(message) ||
+    /\berror sending request for url\b/u.test(message) ||
+    /\bconnection (?:aborted|closed|lost|refused|reset)\b/u.test(message) ||
+    /\bnetwork error\b/u.test(message) ||
+    /\bfetch failed\b/u.test(message)
   )
 }
 

@@ -254,6 +254,35 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
 
+  it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const rawPath = "/tmp/private-hosted-runtime/token";
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async () => {
+        throw new Error(
+          `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON must be configured for ${rawPath}.`,
+        );
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toThrow("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON");
+
+    const failureEntry = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .find((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    const redactedJson = failureEntry?.redactedJson ?? {};
+    expect(JSON.stringify(redactedJson)).not.toContain(rawPath);
+    expect(JSON.stringify(redactedJson)).toContain("<redacted-path>");
+  });
+
   it("marks the local workspace clean for warm reuse after successful v2 checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -694,11 +723,13 @@ function createSnapshotArchiveBuilder(): HostedWorkspaceSnapshotArchiveBuilder {
 }
 
 type WorkspaceSnapshotPort = NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]>;
+type RuntimeLogPort = NonNullable<HostedRuntimePlatform["logPort"]>;
 
 function createRuntimePlatform(): {
   calls: {
     abortSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["abortSnapshotSession"]>>;
     completeSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["completeSnapshotSession"]>>;
+    logWrite: ReturnType<typeof vi.fn<RuntimeLogPort["write"]>>;
     putSnapshotObjectDirect: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["putSnapshotObjectDirect"]>>;
     startSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["startSnapshotSession"]>>;
   };
@@ -747,11 +778,17 @@ function createRuntimePlatform(): {
   const abortSnapshotSession = vi.fn(async (
     _input: Parameters<WorkspaceSnapshotPort["abortSnapshotSession"]>[0],
   ) => {});
+  const logWrite = vi.fn(async (
+    input: Parameters<RuntimeLogPort["write"]>[0],
+  ) => ({
+    loggedCount: input.entries.length,
+  }));
 
   return {
     calls: {
       abortSnapshotSession,
       completeSnapshotSession,
+      logWrite,
       putSnapshotObjectDirect,
       startSnapshotSession,
     },
@@ -763,6 +800,9 @@ function createRuntimePlatform(): {
       effectsPort: {
         readRawEmailMessage: async () => null,
         sendEmail: async () => {},
+      },
+      logPort: {
+        write: logWrite,
       },
       workspaceSnapshotPort: {
         abortSnapshotSession,

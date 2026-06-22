@@ -2745,9 +2745,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         phase: "wake.running",
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
-          safeErrorMessage: "Bearer raw-token-value",
+          safeErrorMessage:
+            "Bearer raw-token-value https://api.openai.com/v1/responses",
           safeErrorPresent: true,
-          safeErrorLength: "Bearer raw-token-value".length,
+          safeErrorLength:
+            "Bearer raw-token-value https://api.openai.com/v1/responses".length,
           type: "input.reply-failed",
         },
       }],
@@ -2757,12 +2759,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
-      safeErrorLength: "Bearer raw-token-value".length,
-      safeErrorMessage: "Bearer [redacted]",
+      safeErrorLength:
+        "Bearer raw-token-value https://api.openai.com/v1/responses".length,
+      safeErrorMessage: "Bearer [redacted] <REDACTED_URL>",
       safeErrorPresent: true,
       type: "input.reply-failed",
     }));
     expect(JSON.stringify(logRequests)).not.toContain("raw-token-value");
+    expect(JSON.stringify(logRequests)).not.toContain("api.openai.com");
   });
 
   it("persists diagnostics when Codex context is missing and error text needs path redaction", async () => {
