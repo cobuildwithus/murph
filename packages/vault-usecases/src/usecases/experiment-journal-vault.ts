@@ -2061,8 +2061,11 @@ function buildExperimentMetricPointFilters(
   }
 
   const dateFilter = buildExperimentMetricPointDateFilter(frontmatter, asOf)
+  const anchorMetricKeys = collectExperimentAnchorMetricKeys(query, frontmatter)
   return metricKeys.map((metricKey) => ({
-    ...dateFilter,
+    ...(anchorMetricKeys.has(metricKey)
+      ? buildExperimentAnchorMetricPointDateFilter(asOf)
+      : dateFilter),
     limit: null,
     metricKey,
   }))
@@ -2078,13 +2081,7 @@ function collectExperimentMetricKeys(
     analysisPlan?.primaryBiomarkerKey,
     ...(analysisPlan?.secondaryBiomarkerKeys ?? []),
   ]) {
-    if (!biomarkerKey) {
-      continue
-    }
-
-    const metricKey =
-      query.resolveMetricDefinitionForBiomarker(biomarkerKey)?.key ??
-      query.resolveMetricDefinition(biomarkerKey.split(':').at(-1) ?? biomarkerKey)?.key
+    const metricKey = resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
     if (metricKey) {
       metricKeys.add(metricKey)
     }
@@ -2109,6 +2106,38 @@ function collectExperimentMetricKeys(
   return [...metricKeys].sort((left, right) => left.localeCompare(right))
 }
 
+function collectExperimentAnchorMetricKeys(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+): Set<string> {
+  const metricKeys = new Set<string>()
+  for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
+    for (const biomarkerKey of anchor.biomarkerKeys) {
+      const metricKey = resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
+      if (metricKey) {
+        metricKeys.add(metricKey)
+      }
+    }
+  }
+
+  return metricKeys
+}
+
+function resolveExperimentBiomarkerMetricKey(
+  query: QueryRuntimeModule,
+  biomarkerKey: string | null | undefined,
+): string | null {
+  if (!biomarkerKey) {
+    return null
+  }
+
+  return (
+    query.resolveMetricDefinitionForBiomarker(biomarkerKey)?.key ??
+    query.resolveMetricDefinition(biomarkerKey.split(':').at(-1) ?? biomarkerKey)?.key ??
+    null
+  )
+}
+
 function buildExperimentMetricPointDateFilter(
   frontmatter: ExperimentFrontmatter,
   asOf?: string,
@@ -2124,20 +2153,47 @@ function buildExperimentMetricPointDateFilter(
     }
   }
 
-  addRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd)
+  addRange(
+    frontmatter.runPlan?.baselineStart,
+    capExperimentMetricEndDate(frontmatter.runPlan?.baselineEnd, asOf),
+  )
   addRange(
     frontmatter.runPlan?.interventionStart,
-    frontmatter.runPlan?.interventionEnd ?? asOf,
+    capExperimentMetricEndDate(frontmatter.runPlan?.interventionEnd, asOf),
   )
 
   for (const measurement of frontmatter.analysisPlan?.plannedMeasurements ?? []) {
-    addRange(measurement.targetWindow?.start, measurement.targetWindow?.end)
+    addRange(
+      measurement.targetWindow?.start,
+      capExperimentMetricEndDate(measurement.targetWindow?.end, asOf),
+    )
   }
 
   return {
     ...(starts.length > 0 ? { from: sortedIsoDates(starts)[0] } : {}),
     ...(ends.length > 0 ? { to: sortedIsoDates(ends).at(-1) } : {}),
   }
+}
+
+function buildExperimentAnchorMetricPointDateFilter(
+  asOf?: string,
+): Pick<QueryMetricPointFilters, 'to'> {
+  return asOf ? { to: asOf } : {}
+}
+
+function capExperimentMetricEndDate(
+  configuredEnd: string | null | undefined,
+  asOf: string | undefined,
+): string | null | undefined {
+  if (!asOf) {
+    return configuredEnd
+  }
+
+  if (!configuredEnd) {
+    return asOf
+  }
+
+  return configuredEnd < asOf ? configuredEnd : asOf
 }
 
 function sortedIsoDates(values: readonly string[]) {

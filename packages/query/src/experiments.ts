@@ -689,6 +689,9 @@ function buildAdherenceObservations(
       case "metricThreshold":
         const metricEvidence = target.evidence;
         for (const point of context.metricPoints) {
+          if (point.effectiveDate > context.asOf) {
+            continue;
+          }
           if (!matchesAdherenceMetric(metricEvidence.metricKey, point)) {
             continue;
           }
