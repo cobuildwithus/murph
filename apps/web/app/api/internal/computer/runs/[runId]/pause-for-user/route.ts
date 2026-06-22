@@ -17,7 +17,6 @@ export const POST = withJsonError(async (
   return jsonOk(await service.pauseForUser({
     handoffPurpose: body.handoffPurpose,
     memberId,
-    message: body.message,
     pauseDeliveryContext: body.pauseDeliveryContext,
     reason: body.reason,
     runId,

@@ -320,7 +320,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       suggestedReply: "yes",
     },
@@ -821,7 +820,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${path}`, {
         body: JSON.stringify({
-          message: "Should I book this appointment?",
           reason: "final_confirmation",
           suggestedReply: "yes",
         }),

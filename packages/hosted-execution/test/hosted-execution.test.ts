@@ -814,16 +814,27 @@ describe("hosted execution coverage gaps", () => {
 
     expect(parseHostedComputerPauseForUserRequest({
       handoffPurpose: "manual_browser_help",
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       suggestedReply: "done",
     })).toEqual({
       handoffPurpose: "manual_browser_help",
-      message: "Should I book this appointment?",
       pauseDeliveryContext: null,
       reason: "final_confirmation",
       suggestedReply: "done",
     });
+    expect(parseHostedComputerPauseForUserRequest({
+      message: "Please log in.",
+      reason: "login_needed",
+    })).toEqual({
+      handoffPurpose: null,
+      pauseDeliveryContext: null,
+      reason: "login_needed",
+      suggestedReply: null,
+    });
+    expect(() => parseHostedComputerPauseForUserRequest({
+      awaitingMessage: "Please log in.",
+      reason: "login_needed",
+    })).toThrow(/Hosted computer pause-for-user request is invalid/u);
   });
 });
 

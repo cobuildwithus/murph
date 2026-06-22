@@ -410,6 +410,9 @@ entry that needs private takeover, or a page that needs direct user takeover.
 When pausing, use `computer_pause_for_user`; after the user replies, resume the
 same run through `computer_start_run` with `resumeRunId`, then observe before
 acting.
+The pause tool stores state and may return a handoff URL; it does not send the
+chat message. Put the handoff URL and concise next step in the normal final
+reply when direct takeover is needed.
 
 When blocked by login, payment setup, or other private credential/financial
 entry, explain that this should be a one-time private handoff. Tell the user to

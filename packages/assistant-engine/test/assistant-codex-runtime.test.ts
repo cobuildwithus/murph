@@ -1317,13 +1317,11 @@ describe('assistant codex runtime', () => {
         fetchOrder.push('pause')
         expect(JSON.parse(String(init?.body))).toMatchObject({
           handoffPurpose: 'manual_browser_help',
-          message: 'Should I book this appointment?',
           reason: 'final_confirmation',
         })
         return new Response(JSON.stringify({
           awaitingReason: 'final_confirmation',
           handoffUrl: 'https://web.example.test/computer/handoff/raw-token',
-          message: 'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
           runId: 'run_123',
           status: 'awaiting_user',
           suggestedReply: 'yes',
@@ -1371,12 +1369,12 @@ describe('assistant codex runtime', () => {
               params: {
                 namespace: 'murph',
                 tool: 'computer_act',
-	                arguments: {
-	                  action: 'goto',
-	                  runId: 'run_123',
-	                  timeoutMs: 25000,
-	                  url: 'https://shop.example.test/checkout',
-	                },
+                arguments: {
+                  action: 'goto',
+                  runId: 'run_123',
+                  timeoutMs: 25000,
+                  url: 'https://shop.example.test/checkout',
+                },
               },
             }),
           )
@@ -1389,7 +1387,6 @@ describe('assistant codex runtime', () => {
                 tool: 'computer_pause_for_user',
                 arguments: {
                   handoffPurpose: 'manual_browser_help',
-                  message: 'Should I book this appointment?',
                   reason: 'final_confirmation',
                   runId: 'run_123',
                   suggestedReply: 'done',
@@ -1454,37 +1451,19 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
-      'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
-    )
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
-  it('closes live steering before delivering a computer pause message', async () => {
+  it('closes live steering before saving a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
-    const pauseMessageDeliveryStarted = createDeferred<void>()
     const pauseRequestStarted = createDeferred<void>()
     const releasePauseRequest = createDeferred<void>()
-    const steerAfterPauseChecked = createDeferred<void>()
     const liveTurnReady = createDeferred<void>()
     let liveTurn: CodexAppServerLiveTurn | null = null
     let liveTurnReleased = 0
 
     const progressDelivery = createProgressDeliveryMock()
-    const hostedToolContext: AssistantHostedToolContext = {
-      ...createHostedToolContext(),
-      sendRequiredUserMessage: vi.fn(async () => {
-        pauseMessageDeliveryStarted.resolve()
-        expect(liveTurnReleased).toBe(1)
-        expect(liveTurn).not.toBeNull()
-        await expect(liveTurn!.steer({
-          prompt: 'yes, continue',
-        })).rejects.toMatchObject({
-          code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
-        })
-        steerAfterPauseChecked.resolve()
-        return sentProgressResult()
-      }),
-    }
+    const hostedToolContext = createHostedToolContext()
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1495,7 +1474,6 @@ describe('assistant codex runtime', () => {
       }
       expect(JSON.parse(String(init?.body))).toMatchObject({
         handoffPurpose: 'manual_browser_help',
-        message: 'Should I book this appointment?',
         reason: 'final_confirmation',
       })
       pauseRequestStarted.resolve()
@@ -1503,7 +1481,6 @@ describe('assistant codex runtime', () => {
       return new Response(JSON.stringify({
         awaitingReason: 'final_confirmation',
         handoffUrl: null,
-        message: 'Should I book this appointment?',
         runId: 'run_123',
         status: 'awaiting_user',
         suggestedReply: 'yes',
@@ -1552,7 +1529,6 @@ describe('assistant codex runtime', () => {
                 tool: 'computer_pause_for_user',
                 arguments: {
                   handoffPurpose: 'manual_browser_help',
-                  message: 'Should I book this appointment?',
                   reason: 'final_confirmation',
                   runId: 'run_123',
                   suggestedReply: 'yes',
@@ -1574,8 +1550,6 @@ describe('assistant codex runtime', () => {
             releasePauseRequest.resolve()
           }
 
-          await pauseMessageDeliveryStarted.promise
-          await steerAfterPauseChecked.promise
           await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
             id: 61,
             result: { success: true },
@@ -1634,9 +1608,155 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(liveTurnReleased).toBe(1)
-    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
-      'Should I book this appointment?',
-    )
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
+  })
+
+  it('rejects finish_without_reply after pausing a computer run for the user', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
+    const progressDelivery = createProgressDeliveryMock()
+    const hostedToolContext = createHostedToolContext()
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe(
+        'http://web-control.worker/api/internal/computer/runs/run_123/pause-for-user',
+      )
+      expect(JSON.parse(String(init?.body))).toEqual({
+        handoffPurpose: 'manual_browser_help',
+        pauseDeliveryContext: null,
+        reason: 'final_confirmation',
+        suggestedReply: 'done',
+      })
+      return new Response(JSON.stringify({
+        awaitingReason: 'final_confirmation',
+        handoffUrl: 'https://web.example.test/computer/handoff/raw-token',
+        runId: 'run_123',
+        status: 'awaiting_user',
+        suggestedReply: 'done',
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-computer-pause-no-reply',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-computer-pause-no-reply',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_pause_for_user',
+                arguments: {
+                  handoffPurpose: 'manual_browser_help',
+                  reason: 'final_confirmation',
+                  runId: 'run_123',
+                  suggestedReply: 'done',
+                },
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              id: 62,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
+            id: 62,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finish_without_reply unavailable after computer_pause_for_user; send a normal final response with the handoff URL or next step for the user',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-pause-no-reply',
+                  type: 'assistant_message',
+                  message: 'Paused for confirmation: https://web.example.test/computer/handoff/raw-token',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-computer-pause-no-reply',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        fetchImpl,
+        hostedToolContext,
+        progressDelivery,
+        prompt: 'pause for confirmation',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: 'Paused for confirmation: https://web.example.test/computer/handoff/raw-token',
+    })
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
@@ -4586,13 +4706,11 @@ describe('assistant codex runtime', () => {
         throw new Error(`Unexpected fetch URL: ${requestUrl}`)
       }
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        message: 'Should I book this appointment?',
         reason: 'final_confirmation',
       })
       return new Response(JSON.stringify({
         awaitingReason: 'final_confirmation',
         handoffUrl: null,
-        message: 'Should I book this appointment?',
         runId: 'run_123',
         status: 'awaiting_user',
         suggestedReply: 'yes',
@@ -4644,7 +4762,6 @@ describe('assistant codex runtime', () => {
             params: {
               arguments: {
                 handoffPurpose: 'manual_browser_help',
-                message: 'Should I book this appointment?',
                 reason: 'final_confirmation',
                 runId: 'run_123',
                 suggestedReply: 'yes',
@@ -4749,9 +4866,7 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-prestart-pause-live-turn-2',
     })
     expect(liveTurnRegistrations).toBe(0)
-    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
-      'Should I book this appointment?',
-    )
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {

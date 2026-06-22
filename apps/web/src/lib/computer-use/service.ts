@@ -69,7 +69,6 @@ export interface ComputerObserveResult {
 export interface ComputerPauseForUserResult {
   awaitingReason: HostedComputerAwaitingReason;
   handoffUrl: string | null;
-  message: string;
   runId: string;
   status: "awaiting_user";
   suggestedReply: string | null;
@@ -412,7 +411,6 @@ export class ComputerUseService {
   async pauseForUser(input: {
     handoffPurpose: HostedComputerHandoffPurpose | null;
     memberId: string;
-    message: string;
     pauseDeliveryContext?: HostedComputerDeliveryContext | null;
     reason: HostedComputerAwaitingReason;
     runId: string;
@@ -425,7 +423,6 @@ export class ComputerUseService {
     input: {
       handoffPurpose: HostedComputerHandoffPurpose | null;
       memberId: string;
-      message: string;
       pauseDeliveryContext?: HostedComputerDeliveryContext | null;
       reason: HostedComputerAwaitingReason;
       runId: string;
@@ -458,7 +455,6 @@ export class ComputerUseService {
       return {
         awaitingReason: run.awaitingReason ?? input.reason,
         handoffUrl: null,
-        message: run.awaitingMessage ?? input.message,
         runId: run.id,
         status: "awaiting_user",
         suggestedReply: run.suggestedReply,
@@ -483,13 +479,10 @@ export class ComputerUseService {
           suggestedReply: input.suggestedReply,
         }, store)
       : null;
-    const message = handoff
-      ? `${input.message}\n\n${handoff.handoffUrl}`
-      : input.message;
     let paused: ComputerRunRecord;
     try {
       paused = await store.markRunAwaitingUser({
-        awaitingMessage: input.message,
+        awaitingMessage: null,
         awaitingReason: input.reason,
         checkpointContext: normalizeComputerCheckpointContext(
           input.pauseDeliveryContext ?? null,
@@ -516,7 +509,6 @@ export class ComputerUseService {
     return {
       awaitingReason: paused.awaitingReason ?? input.reason,
       handoffUrl: handoff?.handoffUrl ?? null,
-      message,
       runId: run.id,
       status: "awaiting_user",
       suggestedReply: input.suggestedReply,
@@ -925,7 +917,6 @@ export class ComputerUseService {
   }): Promise<ComputerPauseForUserResult | null> {
     if (
       !input.run.pendingHandoffId ||
-      !input.run.awaitingMessage ||
       !input.run.awaitingReason
     ) {
       return null;
@@ -1004,7 +995,6 @@ export class ComputerUseService {
       return {
         awaitingReason: refreshed.awaitingReason ?? input.run.awaitingReason,
         handoffUrl: handoff.handoffUrl,
-        message: `${refreshed.awaitingMessage ?? input.run.awaitingMessage}\n\n${handoff.handoffUrl}`,
         runId: input.run.id,
         status: "awaiting_user",
         suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,

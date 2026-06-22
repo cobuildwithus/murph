@@ -323,7 +323,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, optionally create a secure browser handoff link, and send the message through the current Murph channel. A successful call already creates a user-visible message; when there is nothing useful to add, use murph.finish_without_reply to avoid a redundant second reply.',
+    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when direct browser takeover is needed.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -338,7 +338,6 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         ],
         default: null,
       },
-      message: { type: 'string', minLength: 1, maxLength: 1000 },
       reason: {
         type: 'string',
         enum: ['login_needed', 'payment_needed', 'final_confirmation', 'stuck', 'other'],
@@ -349,7 +348,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         default: null,
       },
     },
-    required: ['runId', 'reason', 'message'],
+    required: ['runId', 'reason'],
   },
 } as const
 
@@ -546,11 +545,42 @@ const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
   }
 })
 
-const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSchema
-  .extend({
-    runId: computerRunIdSchema,
-  })
-  .strict()
+const computerPauseForUserArgumentsSchema = z.unknown().transform((value, ctx) => {
+  const withRunId = z
+    .object({
+      runId: computerRunIdSchema,
+    })
+    .passthrough()
+    .safeParse(value)
+  if (!withRunId.success) {
+    for (const issue of withRunId.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  const { runId, ...body } = withRunId.data
+  const parsedBody = hostedComputerPauseForUserRequestSchema.safeParse(body)
+  if (!parsedBody.success) {
+    for (const issue of parsedBody.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  return {
+    ...parsedBody.data,
+    runId,
+  }
+})
 
 const computerFinishRunArgumentsSchema = z
   .object({
@@ -1143,7 +1173,6 @@ export async function executeMurphDynamicToolRequest(input: {
           operation: 'finish',
           runId,
         }),
-        hostedToolContext: input.hostedToolContext ?? null,
         path: buildHostedComputerRunOperationPath({
           operation: 'pause-for-user',
           runId,
@@ -1226,7 +1255,6 @@ async function executeHostedComputerPauseForUserTool(input: {
   body: HostedComputerPauseForUserRequest
   fetchImpl: typeof fetch
   finishPath: string
-  hostedToolContext: AssistantHostedToolContext | null
   path: string
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi({
@@ -1235,7 +1263,7 @@ async function executeHostedComputerPauseForUserTool(input: {
   })
   if (!apiResult.ok) {
     if (apiResult.unknownOutcome) {
-      return await cancelComputerRunAfterPauseDeliveryFailure({
+      return await cancelComputerRunAfterUnknownPauseOutcome({
         ...input,
         reason: apiResult.errorText,
       })
@@ -1243,57 +1271,9 @@ async function executeHostedComputerPauseForUserTool(input: {
     return toolTextResult(false, apiResult.errorText)
   }
 
-  const message = readComputerPauseMessage(apiResult.payload)
-  if (!message) {
-    return savedComputerPauseDeliveryFailureResult({
-      payload: apiResult.payload,
-      reason: 'computer pause saved but no channel message was returned',
-    })
-  }
-
-  if (!input.hostedToolContext?.requiredUserMessageDeliveryAvailable) {
-    return savedComputerPauseDeliveryFailureResult({
-      payload: apiResult.payload,
-      reason: 'computer pause saved but channel delivery is not available',
-    })
-  }
-
-  try {
-    const delivery = await input.hostedToolContext.sendRequiredUserMessage(message)
-    if (delivery.kind !== 'sent') {
-      return savedComputerPauseDeliveryFailureResult({
-        payload: apiResult.payload,
-        reason: 'computer pause saved but channel delivery failed',
-      })
-    }
-  } catch {
-    return savedComputerPauseDeliveryFailureResult({
-      payload: apiResult.payload,
-      reason: 'computer pause saved but channel delivery failed',
-    })
-  }
-
   return toolTextResult(
     true,
-    safeToolPayloadText({
-      ...readSanitizedComputerPausePayload(apiResult.payload),
-      channelMessageSent: true,
-    }),
-    { computerRunPausedForUser: true },
-  )
-}
-
-function savedComputerPauseDeliveryFailureResult(input: {
-  payload: unknown
-  reason: string
-}): MurphDynamicToolExecutionResult {
-  return toolTextResult(
-    false,
-    safeToolPayloadText({
-      ...readSanitizedComputerPausePayload(input.payload),
-      channelMessageSent: false,
-      deliveryError: input.reason,
-    }),
+    safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
     { computerRunPausedForUser: true },
   )
 }
@@ -1352,7 +1332,7 @@ async function executeHostedComputerApiTool(input: {
     : toolTextResult(false, apiResult.errorText)
 }
 
-async function cancelComputerRunAfterPauseDeliveryFailure(input: {
+async function cancelComputerRunAfterUnknownPauseOutcome(input: {
   abortSignal: AbortSignal | null
   fetchImpl: typeof fetch
   finishPath: string
@@ -1517,14 +1497,6 @@ function isUnknownComputerOutcomeError(input: {
     || input.code === 'HOSTED_COMPUTER_ACTION_STATE_INVALID'
 }
 
-function readComputerPauseMessage(payload: unknown): string | null {
-  const record = asRecord(payload)
-  const message = record && typeof record.message === 'string'
-    ? normalizeNullableString(record.message)
-    : null
-  return message
-}
-
 function readSanitizedComputerPausePayload(payload: unknown): Record<string, unknown> {
   const record = asRecord(payload)
   if (!record) {
@@ -1536,13 +1508,20 @@ function readSanitizedComputerPausePayload(payload: unknown): Record<string, unk
   const awaitingReason = typeof record.awaitingReason === 'string'
     ? record.awaitingReason
     : null
-  const handoffCreated = typeof record.handoffUrl === 'string' && record.handoffUrl.length > 0
+  const handoffUrl = typeof record.handoffUrl === 'string' && record.handoffUrl.length > 0
+    ? record.handoffUrl
+    : null
+  const suggestedReply = typeof record.suggestedReply === 'string' && record.suggestedReply.length > 0
+    ? record.suggestedReply
+    : null
 
   return {
     ...(awaitingReason ? { awaitingReason } : {}),
-    handoffCreated,
+    handoffCreated: Boolean(handoffUrl),
+    ...(handoffUrl ? { handoffUrl } : {}),
     ...(runId ? { runId } : {}),
     ...(status ? { status } : {}),
+    ...(suggestedReply ? { suggestedReply } : {}),
   }
 }
 

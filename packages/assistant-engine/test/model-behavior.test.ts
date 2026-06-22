@@ -255,7 +255,7 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed',
     )
     expect(prompt).toContain(
-      'A successful `murph.computer_pause_for_user` call already sends the user-visible handoff message through the current channel. When there is nothing useful to add, use `finish_without_reply` to avoid a redundant second reply.',
+      'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response to summarize the pause and include the returned `handoffUrl` when direct browser takeover is needed.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain(

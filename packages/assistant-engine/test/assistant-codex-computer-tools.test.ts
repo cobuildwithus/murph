@@ -72,6 +72,8 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
     );
+    expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("message");
+    expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
   it("advertises computer tools only when execution transport is available", () => {
@@ -653,7 +655,6 @@ describe("murph computer dynamic tools", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         handoffPurpose: "manual_browser_help",
-        message: "Should I book this appointment?",
         reason: "final_confirmation",
         runId: "run_123",
         suggestedReply: "done",
@@ -664,7 +665,27 @@ describe("murph computer dynamic tools", () => {
     expect(request).toEqual({
       args: {
         handoffPurpose: "manual_browser_help",
+        pauseDeliveryContext: null,
+        reason: "final_confirmation",
+        runId: "run_123",
+        suggestedReply: "done",
+      },
+      kind: "computer-pause-for-user",
+    });
+
+    const legacyMessageRequest = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        handoffPurpose: "manual_browser_help",
         message: "Should I book this appointment?",
+        reason: "final_confirmation",
+        runId: "run_123",
+        suggestedReply: "done",
+      },
+      tool: "computer_pause_for_user",
+    }));
+    expect(legacyMessageRequest).toEqual({
+      args: {
+        handoffPurpose: "manual_browser_help",
         pauseDeliveryContext: null,
         reason: "final_confirmation",
         runId: "run_123",
@@ -674,7 +695,7 @@ describe("murph computer dynamic tools", () => {
     });
   });
 
-  it("pauses through web-control and sends the returned message through required user-message delivery", async () => {
+  it("pauses through web-control and returns the hosted handoff URL to the model", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -686,7 +707,6 @@ describe("murph computer dynamic tools", () => {
       expect(readHeader(init?.headers, "content-type")).toBe("application/json");
       expect(JSON.parse(String(init?.body))).toEqual({
         handoffPurpose: "manual_browser_help",
-        message: "Should I book this appointment?",
         pauseDeliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
@@ -698,9 +718,9 @@ describe("murph computer dynamic tools", () => {
       return jsonResponse({
         awaitingReason: "final_confirmation",
         handoffUrl: "https://web.example.test/computer/handoff/raw-token",
-        message: "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
         runId: "run_123",
         status: "awaiting_user",
+        suggestedReply: "done",
       });
     });
     const hostedToolContext = createHostedToolContext({
@@ -719,7 +739,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
-          message: "Should I book this appointment?",
           pauseDeliveryContext: {
             conversationId: "model-authored-conversation",
             recipientKey: "model-authored-recipient",
@@ -733,24 +752,22 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
-      "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
-    );
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
-      channelMessageSent: true,
       handoffCreated: true,
+      handoffUrl: "https://web.example.test/computer/handoff/raw-token",
       runId: "run_123",
       status: "awaiting_user",
+      suggestedReply: "done",
     });
   });
 
-  it("does not return handoff URLs to Codex after sending them through progress delivery", async () => {
+  it("returns hosted handoff URLs to Codex without using progress delivery", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         awaitingReason: "login_needed",
         handoffUrl: "https://web.example.test/computer/handoff/raw-token",
-        message: "Can you log in here?\n\nhttps://web.example.test/computer/handoff/raw-token",
         runId: "run_123",
         status: "awaiting_user",
       })
@@ -766,7 +783,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           handoffPurpose: "login",
-          message: "Can you log in here?",
           pauseDeliveryContext: null,
           reason: "login_needed",
           runId: "run_123",
@@ -777,20 +793,18 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(hostedToolContext.sendRequiredUserMessage).toHaveBeenCalledWith(
-      "Can you log in here?\n\nhttps://web.example.test/computer/handoff/raw-token",
-    );
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
+    expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "login_needed",
-      channelMessageSent: true,
       handoffCreated: true,
+      handoffUrl: "https://web.example.test/computer/handoff/raw-token",
       runId: "run_123",
       status: "awaiting_user",
     });
   });
 
-  it("does not persist a pause when required user-message delivery cannot be sent", async () => {
+  it("does not pause when hosted computer-use transport is unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "awaiting_user" })
     );
@@ -808,7 +822,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
-          message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
@@ -864,7 +877,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
-          message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
@@ -882,7 +894,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a saved pause when channel delivery fails after the checkpoint commits", async () => {
+  it("pauses even when required user-message delivery is unavailable", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
     ): Promise<Response> => {
@@ -893,7 +905,6 @@ describe("murph computer dynamic tools", () => {
         return jsonResponse({
           awaitingReason: "final_confirmation",
           handoffUrl: "https://web.example.test/computer/handoff/raw-token",
-          message: "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
           runId: "run_123",
           status: "awaiting_user",
         });
@@ -902,7 +913,7 @@ describe("murph computer dynamic tools", () => {
       throw new Error("unexpected finish call");
     });
     const hostedToolContext = createHostedToolContext({
-      sendResult: { kind: "failed" as const, source: "model" as const },
+      requiredUserMessageDeliveryAvailable: false,
     });
 
     const result = await executeMurphDynamicToolRequest({
@@ -914,7 +925,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           handoffPurpose: "manual_browser_help",
-          message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
@@ -924,16 +934,16 @@ describe("murph computer dynamic tools", () => {
       },
     });
 
-    expect(result.rpcResult.success).toBe(false);
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
-      channelMessageSent: false,
-      deliveryError: "computer pause saved but channel delivery failed",
       handoffCreated: true,
+      handoffUrl: "https://web.example.test/computer/handoff/raw-token",
       runId: "run_123",
       status: "awaiting_user",
     });
+    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

@@ -22,7 +22,7 @@ vi.mock("node:dns/promises", () => ({
 vi.stubEnv("HOSTED_COMPUTER_PROFILE_NAMESPACE", "test");
 
 describe("ComputerUseService", () => {
-  it("stores a durable awaiting-user pause and composes the handoff message", async () => {
+  it("stores a durable awaiting-user pause and returns the hosted handoff URL", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
@@ -38,7 +38,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -53,16 +52,14 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Can you log in here?\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
-      awaitingMessage: "Can you log in here?",
+      awaitingMessage: null,
       awaitingReason: "login_needed",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
       suggestedReply: "done",
     });
-    expect(store.run.awaitingMessage).not.toContain("/computer/handoff/");
     expect(store.handoff).toMatchObject({
       expiresAt: new Date("2026-06-17T12:20:00.000Z"),
       id: "hch_handoff123",
@@ -91,7 +88,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please confirm and book this appointment in the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -106,11 +102,8 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(
-      `Please confirm and book this appointment in the browser.\n\n${result.handoffUrl}`,
-    );
     expect(store.run).toMatchObject({
-      awaitingMessage: "Please confirm and book this appointment in the browser.",
+      awaitingMessage: null,
       awaitingReason: "final_confirmation",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
@@ -153,7 +146,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -162,7 +154,6 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
       awaitingMessage: "Old login request.",
       awaitingReason: "login_needed",
@@ -215,13 +206,14 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
     });
 
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "expired",
     });
@@ -272,7 +264,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in?",
       pauseDeliveryContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
@@ -286,7 +277,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I book this appointment?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.run).toMatchObject({
       awaitingMessage: "Should I book this appointment?",
       awaitingReason: "final_confirmation",
@@ -337,7 +330,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please reopen the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -347,7 +339,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I submit this booking?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "completed",
     });
@@ -395,7 +389,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       pauseDeliveryContext: {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
@@ -427,7 +420,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: null,
       memberId: "member_123",
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -460,7 +452,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -491,7 +482,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -541,7 +531,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -2147,7 +2136,6 @@ describe("ComputerUseService", () => {
     await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Should I place this order?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
