@@ -5,7 +5,6 @@ CREATE TABLE "hosted_account_group" (
     "display_name" TEXT,
     "owner_member_id" TEXT NOT NULL,
     "billing_status" "HostedBillingStatus" NOT NULL DEFAULT 'not_started',
-    "max_seats" INTEGER NOT NULL DEFAULT 4,
     "suspended_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,

@@ -162,6 +162,19 @@ interface HostedAiUsageAllowanceBillingRef {
   pulseTrialRedeemedAt: Date | null;
 }
 
+function resolveHostedAiUsageAllowanceBillingRefForAccess(input: {
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  familyAccessActive: boolean;
+}): HostedAiUsageAllowanceBillingRef | null {
+  if (!input.familyAccessActive) {
+    return input.billingRef;
+  }
+
+  return parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid"
+    ? input.billingRef
+    : null;
+}
+
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-05-05-openai-flex";
@@ -502,6 +515,10 @@ export async function resolveHostedAiUsageGate(input: {
         memberId: input.memberId,
         prisma: tx,
       });
+    const allowanceBillingRef = resolveHostedAiUsageAllowanceBillingRefForAccess({
+      billingRef: memberState.billingRef,
+      familyAccessActive,
+    });
 
     if (
       memberState.suspendedAt !== null ||
@@ -512,7 +529,7 @@ export async function resolveHostedAiUsageGate(input: {
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
-        billingRef: memberState.billingRef,
+        billingRef: allowanceBillingRef,
         memberId: input.memberId,
       });
     }
@@ -578,6 +595,10 @@ export async function readHostedAiUsageGate(input: {
         memberId: input.memberId,
         prisma: tx,
       });
+    const allowanceBillingRef = resolveHostedAiUsageAllowanceBillingRefForAccess({
+      billingRef: memberState.billingRef,
+      familyAccessActive,
+    });
 
     if (
       memberState.suspendedAt !== null ||
@@ -588,14 +609,14 @@ export async function readHostedAiUsageGate(input: {
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
-        billingRef: memberState.billingRef,
+        billingRef: allowanceBillingRef,
         memberId: input.memberId,
       });
     }
 
     const period = await readHostedAiUsageAllowancePeriodTx({
       at: now,
-      billingRef: memberState.billingRef,
+      billingRef: allowanceBillingRef,
       memberId: input.memberId,
       tx,
     });
@@ -826,9 +847,17 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     throw new TypeError("Hosted AI usage allowance member does not exist.");
   }
 
+  const familyAccessActive = await hasActiveHostedFamilyAccess({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const billingRef = resolveHostedAiUsageAllowanceBillingRefForAccess({
+    billingRef: member.billingRef,
+    familyAccessActive,
+  });
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
-    billingRef: member.billingRef,
+    billingRef,
   });
   if (resolved.kind === "denied") {
     return {

@@ -725,6 +725,45 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("uses Family-sponsored allowance instead of stale direct trial state", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      familyAccessActive: true,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-09T12:00:01.000Z",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-04-09T12:00:05.000Z"),
+        allowanceCostUsdMicros: 1896n,
+        allowanceCounted: true,
+        allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        allowancePricingVersion: "openai-api-pricing-2026-05-05-standard",
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -1113,6 +1152,43 @@ describe("resolveHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("allows Family-sponsored members with expired direct trial billing state", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      familyAccessActive: true,
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
+    });
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        billingPlanCode: "launch_monthly",
+        memberId: "member_123",
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      }),
+    }));
+  });
+
   it.each([
     [
       "unknown policy",
@@ -1456,6 +1532,71 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
   });
 
+  it("reads Family-sponsored allowance instead of stale direct trial state without writes", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      familyAccessActive: true,
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("keeps direct paid billing periods for Family-sponsored members", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingPlanCode: "launch_edge_monthly",
+      familyAccessActive: true,
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-08T12:00:00.000Z"),
+      spentUsdMicros: 3_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-20T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      periodEnd: new Date("2026-05-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-08T12:00:00.000Z"),
+      remainingUsdMicros: 25_000_000n,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it("reads gate state without creating or updating usage-period rows", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -1770,9 +1911,12 @@ function createAllowanceTx(input: {
   billingPlanCode?: string;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
+  familyAccessActive?: boolean;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitUsdMicros?: bigint;
+  periodEnd?: Date;
+  periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   trialEndsAt?: Date | null;
@@ -1810,15 +1954,28 @@ function createAllowanceTx(input: {
         blockedAt: null,
         lastUsageAt: null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
         spentUsdMicros: 0n,
       })),
       update: vi.fn(async () => undefined),
     },
     hostedAccountGroupMembership: {
-      count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () => null),
+      count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
+      findFirst: vi.fn(async () => input.familyAccessActive
+        ? {
+            group: {
+              billingStatus: HostedBillingStatus.active,
+              id: "hbag_family",
+              ownerMemberId: "member_owner",
+              suspendedAt: null,
+            },
+            groupId: "hbag_family",
+            memberId: "member_123",
+            role: "member",
+            status: "active",
+          }
+        : null),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
@@ -1826,8 +1983,8 @@ function createAllowanceTx(input: {
           currentBillingPhase: input.billingPhase ?? null,
           currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
           currentCheckoutOffer: input.checkoutOffer ?? null,
-          currentPeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
-          currentPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+          currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+          currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
           currentTrialEndsAt: input.trialEndsAt ?? null,
           currentTrialStartedAt: input.trialStartedAt ?? null,
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
@@ -1846,6 +2003,7 @@ function createGatePrisma(input: {
   billingStatus?: HostedBillingStatus;
   checkoutOffer?: string | null;
   executeRaw?: ReturnType<typeof vi.fn>;
+  familyAccessActive?: boolean;
   findUniquePeriod?: {
     billingPlanCode: string;
     blockedAt?: Date | null;
@@ -1925,8 +2083,21 @@ function createGatePrisma(input: {
       })),
     },
     hostedAccountGroupMembership: {
-      count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () => null),
+      count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
+      findFirst: vi.fn(async () => input.familyAccessActive
+        ? {
+            group: {
+              billingStatus: HostedBillingStatus.active,
+              id: "hbag_family",
+              ownerMemberId: "member_owner",
+              suspendedAt: null,
+            },
+            groupId: "hbag_family",
+            memberId: "member_123",
+            role: "member",
+            status: "active",
+          }
+        : null),
     },
     hostedMember: {
       findUnique: vi.fn()

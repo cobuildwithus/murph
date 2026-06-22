@@ -326,7 +326,6 @@ describe("hosted execution email callback routes", () => {
       group: {
         billingStatus: HostedBillingStatus.active,
         id: "hbag_family",
-        maxSeats: 4,
         ownerMemberId: "member_owner",
         suspendedAt: null,
       },

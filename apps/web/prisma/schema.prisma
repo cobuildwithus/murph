@@ -775,7 +775,6 @@ model HostedAccountGroup {
   displayName    String?                        @map("display_name")
   ownerMemberId  String                         @unique @map("owner_member_id")
   billingStatus  HostedBillingStatus            @default(not_started) @map("billing_status")
-  maxSeats       Int                            @default(4) @map("max_seats")
   suspendedAt    DateTime?                      @map("suspended_at")
   createdAt      DateTime                       @default(now()) @map("created_at")
   updatedAt      DateTime                       @updatedAt @map("updated_at")

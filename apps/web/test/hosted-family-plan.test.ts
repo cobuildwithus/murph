@@ -32,7 +32,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  HOSTED_FAMILY_MAX_SEATS,
   acceptHostedFamilyInviteFromPhoneTx,
   acceptHostedFamilyInviteTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
@@ -126,20 +125,20 @@ describe("hosted Family plan", () => {
     clearHostedOnboardingEnvCache();
   });
 
-  it("keeps the MVP family seat limit fixed at four people", async () => {
+  it("creates owner family groups with fixed four-seat behavior", async () => {
     const tx = createTxMock();
 
     await createHostedAccountGroupForOwnerTx({
       groupId: "hbag_family",
-      maxSeats: HOSTED_FAMILY_MAX_SEATS,
       now: new Date("2026-06-18T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       tx,
     });
 
-    expect(tx.hostedAccountGroup.create).toHaveBeenCalledWith(expect.objectContaining({
+    const createArg = tx.hostedAccountGroup.create.mock.calls[0]?.[0];
+    expect(createArg?.data).not.toHaveProperty("maxSeats");
+    expect(createArg).toEqual(expect.objectContaining({
       data: expect.objectContaining({
-        maxSeats: 4,
         memberships: {
           create: expect.objectContaining({
             memberId: "member_owner",
@@ -149,14 +148,6 @@ describe("hosted Family plan", () => {
         },
       }),
     }));
-
-    await expect(createHostedAccountGroupForOwnerTx({
-      maxSeats: 5,
-      ownerMemberId: "member_owner",
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_FIXED_SEAT_LIMIT_REQUIRED",
-    });
   });
 
   it("builds Telegram deep links without treating usernames as identity proof", () => {
@@ -598,7 +589,6 @@ describe("hosted Family plan", () => {
       group: {
         billingStatus: HostedBillingStatus.active,
         id: "hbag_family",
-        maxSeats: 4,
         ownerMemberId: "member_owner",
         suspendedAt: null,
       },
@@ -637,7 +627,6 @@ describe("hosted Family plan", () => {
       group: {
         billingStatus: HostedBillingStatus.active,
         id: "hbag_family",
-        maxSeats: 4,
         ownerMemberId: "member_owner",
         suspendedAt: null,
       },
@@ -745,7 +734,6 @@ describe("hosted Family plan", () => {
       group: {
         billingStatus: HostedBillingStatus.unpaid,
         id: "hbag_family",
-        maxSeats: 4,
         ownerMemberId: "member_owner",
         suspendedAt: null,
       },
@@ -887,7 +875,6 @@ describe("hosted Family plan", () => {
           group: {
             billingStatus: HostedBillingStatus.active,
             id: "hbag_family",
-            maxSeats: 4,
             ownerMemberId: "member_owner",
             suspendedAt: null,
           },
@@ -950,7 +937,6 @@ function createTxMock(input: {
   group?: {
     billingStatus: HostedBillingStatus;
     id: string;
-    maxSeats: number;
     ownerMemberId: string;
     suspendedAt: Date | null;
   } | null;
@@ -960,7 +946,6 @@ function createTxMock(input: {
   const group = input.group ?? {
     billingStatus: HostedBillingStatus.active,
     id: "hbag_family",
-    maxSeats: 4,
     ownerMemberId: "member_owner",
     suspendedAt: null,
   };
@@ -1154,7 +1139,6 @@ function createPendingInvite(overrides: Partial<{
     group: {
       billingStatus: HostedBillingStatus.active,
       id: "hbag_family",
-      maxSeats: 4,
       ownerMemberId: "member_owner",
       suspendedAt: null,
     },

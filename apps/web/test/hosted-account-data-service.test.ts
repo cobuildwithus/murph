@@ -2757,7 +2757,6 @@ async function makeFamilyBillingRefRowForTest(input: {
     group: {
       billingStatus: "active",
       id: input.groupId,
-      maxSeats: 4,
       ownerMemberId: input.ownerMemberId,
       suspendedAt: null,
     },

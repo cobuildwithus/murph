@@ -1582,7 +1582,6 @@ describe("hosted runtime internal web routes", () => {
       group: {
         billingStatus: "active",
         id: "hbag_family",
-        maxSeats: 4,
         ownerMemberId: "member_owner",
         suspendedAt: null,
       },

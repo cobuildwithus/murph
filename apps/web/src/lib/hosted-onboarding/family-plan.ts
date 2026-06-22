@@ -113,7 +113,6 @@ const hostedAccountGroupAccessSelect =
   Prisma.validator<Prisma.HostedAccountGroupSelect>()({
     billingStatus: true,
     id: true,
-    maxSeats: true,
     ownerMemberId: true,
     suspendedAt: true,
   });
@@ -301,10 +300,7 @@ export async function readHostedFamilyAccessForMember(input: {
       status: "active",
     },
   });
-  if (
-    membership.group.maxSeats !== HOSTED_FAMILY_MAX_SEATS ||
-    activeMembershipCount > membership.group.maxSeats
-  ) {
+  if (activeMembershipCount > HOSTED_FAMILY_MAX_SEATS) {
     return null;
   }
 
@@ -750,7 +746,6 @@ export async function createHostedFamilyBillingCheckout(input: {
 export async function createHostedAccountGroupForOwner(input: {
   displayName?: string | null;
   groupId?: string;
-  maxSeats?: number;
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
@@ -766,22 +761,12 @@ export async function createHostedAccountGroupForOwner(input: {
 export async function createHostedAccountGroupForOwnerTx(input: {
   displayName?: string | null;
   groupId?: string;
-  maxSeats?: number;
   now?: Date;
   ownerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupAccessSnapshot> {
   const now = input.now ?? new Date();
   const groupId = input.groupId ?? generateHostedAccountGroupId();
-  const maxSeats = input.maxSeats ?? HOSTED_FAMILY_MAX_SEATS;
-
-  if (maxSeats !== HOSTED_FAMILY_MAX_SEATS) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_FIXED_SEAT_LIMIT_REQUIRED",
-      httpStatus: 400,
-      message: "Family plan supports exactly four seats in the MVP.",
-    });
-  }
 
   await lockHostedMemberRow(input.tx, input.ownerMemberId);
 
@@ -790,7 +775,6 @@ export async function createHostedAccountGroupForOwnerTx(input: {
       billingStatus: HostedBillingStatus.not_started,
       displayName: normalizeFamilyLabel(input.displayName),
       id: groupId,
-      maxSeats,
       ownerMemberId: input.ownerMemberId,
       memberships: {
         create: {
@@ -1448,7 +1432,7 @@ export function buildHostedFamilyInviteAcceptedReplyText(): string {
 }
 
 async function assertHostedFamilySeatAvailableTx(input: {
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "maxSeats">;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
@@ -1470,7 +1454,7 @@ async function assertHostedFamilySeatAvailableTx(input: {
     }),
   ]);
 
-  if (activeMemberships + pendingInvites >= input.group.maxSeats) {
+  if (activeMemberships + pendingInvites >= HOSTED_FAMILY_MAX_SEATS) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
@@ -1481,7 +1465,7 @@ async function assertHostedFamilySeatAvailableTx(input: {
 
 async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
   acceptedMemberId: string;
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "maxSeats">;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   inviteId: string;
   now: Date;
   tx: Prisma.TransactionClient;
@@ -1519,7 +1503,7 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
     ]);
 
   const acceptedMemberSeatDelta = existingAcceptedMembership ? 0 : 1;
-  if (activeMemberships + pendingInvites + acceptedMemberSeatDelta > input.group.maxSeats) {
+  if (activeMemberships + pendingInvites + acceptedMemberSeatDelta > HOSTED_FAMILY_MAX_SEATS) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
