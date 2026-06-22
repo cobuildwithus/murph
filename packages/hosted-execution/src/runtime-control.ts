@@ -1225,6 +1225,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
   "assistant.automation_detail",
+  "assistant.computer_tool_failed",
   "assistant.pass_finished",
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
