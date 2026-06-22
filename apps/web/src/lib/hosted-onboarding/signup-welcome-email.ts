@@ -313,9 +313,9 @@ function buildHostedSignupWelcomeEmailText(input: {
   return [
     "Hey, welcome to Murph!",
     "",
-    `I'm ${input.founderName}, the founder. I built Murph because I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
+    `I'm ${input.founderName}, the founder. I built Murph because I wanted my own personal health assistant. I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
     "",
-    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers (without having to build a spreadsheet to track it all).",
+    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers and made me feel (without having to build a spreadsheet to track it all).",
     "",
     "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
     "",
