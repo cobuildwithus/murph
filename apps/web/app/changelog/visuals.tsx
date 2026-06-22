@@ -203,19 +203,19 @@ export function ImagePreview({
     <div
       role="img"
       aria-label={alt}
-      className="flex flex-col gap-1.5 overflow-hidden rounded-lg"
+      className="overflow-hidden rounded-2xl rounded-bl-md border border-[#2d3436]/8 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
     >
       <div
         aria-hidden="true"
-        className="relative h-[88px] w-full bg-gradient-to-br from-[#3a4a1e] via-[#5a6e32] to-[#c4a882]"
+        className="relative aspect-[4/3] w-full bg-gradient-to-br from-[#3a4a1e] via-[#5a6e32] to-[#c4a882]"
       >
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.18),transparent_55%)]"
+          className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.22),transparent_55%)]"
         />
       </div>
       {caption ? (
-        <p className="font-mono text-[10px] tracking-[0.04em] text-[#736a58]">
+        <p className="bg-[#fafaf6] px-3 py-1.5 font-mono text-[10px] tracking-[0.04em] text-[#736a58]">
           {caption}
         </p>
       ) : null}
@@ -461,13 +461,143 @@ export function ChecklistMock({
             </span>
             <span
               className={`min-w-0 flex-1 truncate text-[12.5px] ${
-                item.done ? "text-[#736a58] line-through" : "text-[#2d3436]"
+                item.done ? "text-[#736a58]" : "text-[#2d3436]"
               }`}
             >
               {item.label}
             </span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+export type MealMacros = {
+  carbs: number;
+  fat: number;
+  protein: number;
+};
+
+export function MealCard({
+  calories,
+  label = "Meal",
+  macros,
+  source,
+  time,
+  title,
+}: {
+  calories: number;
+  label?: string;
+  macros: MealMacros;
+  source?: string;
+  time: string;
+  title: string;
+}) {
+  const total = macros.protein + macros.carbs + macros.fat || 1;
+  const proteinPct = (macros.protein / total) * 100;
+  const carbsPct = (macros.carbs / total) * 100;
+  const fatPct = (macros.fat / total) * 100;
+
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        {source ? <span className={HEADER_META}>via {source}</span> : null}
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
+            {title}
+          </p>
+          <span className="font-mono text-[10px] tracking-[0.06em] text-[#736a58] uppercase">
+            {time}
+          </span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="font-serif text-[1.6rem] font-semibold leading-none tabular-nums text-[#3a4a1e]">
+            {calories}
+          </span>
+          <span className="font-mono text-[10.5px] tracking-[0.06em] text-[#736a58] uppercase">
+            cal
+          </span>
+        </div>
+        <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-[#2d3436]/8">
+          <span
+            aria-hidden="true"
+            style={{ width: `${proteinPct}%` }}
+            className="bg-[#3a4a1e]"
+          />
+          <span
+            aria-hidden="true"
+            style={{ width: `${carbsPct}%` }}
+            className="bg-[#c4a882]"
+          />
+          <span
+            aria-hidden="true"
+            style={{ width: `${fatPct}%` }}
+            className="bg-[#a36b3f]"
+          />
+        </div>
+        <div className="flex items-center gap-3 font-mono text-[10.5px] tabular-nums text-[#736a58]">
+          <span>
+            <strong className="font-semibold text-[#2d3436]">P</strong>{" "}
+            {macros.protein}g
+          </span>
+          <span>
+            <strong className="font-semibold text-[#2d3436]">C</strong>{" "}
+            {macros.carbs}g
+          </span>
+          <span>
+            <strong className="font-semibold text-[#2d3436]">F</strong>{" "}
+            {macros.fat}g
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AppIconCard({
+  label = "iOS app",
+  name = "Murph",
+  status,
+}: {
+  label?: string;
+  name?: string;
+  status: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex items-center gap-4 p-5">
+        <div
+          aria-hidden="true"
+          className="relative grid size-[62px] shrink-0 grid-cols-3 gap-[5px] rounded-[14px] border border-[#2d3436]/12 bg-[#1f241c] p-2.5 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.25)]"
+        >
+          {Array.from({ length: 9 }).map((_, index) => (
+            <span
+              key={index}
+              className={`size-2 rounded-full ${
+                index === 4 ? "bg-[#83945f]" : "bg-[#c4a882]/85"
+              }`}
+            />
+          ))}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="font-serif text-[1.05rem] font-semibold leading-tight text-[#2d3436]">
+            {name}
+          </p>
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#c4a882]/15 px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] text-[#736a58]">
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full bg-[#a39684]"
+            />
+            {status}
+          </span>
+        </div>
       </div>
     </div>
   );

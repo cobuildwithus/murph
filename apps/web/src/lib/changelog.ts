@@ -168,6 +168,26 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["messaging", "reliability", "telegram", "imessage"],
         sourcePullRequests: [232],
       },
+      {
+        id: "telegram-auto-reply-quotes-removed",
+        kind: "improvement",
+        priority: 3,
+        title: "Cleaner Telegram replies",
+        summary:
+          "Murph's Telegram text replies no longer quote your last message back to you — reactions still target the specific inbound message when they fit.",
+        relevanceTags: ["telegram", "messaging", "polish"],
+        sourcePullRequests: [258],
+      },
+      {
+        id: "experiment-progress-secondary-metrics",
+        kind: "improvement",
+        priority: 3,
+        title: "Experiment progress reads secondary metrics",
+        summary:
+          "Progress cards and follow-up decisions now read from the query metric projection, so secondary analysis metrics with data no longer fall through to a misleading \"no wearable data\" status.",
+        relevanceTags: ["experiments", "metrics", "reliability"],
+        sourcePullRequests: [250],
+      },
     ],
   },
   {

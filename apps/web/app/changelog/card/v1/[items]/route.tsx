@@ -60,9 +60,14 @@ function DigestCard({
 }: {
   items: readonly PublishedChangelogItem[];
 }) {
-  const columns = buildDigestColumns(items);
-  const compact = items.length >= COMPACT_ITEM_COUNT;
-  const publishedOn = items[0]?.publishedOn ?? "";
+  const [hero, ...rest] = items;
+  if (!hero) {
+    return null;
+  }
+  const columns = buildDigestColumns(rest);
+  const compact = rest.length >= 4;
+  const publishedOn = hero.publishedOn;
+  const headline = buildHeadline(items);
 
   return (
     <div
@@ -84,6 +89,7 @@ function DigestCard({
               color: COLOR.muted,
               display: "flex",
               fontSize: 15,
+              letterSpacing: 1.2,
               textTransform: "uppercase",
             }}
           >
@@ -93,41 +99,42 @@ function DigestCard({
             style={{
               display: "flex",
               fontFamily: "Fraunces",
-              fontSize: 48,
+              fontSize: 52,
               fontWeight: 600,
-              lineHeight: 1.05,
-              marginTop: 10,
+              lineHeight: 1.04,
+              marginTop: 12,
             }}
           >
-            Picked for you.
+            {headline}
           </div>
         </div>
         <MurphWordmark />
       </div>
 
-      <div style={{ display: "flex", flexGrow: 1, gap: 20, marginTop: 28 }}>
-        {columns.map((column, columnIndex) => (
-          <div
-            key={columnIndex}
-            style={{
-              display: "flex",
-              flexBasis: 0,
-              flexDirection: "column",
-              flexGrow: 1,
-              gap: compact ? 10 : 12,
-            }}
-          >
-            {column.items.map((item, index) => (
-              <DigestItem
-                key={item.id}
-                compact={compact}
-                item={item}
-                ordinal={column.ordinalOffset + index + 1}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <HeroItem item={hero} />
+
+      {rest.length > 0 ? (
+        <div style={{ display: "flex", flexGrow: 1, gap: 18, marginTop: 18 }}>
+          {columns.map((column, columnIndex) => (
+            <div
+              key={columnIndex}
+              style={{
+                display: "flex",
+                flexBasis: 0,
+                flexDirection: "column",
+                flexGrow: 1,
+                gap: compact ? 8 : 10,
+              }}
+            >
+              {column.items.map((item) => (
+                <DigestItem key={item.id} compact={compact} item={item} />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexGrow: 1 }} />
+      )}
 
       <div
         style={{
@@ -145,6 +152,64 @@ function DigestCard({
       </div>
     </div>
   );
+}
+
+function HeroItem({ item }: { item: PublishedChangelogItem }) {
+  const accent = item.kind === "feature" ? COLOR.feature : COLOR.improvement;
+  const kindLabel = item.kind === "feature" ? "FEATURE" : "IMPROVEMENT";
+  return (
+    <div
+      style={{
+        alignItems: "flex-start",
+        backgroundColor: COLOR.panel,
+        border: `1px solid ${COLOR.border}`,
+        borderLeft: `4px solid ${accent}`,
+        borderRadius: 18,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        marginTop: 24,
+        padding: "18px 22px",
+      }}
+    >
+      <div
+        style={{
+          color: accent,
+          display: "flex",
+          fontSize: 13,
+          letterSpacing: 1.4,
+        }}
+      >
+        {kindLabel}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          fontFamily: "Fraunces",
+          fontSize: 30,
+          fontWeight: 600,
+          lineHeight: 1.1,
+        }}
+      >
+        {formatDigestTitle(item.title, 60)}
+      </div>
+    </div>
+  );
+}
+
+function buildHeadline(items: readonly PublishedChangelogItem[]): string {
+  const featureCount = items.filter((item) => item.kind === "feature").length;
+  const improvementCount = items.length - featureCount;
+  if (items.length === 1) {
+    return items[0]!.kind === "feature" ? "New feature." : "Worth a look.";
+  }
+  if (featureCount > 0 && improvementCount === 0) {
+    return `${featureCount} new ${featureCount === 1 ? "feature" : "features"}.`;
+  }
+  if (improvementCount > 0 && featureCount === 0) {
+    return `${improvementCount} ${improvementCount === 1 ? "improvement" : "improvements"}.`;
+  }
+  return `${items.length} updates worth a try.`;
 }
 
 function MurphWordmark() {
@@ -186,11 +251,9 @@ function MurphWordmark() {
 function DigestItem({
   compact,
   item,
-  ordinal,
 }: {
   compact: boolean;
   item: PublishedChangelogItem;
-  ordinal: number;
 }) {
   const accent = item.kind === "feature" ? COLOR.feature : COLOR.improvement;
   const title = formatDigestTitle(item.title, compact ? 54 : 68);
@@ -202,34 +265,30 @@ function DigestItem({
         border: `1px solid ${COLOR.border}`,
         borderRadius: 16,
         display: "flex",
-        gap: compact ? 13 : 16,
+        gap: 14,
         minHeight: compact ? 78 : 96,
         overflow: "hidden",
-        padding: compact ? "12px 15px" : "15px 18px",
+        padding: compact ? "12px 16px" : "15px 20px",
       }}
     >
-      <div
+      <span
+        aria-hidden="true"
         style={{
-          alignItems: "center",
-          border: `1px solid ${accent}`,
+          alignSelf: "stretch",
+          backgroundColor: accent,
           borderRadius: 999,
-          color: accent,
           display: "flex",
           flexShrink: 0,
-          fontSize: 14,
-          height: 28,
-          justifyContent: "center",
-          width: 28,
+          width: 3,
         }}
-      >
-        {ordinal}
-      </div>
+      />
       <div style={{ display: "flex", flexDirection: "column" }}>
         <div
           style={{
             color: accent,
             display: "flex",
             fontSize: 13,
+            letterSpacing: 1.3,
             textTransform: "uppercase",
           }}
         >
@@ -268,10 +327,13 @@ function buildDigestColumns(items: readonly PublishedChangelogItem[]): Array<{
 }
 
 function formatDigestTitle(title: string, maxChars: number): string {
-  if (title.length <= maxChars) {
-    return title;
+  // Fraunces 600 ships without the U+002B "+" glyph and the renderer falls back
+  // to a hyphen — strip it for the OG card surface only.
+  const safe = title.replace(/\+/g, "");
+  if (safe.length <= maxChars) {
+    return safe;
   }
-  return `${title.slice(0, maxChars - 3).trimEnd()}...`;
+  return `${safe.slice(0, maxChars - 3).trimEnd()}...`;
 }
 
 async function toStaticPngResponse(image: Response): Promise<Response> {

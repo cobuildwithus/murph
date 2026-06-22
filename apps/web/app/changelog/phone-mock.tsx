@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 export type PhoneMockMessage = {
+  bare?: boolean;
   body: ReactNode;
   from: "user" | "murph";
   reaction?: string;
@@ -44,9 +45,11 @@ function ChatBubble({ message }: { message: PhoneMockMessage }) {
       <div className="relative max-w-full">
         <div
           className={
-            isUser
-              ? "rounded-2xl rounded-br-md bg-[#3a4a1e] px-3.5 py-2 text-[13px] leading-[1.45] text-[#f5f0e8]"
-              : "rounded-2xl rounded-bl-md bg-[#eee9da] px-3.5 py-2 text-[13px] leading-[1.45] text-[#2d3436]"
+            message.bare
+              ? "w-full"
+              : isUser
+                ? "rounded-2xl rounded-br-md bg-[#3a4a1e] px-3.5 py-2 text-[13px] leading-[1.45] text-[#f5f0e8]"
+                : "rounded-2xl rounded-bl-md bg-[#eee9da] px-3.5 py-2 text-[13px] leading-[1.45] text-[#2d3436]"
           }
         >
           {message.body}
