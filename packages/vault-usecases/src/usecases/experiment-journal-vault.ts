@@ -2066,13 +2066,23 @@ function buildExperimentMetricPointFilters(
     const anchorDateFilters = anchorMetricKeys.has(metricKey)
       ? buildExperimentAnchorMetricPointDateFilters(query, frontmatter, metricKey, asOf)
       : []
-    const dateFilters = anchorDateFilters.length > 0 ? anchorDateFilters : [dateFilter]
-    return dateFilters.map((filter) => ({
+    const dateFilters = [
+      ...(hasMetricPointDateFilter(dateFilter) ? [dateFilter] : []),
+      ...anchorDateFilters,
+    ]
+    const filters = dateFilters.length > 0 ? dateFilters : [dateFilter]
+    return filters.map((filter) => ({
       ...filter,
       limit: null,
       metricKey,
     }))
   })
+}
+
+function hasMetricPointDateFilter(
+  filter: Pick<QueryMetricPointFilters, 'from' | 'to'>,
+): boolean {
+  return typeof filter.from === 'string' || typeof filter.to === 'string'
 }
 
 function collectExperimentMetricKeys(

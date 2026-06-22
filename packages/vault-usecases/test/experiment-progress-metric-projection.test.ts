@@ -388,6 +388,104 @@ analysisPlan:
   return vaultRoot;
 }
 
+async function createIncompleteAnchorRunWindowVault(): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-experiment-incomplete-anchor-"));
+  createdVaultRoots.push(vaultRoot);
+
+  await mkdir(path.join(vaultRoot, "bank/experiments"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "ledger/metric-samples/resting-heart-rate/2026"), { recursive: true });
+
+  await writeFile(
+    path.join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4Q",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Experiment Incomplete Anchor",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+
+  await writeFile(
+    path.join(vaultRoot, "bank/experiments/rhr-baseline-anchor-only.md"),
+    `---
+schemaVersion: murph.frontmatter.experiment.v1
+docType: experiment
+experimentId: exp_01JNV4458HYPP53JDQCBP1QJGR
+slug: rhr-baseline-anchor-only
+status: completed
+title: RHR Baseline Anchor Only
+startedOn: 2026-04-01
+runPlan:
+  baselineStart: 2026-04-01
+  baselineEnd: 2026-04-03
+  interventionStart: 2026-04-08
+  interventionEnd: 2026-04-10
+analysisPlan:
+  primaryBiomarkerKey: biomarker:resting-heart-rate
+  desiredDirection: decrease
+  measurementAnchors:
+    - role: baseline
+      kind: lab_panel
+      recordId: evt_rhr_lab_baseline
+      biomarkerKeys:
+        - biomarker:resting-heart-rate
+      observedOn: 2026-03-25
+---
+# RHR Baseline Anchor Only
+`,
+    "utf8",
+  );
+
+  await writeFile(
+    path.join(vaultRoot, "ledger/events/2026/2026-rhr-anchor.jsonl"),
+    `${JSON.stringify({
+      schemaVersion: "murph.event.v1",
+      id: "evt_rhr_lab_baseline",
+      kind: "test",
+      occurredAt: "2026-03-25T08:00:00.000Z",
+      collectedAt: "2026-03-25T08:00:00.000Z",
+      source: "manual",
+      title: "RHR baseline lab",
+      results: [{
+        biomarkerSlug: "resting-heart-rate",
+        unit: "bpm",
+        value: 70,
+      }],
+    })}\n`,
+    "utf8",
+  );
+
+  const samples = [
+    ["smp_rhr_daily_baseline_1", "2026-04-01", 62],
+    ["smp_rhr_daily_baseline_2", "2026-04-02", 61],
+    ["smp_rhr_daily_baseline_3", "2026-04-03", 60],
+    ["smp_rhr_daily_intervention_1", "2026-04-08", 59],
+    ["smp_rhr_daily_intervention_2", "2026-04-09", 58],
+    ["smp_rhr_daily_intervention_3", "2026-04-10", 59],
+  ] as const;
+  await writeFile(
+    path.join(vaultRoot, "ledger/metric-samples/resting-heart-rate/2026/2026-04.jsonl"),
+    `${samples.map(([id, date, value]) => JSON.stringify({
+      schemaVersion: "murph.metric-sample.v1",
+      id,
+      metric: "resting-heart-rate",
+      recordedAt: `${date}T06:00:00.000Z`,
+      dayKey: date,
+      source: "import",
+      quality: "normalized",
+      qualifiers: { summary: true },
+      value,
+      unit: "bpm",
+    })).join("\n")}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
 async function createAnchoredLabMetricProjectionVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-experiment-anchor-metrics-"));
   createdVaultRoots.push(vaultRoot);
@@ -635,4 +733,28 @@ test("experiment outcome usecases match anchors against projected metric records
   assert.equal(outcome.outcome.metricResults[0]?.baselineMean, 100);
   assert.equal(outcome.outcome.metricResults[0]?.interventionMean, 96);
   assert.equal(outcome.outcome.metricResults[0]?.deltaAbs, -4);
+});
+
+test("experiment progress usecases keep run-window metrics for incomplete anchor plans", async () => {
+  const vaultRoot = await createIncompleteAnchorRunWindowVault();
+
+  const progress = await showExperimentProgress({
+    vault: vaultRoot,
+    lookup: "rhr-baseline-anchor-only",
+    asOf: "2026-04-25",
+  });
+  assert.equal(progress.progress.analysisReadiness.status, "ready");
+  assert.equal(progress.progress.dataCoverage.status, "ready_for_review");
+  assert.equal(progress.progress.signals[0]?.baselineDayCount, 3);
+  assert.equal(progress.progress.signals[0]?.baselineMean, 61);
+  assert.equal(progress.progress.signals[0]?.interventionDayCount, 3);
+  assert.equal(progress.progress.signals[0]?.interventionMean, 58.67);
+
+  const outcome = await analyzeExperimentOutcomeRecord({
+    vault: vaultRoot,
+    lookup: "rhr-baseline-anchor-only",
+    asOf: "2026-04-25",
+  });
+  assert.equal(outcome.outcome.metricResults[0]?.baselineMean, 61);
+  assert.equal(outcome.outcome.metricResults[0]?.interventionMean, 58.67);
 });

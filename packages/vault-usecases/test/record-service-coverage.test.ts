@@ -1716,6 +1716,12 @@ describe("record service seams", () => {
     });
     expect(anchoredMetricPointFilters).toEqual([
       {
+        from: "2026-06-01",
+        limit: null,
+        metricKey: "glucose",
+        to: "2026-06-18",
+      },
+      {
         from: "2026-05-29",
         limit: null,
         metricKey: "glucose",
