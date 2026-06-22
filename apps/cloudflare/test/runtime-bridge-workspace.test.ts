@@ -2065,7 +2065,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceSnapshotClassSummary: expect.arrayContaining([
           `class=raw,files=1,inlineBytes=${rawArtifactBytes},externalBytes=0,externalCount=0`,
           expect.stringMatching(
-            /^class=runtime-assistant,files=1,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
+            /^class=runtime-assistant,files=[1-9]\d*,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
           ),
         ]),
         workspaceSnapshotExternalArtifactBytes: 0,

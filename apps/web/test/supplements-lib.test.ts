@@ -212,8 +212,10 @@ describe("supplements query helpers", () => {
       'product_tests.report_date::text AS "reportDate"',
     );
     expect(contaminantsCall?.text).toContain(
-      'selected_labels.serving_grams::double precision AS "servingGrams"',
+      'linked_labels.serving_grams::double precision AS "servingGrams"',
     );
+    expect(contaminantsCall?.text).not.toContain("selected_labels AS MATERIALIZED");
+    expect(contaminantsCall?.text).not.toContain("JOIN selected_labels");
     expect(contaminantsCall?.text).not.toContain("product_contaminant_threshold_applications");
     expect(contaminantsCall?.text).toContain("LEFT JOIN LATERAL");
     expect(contaminantsCall?.text).toContain("CROSS JOIN LATERAL");
@@ -240,7 +242,7 @@ describe("supplements query helpers", () => {
     );
     expect(contaminantsCall?.text).toContain("product_tests.normalized_unit = 'ppm'");
     expect(contaminantsCall?.text).toContain("product_tests.normalized_basis = 'product_mass'");
-    expect(contaminantsCall?.text).toContain("selected_labels.serving_grams IS NOT NULL");
+    expect(contaminantsCall?.text).toContain("linked_labels.serving_grams IS NOT NULL");
     expect(contaminantsCall?.text).toContain("scored_threshold.comparison_value IS NOT NULL");
     expect(contaminantsCall?.text).toContain("threshold_rows.concern_level_if_exceeded");
     expect(contaminantsCall?.text).not.toContain("comparison_scope");
@@ -427,8 +429,11 @@ describe("supplements query helpers", () => {
           expect(text).toContain(
             "product_tests.supplement_id = linked_labels.label_id",
           );
-          expect(text).toContain("JOIN selected_labels");
-          expect(text).toContain("selected_labels.product_id = linked_labels.product_id");
+          expect(text).toContain(
+            'linked_labels.serving_grams::double precision AS "servingGrams"',
+          );
+          expect(text).not.toContain("selected_labels AS MATERIALIZED");
+          expect(text).not.toContain("JOIN selected_labels");
           expect(text).not.toContain("product_threshold_applications");
           expect(values).toEqual([
             ["brand:creatine"],
@@ -458,13 +463,17 @@ describe("supplements query helpers", () => {
                 normalizedValue: 0.012,
                 normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
+                servingGrams: 1.5,
+                thresholdValue: 0.2,
+                thresholdUnit: "ng/kg_bw/day",
+                thresholdBasis: "oral_total_dietary_exposure",
                 thresholdNormalizedValue: null,
                 thresholdNormalizedUnit: null,
                 thresholdNormalizedBasis: null,
-                thresholdAuthorityName: null,
-                thresholdName: null,
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "BPA daily exposure screen",
                 thresholdUrl: null,
-                concernLevelIfExceeded: null,
+                concernLevelIfExceeded: "high",
               },
             ] as T[],
           };
@@ -495,7 +504,22 @@ describe("supplements query helpers", () => {
       id: "brand:creatine",
       contaminants: {
         status: "known_product_tests",
-        murphConcernLevel: "unknown",
+        murphConcernLevel: "high",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "bpa",
+            concernLevel: "high",
+            threshold: {
+              value: 0.2,
+              unit: "ng/kg_bw/day",
+              basis: "oral_total_dietary_exposure",
+            },
+            screeningPolicy: {
+              servingGrams: 1.5,
+            },
+          },
+        ],
         observationCount: 1,
       },
     });

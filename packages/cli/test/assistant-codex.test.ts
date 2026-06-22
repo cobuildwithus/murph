@@ -119,6 +119,17 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     streamKey?: string | null
     text: string
   }> = []
+  const progressDelivery = {
+    send: vi.fn(
+      async (
+        _text: string,
+        options?: { source?: 'model' | 'system' },
+      ) => ({
+        kind: 'sent' as const,
+        source: options?.source ?? 'model',
+      }),
+    ),
+  }
 
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
@@ -359,6 +370,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
       }
     },
     prompt: 'Summarize the vault.',
+    progressDelivery,
     reasoningEffort: 'high',
     sandbox: 'workspace-write',
     workingDirectory,

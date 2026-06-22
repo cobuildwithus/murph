@@ -27,20 +27,295 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/schema.sql", import.meta.url),
       "utf8",
     );
+    const backfillServingGramsSql = await readFile(
+      new URL("../sql/product-tests/backfill-serving-grams.sql", import.meta.url),
+      "utf8",
+    );
+    const applyReviewedServingGramsSql = await readFile(
+      new URL("../sql/product-tests/apply-reviewed-serving-grams.sql", import.meta.url),
+      "utf8",
+    );
+    const loadReviewedServingGramsOverlaySql = await readFile(
+      new URL("../sql/product-tests/load-reviewed-serving-grams-overlay.sql", import.meta.url),
+      "utf8",
+    );
+    const importProductTestRemapsSql = await readFile(
+      new URL("../sql/product-tests/import-product-test-remaps.sql", import.meta.url),
+      "utf8",
+    );
+    const backfillServingGramsScript = await readFile(
+      new URL("../sql/product-tests/backfill-serving-grams.sh", import.meta.url),
+      "utf8",
+    );
 
     expect(foodsSchemaSql).toContain("ADD COLUMN IF NOT EXISTS serving_grams NUMERIC");
     expect(foodsSchemaSql).toContain("CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID");
     expect(supplementsSchemaSql).toContain("ADD COLUMN IF NOT EXISTS serving_grams NUMERIC");
     expect(supplementsSchemaSql).toContain("CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID");
-    expect(productTestsSchemaSql).toContain("linked_foods AS");
-    expect(productTestsSchemaSql).toContain("linked_supplements AS");
-    expect(productTestsSchemaSql).toContain("foods.label->>'servingSize'");
-    expect(productTestsSchemaSql).toContain("foods.label->>'servingSizeUnit'");
-    expect(productTestsSchemaSql).toContain("lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')");
-    expect(productTestsSchemaSql).toContain("foods.label->'servingSizes'");
-    expect(productTestsSchemaSql).toContain("supplements.label->'servingSizes'");
-    expect(productTestsSchemaSql).toContain("UPDATE foods");
-    expect(productTestsSchemaSql).toContain("UPDATE supplements");
+    expect(productTestsSchemaSql).not.toContain("linked_foods AS");
+    expect(productTestsSchemaSql).not.toContain("linked_supplements AS");
+    expect(productTestsSchemaSql).not.toContain("strict_serving_mass");
+    expect(productTestsSchemaSql).not.toContain("serving_mass.serving_grams");
+    expect(importProductTestRemapsSql).not.toContain("remapped_foods AS");
+    expect(importProductTestRemapsSql).not.toContain("remapped_supplements AS");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("serving_mass.serving_grams");
+
+    expect(backfillServingGramsSql).toContain("serving_grams_food_candidates");
+    expect(backfillServingGramsSql).toContain("serving_grams_supplement_candidates");
+    expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.food_id AS id");
+    expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.supplement_id AS id");
+    expect(backfillServingGramsSql).toContain("foods.label AS source_label");
+    expect(backfillServingGramsSql).toContain("supplements.label AS source_label");
+    expect(backfillServingGramsSql).toContain("foods.label->>'servingSize'");
+    expect(backfillServingGramsSql).toContain("foods.label->>'servingSizeUnit'");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain("foods.label->'servingSizes'");
+    expect(backfillServingGramsSql).toContain("supplements.label->'servingSizes'");
+    expect(backfillServingGramsSql).toContain("serving_size->>'amount'");
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutrition,preparationStates,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("portion->>'gramWeight'");
+    expect(backfillServingGramsSql).toContain("label_serving_size_mass_unit");
+    expect(backfillServingGramsSql).toContain("label_serving_sizes_amount_mass_unit");
+    expect(backfillServingGramsSql).toContain("label_text_serving_size_grams");
+    expect(backfillServingGramsSql).toContain("fdc_exact_household_portion_grams");
+    expect(backfillServingGramsSql).toContain("serving_grams_reviewed_import");
+    expect(backfillServingGramsSql).toContain("\\copy serving_grams_reviewed_import FROM __REVIEWED_SERVING_GRAMS_TSV__");
+    expect(backfillServingGramsSql).toContain("UPDATE serving_grams_reviewed_import");
+    expect(backfillServingGramsSql).toContain("'reviewed_serving_grams' AS source_rule");
+    expect(backfillServingGramsSql).toContain("reviewed serving grams food row is not linked to product tests");
+    expect(backfillServingGramsSql).toContain("reviewed serving grams supplement row is not linked to product tests");
+    expect(backfillServingGramsSql).toContain("reviewed serving grams food row conflicts with automatic candidate");
+    expect(backfillServingGramsSql).toContain("reviewed serving grams supplement row conflicts with automatic candidate");
+    expect(backfillServingGramsSql).toContain("foods.serving_grams IS NULL");
+    expect(backfillServingGramsSql).toContain("supplements.serving_grams IS NULL");
+    expect(backfillServingGramsSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    expect(backfillServingGramsSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    expect(backfillServingGramsSql).toContain("OR candidates.source_rule = 'reviewed_serving_grams'");
+    expect(backfillServingGramsSql).toContain(
+      "foods.label IS NOT DISTINCT FROM candidates.source_label",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "supplements.label IS NOT DISTINCT FROM candidates.source_label",
+    );
+    expect(backfillServingGramsSql).toContain("missing_serving_grams");
+    expect(backfillServingGramsSql).toContain("linked_product_test_rows");
+    expect(backfillServingGramsSql).toContain("candidate.serving_grams <= 2000");
+    expect(backfillServingGramsSql).toContain("bottles?");
+    expect(backfillServingGramsSql).toContain("tablets?");
+    expect(backfillServingGramsSql).toContain("softgels?");
+    const backfillSupplementCandidatesSql = backfillServingGramsSql.slice(
+      backfillServingGramsSql.indexOf("CREATE TEMP TABLE serving_grams_supplement_candidates"),
+      backfillServingGramsSql.indexOf("SELECT\n  'foods' AS table_name"),
+    );
+    expect(backfillSupplementCandidatesSql).not.toContain(
+      "COALESCE(serving_text.source_text, '')",
+    );
+    expect(backfillServingGramsSql).toContain("\\if :serving_grams_backfill_apply");
+    expect(backfillServingGramsSql).toContain("ROLLBACK;");
+    expect(backfillServingGramsSql).not.toContain("29.5735");
+    expect(backfillServingGramsScript).toContain("Dry-run is the default");
+    expect(backfillServingGramsScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+    expect(backfillServingGramsScript).toContain("reviewed-serving-grams.tsv");
+    expect(backfillServingGramsScript).toContain("labels_db_psql_copy_literal \"$reviewed_serving_grams_tsv_path\"");
+    expect(backfillServingGramsScript).toContain("apply=false");
+    expect(backfillServingGramsScript).toContain("--apply");
+    expect(backfillServingGramsScript).toContain("-v serving_grams_backfill_apply=\"$apply\"");
+    expect(backfillServingGramsScript).not.toContain("echo \"$labels_db_url\"");
+
+    expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_options");
+    expect(applyReviewedServingGramsSql).toContain("\\ir load-reviewed-serving-grams-overlay.sql");
+    expect(applyReviewedServingGramsSql).toContain("DROP TABLE serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).not.toContain("ON COMMIT DROP");
+    expect(applyReviewedServingGramsSql).toContain("to_regclass('public.foods')");
+    expect(applyReviewedServingGramsSql).toContain("to_regclass('public.supplements')");
+    expect(applyReviewedServingGramsSql).toContain(
+      "foods.serving_grams IS DISTINCT FROM reviewed.serving_grams",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "options.entity_type IS NULL OR options.entity_type = 'food'",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "options.entity_type IS NULL OR options.entity_type = 'supplement'",
+    );
+    expect(applyReviewedServingGramsSql).not.toContain("product_tests");
+
+    expect(loadReviewedServingGramsOverlaySql).toContain("serving_grams_reviewed_overlay_import");
+    expect(loadReviewedServingGramsOverlaySql).toContain("serving_grams_reviewed_overlay_options");
+    expect(loadReviewedServingGramsOverlaySql).toContain("reviewed_serving_grams_entity_type");
+    expect(loadReviewedServingGramsOverlaySql).toContain("reviewed-serving-grams.tsv");
+    expect(loadReviewedServingGramsOverlaySql).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+    expect(loadReviewedServingGramsOverlaySql).toContain(
+      "reviewed serving grams overlay prepared zero rows",
+    );
+    expect(loadReviewedServingGramsOverlaySql).toContain(
+      "duplicate reviewed serving grams overlay label",
+    );
+    expect(loadReviewedServingGramsOverlaySql).not.toContain("product_tests");
+  });
+
+  it("keeps serving gram imports strict and convergent", async () => {
+    const fdcImportSql = await readFile(
+      new URL("../sql/foods/import-fdc.sql", import.meta.url),
+      "utf8",
+    );
+    const fdcApplyPreparedSql = await readFile(
+      new URL("../sql/foods/apply-prepared.sql", import.meta.url),
+      "utf8",
+    );
+    const dsldImportSql = await readFile(
+      new URL("../sql/supplements/import.sql", import.meta.url),
+      "utf8",
+    );
+    const dailymedImportSql = await readFile(
+      new URL("../sql/supplements/import-dailymed.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(fdcImportSql).toContain(
+      "lower(source_rows.serving_size_unit) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(fdcImportSql).toContain("source_rows.serving_size <= 2000");
+    expect(fdcImportSql).toContain("food_portions.first_portion_gram_weight <= 2000");
+    expect(fdcImportSql).toContain("source_rows.data_type <> 'branded_food'");
+    expect(fdcImportSql).toContain(
+      "lower(btrim(food_portions.first_portion_description)) = lower(btrim(source_rows.branded_household_serving))",
+    );
+    expect(fdcImportSql).toContain("bottles?");
+    expect(fdcImportSql).toContain("tablets?");
+    expect(fdcImportSql).toContain("softgels?");
+    expect(fdcImportSql).toContain("serving_grams = EXCLUDED.serving_grams");
+    expect(fdcImportSql).toContain("'servingGramsContractVersion', 'fdc_strict_serving_grams_v1'");
+    expect(fdcImportSql).toContain("\\set reviewed_serving_grams_entity_type food");
+    expect(fdcImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+    expect(fdcImportSql).toContain("\\unset reviewed_serving_grams_entity_type");
+    expect(fdcImportSql).not.toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
+    expect(fdcImportSql).not.toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
+    expect(fdcImportSql).not.toContain("29.5735");
+    expect(fdcApplyPreparedSql).toContain(
+      "serving_grams = EXCLUDED.serving_grams",
+    );
+    expect(fdcApplyPreparedSql).toContain("\\ir ../product-tests/load-reviewed-serving-grams-overlay.sql");
+    expect(fdcApplyPreparedSql).toContain("\\set reviewed_serving_grams_entity_type food");
+    expect(fdcApplyPreparedSql).toContain("\\unset reviewed_serving_grams_entity_type");
+    expect(fdcApplyPreparedSql).not.toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+    expect(fdcApplyPreparedSql).not.toContain(
+      "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
+    );
+    expect(fdcApplyPreparedSql).not.toContain(
+      "serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)",
+    );
+    expect(fdcApplyPreparedSql).toContain("UPDATE foods_prepared");
+    expect(fdcApplyPreparedSql).toContain("SET serving_grams = NULL");
+    expect(fdcApplyPreparedSql).toContain("NOT (serving_grams > 0 AND serving_grams <= 2000)");
+    expect(fdcApplyPreparedSql).toContain(
+      "label->>'servingGramsContractVersion' IS DISTINCT FROM 'fdc_strict_serving_grams_v1'",
+    );
+    expect(fdcApplyPreparedSql).toContain(
+      "prepared FDC serving_grams require fdc_strict_serving_grams_v1",
+    );
+    expect(fdcApplyPreparedSql).toContain(
+      "data_origin IN ('usda_branded', 'usda_foundation', 'usda_sr_legacy', 'usda_fndds')",
+    );
+    expect(fdcApplyPreparedSql.indexOf("\\ir ../product-tests/load-reviewed-serving-grams-overlay.sql")).toBeLessThan(
+      fdcApplyPreparedSql.indexOf("INSERT INTO foods"),
+    );
+    expect(fdcApplyPreparedSql.indexOf("FROM serving_grams_reviewed_overlay_import reviewed")).toBeLessThan(
+      fdcApplyPreparedSql.indexOf("INSERT INTO foods"),
+    );
+    expect(fdcApplyPreparedSql).not.toMatch(
+      /BEGIN;[\s\S]*INSERT INTO foods[\s\S]*COMMIT;/u,
+    );
+
+    for (const labelImportSql of [
+      fdcImportSql,
+      dsldImportSql,
+      dailymedImportSql,
+    ]) {
+      expect(labelImportSql).toMatch(
+        /BEGIN;[\s\S]*\\ir \.\.\/product-tests\/apply-reviewed-serving-grams\.sql[\s\S]*COMMIT;/u,
+      );
+    }
+
+    for (const supplementImportSql of [dsldImportSql, dailymedImportSql]) {
+      expect(supplementImportSql).toContain("serving_size->>'amount'");
+      expect(supplementImportSql).toContain(
+        "lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+      );
+      expect(supplementImportSql).toContain("(serving_size->>'amount')::numeric <= 2000");
+      expect(supplementImportSql).toContain(
+        "serving_grams = EXCLUDED.serving_grams",
+      );
+      expect(supplementImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
+      expect(supplementImportSql).toContain("\\set reviewed_serving_grams_entity_type supplement");
+      expect(supplementImportSql).toContain("\\unset reviewed_serving_grams_entity_type");
+      expect(supplementImportSql).not.toContain(
+        "serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams)",
+      );
+      expect(supplementImportSql).not.toContain(
+        "serving_grams = COALESCE(supplements.serving_grams, EXCLUDED.serving_grams)",
+      );
+      expect(supplementImportSql).not.toContain("29.5735");
+    }
+  });
+
+  it("keeps strict serving gram repair on gram-only evidence gates", async () => {
+    const productTestsSchemaSql = await readFile(
+      new URL("../sql/product-tests/schema.sql", import.meta.url),
+      "utf8",
+    );
+    const importProductTestRemapsSql = await readFile(
+      new URL("../sql/product-tests/import-product-test-remaps.sql", import.meta.url),
+      "utf8",
+    );
+    const backfillServingGramsSql = await readFile(
+      new URL("../sql/product-tests/backfill-serving-grams.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(productTestsSchemaSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "'([0-9]+(\\.[0-9]+)?)[[:space:]]*(gram\\(s\\)|grams?|grm|g)([^[:alpha:]]|$)'",
+    );
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("portion->>'gramWeight'");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(portion->>'description')) = lower(btrim(foods.label->>'householdServing'))",
+    );
+    expect(backfillServingGramsSql).toContain("lower(btrim(portion->>'description')) !~");
+    expect(backfillServingGramsSql).toContain("fluid[[:space:]]+ounces?");
+    expect(backfillServingGramsSql).toContain("bottles?");
+    expect(backfillServingGramsSql).toContain("tablets?");
+    expect(backfillServingGramsSql).toContain("softgels?");
+    expect(backfillServingGramsSql).toContain("candidate.serving_grams > 0");
+    expect(backfillServingGramsSql).toContain("candidate.serving_grams <= 2000");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('ml'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('tablet'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('capsule'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('softgel'");
+    expect(backfillServingGramsSql).not.toContain("fluid ounces");
+    expect(backfillServingGramsSql).not.toContain("milliliters' THEN");
+
+    expect(backfillServingGramsSql).toMatch(
+      /\\if :serving_grams_backfill_apply[\s\S]*UPDATE foods[\s\S]*foods\.serving_grams IS NULL[\s\S]*OR candidates\.source_rule = 'reviewed_serving_grams'[\s\S]*UPDATE supplements[\s\S]*supplements\.serving_grams IS NULL[\s\S]*OR candidates\.source_rule = 'reviewed_serving_grams'[\s\S]*COMMIT;[\s\S]*\\else[\s\S]*ROLLBACK;[\s\S]*\\endif/u,
+    );
+    expect(backfillServingGramsSql).toMatch(
+      /\\if :\{\?serving_grams_backfill_apply\}[\s\S]*\\else[\s\S]*\\set serving_grams_backfill_apply false[\s\S]*\\endif/u,
+    );
   });
 
   it("keeps contaminant observations explicitly linked or source-only", async () => {
@@ -197,6 +472,14 @@ describe("product test contaminant schema", () => {
       new URL("../sql/foods/import-fdc.sh", import.meta.url),
       "utf8",
     );
+    const importDsldScript = await readFile(
+      new URL("../sql/supplements/import.sh", import.meta.url),
+      "utf8",
+    );
+    const importDailyMedScript = await readFile(
+      new URL("../sql/supplements/import-dailymed.sh", import.meta.url),
+      "utf8",
+    );
     const buildProductTestRemapReviewScript = await readFile(
       new URL(
         "../sql/product-tests/build-product-test-remap-review.ts",
@@ -328,6 +611,15 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain(".product-tests-work/seed-data/thresholds/");
     expect(readme).toContain("Reviewed Remaps");
     expect(readme).toContain("import-product-test-remaps.sh");
+    expect(readme).toContain("Supplement Label Imports");
+    expect(readme).toContain("apps/web/sql/supplements/import.sh");
+    expect(readme).toContain("apps/web/sql/supplements/import-dailymed.sh");
+    expect(readme).toContain("Serving Grams Backfill");
+    expect(readme).toContain("backfill-serving-grams.sh");
+    expect(readme).toContain("labels already linked by `product_tests`");
+    expect(readme).toContain("It does not scan the full catalog and does not convert volume, count, or");
+    expect(readme).toMatch(/Automatic parsed candidates update only rows where\s+`serving_grams IS NULL`/u);
+    expect(readme).toContain("exact reviewed rows update rows where the stored value");
     expect(readme).toContain("Match Candidate Export");
     expect(readme).toContain("export-product-test-match-candidates.sh");
     expect(readme).toContain("build-product-test-remap-review.ts");
@@ -396,13 +688,28 @@ describe("product test contaminant schema", () => {
     expect(importPlasticListBrandSiteFoodsScript).toContain("plasticlist-brand-site-foods.json");
     expect(importPlasticListBrandSiteFoodsScript).toContain("FDC_PREPARED_CSV");
     expect(importPlasticListBrandSiteFoodsScript).toContain("apps/web/sql/foods/apply-prepared.sql");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(importPlasticListBrandSiteFoodsScript).toContain("labels-db-psql.sh");
     expect(importPlasticListBrandSiteFoodsScript).not.toContain("echo \"$labels_db_url\"");
     expect(importFdcScript).toContain("labels-db-psql.sh");
+    expect(importFdcScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(importFdcScript).toContain("prepare_labels_db_psql_env");
     expect(importFdcScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importFdcScript).not.toContain("\"$labels_db_url\"");
     expect(importFdcScript).not.toContain("echo \"$labels_db_url\"");
+    for (const supplementImportScript of [importDsldScript, importDailyMedScript]) {
+      expect(supplementImportScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+      expect(supplementImportScript).toContain("reviewed-serving-grams.tsv");
+      expect(supplementImportScript).toContain("labels-db-psql.sh");
+      expect(supplementImportScript).toContain("prepare_labels_db_psql_env");
+      expect(supplementImportScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
+      expect(supplementImportScript).not.toContain("\"$labels_db_url\"");
+      expect(supplementImportScript).not.toContain("echo \"$labels_db_url\"");
+    }
+    expect(importDsldScript).toContain("DSLD_NDJSON_PATH");
+    expect(importDsldScript).toContain("\"$script_dir_abs/import.sql\"");
+    expect(importDailyMedScript).toContain("DAILYMED_NDJSON_PATH");
+    expect(importDailyMedScript).toContain("\"$script_dir_abs/import-dailymed.sql\"");
     expect(supplementBrandSiteLabelsScript).toContain("process.env.MURPH_LABELS_DB_URL");
     expect(supplementBrandSiteLabelsScript).toContain("parseEnvValue(line, \"MURPH_LABELS_DB_URL\")");
     expect(supplementBrandSiteLabelsScript).not.toContain("process.env.MURPH_SUPPLEMENT_DB_URL");
@@ -638,10 +945,11 @@ describe("product test contaminant schema", () => {
     expect(importProductTestRemapsSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
     expect(importProductTestRemapsSql).toContain("UPDATE product_tests tests");
     expect(importProductTestRemapsSql).toContain("match_method = remaps.match_method");
-    expect(importProductTestRemapsSql).toContain("remapped_foods AS");
-    expect(importProductTestRemapsSql).toContain("remapped_supplements AS");
-    expect(importProductTestRemapsSql).toContain("foods.label->>'servingSize'");
-    expect(importProductTestRemapsSql).toContain("supplements.label->'servingSizes'");
+    expect(importProductTestRemapsSql).not.toContain("remapped_foods AS");
+    expect(importProductTestRemapsSql).not.toContain("remapped_supplements AS");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("serving_mass.serving_grams");
+    expect(importProductTestRemapsSql).not.toContain("29.5735");
     expect(importProductTestRemapsSql).toMatch(
       /UPDATE product_tests tests[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_upc, ''\)/u,
     );
@@ -1086,6 +1394,140 @@ describe("product test contaminant schema", () => {
       match_method: "manual_confirmed",
     });
     expect(identities.has("142")).toBe(true);
+  });
+
+  it("keeps reviewed open-product remaps import-ready", async () => {
+    const remapRecords = parseTsv(
+      await readFile(
+        new URL(
+          "../sql/product-tests/remaps/open-product-reviewed.tsv",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+
+    expect(remapRecords).toHaveLength(30);
+
+    const identities = new Set<string>();
+    for (const record of remapRecords) {
+      const sourceKey = record.source_key ?? "";
+      const testedSourceProductId = record.tested_source_product_id ?? "";
+      const foodId = record.food_id ?? "";
+      const supplementId = record.supplement_id ?? "";
+
+      expect(["king_county_consumer_products", "nyc_dohmh_consumer_products"]).toContain(
+        sourceKey,
+      );
+      expect(testedSourceProductId).not.toHaveLength(0);
+      expect(record.tested_product_name ?? "").not.toHaveLength(0);
+      expect(record.review_note ?? "").not.toHaveLength(0);
+
+      const identity = `${sourceKey}:${testedSourceProductId}`;
+      expect(identities.has(identity)).toBe(false);
+      identities.add(identity);
+
+      const linkCount = (foodId ? 1 : 0) + (supplementId ? 1 : 0);
+      if (record.match_method === "source_only") {
+        expect(linkCount).toBe(0);
+        expect(record.review_note).toContain("reset stale numeric-collision link");
+      } else {
+        expect(record.match_method).toBe("manual_confirmed");
+        expect(linkCount).toBe(1);
+      }
+      expect(supplementId).toBe("");
+    }
+
+    const sourceOnlyIds = new Set([
+      "nyc_dohmh_consumer_products:10",
+      "nyc_dohmh_consumer_products:100",
+      "nyc_dohmh_consumer_products:122",
+      "nyc_dohmh_consumer_products:134",
+      "nyc_dohmh_consumer_products:17",
+      "nyc_dohmh_consumer_products:316",
+      "nyc_dohmh_consumer_products:56",
+      "nyc_dohmh_consumer_products:58",
+      "nyc_dohmh_consumer_products:81",
+      "nyc_dohmh_consumer_products:82",
+      "nyc_dohmh_consumer_products:931",
+    ]);
+    for (const sourceOnlyId of sourceOnlyIds) {
+      expect(
+        remapRecords.find((record) =>
+          `${record.source_key}:${record.tested_source_product_id}` === sourceOnlyId
+        ),
+      ).toMatchObject({
+        food_id: "",
+        supplement_id: "",
+        match_method: "source_only",
+      });
+    }
+
+    expect(
+      remapRecords.find((record) =>
+        `${record.source_key}:${record.tested_source_product_id}`
+          === "king_county_consumer_products:row-ukap-2rd2-8cxu"
+      ),
+    ).toMatchObject({
+      food_id: "tj:025880",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) =>
+        `${record.source_key}:${record.tested_source_product_id}`
+          === "nyc_dohmh_consumer_products:7579"
+      ),
+    ).toMatchObject({
+      food_id: "tj:072774",
+      match_method: "manual_confirmed",
+    });
+  });
+
+  it("keeps reviewed serving grams import-ready", async () => {
+    const records = parseTsv(
+      await readFile(
+        new URL("../sql/product-tests/reviewed-serving-grams.tsv", import.meta.url),
+        "utf8",
+      ),
+    );
+
+    expect(records).toHaveLength(29);
+
+    const identities = new Set<string>();
+    for (const record of records) {
+      const entityType = record.entity_type ?? "";
+      const labelId = record.label_id ?? "";
+      const servingGrams = Number(record.serving_grams);
+      const identity = `${entityType}:${labelId}`;
+
+      expect(["food", "supplement"]).toContain(entityType);
+      expect(labelId).not.toHaveLength(0);
+      expect(identities.has(identity)).toBe(false);
+      identities.add(identity);
+      expect(Number.isFinite(servingGrams)).toBe(true);
+      expect(servingGrams).toBeGreaterThan(0);
+      expect(servingGrams).toBeLessThanOrEqual(2000);
+      expect(record.evidence_url ?? "").toMatch(/^https:\/\//u);
+      expect(record.evidence_note ?? "").not.toHaveLength(0);
+    }
+
+    expect(records.find((record) => record.label_id === "fdc:1086537")).toMatchObject({
+      serving_grams: "370",
+      evidence_url: "https://www.plasticlist.org/product/78",
+    });
+    expect(records.find((record) => record.label_id === "tj:072774")).toMatchObject({
+      serving_grams: "114",
+      evidence_url: "https://www.eatthismuch.com/calories/steamed-peeled-baby-beets-1827039",
+    });
+    expect(records.find((record) => record.label_id === "280356")).toMatchObject({
+      entity_type: "supplement",
+      serving_grams: "1.5",
+    });
+    expect(records.find((record) =>
+      record.label_id === "brand_site:tazo-awake-english-breakfast-black-tea"
+    )).toMatchObject({
+      serving_grams: "300",
+    });
   });
 
   it("keeps PlasticList brand-site label anchors import-ready", async () => {
@@ -1659,6 +2101,178 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("-v replace_source=false");
       expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows=");
       expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("renders reviewed serving grams copy paths through the secret-safe psql path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-serving-grams-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempReviewedDir = path.join(tempRepoRoot, ".product-tests-work/reviewed");
+      await mkdir(tempScriptDir, { recursive: true });
+      await mkdir(tempReviewedDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "backfill-serving-grams.sh",
+      );
+      const reviewedTsvPath = path.join(tempReviewedDir, "reviewed O'Brien.tsv");
+      await writeFile(
+        reviewedTsvPath,
+        [
+          "entity_type\tlabel_id\tserving_grams\tevidence_url\tevidence_note",
+          "food\tfdc:example\t1\thttps://example.invalid/serving\treviewed test row",
+          "",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      const renderedSqlLogPath = path.join(tempRoot, "rendered.sql");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync, copyFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "const argv = process.argv.slice(2);",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${argv.join(' ')}\\n`);",
+          "const sqlPath = argv[argv.indexOf('-f') + 1];",
+          "if (!sqlPath) {",
+          "  throw new Error('rendered SQL path was not passed to psql');",
+          "}",
+          "copyFileSync(sqlPath, process.env.RENDERED_SQL_LOG);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+          RENDERED_SQL_LOG: renderedSqlLogPath,
+          REVIEWED_SERVING_GRAMS_TSV_PATH: reviewedTsvPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("-v serving_grams_backfill_apply=false");
+      expect(fakePsqlLog).not.toContain("postgres://");
+      expect(fakePsqlLog).not.toContain(reviewedTsvPath);
+
+      const renderedSql = await readFile(renderedSqlLogPath, "utf8");
+      expect(renderedSql).toContain(
+        "\\copy serving_grams_reviewed_import FROM '",
+      );
+      expect(renderedSql).toContain("reviewed O''Brien.tsv");
+      expect(renderedSql).not.toContain("__REVIEWED_SERVING_GRAMS_TSV__");
+      expect(renderedSql).toContain("WHERE foods.serving_grams IS NULL");
+      expect(renderedSql).toContain("WHERE supplements.serving_grams IS NULL");
+      expect(renderedSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+      expect(renderedSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("runs supplement import wrappers with repo-independent reviewed serving grams paths", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-supplement-imports-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempSupplementDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/supplements",
+      );
+      const tempProductTestsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const runDir = path.join(tempRoot, "runner");
+      await mkdir(tempSupplementDir, { recursive: true });
+      await mkdir(tempProductTestsDir, { recursive: true });
+      await mkdir(runDir, { recursive: true });
+
+      const sourceSupplementDir = new URL("../sql/supplements/", import.meta.url);
+      const sourceProductTestsDir = new URL(
+        "../sql/product-tests/",
+        import.meta.url,
+      );
+      for (const file of [
+        "import.sh",
+        "import-dailymed.sh",
+        "schema.sql",
+        "import.sql",
+        "import-dailymed.sql",
+      ]) {
+        const targetPath = path.join(tempSupplementDir, file);
+        await writeFile(targetPath, await readFile(new URL(file, sourceSupplementDir), "utf8"));
+        if (file.endsWith(".sh")) await chmod(targetPath, 0o755);
+      }
+      for (const file of ["labels-db-psql.sh", "reviewed-serving-grams.tsv"]) {
+        await writeFile(
+          path.join(tempProductTestsDir, file),
+          await readFile(new URL(file, sourceProductTestsDir), "utf8"),
+        );
+      }
+
+      await writeFile(path.join(runDir, "dsld.ndjson"), "{}\n");
+      await writeFile(path.join(runDir, "dailymed.ndjson"), "{}\n");
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync, existsSync } from 'node:fs';",
+          "import path from 'node:path';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "for (const envName of ['REVIEWED_SERVING_GRAMS_TSV_PATH', 'DSLD_NDJSON_PATH', 'DAILYMED_NDJSON_PATH']) {",
+          "  const value = process.env[envName];",
+          "  if (!value) continue;",
+          "  if (!path.isAbsolute(value) || !existsSync(value)) {",
+          "    throw new Error(`${envName} was not an existing absolute path`);",
+          "  }",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      for (const [scriptName, sourceEnvName, sourceFileName] of [
+        ["import.sh", "DSLD_NDJSON_PATH", "dsld.ndjson"],
+        ["import-dailymed.sh", "DAILYMED_NDJSON_PATH", "dailymed.ndjson"],
+      ] as const) {
+        await execFileAsync(path.join(tempSupplementDir, scriptName), {
+          cwd: runDir,
+          env: {
+            ...process.env,
+            [sourceEnvName]: sourceFileName,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PSQL_BIN: fakePsqlPath,
+            PSQL_FAKE_LOG: fakePsqlLogPath,
+          },
+        });
+      }
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("supplements/schema.sql");
+      expect(fakePsqlLog).toContain("supplements/import.sql");
+      expect(fakePsqlLog).toContain("supplements/import-dailymed.sql");
       expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });

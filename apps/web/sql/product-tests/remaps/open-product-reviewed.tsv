@@ -1,0 +1,31 @@
+source_key	tested_source_product_id	tested_product_name	tested_product_brand	tested_product_upc	food_id	supplement_id	match_method	review_note
+king_county_consumer_products	row-ukap-2rd2-8cxu	Basmati Rice	Trader Joes		tj:025880		manual_confirmed	King County Trader Joes Basmati Rice row matches the Trader Joe's Basmati Rice label.
+nyc_dohmh_consumer_products	10	Turmeric (Haldi)					source_only	NYC row is Turmeric (Haldi), not Costco rotisserie chicken; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	100	Paprika					source_only	NYC row is Paprika, not Clover whole milk; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	1010	Clasico seasoning with lime	Tajin		fdc:552756		manual_confirmed	NYC Tajin Clasico seasoning row matches the Tajin Clasico seasoning label.
+nyc_dohmh_consumer_products	122	Turmeric powder					source_only	NYC row is Turmeric powder, not Nescafe instant coffee; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	134	Rhizoma simi lacis glabrae					source_only	NYC row is Rhizoma simi lacis glabrae, not Clover whole milk; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	1534	Montreal Steak seasoning	McCormick & Company, Inc.		fdc:531970		manual_confirmed	NYC McCormick Montreal Steak seasoning row matches the FDC seasoning label.
+nyc_dohmh_consumer_products	17	Calcimax 500	Meyer Vitabiotics				source_only	NYC row is Meyer Vitabiotics Calcimax 500, not Nespresso coffee; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	316	Amaranto					source_only	NYC row is Amaranto, not O Organics eggs; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	3521	24 Mantra Organic Turmeric Powder	D- Sresta Natural Bioproducts Pvt. Ltd.		kroger_site:0890408351944		manual_confirmed	NYC 24 Mantra Organic Turmeric Powder row matches the Kroger 24 Mantra turmeric label.
+nyc_dohmh_consumer_products	5381	Vegeta All Purpose Seasoning	Podravka d.d.		fdc:377186		manual_confirmed	NYC Podravka Vegeta row matches the FDC Vegeta all purpose seasoning label.
+nyc_dohmh_consumer_products	56	Turmeric powder					source_only	NYC row is Turmeric powder, not Impossible meat; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	58	Cetamol - liquid pain & fever reliever	Cetamol				source_only	NYC row is Cetamol pain and fever reliever, not Oatly oatmilk; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	6136	Maesri Yellow Curry Paste	Maesri		fdc:397824		manual_confirmed	NYC Maesri Yellow Curry Paste row matches the FDC Maesri yellow curry paste label.
+nyc_dohmh_consumer_products	6260	Indomie Instant Noodles	De United Foods Industries Limited		kroger_site:0008968617079		manual_confirmed	NYC Indomie Instant Noodles row matches the Kroger Indomie label.
+nyc_dohmh_consumer_products	6379	Mama Sita's Ilocano Pinapaitan Bitter Stew Mix	Marigold Manufacturing Company		fdc:397874		manual_confirmed	NYC Mama Sita's Ilocano Pinapaitan row matches the FDC Mama Sita's label.
+nyc_dohmh_consumer_products	6392	Trader Joes Ajika Georgian Seasoning Blend	Trader Joes		tj:068324		manual_confirmed	NYC Trader Joes Ajika Georgian Seasoning Blend row matches the Trader Joe's Ajika label.
+nyc_dohmh_consumer_products	7579	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	7669	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	7742	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	7785	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	7791	Gamesa Marias Cookies	Quaker		kroger_site:0068670010123		manual_confirmed	NYC Quaker Gamesa Marias Cookies row matches the Kroger Gamesa Marias Cookies label.
+nyc_dohmh_consumer_products	7908	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	81	Orange food coloring					source_only	NYC row is Orange food coloring, not Driscoll's strawberries; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	8168	Baby Beets	trader joe's		tj:072774		manual_confirmed	NYC Trader Joe's Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	82	Chili powder					source_only	NYC row is Chili powder, not Good Farms strawberries; reset stale numeric-collision link.
+nyc_dohmh_consumer_products	8295	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	8426	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	8448	Trader Joe's Steamed & Peeled Baby Beets			tj:072774		manual_confirmed	NYC Trader Joe's Steamed & Peeled Baby Beets row matches the Trader Joe's baby beets label.
+nyc_dohmh_consumer_products	931	Vasant Kusumakar Ras With Gold & Pearl (Ayurvedic)	Dabur India Ltd.				source_only	NYC row is Dabur Vasant Kusumakar Ras, not Rishi black tea; reset stale numeric-collision link.

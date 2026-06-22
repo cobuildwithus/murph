@@ -514,12 +514,13 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && requiredUserMessageDeliveryAvailable
+        const hostedExecutionContext = executionContext?.hosted ?? null
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
-                const hosted = executionContext?.hosted
+                const hosted = hostedExecutionContext
                 if (hosted) {
                   const dependencies = hosted.progressDeliveryDependencies
                   if (
@@ -557,7 +558,7 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
           : null
-        const hostedToolContext = executionContext.hosted
+        const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
               getDeliveryContext: () => ({
@@ -575,7 +576,7 @@ export async function sendAssistantMessageLocal(
                   : requiredUserMessageDeliveryAvailable
                     ? await sendHostedRequiredUserMessage({
                         dependencies:
-                          executionContext.hosted?.progressDeliveryDependencies,
+                          hostedExecutionContext.progressDeliveryDependencies,
                         getDeliveryContext: () => ({
                           messageInput: currentInput,
                           session: currentSession,

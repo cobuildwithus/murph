@@ -17,6 +17,9 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  upsertAssistantInputEvent,
+} from "@murphai/assistant-engine";
 
 import {
   type HostedRuntimePlatform,
@@ -328,6 +331,57 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeOperationPath));
   });
 
+  it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const residuePaths = await writeSettledAssistantInputResidue(vaultRoot);
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.inputEvent)).toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.evidence)).toBe(false);
+    await expectMissing(path.join(vaultRoot, residuePaths.inputEvent));
+    await expectMissing(path.join(vaultRoot, residuePaths.evidence));
+  });
+
+  it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const pendingInputsPath = path.join(
+      vaultRoot,
+      ".runtime",
+      "operations",
+      "assistant",
+      "hosted-pending-inputs.json",
+    );
+    await mkdir(path.dirname(pendingInputsPath), { recursive: true });
+    await writeFile(pendingInputsPath, "{ not-json", "utf8");
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
   it("continues checkpoint publication when terminal write-operation pruning fails", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -497,6 +551,75 @@ async function writeOperationRecord(
     "utf8",
   );
   return relativePath;
+}
+
+async function writeSettledAssistantInputResidue(
+  vaultRoot: string,
+): Promise<{ evidence: string; inputEvent: string }> {
+  const recordedAt = "2026-01-01T00:00:00.000Z";
+  const event = await upsertAssistantInputEvent({
+    now: new Date(recordedAt),
+    vault: vaultRoot,
+    event: {
+      content: {
+        text: "old hosted input",
+      },
+      conversation: {
+        accountId: null,
+        actorId: "actor-residue",
+        actorIsSelf: false,
+        source: "email",
+        threadId: "thread-residue",
+        threadIsDirect: true,
+      },
+      occurredAt: recordedAt,
+      receivedAt: recordedAt,
+      replyTarget: {
+        channel: "email",
+        messageId: "message-residue",
+        threadId: "thread-residue",
+      },
+      sourceRef: {
+        dedupeKey: "dedupe-residue",
+        eventId: "event-residue",
+        itemId: "item-residue",
+        kind: "hosted-mailbox",
+        lane: "conversation",
+        laneSeq: "1",
+        payloadSchema: "test-payload",
+        payloadSource: "inline",
+        source: "hosted-mailbox",
+        wakeSchema: "test-wake",
+      },
+    },
+  });
+  const inputEvent = `.runtime/operations/assistant/input-events/${event.inputId}.json`;
+  const evidence = `.runtime/operations/assistant/auto-reply/evidence/${encodeURIComponent(event.inputId)}.json`;
+  await mkdir(path.dirname(path.join(vaultRoot, evidence)), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, evidence),
+    `${JSON.stringify({
+      captureId: event.inputId,
+      groupCaptureIds: [event.inputId],
+      groupId: `group_${event.inputId}`,
+      groupInputIds: [event.inputId],
+      inputId: event.inputId,
+      primaryCaptureId: event.inputId,
+      primaryInputId: event.inputId,
+      providerCleanup: {
+        linqMessageIds: [],
+        queuedAt: null,
+      },
+      recordedAt,
+      schema: "murph.assistant-auto-reply-terminal-evidence.v1",
+      terminal: {
+        kind: "suppressed",
+        reason: "already-handled",
+      },
+    })}\n`,
+    "utf8",
+  );
+  return { evidence, inputEvent };
 }
 
 async function expectPresent(absolutePath: string): Promise<void> {

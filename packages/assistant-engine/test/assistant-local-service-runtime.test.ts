@@ -4914,16 +4914,10 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(progressDelivery)
+  assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
-  const result = await progressDelivery.send('Checking the iMessage thread.')
-
-  assert.deepEqual(result, {
-    kind: 'failed',
-    source: 'model',
-  })
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
 })
