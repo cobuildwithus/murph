@@ -1603,6 +1603,132 @@ describe("record service seams", () => {
       },
     });
     expect(journalQuery.listMetricPoints).not.toHaveBeenCalled();
+
+    const anchoredExperimentId = "exp_01JNV4458HYPP53JDQCBP1QJAN";
+    const anchoredExperiment = sampleQueryRecord({
+      entityId: anchoredExperimentId,
+      primaryLookupId: anchoredExperimentId,
+      family: "experiment",
+      recordClass: "bank",
+      kind: "experiment",
+      status: "active",
+      experimentSlug: "glucose-anchors",
+      attributes: {
+        schemaVersion: "murph.frontmatter.experiment.v1",
+        docType: "experiment",
+        experimentId: anchoredExperimentId,
+        slug: "glucose-anchors",
+        status: "active",
+        title: "Glucose Anchors",
+        startedOn: "2026-06-01",
+        runPlan: {
+          baselineStart: "2026-06-01",
+          baselineEnd: "2026-06-03",
+          interventionStart: "2026-06-04",
+          interventionEnd: "2026-06-18",
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:blood-glucose",
+          desiredDirection: "decrease",
+          measurementAnchors: [
+            {
+              role: "baseline",
+              kind: "wearable_summary",
+              recordId: "metric_sample_glucose_baseline",
+              biomarkerKeys: ["biomarker:blood-glucose"],
+              observedOn: "2026-05-29",
+            },
+            {
+              role: "followup",
+              kind: "wearable_summary",
+              recordId: "metric_sample_glucose_followup",
+              biomarkerKeys: ["biomarker:blood-glucose"],
+              observedOn: "2026-06-18",
+            },
+          ],
+        },
+      },
+    });
+    const anchoredMetricPointFilters: unknown[] = [];
+    const anchoredMetricQuery = {
+      readVault: vi.fn(async () => journalQuery.readVault()),
+      lookupEntityById: vi.fn(() => anchoredExperiment),
+      listMetricPoints: vi.fn(async (_vault: string, filters: unknown) => {
+        anchoredMetricPointFilters.push(filters);
+        return [];
+      }),
+      normalizeMetricKey: queryRuntime.normalizeMetricKey,
+      resolveMetricDefinition: queryRuntime.resolveMetricDefinition,
+      resolveMetricDefinitionForBiomarker: queryRuntime.resolveMetricDefinitionForBiomarker,
+      summarizeExperimentProgress: vi.fn(() => ({
+        schemaVersion: "murph.experiment-progress.v1",
+        asOf: "2026-06-18",
+        experiment: {
+          id: anchoredExperimentId,
+          slug: "glucose-anchors",
+          status: "active",
+          title: "Glucose Anchors",
+        },
+        phase: "review_due",
+        windows: {
+          baselineStart: "2026-06-01",
+          baselineEnd: "2026-06-03",
+          interventionStart: "2026-06-04",
+          interventionEnd: "2026-06-18",
+        },
+        setupReadiness: { status: "ready", blockingReasons: [] },
+        analysisReadiness: { status: "ready", blockingReasons: [] },
+        dataCoverage: {
+          status: "ready_for_review",
+          baselineDaysAvailable: 1,
+          interventionDaysAvailable: 1,
+          primaryBiomarkerKey: "biomarker:blood-glucose",
+          primaryMetricDaysAvailable: 2,
+          wearableProviders: [],
+        },
+        adherence: {
+          completedSessions: 0,
+          expectedSessionsByNow: null,
+          minimumUsefulSessions: null,
+          status: "unknown",
+          targetSessions: null,
+        },
+        signals: [],
+        earlySignals: [],
+        confounders: [],
+        recommendation: null,
+        commonsProtocolRef: null,
+        protocolRef: null,
+      })),
+    };
+    const anchoredJournal = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => anchoredMetricQuery),
+      })),
+    });
+    await anchoredJournal.showExperimentProgress({
+      vault: "./vault",
+      lookup: "glucose-anchors",
+      asOf: "2026-06-18",
+    });
+    expect(anchoredMetricPointFilters).toEqual([
+      {
+        from: "2026-05-29",
+        limit: null,
+        metricKey: "glucose",
+        to: "2026-05-29",
+      },
+      {
+        from: "2026-06-18",
+        limit: null,
+        metricKey: "glucose",
+        to: "2026-06-18",
+      },
+    ]);
+
     assert.deepEqual(await journal.showVaultSummary("./vault"), {
       vault: "./vault",
       formatVersion: 1,

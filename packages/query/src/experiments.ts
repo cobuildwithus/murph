@@ -26,6 +26,7 @@ import {
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  normalizeMetricKey,
   selectMetricSeries,
   selectMetricValue,
   selectMetricWindowComparison,
@@ -623,9 +624,15 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     context.frontmatter.runPlan?.minimumUsefulSessions ??
     null;
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const completedSessions = adherenceCalendar?.summary.satisfiedCount ?? context.completedSessions;
+  const rollupTargetId = targets[0]?.targetId ?? null;
+  const rollupCells = rollupTargetId && adherenceCalendar
+    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTargetId)
+    : null;
+  const completedSessions = rollupCells
+    ? rollupCells.filter((cell) => cell.status === "satisfied").length
+    : context.completedSessions;
   const expectedSessionsByNow = adherenceCalendar
-    ? adherenceCalendar.cells.filter((cell) => cell.status !== "scheduled").length
+    ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
     : computeExpectedSessionsByNow(
         context.frontmatter,
         context.asOf,
@@ -716,14 +723,18 @@ function buildAdherenceObservations(
 
 function matchesAdherenceMetric(metricKey: string, point: MetricPoint): boolean {
   const trimmedMetricKey = metricKey.trim();
-  const normalizedMetricKey = trimmedMetricKey.toLowerCase().replaceAll("_", "-");
+  const normalizedMetricKey = normalizeMetricKey(trimmedMetricKey);
+  const metricSlug = trimmedMetricKey.split(":").at(-1) ?? trimmedMetricKey;
   const definition = resolveMetricDefinition(trimmedMetricKey);
   const biomarkerDefinition = resolveMetricDefinitionForBiomarker(trimmedMetricKey);
+  const slugDefinition = resolveMetricDefinition(metricSlug);
   const candidateMetricKeys = new Set([
     trimmedMetricKey,
     normalizedMetricKey,
     definition?.key,
     biomarkerDefinition?.key,
+    slugDefinition?.key,
+    normalizeMetricKey(metricSlug),
   ].filter((value): value is string => typeof value === "string" && value.length > 0));
 
   if (candidateMetricKeys.has(point.metricKey)) {
@@ -1439,7 +1450,6 @@ function collectRunMetricWindows(
     comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
     metricKey,
     points: selectMetricSeries({
-      duplicatePolicy: "keep-all",
       metricKey,
       points: context.metricPoints,
     }).rows,
@@ -1502,25 +1512,51 @@ function collectAnchoredMetricWindow(
     return null;
   }
 
+  const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
   const values: number[] = [];
   let unit: string | null = null;
   for (const anchor of anchors) {
+    const anchoredPoints = context.metricPoints.filter(
+      (point) =>
+        point.effectiveDate <= context.asOf &&
+        metricPointRecordIds(point).includes(anchor.recordId) &&
+        (metricKey ? point.metricKey === metricKey : point.biomarkerKey === biomarkerKey),
+    );
     const selection = selectMetricValue({
       biomarkerKey,
       now: context.asOf,
-      points: context.metricPoints.filter(
-        (point) => point.source.recordId === anchor.recordId,
-      ),
+      points: anchoredPoints,
     });
-    if (typeof selection.value !== "number" || !Number.isFinite(selection.value)) {
+    const fallbackPoint = anchoredPoints.find((point) =>
+      typeof (point.canonicalValue ?? point.value) === "number" &&
+      Number.isFinite(point.canonicalValue ?? point.value)
+    );
+    const value = typeof selection.value === "number"
+      ? selection.value
+      : fallbackPoint?.canonicalValue ?? fallbackPoint?.value ?? null;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
       continue;
     }
 
-    values.push(selection.value);
-    unit ??= selection.unit ?? null;
+    values.push(value);
+    unit ??= selection.unit ?? fallbackPoint?.canonicalUnit ?? fallbackPoint?.unit ?? null;
   }
 
   return metricWindowSelectionFromValues(values, anchors.length, unit);
+}
+
+function metricPointRecordIds(point: MetricPoint): string[] {
+  const contributingRecordIds = point.context.contributingRecordIds;
+  if (!Array.isArray(contributingRecordIds)) {
+    return [point.source.recordId];
+  }
+
+  return [...new Set([
+    ...contributingRecordIds.filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    ),
+    point.source.recordId,
+  ])];
 }
 
 function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {

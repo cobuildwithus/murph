@@ -2062,13 +2062,17 @@ function buildExperimentMetricPointFilters(
 
   const dateFilter = buildExperimentMetricPointDateFilter(frontmatter, asOf)
   const anchorMetricKeys = collectExperimentAnchorMetricKeys(query, frontmatter)
-  return metricKeys.map((metricKey) => ({
-    ...(anchorMetricKeys.has(metricKey)
-      ? buildExperimentAnchorMetricPointDateFilter(asOf)
-      : dateFilter),
-    limit: null,
-    metricKey,
-  }))
+  return metricKeys.flatMap((metricKey) => {
+    const anchorDateFilters = anchorMetricKeys.has(metricKey)
+      ? buildExperimentAnchorMetricPointDateFilters(query, frontmatter, metricKey, asOf)
+      : []
+    const dateFilters = anchorDateFilters.length > 0 ? anchorDateFilters : [dateFilter]
+    return dateFilters.map((filter) => ({
+      ...filter,
+      limit: null,
+      metricKey,
+    }))
+  })
 }
 
 function collectExperimentMetricKeys(
@@ -2096,8 +2100,9 @@ function collectExperimentMetricKeys(
     }
 
     const metricKey =
+      resolveExperimentBiomarkerMetricKey(query, target.evidence.metricKey) ??
       query.resolveMetricDefinition(target.evidence.metricKey)?.key ??
-      target.evidence.metricKey.trim().toLowerCase().replaceAll('_', '-')
+      query.normalizeMetricKey(target.evidence.metricKey)
     if (metricKey.length > 0) {
       metricKeys.add(metricKey)
     }
@@ -2175,10 +2180,26 @@ function buildExperimentMetricPointDateFilter(
   }
 }
 
-function buildExperimentAnchorMetricPointDateFilter(
+function buildExperimentAnchorMetricPointDateFilters(
+  query: QueryRuntimeModule,
+  frontmatter: ExperimentFrontmatter,
+  metricKey: string,
   asOf?: string,
-): Pick<QueryMetricPointFilters, 'to'> {
-  return asOf ? { to: asOf } : {}
+): Array<Pick<QueryMetricPointFilters, 'from' | 'to'>> {
+  const dates = new Set<string>()
+  for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
+    if (!anchor.observedOn || (asOf && anchor.observedOn > asOf)) {
+      continue
+    }
+    const matchesMetricKey = anchor.biomarkerKeys.some(
+      (biomarkerKey) => resolveExperimentBiomarkerMetricKey(query, biomarkerKey) === metricKey,
+    )
+    if (matchesMetricKey) {
+      dates.add(anchor.observedOn)
+    }
+  }
+
+  return sortedIsoDates([...dates]).map((date) => ({ from: date, to: date }))
 }
 
 function capExperimentMetricEndDate(

@@ -126,7 +126,11 @@ function buildCardWeeks(input: {
   windows: ExperimentProgressSummary["windows"];
 }): Array<{ start: string; cells: string }> {
   const statusesByDate = new Map<string, ExperimentAdherenceCellStatus[]>();
+  const rollupTargetId = input.calendar?.targets[0]?.targetId ?? null;
   for (const cell of input.calendar?.cells ?? []) {
+    if (rollupTargetId && cell.targetId !== rollupTargetId) {
+      continue;
+    }
     const statuses = statusesByDate.get(cell.localDate) ?? [];
     statuses.push(cell.status);
     statusesByDate.set(cell.localDate, statuses);
