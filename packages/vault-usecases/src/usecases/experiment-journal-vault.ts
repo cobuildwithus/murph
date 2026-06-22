@@ -2063,26 +2063,15 @@ function buildExperimentMetricPointFilters(
   const dateFilter = buildExperimentMetricPointDateFilter(frontmatter, asOf)
   const anchorMetricKeys = collectExperimentAnchorMetricKeys(query, frontmatter)
   return metricKeys.flatMap((metricKey) => {
-    const anchorDateFilters = anchorMetricKeys.has(metricKey)
-      ? buildExperimentAnchorMetricPointDateFilters(query, frontmatter, metricKey, asOf)
-      : []
-    const dateFilters = [
-      ...(hasMetricPointDateFilter(dateFilter) ? [dateFilter] : []),
-      ...anchorDateFilters,
-    ]
-    const filters = dateFilters.length > 0 ? dateFilters : [dateFilter]
+    const filters = anchorMetricKeys.has(metricKey)
+      ? [buildExperimentAnchorMetricPointDateFilter(asOf)]
+      : [dateFilter]
     return filters.map((filter) => ({
       ...filter,
       limit: null,
       metricKey,
     }))
   })
-}
-
-function hasMetricPointDateFilter(
-  filter: Pick<QueryMetricPointFilters, 'from' | 'to'>,
-): boolean {
-  return typeof filter.from === 'string' || typeof filter.to === 'string'
 }
 
 function collectExperimentMetricKeys(
@@ -2190,35 +2179,10 @@ function buildExperimentMetricPointDateFilter(
   }
 }
 
-function buildExperimentAnchorMetricPointDateFilters(
-  query: QueryRuntimeModule,
-  frontmatter: ExperimentFrontmatter,
-  metricKey: string,
+function buildExperimentAnchorMetricPointDateFilter(
   asOf?: string,
-): Array<Pick<QueryMetricPointFilters, 'from' | 'to'>> {
-  const dates = new Set<string>()
-  let needsHistory = false
-  for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
-    const matchesMetricKey = anchor.biomarkerKeys.some(
-      (biomarkerKey) => resolveExperimentBiomarkerMetricKey(query, biomarkerKey) === metricKey,
-    )
-    if (!matchesMetricKey) {
-      continue
-    }
-
-    if (!anchor.observedOn) {
-      needsHistory = true
-      continue
-    }
-    if (!asOf || anchor.observedOn <= asOf) {
-      dates.add(anchor.observedOn)
-    }
-  }
-
-  return [
-    ...(needsHistory ? [{ ...(asOf ? { to: asOf } : {}) }] : []),
-    ...sortedIsoDates([...dates]).map((date) => ({ from: date, to: date })),
-  ]
+): Pick<QueryMetricPointFilters, 'to'> {
+  return asOf ? { to: asOf } : {}
 }
 
 function capExperimentMetricEndDate(

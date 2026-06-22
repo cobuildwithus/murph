@@ -1540,18 +1540,18 @@ function collectAnchoredMetricWindow(
       points: anchoredPoints,
     });
     const fallbackPoint = anchoredPoints.find((point) =>
-      typeof (point.canonicalValue ?? point.value) === "number" &&
-      Number.isFinite(point.canonicalValue ?? point.value)
+      typeof point.canonicalValue === "number" &&
+      Number.isFinite(point.canonicalValue) &&
+      typeof point.canonicalUnit === "string" &&
+      point.canonicalUnit.length > 0
     );
-    const value = typeof selection.value === "number"
-      ? selection.value
-      : fallbackPoint?.canonicalValue ?? fallbackPoint?.value ?? null;
+    const value = typeof selection.value === "number" ? selection.value : fallbackPoint?.canonicalValue ?? null;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       continue;
     }
 
     values.push(value);
-    unit ??= selection.unit ?? fallbackPoint?.canonicalUnit ?? fallbackPoint?.unit ?? null;
+    unit ??= typeof selection.value === "number" ? selection.unit : fallbackPoint?.canonicalUnit ?? null;
   }
 
   return metricWindowSelectionFromValues(values, anchors.length, unit);

@@ -287,6 +287,8 @@ function makeProjectedGlucosePoint(input: {
 
 function makeProjectedMetricPoint(input: {
   biomarkerKey: string;
+  canonicalUnit?: string | null;
+  canonicalValue?: number | null;
   contributingRecordIds?: string[];
   date: string;
   metricKey: string;
@@ -299,8 +301,8 @@ function makeProjectedMetricPoint(input: {
   return {
     schemaVersion: "murph.metric-point.v1",
     biomarkerKey: input.biomarkerKey,
-    canonicalUnit: input.unit,
-    canonicalValue: input.value,
+    canonicalUnit: input.canonicalUnit === undefined ? input.unit : input.canonicalUnit,
+    canonicalValue: input.canonicalValue === undefined ? input.value : input.canonicalValue,
     comparator: null,
     confidence: "medium",
     context: {
@@ -771,6 +773,78 @@ test("experiment analysis matches anchors against contributing metric records", 
   assert.equal(outcome.metricResults[0]?.baselineMean, 100);
   assert.equal(outcome.metricResults[0]?.interventionMean, 96);
   assert.equal(outcome.metricResults[0]?.deltaAbs, -4);
+});
+
+test("experiment analysis skips uncanonicalized anchored metric fallback values", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGW",
+    slug: "glucose-uncanonicalized-anchors",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-glucose",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_canonical_baseline",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-01",
+        },
+        {
+          role: "followup",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_raw_followup",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-02",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-uncanonicalized-anchors",
+    metadata: null,
+    entities: [experiment],
+  });
+
+  const outcome = analyzeExperimentOutcome(vault, "glucose-uncanonicalized-anchors", {
+    asOf: "2026-06-02",
+    metricPoints: [
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        contributingRecordIds: ["sample_glucose_canonical_baseline"],
+        date: "2026-06-01",
+        metricKey: "glucose",
+        sourceKind: "wearable-summary",
+        sourceLabel: "Wearable summary",
+        sourceRecordId: "summary_glucose_canonical_baseline",
+        unit: "mg/dL",
+        value: 100,
+      }),
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        canonicalUnit: null,
+        canonicalValue: null,
+        contributingRecordIds: ["sample_glucose_raw_followup"],
+        date: "2026-06-02",
+        metricKey: "glucose",
+        sourceKind: "wearable-summary",
+        sourceLabel: "Wearable summary",
+        sourceRecordId: "summary_glucose_raw_followup",
+        unit: "g/L",
+        value: 0.9,
+      }),
+    ],
+  });
+
+  assert.equal(outcome.metricResults[0]?.baselineMean, 100);
+  assert.equal(outcome.metricResults[0]?.interventionMean, null);
+  assert.equal(outcome.metricResults[0]?.deltaAbs, null);
 });
 
 test("metric adherence uses the selected same-day metric point", () => {
