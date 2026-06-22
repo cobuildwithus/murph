@@ -615,6 +615,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
+    if (foregroundConversationWorkObserved) {
+      const pendingForegroundAssistantWakeMerged = await mergePendingForegroundAssistantInputWake({
+        now: input.now,
+        preserveExistingWake: false,
+        result: assistantPhaseResult,
+        vaultRoot: input.vaultRoot,
+      });
+      if (pendingForegroundAssistantWakeMerged) {
+        projectedWakeRequiresCheckpoint = false;
+      }
+    }
     await stageHostedConversationMailboxConsumedAckBestEffort({
       afterDurableCheckpoint,
       assistantPhaseResult,
@@ -1469,19 +1480,19 @@ async function mergePendingForegroundAssistantInputWake(input: {
   preserveExistingWake: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.preserveExistingWake && input.result.nextWakeAt) {
-    return;
+    return false;
   }
   if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
-    return;
+    return false;
   }
   const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
     now: input.now,
     vaultRoot: input.vaultRoot,
   });
   if (!wakeAt) {
-    return;
+    return false;
   }
 
   mergeHostedAssistantWake({
@@ -1489,6 +1500,7 @@ async function mergePendingForegroundAssistantInputWake(input: {
     result: input.result,
     wakeAt,
   });
+  return input.result.nextWakeAt !== null && input.result.nextWakeReason === "assistant";
 }
 
 function canSkipPendingAssistantInputProbe(vaultRoot: string): boolean {

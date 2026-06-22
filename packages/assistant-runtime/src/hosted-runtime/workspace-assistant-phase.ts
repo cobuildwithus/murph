@@ -252,6 +252,7 @@ export async function runHostedWorkspaceAssistantPhase(
       wake,
     });
     const managedAutomationsResult = hasFreshConversationInput
+      || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
       : await applyHostedManagedAutomationsBestEffort({ input });
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
@@ -311,6 +312,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
       input,
+      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
     const currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
@@ -1642,6 +1644,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   continueAssistantLane: boolean;
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
+  pendingAssistantInputWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   if (
@@ -1652,6 +1655,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint: null,
+      pendingAssistantInputWakeAt: null,
       result: null,
     };
   }
@@ -1670,6 +1674,17 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
     return state;
   };
+  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
+  if (pendingAssistantInputWakeAt) {
+    return {
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: null,
+    };
+  }
+
   if (shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)) {
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();
     if (preflightAssistantCronWakeState.dueNow) {
@@ -1677,6 +1692,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt: null,
         result: null,
       };
     }
@@ -1692,7 +1708,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
-  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   const initialProviderCleanupDue =
     !shouldYieldAfterSystemMailboxPreparation
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
@@ -1722,6 +1737,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: null,
       };
     }
@@ -1731,6 +1747,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: dirtyAssistantCronWakeState.dueNow,
         deviceSyncMaintenanceRan: true,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1752,6 +1769,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: withHostedAssistantCronWakeCandidate({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1766,6 +1784,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
       result: null,
     };
   }
@@ -1883,6 +1902,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldYieldAfterSystemMailboxPreparation
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
+    pendingAssistantInputWakeAt,
     result: {
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
@@ -2975,6 +2995,7 @@ function buildHostedAssistantAutomationBootstrapEnv(
 function resolveSkippedDeviceSyncWake(input: {
   deviceSyncMaintenanceRan: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  pendingAssistantInputWakeAt: string | null;
 }): HostedRuntimeWakeCandidate | null {
   if (input.deviceSyncMaintenanceRan) {
     return null;
@@ -3005,7 +3026,7 @@ function resolveSkippedDeviceSyncWake(input: {
     };
   }
 
-  if (shouldRescheduleSkippedDeviceSyncWake(input.input)) {
+  if (input.pendingAssistantInputWakeAt || shouldRescheduleSkippedDeviceSyncWake(input.input)) {
     return {
       at: new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString(),
       reason: existingWakeReason,

@@ -2051,13 +2051,28 @@ function mergeHostedWorkspaceInvocationProjection(
           reason: next.nextWakeReason,
         },
       ]);
+  let selectedWakeRequiresCheckpoint = false;
+  if (options.replaceWake) {
+    selectedWakeRequiresCheckpoint = next.projectedWakeRequiresCheckpoint
+      || (
+        previous.projectedWakeRequiresCheckpoint
+        && next.nextWakeAt !== null
+        && next.nextWakeReason !== "assistant"
+      );
+  } else {
+    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, previous)) {
+      selectedWakeRequiresCheckpoint ||= previous.projectedWakeRequiresCheckpoint;
+    }
+    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, next)) {
+      selectedWakeRequiresCheckpoint ||= next.projectedWakeRequiresCheckpoint;
+    }
+  }
 
   return {
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
     nextWakeAt: selectedWake.nextWakeAt,
     nextWakeReason: selectedWake.nextWakeReason,
-    projectedWakeRequiresCheckpoint: previous.projectedWakeRequiresCheckpoint
-      || next.projectedWakeRequiresCheckpoint,
+    projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
     redactedStatus: {
       ...previous.redactedStatus,
       ...next.redactedStatus,
@@ -2066,6 +2081,14 @@ function mergeHostedWorkspaceInvocationProjection(
       ? next.status
       : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
   };
+}
+
+function hostedWorkspaceInvocationProjectionWakeMatches(
+  selectedWake: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): boolean {
+  return selectedWake.nextWakeAt === projection.nextWakeAt
+    && selectedWake.nextWakeReason === projection.nextWakeReason;
 }
 
 function projectHostedWorkspaceWakeForForegroundPass(input: {
