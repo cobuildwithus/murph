@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createCipheriv, createDecipheriv, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, type Hash } from "node:crypto";
 import { createReadStream, createWriteStream, type Stats } from "node:fs";
 import {
   access,
@@ -17,12 +17,14 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { Transform, type Readable } from "node:stream";
+import { Readable, Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import {
   decodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   serializeHostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
@@ -162,14 +164,17 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
   });
   const tempDir = await mkdtemp(path.join(outputDir, "workspace-snapshot-"));
   const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
-  const preflight = await readHostedWorkspaceSnapshotState({
-    archiveEntries: input.archiveEntries,
-    durableRoot,
-  });
   let dataKey: Uint8Array | null = null;
   let completed = false;
 
   try {
+    const preflight = await readHostedWorkspaceSnapshotState({
+      archiveEntries: input.archiveEntries,
+      durableRoot,
+    });
+    if (preflight.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+      throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
+    }
     const tarListPath = input.archiveEntries
       ? path.join(tempDir, "workspace-snapshot-tar-list.txt")
       : null;
@@ -342,7 +347,6 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   encryptedFilePath: string;
   postExtractIntegrityCheck?: boolean;
   ref: HostedWorkspaceSnapshotV2Ref;
-  scratchRoot?: string | null;
 }): Promise<RestoreEncryptedWorkspaceSnapshotTimings> {
   if (input.ref.archive.compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
     throw new Error("Hosted workspace snapshot restore only supports zstd archives.");
@@ -355,30 +359,22 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   if (encryptedStat.size <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
     throw new Error("Hosted workspace snapshot encrypted object is too small.");
   }
+  if (encryptedStat.size >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+    throw new RangeError("Hosted workspace snapshot exceeds the single-part size limit.");
+  }
+  if (input.ref.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+    throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
+  }
 
   const durableRoot = path.resolve(input.durableRoot);
   const durableParent = path.dirname(durableRoot);
-  const scratchRoot = input.scratchRoot ? path.resolve(input.scratchRoot) : null;
-  if (scratchRoot && isSameOrDescendantPath(scratchRoot, durableRoot)) {
-    throw new Error("Hosted workspace snapshot restore scratchRoot must be outside durableRoot.");
-  }
   await mkdir(durableParent, { mode: 0o700, recursive: true });
-  if (scratchRoot) {
-    await mkdir(scratchRoot, { mode: 0o700, recursive: true });
-    await assertHostedWorkspaceSnapshotPathOutsideRoot({
-      candidate: scratchRoot,
-      message: "Hosted workspace snapshot restore scratchRoot must be outside durableRoot.",
-      root: durableRoot,
-    });
-  }
   await assertHostedWorkspaceSnapshotZstdCliAvailable();
   const restoreTempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
-  const scratchTempDir = scratchRoot
-    ? await mkdtemp(path.join(scratchRoot, "workspace-snapshot-restore-"))
-    : restoreTempDir;
   const restoreRoot = path.join(restoreTempDir, "durable-root");
   const backupRoot = path.join(restoreTempDir, "previous-durable-root");
   let dataKey: Uint8Array | null = null;
+  let plaintextArchiveBuffer: Buffer | null = null;
   let decryptMs = 0;
   let archiveExtractMs = 0;
   let restorePreflightMs = 0;
@@ -404,17 +400,27 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
 
     const encryptedObjectHash = createHash("sha256");
     const plaintextArchiveHash = createHash("sha256");
-    const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.zst");
-    await pipeline(
-      createReadStream(encryptedFilePath, {
-        end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
-        start: 0,
-      }),
-      createHashTransform(encryptedObjectHash),
-      decipher,
-      createHashTransform(plaintextArchiveHash),
-      createWriteStream(plaintextArchivePath, { mode: 0o600 }),
-    );
+    const plaintextArchiveCollector = createFixedSizeArchiveBufferCollector({
+      byteLength: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES,
+      hash: plaintextArchiveHash,
+    });
+    let plaintextArchive: Buffer;
+    try {
+      await pipeline(
+        createReadStream(encryptedFilePath, {
+          end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
+          start: 0,
+        }),
+        createHashTransform(encryptedObjectHash),
+        decipher,
+        plaintextArchiveCollector,
+      );
+      plaintextArchive = plaintextArchiveCollector.readBuffer();
+      plaintextArchiveBuffer = plaintextArchive;
+    } catch (error) {
+      plaintextArchiveCollector.clear();
+      throw error;
+    }
 
     encryptedObjectHash.update(authTag);
     const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
@@ -425,7 +431,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
-    await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchivePath, {
+    await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchive, {
       expectedFileCount: input.ref.archive.fileCount,
       expectedTotalPlainBytes: input.ref.archive.totalPlainBytes,
     });
@@ -436,9 +442,8 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     const zstd = spawn("zstd", [
       "-d",
       "--stdout",
-      plaintextArchivePath,
     ], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     const tar = spawn("tar", [
       "-C",
@@ -452,12 +457,20 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     });
     const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    let zstdInputPipe: Promise<void> | null = null;
+    let archivePipe: Promise<void> | null = null;
     try {
       if (!zstd.stdout || !tar.stdin) {
         throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
       }
+      if (!zstd.stdin) {
+        throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
+      }
+      zstdInputPipe = pipeline(Readable.from([plaintextArchive]), zstd.stdin);
+      archivePipe = pipeline(zstd.stdout, tar.stdin);
       await Promise.all([
-        pipeline(zstd.stdout, tar.stdin),
+        zstdInputPipe,
+        archivePipe,
         zstdExit,
         tarExit,
       ]);
@@ -468,6 +481,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
         zstdExit,
         tarExit,
       ]);
+      await Promise.allSettled([zstdInputPipe, archivePipe].filter((promise) => promise !== null));
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -499,12 +513,10 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     durableRootReplaceMs = Date.now() - durableRootReplaceStartedAt;
     extractMs = Date.now() - extractStartedAt;
   } finally {
+    plaintextArchiveBuffer?.fill(0);
     dataKey?.fill(0);
     const cleanupStartedAt = Date.now();
     try {
-      if (scratchTempDir !== restoreTempDir) {
-        await rm(scratchTempDir, { force: true, recursive: true });
-      }
       await rm(restoreTempDir, { force: true, recursive: true });
     } finally {
       cleanupMs = Date.now() - cleanupStartedAt;
@@ -769,7 +781,7 @@ function assertHostedWorkspaceSnapshotRelativePathSafe(
 }
 
 async function assertHostedWorkspaceSnapshotTarEntriesSafe(
-  archivePath: string,
+  archiveSource: Buffer,
   limits: {
     expectedFileCount: number;
     expectedTotalPlainBytes: number;
@@ -783,7 +795,7 @@ async function assertHostedWorkspaceSnapshotTarEntriesSafe(
   ) {
     throw new Error("Hosted workspace snapshot archive manifest is unsafe.");
   }
-  const entries = await listHostedWorkspaceSnapshotVerboseTarEntries(archivePath);
+  const entries = await listHostedWorkspaceSnapshotVerboseTarEntries(archiveSource);
   let fileCount = 0;
   const seen = new Set<string>();
   let totalPlainBytes = 0;
@@ -874,7 +886,7 @@ function parseHostedWorkspaceSnapshotBooleanEnv(value: string | undefined): bool
 }
 
 async function listHostedWorkspaceSnapshotVerboseTarEntries(
-  archivePath: string,
+  archiveSource: Buffer,
 ): Promise<string[]> {
   const tar = spawn("tar", [
     "-tvf",
@@ -885,9 +897,8 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
   const zstd = spawn("zstd", [
     "-d",
     "--stdout",
-    archivePath,
   ], {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
   if (!zstd.stdout || !tar.stdin) {
     throw new Error("Hosted workspace snapshot tar list streams are unavailable.");
@@ -895,9 +906,13 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
   if (!tar.stdout) {
     throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
   }
+  if (!zstd.stdin) {
+    throw new Error("Hosted workspace snapshot tar list streams are unavailable.");
+  }
   tar.stdout.setEncoding("utf8");
   const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
   const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+  const zstdInputPipe = pipeline(Readable.from([archiveSource]), zstd.stdin);
   const archivePipe = pipeline(zstd.stdout, tar.stdin);
   const lines = createInterface({
     crlfDelay: Number.POSITIVE_INFINITY,
@@ -915,7 +930,11 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
       }
     }
     await archivePipe;
-    await Promise.all([zstdExit, tarExit]);
+    await Promise.all([
+      zstdInputPipe,
+      zstdExit,
+      tarExit,
+    ]);
   } catch (error) {
     zstd.kill("SIGTERM");
     tar.kill("SIGTERM");
@@ -923,7 +942,7 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
       zstdExit,
       tarExit,
     ]);
-    await Promise.allSettled([archivePipe]);
+    await Promise.allSettled([zstdInputPipe, archivePipe]);
     if (
       processFailure
       && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -983,11 +1002,49 @@ function decodeHostedWorkspaceSnapshotIv(value: string): Buffer {
   return iv;
 }
 
-function createHashTransform(hash: ReturnType<typeof createHash>): Transform {
+function createHashTransform(hash: Hash): Transform {
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       hash.update(chunk);
       callback(null, chunk);
+    },
+  });
+}
+
+function createFixedSizeArchiveBufferCollector(input: {
+  byteLength: number;
+  hash: Hash;
+}): Writable & {
+  clear(): void;
+  readBuffer(): Buffer;
+} {
+  if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0) {
+    throw new Error("Hosted workspace snapshot decrypted archive size is unsafe.");
+  }
+  const buffer = Buffer.allocUnsafe(input.byteLength);
+  let offset = 0;
+  const collector = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      const nextOffset = offset + chunk.byteLength;
+      if (nextOffset > buffer.byteLength) {
+        callback(new Error("Hosted workspace snapshot decrypted archive size accounting failed."));
+        return;
+      }
+      input.hash.update(chunk);
+      chunk.copy(buffer, offset);
+      offset = nextOffset;
+      callback();
+    },
+  });
+  return Object.assign(collector, {
+    clear: () => {
+      buffer.fill(0);
+    },
+    readBuffer: () => {
+      if (offset !== buffer.byteLength) {
+        throw new Error("Hosted workspace snapshot decrypted archive size accounting failed.");
+      }
+      return buffer;
     },
   });
 }

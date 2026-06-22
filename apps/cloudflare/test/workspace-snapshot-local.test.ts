@@ -1,6 +1,16 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { writeFile, mkdtemp, rm, access, mkdir, readFile, readdir, symlink } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +20,8 @@ import {
   buildHostedWorkspaceSnapshotV2Aad,
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   serializeHostedWorkspaceSnapshotV2Aad,
@@ -126,7 +138,6 @@ describe("workspace snapshot local restore", () => {
         encryptedFilePath: encrypted.encryptedFilePath,
         postExtractIntegrityCheck: true,
         ref,
-        scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
 
       for (const key of [
@@ -155,6 +166,238 @@ describe("workspace snapshot local restore", () => {
       await expect(access(path.join(restoredVaultRoot, ".git", "config"))).rejects.toThrow();
       await expect(access(path.join(restoredOperatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt")))
         .rejects.toThrow();
+      await expect(readdir(path.dirname(restoredDurableRoot))).resolves.toEqual(["durable"]);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("round-trips ordinary planned paths with spaces and long names", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const sourceOperatorHomeRoot = path.join(sourceDurableRoot, "home");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const longFileName =
+      "2026-06-21 path with spaces and enough length to exercise tar list handling.md";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 21);
+    const snapshotId = "snapshot_ordinary_paths";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_ordinary_paths.snapshot.enc";
+    const userId = "member_123";
+
+    try {
+      await mkdir(path.join(sourceVaultRoot, "journal", "2026"), { recursive: true });
+      await mkdir(sourceOperatorHomeRoot, { recursive: true });
+      await writeFile(
+        path.join(sourceVaultRoot, "journal", "2026", longFileName),
+        "ordinary planned path\n",
+        "utf8",
+      );
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        operatorHomeRoot: sourceOperatorHomeRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePlan.entries,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 30))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const ref: HostedWorkspaceSnapshotV2Ref = {
+        archive: {
+          compression: encrypted.compression,
+          encryptedByteSize: encrypted.encryptedByteSize,
+          encryptedObjectSha256: encrypted.encryptedObjectSha256,
+          fileCount: encrypted.fileCount,
+          format: "tar",
+          plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+          totalPlainBytes: encrypted.totalPlainBytes,
+        },
+        createdAt: "2026-05-20T00:00:00.000Z",
+        encryption: {
+          aad,
+          ivBase64: encrypted.ivBase64,
+          rootKeyId: "root_key_test",
+          scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+          wrappedDataKey: "wrapped_data_key_test",
+        },
+        objectKey,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+        snapshotId,
+        upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+        userId,
+      };
+
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: encrypted.encryptedFilePath,
+        ref,
+      });
+
+      await expect(readFile(
+        path.join(restoredDurableRoot, "vault", "journal", "2026", longFileName),
+        "utf8",
+      )).resolves.toBe("ordinary planned path\n");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects snapshots at the encrypted size limit before preparing restore roots", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-limit-test-"));
+    const durableRoot = path.join(tempRoot, "restored", "durable");
+    const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
+    const snapshotId = "snapshot_size_limit";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_size_limit.snapshot.enc";
+    const userId = "member_123";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({
+      objectKey,
+      snapshotId,
+      userId,
+    });
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await writeFile(encryptedFilePath, "");
+      await truncate(encryptedFilePath, HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES);
+
+      const ref: HostedWorkspaceSnapshotV2Ref = {
+        archive: {
+          compression: "zstd",
+          encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+          encryptedObjectSha256: "0".repeat(64),
+          fileCount: 0,
+          format: "tar",
+          plaintextArchiveSha256: "0".repeat(64),
+          totalPlainBytes: 0,
+        },
+        createdAt: "2026-05-20T00:00:00.000Z",
+        encryption: {
+          aad,
+          ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+            .toString("base64url"),
+          rootKeyId: "root_key_test",
+          scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+          wrappedDataKey: "wrapped_data_key_test",
+        },
+        objectKey,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+        snapshotId,
+        upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+        userId,
+      };
+
+      await expect(restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        encryptedFilePath,
+        ref,
+      })).rejects.toThrow("Hosted workspace snapshot exceeds the single-part size limit.");
+      await expect(access(durableRoot)).rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects snapshots at the total plain size limit before preparing restore roots", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-plain-limit-test-"));
+    const durableRoot = path.join(tempRoot, "restored", "durable");
+    const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
+    const snapshotId = "snapshot_plain_size_limit";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_plain_size_limit.snapshot.enc";
+    const userId = "member_123";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({
+      objectKey,
+      snapshotId,
+      userId,
+    });
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await writeFile(encryptedFilePath, Buffer.alloc(17));
+
+      const ref: HostedWorkspaceSnapshotV2Ref = {
+        archive: {
+          compression: "zstd",
+          encryptedByteSize: 17,
+          encryptedObjectSha256: "0".repeat(64),
+          fileCount: 1,
+          format: "tar",
+          plaintextArchiveSha256: "0".repeat(64),
+          totalPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
+        },
+        createdAt: "2026-05-20T00:00:00.000Z",
+        encryption: {
+          aad,
+          ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+            .toString("base64url"),
+          rootKeyId: "root_key_test",
+          scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+          wrappedDataKey: "wrapped_data_key_test",
+        },
+        objectKey,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+        snapshotId,
+        upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+        userId,
+      };
+
+      await expect(restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        encryptedFilePath,
+        ref,
+      })).rejects.toThrow("Hosted workspace snapshot exceeds the total plain size limit.");
+      await expect(access(durableRoot)).rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects snapshot creation at the total plain size limit before archiving", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-create-plain-limit-test-"));
+    const durableRoot = path.join(tempRoot, "source", "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const outputDir = path.join(tempRoot, "scratch");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const snapshotId = "snapshot_create_plain_size_limit";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_create_plain_size_limit.snapshot.enc";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+
+    try {
+      await mkdir(vaultRoot, { mode: 0o700, recursive: true });
+      await writeFile(path.join(vaultRoot, "large.bin"), "");
+      await truncate(path.join(vaultRoot, "large.bin"), HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES);
+
+      await expect(createEncryptedWorkspaceSnapshotFile({
+        aad,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        outputDir,
+      })).rejects.toThrow("Hosted workspace snapshot exceeds the total plain size limit.");
+      await expect(readdir(outputDir)).resolves.toEqual([]);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -355,7 +598,6 @@ async function expectUnsafeTarArchive(input: {
   const durableRoot = path.join(tempRoot, "durable");
   const existingDurableFile = path.join(durableRoot, "existing.txt");
   const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
-  const scratchRoot = path.join(tempRoot, "restore-scratch");
   const snapshotId = "snapshot_unsafe_tar";
   const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
   const userId = "member_123";
@@ -416,10 +658,10 @@ async function expectUnsafeTarArchive(input: {
       durableRoot,
       encryptedFilePath,
       ref,
-      scratchRoot,
     })).rejects.toThrow(input.expectedError);
     await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
-    await expect(readdir(scratchRoot)).resolves.toEqual([]);
+    expect((await readdir(tempRoot)).filter((entry) => entry.startsWith(".workspace-snapshot-restore-")))
+      .toEqual([]);
     if (input.unwrittenRelativePath) {
       await expect(access(path.join(durableRoot, input.unwrittenRelativePath))).rejects.toThrow();
       await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
@@ -506,5 +748,6 @@ function zstdCompress(bytes: Buffer): Buffer {
     "--stdout",
   ], {
     input: bytes,
+    maxBuffer: 64 * 1024 * 1024,
   });
 }

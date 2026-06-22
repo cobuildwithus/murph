@@ -99,7 +99,7 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
         {/* Keeps the dialog accessibly named without showing a heading. */}
         <DialogTitle className="sr-only">Share your results</DialogTitle>
 
-        <div className="overflow-hidden rounded-xl border border-border bg-muted/50 shadow-sm">
+        <div className="overflow-hidden rounded-xl bg-muted/50 shadow-sm outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10">
           {/* eslint-disable-next-line @next/next/no-img-element -- OG route output, not a static asset */}
           <img
             src={cardPath}

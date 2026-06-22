@@ -1,5 +1,5 @@
 import { createCipheriv, createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,6 +13,7 @@ import {
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -260,6 +261,7 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
 
 function createWorkspaceSnapshotV2Ref(input: {
   encryptedByteSize: number;
+  totalPlainBytes?: number;
 }): HostedWorkspaceSnapshotV2Ref {
   const snapshotId = "snapshot_runner_platform";
   const objectKey = `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
@@ -271,7 +273,7 @@ function createWorkspaceSnapshotV2Ref(input: {
       fileCount: 1,
       format: "tar",
       plaintextArchiveSha256: "b".repeat(64),
-      totalPlainBytes: input.encryptedByteSize,
+      totalPlainBytes: input.totalPlainBytes ?? input.encryptedByteSize,
     },
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: {
@@ -367,6 +369,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }),
       scratchRoot: "unused-scratch-root",
     })).rejects.toThrow("Hosted workspace snapshot restore exceeds the single-part size guard.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized plain workspace snapshot restores before unwrap or fetch", async () => {
+    const fetchMock = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      durableRoot: "unused-durable-root",
+      ref: createWorkspaceSnapshotV2Ref({
+        encryptedByteSize: 128,
+        totalPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
+      }),
+      scratchRoot: "unused-scratch-root",
+    })).rejects.toThrow("Hosted workspace snapshot restore exceeds the total plain size guard.");
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -1102,6 +1123,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
@@ -1109,6 +1135,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         outputDir: scratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      await rm(scratchRoot, { force: true, recursive: true });
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
@@ -1241,6 +1268,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
+      await expect(readdir(scratchRoot)).resolves.toEqual([]);
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
         .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
@@ -1344,6 +1372,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
@@ -1463,6 +1496,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
+        archiveEntries: [{
+          absolutePath: path.join(sourceRoot, "note.md"),
+          archivePath: "note.md",
+          kind: "file",
+        }],
         dataKey: dataKeyBase64,
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
@@ -1694,6 +1732,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ref,
         scratchRoot,
       })).rejects.toThrow("Hosted workspace snapshot encrypted object is unavailable.");
+      await expect(readdir(scratchRoot)).resolves.toEqual([]);
 
       const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
         .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");

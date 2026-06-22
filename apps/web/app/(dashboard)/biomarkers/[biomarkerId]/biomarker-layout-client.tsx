@@ -36,7 +36,7 @@ export function BiomarkerLayoutClient({
         />
         <Link
           href="/biomarkers"
-          className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:mt-1"
+          className="relative inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-[''] sm:mt-1"
         >
           <ArrowLeft className="size-3.5" strokeWidth={1.75} aria-hidden />
           All biomarkers

@@ -388,7 +388,7 @@ function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
             ) : null}
           </dt>
           <dd className="mt-1 flex items-baseline gap-1.5">
-            <span className="font-serif text-2xl font-semibold text-foreground">
+            <span className="font-serif text-2xl font-semibold tabular-nums text-foreground">
               {formatMetricValue(metric.value, metric.valuePrecision)}
             </span>
             <span className="text-sm text-foreground/50">
@@ -396,7 +396,7 @@ function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
             </span>
           </dd>
           <div
-            className="mt-1 min-w-0 truncate text-xs text-foreground/45"
+            className="mt-1 min-w-0 truncate text-xs tabular-nums text-foreground/45"
             title={`${formatChipLabel(metric.sourceLabel)} · ${formatDateLabel(metric.date)}`}
           >
             {formatChipLabel(metric.sourceLabel)} · {formatDateLabel(metric.date)}

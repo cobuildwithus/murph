@@ -824,6 +824,14 @@ export async function runAssistantAutomationPass(
     fault: 'automation',
     message: 'Injected assistant automation failure.',
   })
+  await maybeRunAssistantRuntimeMaintenance({
+    vault: input.vault,
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'runtime maintenance',
+    })
+  })
   await recordAssistantDiagnosticEvent({
     vault: input.vault,
     component: 'automation',
@@ -832,14 +840,6 @@ export async function runAssistantAutomationPass(
     counterDeltas: {
       automationScans: 1,
     },
-  })
-  await maybeRunAssistantRuntimeMaintenance({
-    vault: input.vault,
-  }).catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'runtime maintenance',
-    })
   })
 
   const outboxResult = input.drainOutbox ?? true

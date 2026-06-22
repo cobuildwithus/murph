@@ -28,7 +28,7 @@ export function BiomarkerExperimentCard({
       href={protocol.href}
       className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
     >
-      <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden">
+      <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10">
         {imageSrc ? (
           <Image
             src={imageSrc}
@@ -51,7 +51,7 @@ export function BiomarkerExperimentCard({
             <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
               {protocol.category}
             </span>
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-pretty">
+            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
               {protocol.title}
             </h3>
           </div>
@@ -112,7 +112,7 @@ function StatCell({
       <span className="font-mono text-[9px]/3 uppercase tracking-[0.12em] text-muted-foreground sm:text-[10px]/3 sm:tracking-[0.14em]">
         {label}
       </span>
-      <span className={cn("text-pretty", valueClassName)}>{value}</span>
+      <span className={cn("tabular-nums text-pretty", valueClassName)}>{value}</span>
     </div>
   );
 }

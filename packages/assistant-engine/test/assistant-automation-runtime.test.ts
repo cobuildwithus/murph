@@ -8200,6 +8200,14 @@ describe('assistant automation run loop', () => {
     })
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(runLoopMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledOnce()
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledWith({
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(
+      runLoopMocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      runLoopMocks.recordAssistantDiagnosticEvent.mock.invocationCallOrder[0] ?? 0,
+    )
     expect(release).toHaveBeenCalledOnce()
   })
 

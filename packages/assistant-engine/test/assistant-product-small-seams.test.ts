@@ -1015,6 +1015,9 @@ describe('assistant product small seams', () => {
   })
 
   it('records diagnostics, trims warnings, and recovers malformed snapshots', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:01:00.000Z'))
+
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-diagnostics-small-seams-',
     )
@@ -1077,7 +1080,98 @@ describe('assistant product small seams', () => {
     })
   })
 
+  it('bounds diagnostic events while retaining snapshot counters and recent warnings', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-15T00:00:00.000Z'))
+
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-diagnostics-retention-',
+    )
+    tempRoots.push(parentRoot)
+
+    await recordAssistantDiagnosticEvent({
+      at: '2026-04-15T00:00:00.000Z',
+      component: 'assistant',
+      kind: 'routine-info',
+      level: 'info',
+      message: 'routine-info',
+      vault: vaultRoot,
+    })
+    await recordAssistantDiagnosticEvent({
+      at: '2026-04-07T23:59:59.000Z',
+      component: 'assistant',
+      counterDeltas: {
+        providerFailures: 1,
+      },
+      kind: 'too-old-diagnostic',
+      level: 'warn',
+      message: 'too-old-diagnostic',
+      vault: vaultRoot,
+    })
+    await recordAssistantDiagnosticEvent({
+      at: '2026-04-15T00:00:30.000Z',
+      component: 'assistant',
+      data: {
+        payload: 'x'.repeat(2 * 1024 * 1024),
+      },
+      kind: 'oversized-diagnostic',
+      level: 'warn',
+      message: 'oversized-diagnostic',
+      vault: vaultRoot,
+    })
+
+    for (let index = 0; index < 70; index += 1) {
+      const hour = String(Math.floor(index / 60)).padStart(2, '0')
+      const minute = String(index % 60).padStart(2, '0')
+      await recordAssistantDiagnosticEvent({
+        at: `2026-04-15T${hour}:${minute}:00.000Z`,
+        component: 'assistant',
+        counterDeltas: {
+          turnsStarted: 1,
+        },
+        data: {
+          payload: 'x'.repeat(12_000),
+        },
+        kind: 'turn.warned',
+        level: 'warn',
+        message: `retained-warning-${index}`,
+        vault: vaultRoot,
+      })
+    }
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await runAssistantRuntimeMaintenance({
+      now: new Date('2026-04-15T01:11:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    const diagnosticEventsRaw = await readFile(paths.diagnosticEventsPath, 'utf8')
+    expect(Buffer.byteLength(diagnosticEventsRaw, 'utf8')).toBeLessThanOrEqual(
+      512 * 1024,
+    )
+    expect(diagnosticEventsRaw).toContain('retained-warning-69')
+    expect(diagnosticEventsRaw).not.toContain('retained-warning-0')
+    expect(diagnosticEventsRaw).not.toContain('oversized-diagnostic')
+    expect(diagnosticEventsRaw).not.toContain('too-old-diagnostic')
+
+    const runtimeEventsRaw = await readFile(paths.runtimeEventsPath, 'utf8')
+    expect(runtimeEventsRaw).toContain('retained-warning-69')
+    expect(runtimeEventsRaw).not.toContain('routine-info')
+    expect(runtimeEventsRaw).not.toContain('oversized-diagnostic')
+    expect(runtimeEventsRaw).not.toContain('too-old-diagnostic')
+
+    const snapshot = await readAssistantDiagnosticsSnapshot(vaultRoot)
+    expect(snapshot.counters.turnsStarted).toBe(70)
+    expect(snapshot.counters.providerFailures).toBe(1)
+    expect(snapshot.recentWarnings).toHaveLength(12)
+    expect(snapshot.recentWarnings[0]).toContain('retained-warning-58')
+    expect(snapshot.recentWarnings.at(-1)).toContain('retained-warning-69')
+  })
+
   it('redacts hosted direct identifiers from diagnostics and mirrored runtime events', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:01:00.000Z'))
+
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-diagnostics-direct-id-redaction-',
     )
@@ -1159,6 +1253,7 @@ describe('assistant product small seams', () => {
     })
     expect(event.code).toBe('turn.started')
     expect(event.dataJson).toBeNull()
+    expect(appendAssistantRuntimeEventAtPaths).not.toHaveBeenCalled()
 
     const snapshot = await diagnosticsModule.readAssistantDiagnosticsSnapshot(vaultRoot)
     expect(snapshot.counters).toEqual(createEmptyAssistantDiagnosticsCounters())

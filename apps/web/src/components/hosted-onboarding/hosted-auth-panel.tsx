@@ -269,7 +269,7 @@ function HostedResumableAuthState({
     : `You're already signed in with ${methodLabel}.`;
 
   return (
-    <Alert className="border-stone-200 bg-stone-50">
+    <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
       <AlertTitle>Continue with {methodLabel}</AlertTitle>
       <AlertDescription>{description}</AlertDescription>
       <div className="mt-3 flex flex-wrap gap-3">

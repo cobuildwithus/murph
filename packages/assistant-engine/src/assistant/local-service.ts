@@ -90,6 +90,7 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
+import { maybeRunAssistantRuntimeMaintenance } from './runtime-budgets.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -302,6 +303,12 @@ export async function sendAssistantMessageLocal(
       throw createAssistantActiveTurnNotActiveError()
     }
   }
+
+  await runAssistantTurnBestEffort(() =>
+    maybeRunAssistantRuntimeMaintenance({
+      vault: input.vault,
+    })
+  )
 
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
