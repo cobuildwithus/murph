@@ -138,13 +138,16 @@ export function createComposioConnectedAppsClient(input: {
 
     async listAccounts(inputList: {
       accountIds?: readonly string[];
+      statuses?: readonly string[] | null;
       toolkit?: string;
       userId: string;
     }): Promise<ComposioConnectedAccount[]> {
       const query = new URLSearchParams();
       query.set("account_type", "PRIVATE");
       query.set("limit", "100");
-      appendQueryValues(query, "statuses", ["ACTIVE"]);
+      if (inputList.statuses !== null) {
+        appendQueryValues(query, "statuses", inputList.statuses ?? ["ACTIVE"]);
+      }
       appendQueryValues(query, "user_ids", [inputList.userId]);
       if (inputList.accountIds?.length) {
         appendQueryValues(query, "connected_account_ids", inputList.accountIds);
@@ -198,8 +201,8 @@ export function createComposioConnectedAppsClient(input: {
       await requestJson({
         config: input.config,
         fetchImpl,
-        method: "DELETE",
-        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}?revoke_on_delete=true`,
+        method: "POST",
+        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}/revoke`,
       });
     },
   };

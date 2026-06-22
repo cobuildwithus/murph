@@ -93,15 +93,15 @@ describe("Composio connected-app client", () => {
     ]);
   });
 
-  it("supports multiple connected accounts and explicit revoke", async () => {
+  it("supports multiple connected accounts and explicit provider revoke", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
     ): Promise<Response> => {
       const parsed = new URL(String(url));
-      if (init?.method === "DELETE") {
-        expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work");
-        expect(parsed.searchParams.get("revoke_on_delete")).toBe("true");
+      if (init?.method === "POST") {
+        expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work/revoke");
+        expect(parsed.search).toBe("");
         return jsonResponse({ success: true });
       }
       expect(parsed.searchParams.get("user_ids")).toBe("hbm_member");

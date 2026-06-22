@@ -8,6 +8,14 @@ import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
+  createComposioConnectedAppsClient,
+  type ComposioConnectedAccount,
+} from "../connected-apps/composio";
+import {
+  formatHostedConnectedAppToolkitLabel,
+  readHostedConnectedAppsConfig,
+} from "../connected-apps/config";
+import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
 } from "../device-sync/provider-label";
@@ -226,6 +234,20 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
   },
   {
+    slug: "prisma.hosted_connected_apps_session",
+    label: "Connected-app Tool Router sessions",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Revokes provider access through Composio before local Tool Router session references are deleted.",
+  },
+  {
+    slug: "prisma.hosted_connected_app_connect_intent",
+    label: "Connected-app connection intents",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes short-lived connected-app connection claims and account ids after provider revocation has been attempted.",
+  },
+  {
     slug: "prisma.device_sync_dirty_connection",
     label: "Device sync dirty state",
     deletion: "live-delete",
@@ -322,6 +344,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "best-effort-delete",
     export: "metadata-and-counts",
     note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
+  },
+  {
+    slug: "providers.composio_connected_apps",
+    label: "Composio connected-app provider revocation",
+    deletion: "best-effort-delete",
+    export: "metadata-and-counts",
+    note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -1495,11 +1524,19 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const providerRevocations = await revokeDeviceProvidersBestEffort({
+  const deviceProviderRevocations = await revokeDeviceProvidersBestEffort({
     connections: providerRevocationConnectionIdentities,
     memberId: input.memberId,
     request: input.request,
   });
+  const connectedAppRevocations = await revokeConnectedAppsBestEffort({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const providerRevocations = [
+    ...deviceProviderRevocations,
+    ...connectedAppRevocations,
+  ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
@@ -1874,6 +1911,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_connected_apps_session", await input.prisma.hostedConnectedAppsSession.deleteMany({ where: { memberId } }));
 
   const webhookTraceWhere = buildDeviceWebhookTraceWhere(input.connectionIdentities);
   counts["prisma.device_webhook_trace"] = webhookTraceWhere
@@ -2131,6 +2170,74 @@ async function revokeDeviceProvidersBestEffort(input: {
   }
 
   return results;
+}
+
+async function revokeConnectedAppsBestEffort(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedAccountProviderRevocationResult[]> {
+  const session = await input.prisma.hostedConnectedAppsSession.findUnique({
+    select: { memberId: true },
+    where: { memberId: input.memberId },
+  });
+  if (!session) {
+    return [];
+  }
+
+  let accounts: ComposioConnectedAccount[];
+  let client: ReturnType<typeof createComposioConnectedAppsClient>;
+  try {
+    const config = readHostedConnectedAppsConfig();
+    client = createComposioConnectedAppsClient({ config });
+    accounts = await client.listAccounts({
+      statuses: null,
+      userId: input.memberId,
+    });
+  } catch (error) {
+    return [{
+      connectionId: "composio_connected_apps",
+      errorCode: safeErrorCode(error),
+      providerLabel: "Connected apps",
+      status: "failed",
+      warningCode: null,
+    }];
+  }
+
+  const results: HostedAccountProviderRevocationResult[] = [];
+  for (const account of accounts.filter(isComposioAccountRevokable)) {
+    try {
+      await client.disconnectAccount(account.id);
+      results.push({
+        connectionId: account.id,
+        errorCode: null,
+        providerLabel: formatConnectedAppProviderLabel(account),
+        status: "revoked",
+        warningCode: null,
+      });
+    } catch (error) {
+      results.push({
+        connectionId: account.id,
+        errorCode: safeErrorCode(error),
+        providerLabel: formatConnectedAppProviderLabel(account),
+        status: "failed",
+        warningCode: null,
+      });
+    }
+  }
+
+  return results;
+}
+
+function isComposioAccountRevokable(account: ComposioConnectedAccount): boolean {
+  const status = account.status.toUpperCase();
+  return status !== "DELETED" && status !== "REVOKED";
+}
+
+function formatConnectedAppProviderLabel(account: ComposioConnectedAccount): string {
+  const label = account.toolkit.name
+    || formatHostedConnectedAppToolkitLabel(account.toolkit.slug);
+  const qualifier = account.alias ?? account.wordId;
+  return qualifier ? `${label} (${qualifier})` : label;
 }
 
 function assertProviderRevocationsAllowDeletion(

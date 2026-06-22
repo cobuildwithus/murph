@@ -1,11 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
+  connectedAppsClient: {
+    disconnectAccount: vi.fn(),
+    listAccounts: vi.fn(),
+  },
+  createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
+  readHostedConnectedAppsConfig: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
+}));
+
+vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/connected-apps/composio")>()),
+  createComposioConnectedAppsClient: serviceMocks.createComposioConnectedAppsClient,
+}));
+
+vi.mock("@/src/lib/connected-apps/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/connected-apps/config")>()),
+  readHostedConnectedAppsConfig: serviceMocks.readHostedConnectedAppsConfig,
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -60,6 +76,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
   "prisma.hosted_member_billing_ref",
+  "prisma.hosted_connected_app_connect_intent",
+  "prisma.hosted_connected_apps_session",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -91,6 +109,7 @@ const REQUIRED_STORE_SLUGS = [
   "cloudflare.r2_user_artifacts",
   "temporal.per_user_runtime_workflow",
   "providers.oura_whoop_strava",
+  "providers.composio_connected_apps",
   "providers.linq_telegram_email_messages",
   "providers.stripe_privy",
   "backups",
@@ -111,6 +130,11 @@ const VALID_EXPORT_MODES = new Set([
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.connectedAppsClient.disconnectAccount.mockReset();
+  serviceMocks.connectedAppsClient.listAccounts.mockReset();
+  serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([]);
+  serviceMocks.createComposioConnectedAppsClient.mockReset();
+  serviceMocks.createComposioConnectedAppsClient.mockReturnValue(serviceMocks.connectedAppsClient);
   serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
@@ -118,6 +142,13 @@ beforeEach(() => {
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
   serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
+  serviceMocks.readHostedConnectedAppsConfig.mockReset();
+  serviceMocks.readHostedConnectedAppsConfig.mockReturnValue({
+    apiKey: "secret-test-key",
+    baseUrl: "https://backend.composio.test",
+    maxAccountsPerToolkit: 5,
+    toolkits: ["gmail", "googlecalendar"],
+  });
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -1246,6 +1277,88 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
+  it("revokes connected apps before local account deletion removes ownership rows", async () => {
+    const order: string[] = [];
+    serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([
+      {
+        alias: "work",
+        id: "ca_gmail",
+        isDisabled: false,
+        status: "ACTIVE",
+        toolkit: { name: "Gmail", slug: "gmail" },
+        wordId: "bright-river",
+      },
+    ]);
+    serviceMocks.connectedAppsClient.disconnectAccount.mockImplementation(async (accountId: string) => {
+      order.push(`revoke:${accountId}`);
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppsSession: true,
+      onTransaction: () => order.push("prisma"),
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).toHaveBeenCalledWith({
+      statuses: null,
+      userId: "member_123",
+    });
+    expect(serviceMocks.connectedAppsClient.disconnectAccount).toHaveBeenCalledWith("ca_gmail");
+    expect(order.indexOf("revoke:ca_gmail")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("revoke:ca_gmail")).toBeLessThan(order.indexOf("prisma"));
+    expect(result.providerRevocations).toEqual([
+      {
+        connectionId: "ca_gmail",
+        errorCode: null,
+        providerLabel: "Gmail (work)",
+        status: "revoked",
+        warningCode: null,
+      },
+    ]);
+    expect(result.deletedCounts["prisma.hosted_connected_app_connect_intent"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_connected_apps_session"]).toBe(1);
+  });
+
+  it("blocks hosted account deletion when connected-app revocation fails", async () => {
+    const order: string[] = [];
+    serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([
+      {
+        alias: "work",
+        id: "ca_gmail",
+        isDisabled: false,
+        status: "ACTIVE",
+        toolkit: { name: "Gmail", slug: "gmail" },
+        wordId: "bright-river",
+      },
+    ]);
+    serviceMocks.connectedAppsClient.disconnectAccount.mockRejectedValue(
+      Object.assign(new Error("provider secret should not leak"), {
+        name: "ComposioRevokeFailed",
+      }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppsSession: true,
+      onTransaction: () => order.push("prisma"),
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(serviceMocks.connectedAppsClient.disconnectAccount).toHaveBeenCalledWith("ca_gmail");
+    expect(order).toEqual([]);
+  });
+
   it("blocks hosted account deletion when provider-config revocation fails", async () => {
     const order: string[] = [];
     const revokeAccess = vi.fn(async () => {
@@ -2067,6 +2180,7 @@ async function createHostedAccountDataExportPrismaForTest(
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
+  connectedAppsSession?: boolean;
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
     id: string;
@@ -2151,6 +2265,11 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
+    },
+    hostedConnectedAppsSession: {
+      findUnique: async () => input.connectedAppsSession
+        ? { memberId: "member_123" }
+        : null,
     },
     hostedComputerRun: {
       findMany: async () => {
