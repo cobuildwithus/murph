@@ -65,6 +65,7 @@ import {
   unlinkJournalStreams,
   updateExperiment,
   updateVaultSummary,
+  VAULT_LAYOUT,
   upsertEvent,
   upsertProvider,
   validateVault,
@@ -2233,6 +2234,29 @@ test("validateVault accumulates missing directory and malformed event issues", a
         issue.code === "EVENT_INVALID" &&
         issue.path === "ledger/events/2026/2026-03.jsonl",
     ),
+  );
+});
+
+test("validateVault accepts format v1 vaults without integration ingest ledger directory", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  await fs.rm(path.join(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory), {
+    recursive: true,
+    force: true,
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.equal(validation.metadata?.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "VAULT_MISSING_DIRECTORY" &&
+        issue.path === VAULT_LAYOUT.integrationIngestLedgerDirectory,
+    ),
+    false,
   );
 });
 

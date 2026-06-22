@@ -148,8 +148,9 @@ function sampleQueryRecord(overrides: Partial<QueryRecord> = {}): QueryRecord {
 
 function createRawImportManifest(input: {
   importId: string;
-  importKind: "document" | "meal" | "workout_batch";
-  ownerKind: "document" | "meal" | "workout";
+  importKind: "device_batch" | "document" | "meal" | "workout_batch";
+  ownerKind: "device_batch" | "document" | "meal" | "workout";
+  ownerPartition?: string;
   rawDirectory: string;
   relativePath: string;
   originalFileName: string;
@@ -164,6 +165,7 @@ function createRawImportManifest(input: {
     owner: {
       kind: input.ownerKind,
       id: input.importId,
+      ...(input.ownerPartition ? { partition: input.ownerPartition } : {}),
     },
     rawDirectory: input.rawDirectory,
     artifacts: [
@@ -218,8 +220,19 @@ async function loadManifestReadUsecases(queryRuntime: {
       }),
     ),
   });
+  const measurementRead = await importWithMocks<
+    typeof import("../src/usecases/measurement-read.ts")
+  >("../src/usecases/measurement-read.ts", {
+    "../src/commands/query-record-command-helpers.ts": mockActualModule(
+      "../src/commands/query-record-command-helpers.ts",
+      (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => queryRuntime),
+      }),
+    ),
+  });
 
-  return { documentMeal, workoutRead };
+  return { documentMeal, measurementRead, workoutRead };
 }
 
 function createCoreStub<T extends Record<string, unknown>>(overrides: T): T {
@@ -233,6 +246,7 @@ afterEach(() => {
   vi.doUnmock("../src/query-runtime.ts");
   vi.doUnmock("../src/commands/query-record-command-helpers.ts");
   vi.doUnmock("../src/usecases/event-record-mutations.ts");
+  vi.doUnmock("../src/usecases/measurement-read.ts");
   vi.doUnmock("../src/usecases/provider-event.ts");
 });
 
@@ -816,8 +830,13 @@ describe("record service seams", () => {
     const documentId = "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const workoutEventId = "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const workoutImportId = "xfm_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const measurementEventId = "evt_01ARZ3NDEKTSV4RRFFQ69G5FAW";
+    const measurementImportId = "xfm_01ARZ3NDEKTSV4RRFFQ69G5FAW";
     const documentManifestFile = `raw/documents/2026/04/${documentId}/manifest.json`;
     const workoutManifestFile = `raw/workouts/2026/04/${workoutEventId}/manifest.json`;
+    const measurementRawDirectory = `raw/integrations/junction/2026/04/${measurementImportId}`;
+    const measurementRawFile = `${measurementRawDirectory}/001-body-measurement.json`;
+    const measurementManifestFile = `${measurementRawDirectory}/manifest.json`;
 
     try {
       await writeManifestFile(
@@ -846,6 +865,20 @@ describe("record service seams", () => {
           mediaType: "text/csv",
         }),
       );
+      await writeManifestFile(
+        vaultRoot,
+        measurementManifestFile,
+        createRawImportManifest({
+          importId: measurementImportId,
+          importKind: "device_batch",
+          ownerKind: "device_batch",
+          ownerPartition: "junction",
+          rawDirectory: measurementRawDirectory,
+          relativePath: measurementRawFile,
+          originalFileName: "body-measurement.json",
+          mediaType: "application/json",
+        }),
+      );
 
       const queryRuntime = {
         readVault: vi.fn(async () => ({ vault: vaultRoot })),
@@ -870,10 +903,21 @@ describe("record service seams", () => {
                     rawRefs: [`raw/workouts/2026/04/${workoutEventId}/workout.csv`],
                   },
                 })
+              : lookup === measurementEventId
+                ? sampleQueryRecord({
+                    kind: "body_measurement",
+                    family: "event",
+                    entityId: measurementEventId,
+                    primaryLookupId: measurementEventId,
+                    path: `bank/events/${measurementEventId}.md`,
+                    attributes: {
+                      rawRefs: [measurementRawFile],
+                    },
+                  })
               : null,
         ),
       };
-      const { documentMeal, workoutRead } = await loadManifestReadUsecases(queryRuntime);
+      const { documentMeal, measurementRead, workoutRead } = await loadManifestReadUsecases(queryRuntime);
 
       const shownDocumentManifest = await documentMeal.showDocumentManifest(vaultRoot, documentId);
       assert.equal(shownDocumentManifest.manifestFile, documentManifestFile);
@@ -882,6 +926,10 @@ describe("record service seams", () => {
       const shownWorkoutManifest = await workoutRead.showWorkoutManifest(vaultRoot, workoutEventId);
       assert.equal(shownWorkoutManifest.manifestFile, workoutManifestFile);
       assert.equal(shownWorkoutManifest.manifest.importKind, "workout_batch");
+
+      const shownMeasurementManifest = await measurementRead.showMeasurementManifest(vaultRoot, measurementEventId);
+      assert.equal(shownMeasurementManifest.manifestFile, measurementManifestFile);
+      assert.equal(shownMeasurementManifest.manifest.importKind, "device_batch");
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }

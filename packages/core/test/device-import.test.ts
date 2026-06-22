@@ -551,6 +551,7 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
       timeZone: "UTC",
       source: "device",
       title: "WHOOP sleep",
+      rawRefs: [`${rawDirectory}/001-sleep-sleep-1.json`],
       externalRef: {
         system: "whoop",
         resourceType: "sleep",
@@ -571,6 +572,7 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
       timeZone: "UTC",
       source: "device",
       title: "WHOOP recovery score",
+      rawRefs: [`${rawDirectory}/002-recovery-sleep-1.json`],
       externalRef: {
         system: "whoop",
         resourceType: "recovery",
@@ -1121,11 +1123,13 @@ test("importDeviceBatch falls back to the sole evidence part when events omit ex
     vaultRoot,
     id: result.importId,
   });
+  const fallbackRawRef = ingestRecord.parts[0]?.relativePath;
 
   assert.equal(result.importId, "xfm_1Z08Z92ZENNAM92FY9NK798ZXY");
   assert.equal(result.events[0]?.id, "evt_2TSF1SDWFHHSQ8503JWDHCF47K");
   assert.equal(eventRecords[0]?.kind, "note");
-  assert.equal(Object.hasOwn(eventRecords[0] ?? {}, "rawRefs"), false);
+  assert.ok(fallbackRawRef);
+  assert.deepEqual(eventRecords[0]?.rawRefs, [fallbackRawRef]);
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "murph.event.v1",
@@ -1138,6 +1142,7 @@ test("importDeviceBatch falls back to the sole evidence part when events omit ex
       source: "device",
       title: "note",
       note: "single raw fallback",
+      rawRefs: [fallbackRawRef],
     },
   ]);
   assert.equal(ingestRecord.parts[0]?.role, "artifact-1");
@@ -1145,6 +1150,85 @@ test("importDeviceBatch falls back to the sole evidence part when events omit ex
   assert.deepEqual(ingestRecord.outputs?.events, [
     { id: "evt_2TSF1SDWFHHSQ8503JWDHCF47K", roles: ["artifact-1"] },
   ]);
+});
+
+test("importDeviceBatch preserves provider evidence rawRefs for manifest-backed event commands", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-event-rawrefs");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-03T20:35:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({ resourceId: "workouts-manifest-command" }),
+        rawArtifactRoles: ["workout-source"],
+      },
+      {
+        kind: "body_measurement",
+        occurredAt: "2026-06-03T20:35:00.000Z",
+        recordedAt: "2026-06-03T20:35:00.000Z",
+        title: "Body weight",
+        rawArtifactRoles: ["measurement-source"],
+        fields: {
+          measurements: [
+            {
+              type: "weight",
+              value: 180,
+              unit: "lb",
+            },
+          ],
+        },
+      },
+    ],
+    evidenceParts: [
+      {
+        role: "workout-source",
+        fileName: "workout.json",
+        content: {
+          provider: "junction",
+          kind: "workout",
+        },
+      },
+      {
+        role: "measurement-source",
+        fileName: "body-measurement.json",
+        content: {
+          provider: "junction",
+          kind: "body_measurement",
+        },
+      },
+    ],
+  });
+
+  const eventRecords = (
+    await Promise.all(
+      result.eventShardPaths.map(async (relativePath) =>
+        await readJsonlRecords({
+          vaultRoot,
+          relativePath,
+        })
+      ),
+    )
+  ).flat() as EventRecord[];
+  const recordsById = new Map(eventRecords.map((record) => [record.id, record]));
+  const { record: ingestRecord } = await readRequiredIntegrationIngest({
+    vaultRoot,
+    id: result.importId,
+  });
+  const rawRefsByRole = new Map(ingestRecord.parts.map((part) => [part.role, part.relativePath]));
+
+  assert.deepEqual(recordsById.get(result.events[0]?.id ?? "")?.rawRefs, [
+    rawRefsByRole.get("workout-source"),
+  ]);
+  assert.deepEqual(recordsById.get(result.events[1]?.id ?? "")?.rawRefs, [
+    rawRefsByRole.get("measurement-source"),
+  ]);
+  assert.deepEqual(ingestRecord.outputs?.events, [
+    { id: result.events[1]?.id, roles: ["measurement-source"] },
+    { id: result.events[0]?.id, roles: ["workout-source"] },
+  ].sort((left, right) => String(left.id).localeCompare(String(right.id))));
 });
 
 test("importDeviceBatch writes Date evidence part values as ISO strings", async () => {
@@ -1481,14 +1565,16 @@ test("importDeviceBatch does not implicitly attach synthetic wearable receipts a
     vaultRoot,
     relativePath: result.eventShardPaths[0] as string,
   })) as EventRecord[];
-
-  assert.equal(eventRecords[0]?.title, "implicit receipt fallback");
-  assert.equal(Object.hasOwn(eventRecords[0] ?? {}, "rawRefs"), false);
-  assert.equal(Object.hasOwn(eventRecords[1] ?? {}, "rawRefs"), false);
   const { record: ingestRecord } = await readRequiredIntegrationIngest({
     vaultRoot,
     id: result.importId,
   });
+  const providerSnapshotRef = ingestRecord.parts.find((part) => part.role === "provider-snapshot")?.relativePath;
+
+  assert.equal(eventRecords[0]?.title, "implicit receipt fallback");
+  assert.equal(Object.hasOwn(eventRecords[0] ?? {}, "rawRefs"), false);
+  assert.ok(providerSnapshotRef);
+  assert.deepEqual(eventRecords[1]?.rawRefs, [providerSnapshotRef]);
   assert.deepEqual(ingestRecord.receipt, {
     schemaVersion: "wearable.raw_ingest_receipt.v1",
     id: "wearable_raw_test",

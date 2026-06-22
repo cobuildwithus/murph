@@ -594,6 +594,7 @@ const vaultFamilyDescriptors = [
     fileExtension: ".jsonl",
     shardPattern: "ledger/integration-ingests/YYYY/YYYY-MM.jsonl",
     querySource: "none",
+    requiredDirectory: false,
     validation: {
       kind: "jsonl",
       issueCode: "INTEGRATION_INGEST_INVALID",

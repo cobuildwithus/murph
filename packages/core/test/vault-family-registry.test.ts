@@ -22,6 +22,18 @@ async function expectDirectoryExists(vaultRoot: string, relativePath: string): P
   assert.equal(details.isDirectory(), true);
 }
 
+async function expectDirectoryMissing(vaultRoot: string, relativePath: string): Promise<void> {
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, relativePath)),
+    (error: unknown) => (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ),
+  );
+}
+
 afterEach(async () => {
   await Promise.all(
     tempRoots.splice(0).map((vaultRoot) => rm(vaultRoot, { recursive: true, force: true })),
@@ -35,7 +47,7 @@ test("initializeVault creates registry-owned required directories", async () => 
 
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.automationsDirectory);
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.inboxCaptureLedgerDirectory);
-  await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
+  await expectDirectoryMissing(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.rawInboxDirectory);
 });
 

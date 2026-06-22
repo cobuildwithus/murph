@@ -1477,7 +1477,8 @@ function prepareDeviceEventEntries(
   events: readonly NormalizedDeviceEvent[],
   preparedEvidenceParts: readonly PreparedDeviceEvidencePart[],
 ): PreparedDeviceEventEntry[] {
-  const evidencePartRoles = new Set(preparedEvidenceParts.map((part) => part.role));
+  const evidencePartPathsByRole = new Map(preparedEvidenceParts.map((part) => [part.role, part.relativePath] as const));
+  const evidencePartRoles = new Set(evidencePartPathsByRole.keys());
   const soleEvidencePart = preparedEvidenceParts.length === 1 ? preparedEvidenceParts[0] : undefined;
   const soleFallbackRole = soleEvidencePart && isImplicitDeviceEvidenceFallbackRole(soleEvidencePart.role)
     ? soleEvidencePart.role
@@ -1498,7 +1499,16 @@ function prepareDeviceEventEntries(
       : soleFallbackRole
         ? [soleFallbackRole]
         : [];
-    const entry = prepareStoredEventLedgerEntry(event.seed, event.recordId);
+    const rawRefs = outputRoles
+      .map((role) => evidencePartPathsByRole.get(role))
+      .filter((relativePath): relativePath is string => typeof relativePath === "string");
+    const seed = rawRefs.length > 0
+      ? {
+        ...event.seed,
+        rawRefs: [...new Set([...(event.seed.rawRefs ?? []), ...rawRefs])],
+      }
+      : event.seed;
+    const entry = prepareStoredEventLedgerEntry(seed, event.recordId);
     return {
       ...entry,
       evidencePartRoles: outputRoles,

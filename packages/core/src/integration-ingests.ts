@@ -13,6 +13,7 @@ import {
   type IntegrationIngestReceipt,
   type IntegrationIngestRecord,
   type JsonObject,
+  type RawImportManifest,
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
@@ -85,6 +86,20 @@ export type IntegrationEvidencePartManifestBindingResult =
     ok: false;
     relativePath: string;
   };
+
+export interface IntegrationEvidencePartManifestBindingCache {
+  rawDirectories: Map<string, Promise<RawManifestDirectoryBindingState>>;
+}
+
+interface ParsedRawManifestBinding {
+  manifest: RawImportManifest;
+  manifestPath: string;
+}
+
+interface RawManifestDirectoryBindingState {
+  manifestPaths: string[];
+  manifests: ParsedRawManifestBinding[];
+}
 
 export interface IntegrationIngestEventSummary {
   accountId?: string;
@@ -425,7 +440,65 @@ async function listRawManifestPathsForDirectory(input: {
   );
 }
 
+export function createIntegrationEvidencePartManifestBindingCache(): IntegrationEvidencePartManifestBindingCache {
+  return {
+    rawDirectories: new Map(),
+  };
+}
+
+async function loadRawManifestBindingsForDirectory(input: {
+  rawDirectory: string;
+  vaultRoot: string;
+}): Promise<RawManifestDirectoryBindingState> {
+  const manifestPaths = (await listRawManifestPathsForDirectory(input)).sort();
+  const manifests: ParsedRawManifestBinding[] = [];
+
+  for (const manifestPath of manifestPaths) {
+    let manifestValue: unknown;
+    try {
+      manifestValue = await readJsonFile(input.vaultRoot, manifestPath);
+    } catch {
+      continue;
+    }
+
+    const parsed = safeParseContract(rawImportManifestSchema, manifestValue);
+    if (!parsed.success) {
+      continue;
+    }
+
+    manifests.push({
+      manifest: parsed.data,
+      manifestPath,
+    });
+  }
+
+  return {
+    manifestPaths,
+    manifests,
+  };
+}
+
+async function readRawManifestBindingsForDirectory(input: {
+  cache?: IntegrationEvidencePartManifestBindingCache;
+  rawDirectory: string;
+  vaultRoot: string;
+}): Promise<RawManifestDirectoryBindingState> {
+  if (!input.cache) {
+    return await loadRawManifestBindingsForDirectory(input);
+  }
+
+  const cached = input.cache.rawDirectories.get(input.rawDirectory);
+  if (cached) {
+    return await cached;
+  }
+
+  const loaded = loadRawManifestBindingsForDirectory(input);
+  input.cache.rawDirectories.set(input.rawDirectory, loaded);
+  return await loaded;
+}
+
 export async function validateIntegrationEvidencePartManifestBinding(input: {
+  cache?: IntegrationEvidencePartManifestBindingCache;
   ingestId: string;
   part: IntegrationEvidencePart;
   provider: string;
@@ -441,12 +514,13 @@ export async function validateIntegrationEvidencePartManifestBinding(input: {
   }
 
   const rawDirectory = path.posix.dirname(input.part.relativePath);
-  const manifestPaths = await listRawManifestPathsForDirectory({
+  const directoryBinding = await readRawManifestBindingsForDirectory({
+    cache: input.cache,
     rawDirectory,
     vaultRoot: input.vaultRoot,
   });
 
-  if (manifestPaths.length === 0) {
+  if (directoryBinding.manifestPaths.length === 0) {
     return {
       code: "INTEGRATION_INGEST_PART_MANIFEST",
       message: `Integration ingest part "${input.part.role}" raw directory "${rawDirectory}" is missing a matching raw import manifest.`,
@@ -456,20 +530,7 @@ export async function validateIntegrationEvidencePartManifestBinding(input: {
   }
 
   let ownerMatched = false;
-  for (const manifestPath of manifestPaths.sort()) {
-    let manifestValue: unknown;
-    try {
-      manifestValue = await readJsonFile(input.vaultRoot, manifestPath);
-    } catch {
-      continue;
-    }
-
-    const parsed = safeParseContract(rawImportManifestSchema, manifestValue);
-    if (!parsed.success) {
-      continue;
-    }
-
-    const manifest = parsed.data;
+  for (const { manifest, manifestPath } of directoryBinding.manifests) {
     if (
       manifest.rawDirectory !== rawDirectory ||
       manifest.importKind !== "device_batch" ||

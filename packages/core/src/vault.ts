@@ -38,8 +38,10 @@ import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import {
+  createIntegrationEvidencePartManifestBindingCache,
   validateIntegrationEvidencePartManifestBinding,
   validateIntegrationIngestRecordForShard,
+  type IntegrationEvidencePartManifestBindingCache,
 } from "./integration-ingests.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
@@ -569,6 +571,7 @@ function resolveJsonlFamilyPostValidator(
     case "events":
       return async (record) => validateEventRecordReferences(vaultRoot, record);
     case "integrationIngests": {
+      const manifestBindingCache = createIntegrationEvidencePartManifestBindingCache();
       const seenIngestIds = new Map<string, string>();
       let eventIdsPromise: Promise<Set<string>> | null = null;
       let sampleIdsPromise: Promise<Set<string>> | null = null;
@@ -583,6 +586,7 @@ function resolveJsonlFamilyPostValidator(
           sampleIds: await sampleIdsPromise,
           seenIngestIds,
           vaultRoot,
+          manifestBindingCache,
         });
       };
     }
@@ -654,6 +658,7 @@ async function validateIntegrationIngestRecordAgainstVault(input: {
   sampleIds: ReadonlySet<string>;
   seenIngestIds: Map<string, string>;
   vaultRoot: string;
+  manifestBindingCache: IntegrationEvidencePartManifestBindingCache;
 }): Promise<ValidationIssue[]> {
   const issues = validateIntegrationIngestRecordForShard({
     record: input.record,
@@ -757,6 +762,7 @@ async function validateIntegrationIngestRecordAgainstVault(input: {
 
       const manifestBinding = await validateIntegrationEvidencePartManifestBinding({
         ingestId: parsedIngest.data.id,
+        cache: input.manifestBindingCache,
         part,
         provider: parsedIngest.data.provider,
         vaultRoot: input.vaultRoot,
