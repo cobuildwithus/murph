@@ -4809,6 +4809,159 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   )
 })
 
+test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {
+  const progressDeliveryDependencies = {
+    sendLinqVoiceMemo: vi.fn(async () => ({
+      providerMessageId: 'progress-voice-memo',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only Linq manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  const result = await progressDelivery.send('Checking the iMessage thread.')
+
+  assert.deepEqual(result, {
+    kind: 'failed',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal enables hosted computer tools for Telegram when provider fetch and delivery are available', async () => {
+  const progressDeliveryDependencies = {
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'telegram-thread',
+      target: 'telegram-thread',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'telegram',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only Telegram manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  await progressDelivery.send('Checking the Telegram thread.')
+
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
+    'Checking the Telegram thread.',
+  )
+})
+
+test('sendAssistantMessageLocal does not mark required hosted progress delivery available for unsupported channels', async () => {
+  const progressDeliveryDependencies = {
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'telegram-thread',
+      target: 'telegram-thread',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'whatsapp'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'whatsapp',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        providerFetch: vi.fn<typeof fetch>(),
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only WhatsApp manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
+  const result = await progressDelivery.send('Checking the WhatsApp thread.')
+
+  assert.deepEqual(result, {
+    kind: 'failed',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendTelegram.mock.calls.length, 0)
+})
+
 test('sendAssistantMessageLocal lets the provider own hosted attachment progress', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-attachment-progress-',
@@ -5039,13 +5192,12 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
   )
 })
 
-test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resolved audience channels', async () => {
+test('sendAssistantMessageLocal routes hosted email model progress through progress delivery dependencies', async () => {
   const progressDeliveryDependencies = {
-    sendLinq: vi.fn(async () => ({
+    sendEmail: vi.fn(async () => ({
       providerMessageId: 'progress-message',
-      providerThreadId: 'thread-progress',
-      target: 'thread-progress',
-      targetKind: 'thread' as const,
+      providerThreadId: 'email-thread',
+      target: 'email-thread',
     })),
   }
   const sharedPlan = createSharedPlan()
@@ -5058,17 +5210,18 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
   })
 
   await sendAssistantMessageLocal({
-    channel: 'linq',
+    channel: 'email',
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        providerFetch: vi.fn(async () => new Response(null)),
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only manual reply',
+    prompt: 'Hosted queue-only email manual reply',
     turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
@@ -5076,15 +5229,23 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
-  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
-  const result = await progressDelivery.send('Checking the iMessage thread.')
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
+  const result = await progressDelivery.send('Checking the email thread.')
 
   assert.deepEqual(result, {
-    kind: 'failed',
+    kind: 'sent',
     source: 'model',
   })
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
-  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
+    'Checking the email thread.',
+  )
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {

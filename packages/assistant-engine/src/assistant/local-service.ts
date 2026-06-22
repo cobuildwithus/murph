@@ -70,6 +70,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantExecutionContext,
+  type AssistantHostedProgressDeliveryDependencies,
   type AssistantExecutionContext,
 } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -141,6 +142,27 @@ function resolveAssistantProgressDeliveryChannel(input: {
     ?? normalizeNullableString(input.session.binding.channel)
 }
 
+function hasHostedProgressDeliveryForChannel(input: {
+  channel: string | null
+  dependencies?: AssistantHostedProgressDeliveryDependencies | null
+}): boolean {
+  const dependencies = input.dependencies
+  if (!dependencies) {
+    return false
+  }
+
+  switch (input.channel) {
+    case 'telegram':
+      return typeof dependencies.sendTelegram === 'function'
+    case 'linq':
+      return typeof dependencies.sendLinq === 'function'
+    case 'email':
+      return typeof dependencies.sendEmail === 'function'
+    default:
+      return false
+  }
+}
+
 function isRequiredUserMessageDeliveryAvailable(input: {
   executionContext: AssistantExecutionContext | null
   session: AssistantSession
@@ -151,16 +173,16 @@ function isRequiredUserMessageDeliveryAvailable(input: {
     return true
   }
 
-  return resolveAssistantProgressDeliveryChannel(input) === 'linq' &&
-    typeof hosted.progressDeliveryDependencies?.sendLinq === 'function'
+  return hasHostedProgressDeliveryForChannel({
+    channel: resolveAssistantProgressDeliveryChannel(input),
+    dependencies: hosted.progressDeliveryDependencies,
+  })
 }
 
 function isHostedComputerToolTransportAvailable(input: {
   executionContext: AssistantExecutionContext | null
-  requiredUserMessageDeliveryAvailable: boolean
 }): boolean {
-  return input.requiredUserMessageDeliveryAvailable &&
-    typeof input.executionContext?.hosted?.providerFetch === 'function'
+  return typeof input.executionContext?.hosted?.providerFetch === 'function'
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -405,31 +427,30 @@ export async function sendAssistantMessageLocal(
         const hostedComputerToolsAvailable =
           isHostedComputerToolTransportAvailable({
             executionContext,
-            requiredUserMessageDeliveryAvailable,
-          })
+          }) && requiredUserMessageDeliveryAvailable
         const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
                 const hosted = executionContext?.hosted
                 if (hosted) {
-                  const deliveryChannel = resolveAssistantProgressDeliveryChannel(
-                    progressInput,
-                  )
-                  if (deliveryChannel !== 'linq') {
+                  const dependencies = hosted.progressDeliveryDependencies
+                  if (
+                    !dependencies ||
+                    !hasHostedProgressDeliveryForChannel({
+                      channel: resolveAssistantProgressDeliveryChannel(
+                        progressInput,
+                      ),
+                      dependencies,
+                    })
+                  ) {
                     throw new VaultCliError(
                       'ASSISTANT_PROGRESS_CHANNEL_UNSUPPORTED',
-                      'Hosted model progress updates are currently supported for iMessage delivery only.',
-                    )
-                  }
-                  if (!hosted.progressDeliveryDependencies?.sendLinq) {
-                    throw new VaultCliError(
-                      'ASSISTANT_PROGRESS_DELIVERY_UNAVAILABLE',
-                      'Hosted iMessage progress delivery dependencies were not available.',
+                      'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
                   await deliverAssistantProgressUpdate({
                     ...progressInput,
-                    dependencies: hosted.progressDeliveryDependencies,
+                    dependencies,
                   })
                   return
                 }

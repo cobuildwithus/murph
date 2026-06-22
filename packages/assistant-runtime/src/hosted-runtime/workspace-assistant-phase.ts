@@ -195,10 +195,12 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
+          effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           ...(input.initialMailboxImport.importResult.latestLinqDeliveryContext
             ? { linqDeliveryContext: input.initialMailboxImport.importResult.latestLinqDeliveryContext }
             : {}),
+          platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           signal: channelAbortController.signal,
           userEnv: input.runtime.userEnv,

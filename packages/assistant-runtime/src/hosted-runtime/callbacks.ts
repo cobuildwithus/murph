@@ -774,13 +774,19 @@ function hasHostedAssistantVoiceMemoMedia(
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   wake?: HostedRuntimeEvent | null;
 }): AssistantHostedProgressDeliveryDependencies {
+  const telegramEnv = buildHostedTelegramChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const linqEnv = buildHostedLinqChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
@@ -790,6 +796,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
 
   return {
     ...(input.signal ? { signal: input.signal } : {}),
+    sendTelegram: createHostedAssistantTelegramSendDependency({
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+      telegramEnv,
+    }),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
       linqDeliveryContext,
@@ -802,6 +813,57 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
+    ...(input.effectsPort
+      ? {
+          sendEmail: createHostedAssistantEmailSendDependency({
+            effectsPort: input.effectsPort,
+          }),
+        }
+      : {}),
+  };
+}
+
+function createHostedAssistantTelegramSendDependency(input: {
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+  telegramEnv: NodeJS.ProcessEnv;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendTelegram"]> {
+  return async (request) => {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.telegramEnv,
+      fetchImplementation: input.providerFetch,
+      ...(request.signal ?? input.signal
+        ? { signal: request.signal ?? input.signal ?? undefined }
+        : {}),
+    }, "Hosted assistant Telegram progress delivery");
+    return await sendTelegramMessage({
+      idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+    }, dependencies);
+  };
+}
+
+function createHostedAssistantEmailSendDependency(input: {
+  effectsPort: Pick<HostedRuntimeEffectsPort, "sendEmail">;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendEmail"]> {
+  return async (request) => {
+    if (request.targetKind === "participant") {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+        "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
+      );
+    }
+
+    return await input.effectsPort.sendEmail({
+      idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      subject: request.subject ?? null,
+      target: request.target,
+      targetKind: request.targetKind,
+    });
   };
 }
 
