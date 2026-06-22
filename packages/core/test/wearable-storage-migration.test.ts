@@ -7,17 +7,25 @@ import { test, vi } from "vitest";
 
 import {
   CONTRACT_SCHEMA_VERSION,
+  CURRENT_VAULT_FORMAT_VERSION,
+  LEGACY_VAULT_FORMAT_VERSION,
+  type EventRecord,
+  type IntegrationIngestRecord,
   type JsonObject,
   type RawImportManifest,
   type RawImportManifestArtifact,
 } from "@murphai/contracts";
 
 import {
+  detectIntegrationIngestMigration,
   detectWearableStorageMigrationCandidates,
   hashWearableRawPayload,
   importDeviceBatch,
   initializeVault,
   pruneWearableDenseRawTimeseries,
+  readIntegrationIngestById,
+  readJsonlRecords,
+  runIntegrationIngestMigration,
   runWearableStorageMigrationPass,
   validateVault,
 } from "../src/index.ts";
@@ -221,6 +229,235 @@ test("bounded dense raw passes report more work after canonical budget is consum
   });
 
   assert.equal(secondResult.tombstonedDenseRawArtifactCount, 1);
+});
+
+test("integration ingest migration bounds legacy bundle processing per pass", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-bounded");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+
+  const firstBundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_11111111111111111111111111",
+    importedAt: "2026-05-01T00:00:00.000Z",
+    resource: "heart_rate",
+  });
+  const secondBundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_22222222222222222222222222",
+    importedAt: "2026-05-02T00:00:00.000Z",
+    resource: "steps",
+  });
+
+  const detection = await detectIntegrationIngestMigration({ vaultRoot, maxBundles: 1 });
+  assert.equal(detection.candidateBundleCount, 1);
+  assert.equal(detection.hasMore, true);
+
+  const firstResult = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+    finalize: false,
+    maxBundles: 1,
+  });
+
+  assert.equal(firstResult.appendedBundleCount, 1);
+  assert.equal(firstResult.deletedFileCount, 2);
+  assert.ok(await readIntegrationIngestById(vaultRoot, firstBundle.importId));
+  assert.equal(await fileExists(path.join(vaultRoot, firstBundle.artifactPath)), false);
+  assert.equal(await fileExists(path.join(vaultRoot, secondBundle.artifactPath)), true);
+  assert.equal((await readVaultMetadataFormatVersion(vaultRoot)), LEGACY_VAULT_FORMAT_VERSION);
+
+  const secondResult = await runIntegrationIngestMigration({
+    vaultRoot,
+    apply: true,
+    maxBundles: 1,
+  });
+
+  assert.equal(secondResult.appendedBundleCount, 1);
+  assert.equal(secondResult.deletedFileCount, 2);
+  assert.equal(secondResult.finalized, true);
+  assert.ok(await readIntegrationIngestById(vaultRoot, secondBundle.importId));
+  assert.equal((await readVaultMetadataFormatVersion(vaultRoot)), CURRENT_VAULT_FORMAT_VERSION);
+});
+
+test("integration ingest migration rewrites event rawRefs before deleting legacy files and finalizing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-event-rewrite");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+
+  const bundle = await writeLegacyIntegrationBundle({
+    eventCount: 1,
+    vaultRoot,
+    importId: "xfm_33333333333333333333333333",
+    importedAt: "2026-05-03T00:00:00.000Z",
+    resource: "sleep",
+  });
+  const eventId = "evt_33333333333333333333333333";
+  const eventShardPath = await writeLegacyDeviceEventRawRef({
+    eventId,
+    rawRef: bundle.artifactPath,
+    vaultRoot,
+  });
+
+  const result = await runIntegrationIngestMigration({
+    apply: true,
+    vaultRoot,
+  });
+
+  assert.equal(result.appendedBundleCount, 1);
+  assert.equal(result.detachedEventRowCount, 1);
+  assert.equal(result.deletedFileCount, 2);
+  assert.equal(result.finalized, true);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(await fileExists(path.join(vaultRoot, bundle.artifactPath)), false);
+  assert.equal(await fileExists(path.join(vaultRoot, bundle.manifestPath)), false);
+
+  const migrated = await readIntegrationIngestById(vaultRoot, bundle.importId);
+  assert.ok(migrated);
+  assert.deepEqual(migrated.record.outputs.events, [
+    { id: eventId, roles: [bundle.artifactRole] },
+  ]);
+  assert.equal(migrated.record.counts.eventCount, 1);
+  assert.equal(migrated.record.outputs.eventIdsComplete, true);
+  assert.equal(migrated.record.parts[0]?.role, bundle.artifactRole);
+  assert.match(migrated.relativePath, /^ledger\/integration-ingests\/2026\/2026-05\.jsonl$/u);
+
+  const rewrittenEvents = (await readJsonlRecords({ vaultRoot, relativePath: eventShardPath })) as EventRecord[];
+  assert.equal(rewrittenEvents.length, 1);
+  assert.equal(rewrittenEvents[0]?.id, eventId);
+  assert.equal(Object.hasOwn(rewrittenEvents[0] ?? {}, "rawRefs"), false);
+});
+
+test("integration ingest migration fails closed on unverified legacy inputs", async () => {
+  const cases: Array<{
+    expectedCode: string;
+    label: string;
+    mutate: (input: { bundle: Awaited<ReturnType<typeof writeLegacyIntegrationBundle>>; vaultRoot: string }) => Promise<void>;
+  }> = [
+    {
+      expectedCode: "LEGACY_UNMANIFESTED_FILE",
+      label: "unmanifested file",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await fs.writeFile(path.join(vaultRoot, bundle.rawDirectory, "unknown.json"), "{}\n", "utf8");
+      },
+    },
+    {
+      expectedCode: "LEGACY_REFERENCE_UNRESOLVED",
+      label: "unresolved historical rawRef",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await writeLegacyDeviceEventRawRef({
+          eventId: "evt_44444444444444444444444444",
+          rawRef: `${bundle.rawDirectory}/missing.json`,
+          vaultRoot,
+        });
+      },
+    },
+    {
+      expectedCode: "LEGACY_REFERENCE_UNRESOLVED",
+      label: "historical manifest rawRef",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await writeLegacyDeviceEventRawRef({
+          eventId: "evt_44444444444444444444444444",
+          rawRef: bundle.manifestPath,
+          vaultRoot,
+        });
+      },
+    },
+    {
+      expectedCode: "LEGACY_REFERENCE_UNRESOLVED",
+      label: "historical receipt rawRef",
+      mutate: async ({ bundle, vaultRoot }) => {
+        const receiptPath = await appendLegacyBundleArtifact({
+          bundle,
+          content: {
+            schemaVersion: "wearable.raw_ingest_receipt.v1",
+            id: "wearable_raw_aaaaaaaaaaaaaaaaaaaaaaaa",
+            provider: "wearable-provider",
+            sourceKind: "poll",
+            deliveryMode: "full_payload",
+            observedAt: "2026-05-04T00:00:00.000Z",
+            payloadHash: "0".repeat(64),
+          },
+          fileName: "receipt.json",
+          role: "wearable-raw-receipt:wearable_raw_aaaaaaaaaaaaaaaaaaaaaaaa",
+          vaultRoot,
+        });
+        await writeLegacyDeviceEventRawRef({
+          eventId: "evt_44444444444444444444444444",
+          rawRef: receiptPath,
+          vaultRoot,
+        });
+      },
+    },
+    {
+      expectedCode: "LEGACY_ARTIFACT_MISSING",
+      label: "symlink artifact",
+      mutate: async ({ bundle, vaultRoot }) => {
+        const outsideFile = path.join(vaultRoot, "outside-symlink-target.json");
+        await fs.writeFile(outsideFile, "{}\n", "utf8");
+        await fs.rm(path.join(vaultRoot, bundle.artifactPath));
+        await fs.symlink(outsideFile, path.join(vaultRoot, bundle.artifactPath));
+      },
+    },
+    {
+      expectedCode: "LEGACY_RECEIPT_INVALID",
+      label: "invalid receipt",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await appendLegacyBundleArtifact({
+          bundle,
+          content: { schemaVersion: "wearable.raw_ingest_receipt.v1", provider: "wearable-provider" },
+          fileName: "receipt.json",
+          role: "wearable-raw-receipt:wearable_raw_bad",
+          vaultRoot,
+        });
+      },
+    },
+    {
+      expectedCode: "LEGACY_ARTIFACT_HASH_MISMATCH",
+      label: "size or hash mismatch",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await fs.writeFile(path.join(vaultRoot, bundle.artifactPath), "{\"changed\":true}\n", "utf8");
+      },
+    },
+    {
+      expectedCode: "JOURNAL_ROW_CONFLICT",
+      label: "existing journal conflict",
+      mutate: async ({ bundle, vaultRoot }) => {
+        await writeConflictingIntegrationJournalRow({
+          importId: bundle.importId,
+          importedAt: "2026-05-04T00:00:00.000Z",
+          vaultRoot,
+        });
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const vaultRoot = await makeTempDirectory(`murph-integration-ingest-migration-${testCase.label.replaceAll(" ", "-")}`);
+    await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+    await writeLegacyVaultFormat(vaultRoot);
+    const bundle = await writeLegacyIntegrationBundle({
+      vaultRoot,
+      importId: "xfm_44444444444444444444444444",
+      importedAt: "2026-05-04T00:00:00.000Z",
+      resource: "heart_rate",
+    });
+    await testCase.mutate({ bundle, vaultRoot });
+
+    const detection = await detectIntegrationIngestMigration({ vaultRoot });
+    assert.equal(detection.blockersByCode[testCase.expectedCode], 1, testCase.label);
+
+    const result = await runIntegrationIngestMigration({
+      apply: true,
+      vaultRoot,
+    });
+
+    assert.equal(result.mutated, false, testCase.label);
+    assert.equal(result.finalized, false, testCase.label);
+    assert.equal(result.blockersByCode[testCase.expectedCode], 1, testCase.label);
+    assert.equal(await readVaultMetadataFormatVersion(vaultRoot), LEGACY_VAULT_FORMAT_VERSION, testCase.label);
+    assert.equal(await fileExists(path.join(vaultRoot, bundle.manifestPath)), true, testCase.label);
+  }
 });
 
 test("dense raw scoped passes do not mutate broader repair classes", async () => {
@@ -1137,6 +1374,178 @@ test("runWearableStorageMigrationPass leaves manual sample shards untouched", as
   assert.equal(result.mutated, false);
   assert.equal(await fs.readFile(path.join(vaultRoot, shardPath), "utf8"), before);
 });
+
+async function writeLegacyVaultFormat(vaultRoot: string): Promise<void> {
+  const metadataPath = path.join(vaultRoot, "vault.json");
+  const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as Record<string, unknown>;
+  await fs.writeFile(
+    metadataPath,
+    `${JSON.stringify({ ...metadata, formatVersion: LEGACY_VAULT_FORMAT_VERSION }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function readVaultMetadataFormatVersion(vaultRoot: string): Promise<unknown> {
+  const metadata = JSON.parse(await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8")) as Record<string, unknown>;
+  return metadata.formatVersion;
+}
+
+async function fileExists(absolutePath: string): Promise<boolean> {
+  try {
+    await fs.access(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeLegacyIntegrationBundle(input: {
+  eventCount?: number;
+  vaultRoot: string;
+  importId: string;
+  importedAt: string;
+  resource: string;
+  sampleCount?: number;
+}): Promise<{
+  artifactPath: string;
+  artifactRole: string;
+  importId: string;
+  importedAt: string;
+  manifestPath: string;
+  rawDirectory: string;
+}> {
+  const provider = "wearable-provider";
+  const rawDirectory = `raw/integrations/${provider}/2026/05/${input.importId}`;
+  await fs.mkdir(path.join(input.vaultRoot, rawDirectory), { recursive: true });
+
+  const artifactContent = `${JSON.stringify({ resource: input.resource, values: [1, 2, 3] }, null, 2)}\n`;
+  const artifactPath = `${rawDirectory}/payload.json`;
+  const artifact: RawImportManifestArtifact = {
+    byteSize: Buffer.byteLength(artifactContent, "utf8"),
+    mediaType: "application/json",
+    originalFileName: "payload.json",
+    relativePath: artifactPath,
+    role: `provider-${input.resource}`,
+    sha256: sha256Hex(artifactContent),
+  };
+  const manifest: RawImportManifest = {
+    artifacts: [artifact],
+    importId: input.importId,
+    importKind: "device_batch",
+    importedAt: input.importedAt,
+    owner: {
+      id: input.importId,
+      kind: "device_batch",
+      partition: provider,
+    },
+    provenance: {
+      eventCount: input.eventCount ?? 0,
+      provider,
+      sampleCount: input.sampleCount ?? 0,
+    },
+    rawDirectory,
+    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+    source: "device",
+  };
+  const manifestPath = `${rawDirectory}/manifest.json`;
+
+  await fs.writeFile(path.join(input.vaultRoot, artifactPath), artifactContent, "utf8");
+  await fs.writeFile(
+    path.join(input.vaultRoot, manifestPath),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+
+  return {
+    artifactPath,
+    artifactRole: artifact.role,
+    importId: input.importId,
+    importedAt: input.importedAt,
+    manifestPath,
+    rawDirectory,
+  };
+}
+
+async function writeLegacyDeviceEventRawRef(input: {
+  eventId: string;
+  rawRef: string;
+  vaultRoot: string;
+}): Promise<string> {
+  const relativePath = "ledger/events/2026/2026-05.jsonl";
+  const record: EventRecord = {
+    schemaVersion: CONTRACT_SCHEMA_VERSION.event,
+    id: input.eventId,
+    kind: "note",
+    occurredAt: "2026-05-03T00:00:00.000Z",
+    recordedAt: "2026-05-03T00:00:00.000Z",
+    dayKey: "2026-05-03",
+    timeZone: "UTC",
+    source: "device",
+    title: "Legacy device event",
+    note: "Uses legacy integration raw evidence.",
+    rawRefs: [input.rawRef],
+  };
+  await fs.mkdir(path.join(input.vaultRoot, path.dirname(relativePath)), { recursive: true });
+  await fs.appendFile(path.join(input.vaultRoot, relativePath), `${JSON.stringify(record)}\n`, "utf8");
+  return relativePath;
+}
+
+async function appendLegacyBundleArtifact(input: {
+  bundle: Awaited<ReturnType<typeof writeLegacyIntegrationBundle>>;
+  content: unknown;
+  fileName: string;
+  role: string;
+  vaultRoot: string;
+}): Promise<string> {
+  const text = `${JSON.stringify(input.content, null, 2)}\n`;
+  const artifactPath = `${input.bundle.rawDirectory}/${input.fileName}`;
+  const artifact: RawImportManifestArtifact = {
+    byteSize: Buffer.byteLength(text, "utf8"),
+    mediaType: "application/json",
+    originalFileName: input.fileName,
+    relativePath: artifactPath,
+    role: input.role,
+    sha256: sha256Hex(text),
+  };
+  await fs.writeFile(path.join(input.vaultRoot, artifactPath), text, "utf8");
+  const manifest = parseRawImportManifest(
+    JSON.parse(await fs.readFile(path.join(input.vaultRoot, input.bundle.manifestPath), "utf8")),
+  );
+  await fs.writeFile(
+    path.join(input.vaultRoot, input.bundle.manifestPath),
+    `${JSON.stringify({ ...manifest, artifacts: [...manifest.artifacts, artifact] }, null, 2)}\n`,
+    "utf8",
+  );
+  return artifactPath;
+}
+
+async function writeConflictingIntegrationJournalRow(input: {
+  importId: string;
+  importedAt: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const relativePath = "ledger/integration-ingests/2026/2026-05.jsonl";
+  const record: IntegrationIngestRecord = {
+    schemaVersion: CONTRACT_SCHEMA_VERSION.integrationIngest,
+    id: input.importId,
+    provider: "wearable-provider",
+    source: "device",
+    importedAt: input.importedAt,
+    parts: [],
+    outputs: {
+      events: [],
+      eventIdsComplete: true,
+      sampleIds: [],
+      sampleIdsComplete: true,
+    },
+    counts: {
+      eventCount: 0,
+      sampleCount: 0,
+    },
+  };
+  await fs.mkdir(path.join(input.vaultRoot, path.dirname(relativePath)), { recursive: true });
+  await fs.writeFile(path.join(input.vaultRoot, relativePath), `${JSON.stringify(record)}\n`, "utf8");
+}
 
 async function createRawArtifactFixture(
   options: {

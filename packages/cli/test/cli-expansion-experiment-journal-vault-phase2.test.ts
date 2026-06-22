@@ -12,6 +12,7 @@ import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
   importDeviceBatch,
   readJsonlRecords,
   VAULT_LAYOUT,
@@ -2964,7 +2965,7 @@ test.sequential(
 
       assert.equal(metadata.title, 'Precision Health Vault')
       assert.equal(metadata.timezone, 'UTC')
-      assert.equal(metadata.formatVersion, 1)
+      assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION)
       assert.match(coreMarkdown, /^# Precision Health Vault/mu)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -3013,7 +3014,7 @@ test.sequential(
       }
 
       assert.deepEqual(repairedMetadata, initialMetadata)
-      assert.equal(repairedMetadata.formatVersion, 1)
+      assert.equal(repairedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION)
       const validated = await runSliceCli<{
         valid: boolean
         issues: Array<{ code: string }>
@@ -3216,7 +3217,7 @@ test.sequential(
             },
           },
         ],
-        rawArtifacts: [
+        evidenceParts: [
           {
             role: 'junction-summary-workouts',
             fileName: 'junction-summary-workouts.json',

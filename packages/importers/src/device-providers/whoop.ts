@@ -7,7 +7,7 @@ import {
   asArray,
   asPlainObject,
   buildSyntheticDeletionResourceId,
-  createRawArtifact,
+  createEvidencePart,
   emitObservationMetrics,
   finiteNumber,
   kilojoulesToKilocalories,
@@ -15,7 +15,7 @@ import {
   makeProviderExternalRef,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
-  pushRawArtifact,
+  pushEvidencePart,
   slugify,
   stringId,
   toIso,
@@ -25,7 +25,7 @@ import {
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -343,7 +343,7 @@ function buildWhoopWorkoutMetrics(
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -365,7 +365,7 @@ function pushDeletionObservation(
       deletion,
     });
 
-  pushSharedDeletionObservation(events, rawArtifacts, {
+  pushSharedDeletionObservation(events, evidenceParts, {
     provider: "whoop",
     providerDisplayName: "WHOOP",
     resourceType,
@@ -387,7 +387,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const workouts = asArray(request.workouts).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const deletions = asArray(request.deletions).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const evidenceParts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
     stringId(profile?.user_id ?? profile?.userId ?? profile?.id);
@@ -400,8 +400,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const bodyMeasurementResourceId = bodyMeasurementDayKey ?? "current";
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
-  pushRawArtifact(rawArtifacts, createRawArtifact("profile", "profile.json", profile));
-  pushRawArtifact(rawArtifacts, createRawArtifact("body-measurement", "body-measurement.json", bodyMeasurement));
+  pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
+  pushEvidencePart(evidenceParts, createEvidencePart("body-measurement", "body-measurement.json", bodyMeasurement));
 
   if (bodyMeasurement && bodyMeasurementRecordedAt) {
     emitObservationMetrics(
@@ -415,7 +415,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         recordedAt: bodyMeasurementRecordedAt,
         dayKey: bodyMeasurementDayKey,
         observationGrain: "summary",
-        rawArtifactRoles: ["body-measurement"],
+        evidenceRoles: ["body-measurement"],
         externalRef: (facet) => makeExternalRef("body-measurement", bodyMeasurementResourceId, undefined, facet),
       },
       WHOOP_BODY_OBSERVATION_METRICS,
@@ -437,9 +437,9 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const stageSummary = asPlainObject(score?.stage_summary);
     const nap = Boolean(sleep.nap);
 
-    pushRawArtifact(
-      rawArtifacts,
-      createRawArtifact(sleepRole, `sleep-${sleepId}.json`, sleep),
+    pushEvidencePart(
+      evidenceParts,
+      createEvidencePart(sleepRole, `sleep-${sleepId}.json`, sleep),
     );
 
     if (occurredAt && startAt && endAt && durationMinutes) {
@@ -451,7 +451,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           dayKey,
           source: "device",
           title: nap ? "WHOOP nap" : "WHOOP sleep",
-          rawArtifactRoles: [sleepRole],
+          evidenceRoles: [sleepRole],
           externalRef: sleepRef,
           fields: {
             startAt,
@@ -470,7 +470,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [sleepRole],
+        evidenceRoles: [sleepRole],
         externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
       },
       WHOOP_SLEEP_OBSERVATION_METRICS,
@@ -485,7 +485,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           recordedAt,
           dayKey,
           observationGrain: "summary",
-          rawArtifactRoles: [sleepRole],
+          evidenceRoles: [sleepRole],
           externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
         },
         WHOOP_SLEEP_STAGE_METRICS,
@@ -502,9 +502,9 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const dayKey = firstDayKey(recordedAt);
     const score = asPlainObject(recovery.score);
 
-    pushRawArtifact(
-      rawArtifacts,
-      createRawArtifact(recoveryRole, `recovery-${sleepId}.json`, recovery),
+    pushEvidencePart(
+      evidenceParts,
+      createEvidencePart(recoveryRole, `recovery-${sleepId}.json`, recovery),
     );
 
     emitObservationMetrics(
@@ -515,7 +515,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [recoveryRole],
+        evidenceRoles: [recoveryRole],
         externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
       },
       WHOOP_RECOVERY_OBSERVATION_METRICS,
@@ -533,9 +533,9 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const dayKey = firstDayKey(endAt, startAt, recordedAt);
     const score = asPlainObject(cycle.score);
 
-    pushRawArtifact(
-      rawArtifacts,
-      createRawArtifact(cycleRole, `cycle-${cycleId}.json`, cycle),
+    pushEvidencePart(
+      evidenceParts,
+      createEvidencePart(cycleRole, `cycle-${cycleId}.json`, cycle),
     );
 
     emitObservationMetrics(
@@ -546,7 +546,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [cycleRole],
+        evidenceRoles: [cycleRole],
         externalRef: (facet) => makeExternalRef("cycle", cycleId, version, facet),
       },
       WHOOP_CYCLE_OBSERVATION_METRICS,
@@ -568,9 +568,9 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const activityType = slugify(sportName, "workout");
     const score = asPlainObject(workout.score);
 
-    pushRawArtifact(
-      rawArtifacts,
-      createRawArtifact(workoutRole, `workout-${workoutId}.json`, workout),
+    pushEvidencePart(
+      evidenceParts,
+      createEvidencePart(workoutRole, `workout-${workoutId}.json`, workout),
     );
 
     if (occurredAt && durationMinutes) {
@@ -581,7 +581,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           recordedAt,
           source: "device",
           title: trimToLength(`WHOOP ${sportName}`, 160),
-          rawArtifactRoles: [workoutRole],
+          evidenceRoles: [workoutRole],
           externalRef: makeExternalRef("workout", workoutId, version),
           fields: stripUndefined({
             activityType,
@@ -606,7 +606,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   }
 
   for (const deletion of deletions) {
-    pushDeletionObservation(events, rawArtifacts, importedAt, deletion);
+    pushDeletionObservation(events, evidenceParts, importedAt, deletion);
   }
 
   const provenance = stripEmptyObject({
@@ -628,7 +628,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     accountId,
     importedAt,
     events,
-    rawArtifacts,
+    evidenceParts,
     provenance,
   });
 }

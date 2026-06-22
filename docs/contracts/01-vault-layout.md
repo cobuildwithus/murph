@@ -42,11 +42,10 @@ Status: frozen current contract plus health extension fence
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
   raw/workouts/YYYY/MM/<eventId>/<filename>
   raw/workouts/YYYY/MM/<eventId>/manifest.json
-  raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>
-  raw/integrations/<provider>/YYYY/MM/<transformId>/manifest.json
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
+  ledger/integration-ingests/YYYY/YYYY-MM.jsonl
   ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
   audit/YYYY/YYYY-MM.jsonl
@@ -75,16 +74,16 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - All stored paths are relative to the vault root.
 - Stored paths may not start with `/` or contain `..`.
 - Markdown docs remain human-readable and reviewable in place.
-- Raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
-- Each raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
+- Non-device raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
+- Each non-device raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
 - `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes.
 - Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment bytes.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
-- `raw/integrations/<provider>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from normalized device/provider imports and keeps provider API snapshots immutable alongside a manifest.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
+- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`. These shards are explicit import/debug ledgers; default query/read/browser paths use sparse entities and compact metric rows instead.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
@@ -114,8 +113,8 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
 - Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
-- Device/provider API snapshot imports use `raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>`, where `transformId` is the returned device-batch id.
-- Each raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
+- Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` and do not create `raw/integrations` files or manifest sidecars.
+- Each non-device raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
 - `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars.
 - File names are slug-safe ASCII and preserve the original extension.
 

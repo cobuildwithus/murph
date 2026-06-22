@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -12,6 +13,7 @@ import {
   findEventByExternalRef,
   importDeviceBatch,
   initializeVault,
+  readIntegrationIngestById,
   readJsonlRecords,
   repairJunctionWorkoutHeartRateZones,
   VaultError,
@@ -23,7 +25,7 @@ async function makeTempDirectory(name: string): Promise<string> {
 }
 
 interface DeviceImportManifest {
-  importId: string;
+  ingestId: string;
   importKind: string;
   rawDirectory: string;
   artifacts: Array<{
@@ -37,7 +39,7 @@ interface DeviceImportManifest {
     importedAt?: string;
     eventCount?: number;
     sampleCount?: number;
-    rawArtifacts?: Array<{
+    evidenceParts?: Array<{
       role: string;
       relativePath: string;
       sha256: string;
@@ -52,6 +54,12 @@ async function readDeviceImportManifest(
   relativePath: string,
 ): Promise<DeviceImportManifest> {
   return JSON.parse(await fs.readFile(path.join(vaultRoot, relativePath), "utf8")) as DeviceImportManifest;
+}
+
+async function readRequiredIntegrationIngest(vaultRoot: string, ingestId: string) {
+  const entry = await readIntegrationIngestById(vaultRoot, ingestId);
+  assert.ok(entry, `Expected integration ingest "${ingestId}" to exist.`);
+  return entry.record;
 }
 
 function invalidTestValue<T>(value: unknown): T {
@@ -380,7 +388,7 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
         occurredAt: "2026-03-15T22:00:00.000Z",
         recordedAt: "2026-03-16T07:30:00.000Z",
         title: "WHOOP sleep",
-        rawArtifactRoles: ["sleep:sleep-1"],
+        evidenceRoles: ["sleep:sleep-1"],
         externalRef: {
           system: "whoop",
           resourceType: "sleep",
@@ -398,7 +406,7 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
         occurredAt: "2026-03-16T07:30:00.000Z",
         recordedAt: "2026-03-16T07:30:00.000Z",
         title: "WHOOP recovery score",
-        rawArtifactRoles: ["recovery:sleep-1"],
+        evidenceRoles: ["recovery:sleep-1"],
         externalRef: {
           system: "whoop",
           resourceType: "recovery",
@@ -432,7 +440,7 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
         },
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "sleep:sleep-1",
         fileName: "sleep-sleep-1.json",
@@ -459,25 +467,26 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
     },
   });
 
-  assert.equal(result.importId, "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE");
+  assert.equal(result.ingestId, "xfm_ARQV9NAR6P2P3YA7VGCB3V1NSF");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
-  assert.equal(result.rawArtifacts.length, 2);
+  assert.equal(result.evidencePartCount, 2);
   assert.equal(result.provider, "whoop");
   assert.equal(result.accountId, "whoop-user-1");
+  await assert.rejects(
+    () => fs.access(path.join(vaultRoot, "raw", "integrations")),
+    (error) => typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT",
+  );
   assert.deepEqual(
     result.events.map((record) => record.id),
     ["evt_KBKEHWQT2XXW0K5XZCS1T5X9KA", "evt_S5K01TSPA86JJVS1DWVHT9RRZ1"],
   );
   assert.deepEqual(result.samples.map((record) => record.id), ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
-  assert.equal(
-    result.rawArtifacts[0]?.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/01-sleep-sleep-1.json",
-  );
-  const sleepRawText = await fs.readFile(
-    path.join(vaultRoot, result.rawArtifacts[0]?.relativePath ?? ""),
-    "utf8",
-  );
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  assert.equal(result.ingestShardPath, "ledger/integration-ingests/2026/2026-03.jsonl");
+  const sleepPart = ingest.parts.find((part) => part.role === "sleep:sleep-1");
+  assert.equal(sleepPart?.fileName, "sleep-sleep-1.json");
+  const sleepRawText = sleepPart?.content ?? "";
   assert.equal(
     sleepRawText,
     '{"end":"2026-03-16T07:00:00.000Z","id":"sleep-1","start":"2026-03-15T22:00:00.000Z"}\n',
@@ -496,7 +505,6 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
     vaultRoot,
     relativePath: result.auditPath,
   })) as AuditRecord[];
-  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
   assert.deepEqual(eventRecords, [
     {
@@ -509,9 +517,6 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
       timeZone: "UTC",
       source: "device",
       title: "WHOOP sleep",
-      rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/01-sleep-sleep-1.json",
-      ],
       externalRef: {
         system: "whoop",
         resourceType: "sleep",
@@ -532,9 +537,6 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
       timeZone: "UTC",
       source: "device",
       title: "WHOOP recovery score",
-      rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/02-recovery-sleep-1.json",
-      ],
       externalRef: {
         system: "whoop",
         resourceType: "recovery",
@@ -569,15 +571,37 @@ test("importDeviceBatch writes inline raw integration payloads and compact recor
     },
   ]);
   assert.equal(auditRecords.at(-1)?.action, "device_import");
-  assert.deepEqual(auditRecords.at(-1)?.targetIds, [result.importId]);
-  assert.equal(manifest.importKind, "device_batch");
-  assert.equal(manifest.artifacts.length, 2);
-  assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
-  assert.equal(manifest.provenance.eventCount, 2);
-  assert.equal(manifest.provenance.sampleCount, 1);
-  assert.deepEqual(manifest.provenance.operatorMetadata, {
+  assert.deepEqual(auditRecords.at(-1)?.targetIds, [result.ingestId]);
+  assert.equal(ingest.counts.eventCount, 2);
+  assert.equal(ingest.counts.sampleCount, 1);
+  assert.deepEqual(ingest.provenance, {
     syncMode: "test",
   });
+});
+
+test("importDeviceBatch accepts high-cardinality evidence within the total byte cap", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-many-evidence-parts");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const evidenceParts = Array.from({ length: 90 }, (_, index) => ({
+    role: `daily-summary:${index + 1}`,
+    fileName: `daily-summary-${index + 1}.json`,
+    content: { index, value: index + 1 },
+  }));
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "oura",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    evidenceParts,
+  });
+
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  assert.equal(result.evidencePartCount, 90);
+  assert.equal(ingest.parts.length, 90);
+  assert.deepEqual(
+    ingest.parts.slice(0, 3).map((part) => part.role),
+    ["daily-summary:1", "daily-summary:2", "daily-summary:3"],
+  );
 });
 
 test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaults", async () => {
@@ -600,7 +624,7 @@ test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaul
         recordedAt: "2026-03-15T00:00:00.000Z",
         dayKey: "2026-03-15",
         title: "Garmin daily steps",
-        rawArtifactRoles: ["daily-summary:2026-03-15"],
+        evidenceRoles: ["daily-summary:2026-03-15"],
         externalRef: {
           system: "garmin",
           resourceType: "daily-summary",
@@ -636,7 +660,7 @@ test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaul
         },
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "daily-summary:2026-03-15",
         fileName: "daily-summary-2026-03-15.json",
@@ -662,11 +686,8 @@ test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaul
   assert.equal(result.events[0]?.timeZone, "America/Los_Angeles");
   assert.equal(result.samples[0]?.dayKey, "2026-03-14");
   assert.equal(result.samples[0]?.timeZone, "America/Los_Angeles");
-  assert.ok(
-    result.rawArtifacts.some(
-      (artifact) => artifact.relativePath.endsWith("02-activity-1-fit-descriptor.json"),
-    ),
-  );
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  assert.ok(ingest.parts.some((part) => part.fileName === "activity-1-fit-descriptor.json"));
 });
 
 test("importDeviceBatch preserves versioned device data origin on events and samples", async () => {
@@ -780,7 +801,7 @@ test("importDeviceBatch keeps canonical manifest provenance authoritative over c
     sampleCount: 888,
     eventIds: ["evt_spoofed"],
     sampleIds: ["sample_spoofed"],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "spoofed-role",
         relativePath: "raw/integrations/spoofed/1900/01/xfm_spoofed/spoofed.json",
@@ -821,7 +842,7 @@ test("importDeviceBatch keeps canonical manifest provenance authoritative over c
         },
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "recovery:sleep-1",
         content: {
@@ -837,27 +858,23 @@ test("importDeviceBatch keeps canonical manifest provenance authoritative over c
     provenance: attemptedOverrides,
   });
 
-  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
 
-  assert.equal(manifest.provenance.provider, "whoop");
-  assert.equal(manifest.provenance.accountId, "whoop-user-1");
-  assert.equal(manifest.provenance.importedAt, "2026-03-16T09:30:00.000Z");
-  assert.equal(manifest.provenance.eventCount, result.events.length);
-  assert.equal(manifest.provenance.sampleCount, result.samples.length);
-  assert.equal(manifest.provenance.rawArtifacts?.length, 1);
-  assert.equal(manifest.provenance.rawArtifacts?.[0]?.role, "recovery:sleep-1");
-  assert.equal(
-    manifest.provenance.rawArtifacts?.[0]?.relativePath,
-    result.rawArtifacts[0]?.relativePath,
-  );
+  assert.equal(ingest.provider, "whoop");
+  assert.equal(ingest.accountId, "whoop-user-1");
+  assert.equal(ingest.importedAt, "2026-03-16T09:30:00.000Z");
+  assert.equal(ingest.counts.eventCount, result.events.length);
+  assert.equal(ingest.counts.sampleCount, result.samples.length);
+  assert.equal(ingest.parts.length, 1);
+  assert.equal(ingest.parts[0]?.role, "recovery:sleep-1");
   assert.notEqual(
-    manifest.provenance.rawArtifacts?.[0]?.sha256,
-    attemptedOverrides.rawArtifacts[0]?.sha256,
+    ingest.parts[0]?.sha256,
+    attemptedOverrides.evidenceParts[0]?.sha256,
   );
-  assert.deepEqual(manifest.provenance.rawArtifacts?.[0]?.metadata, {
+  assert.deepEqual(ingest.parts[0]?.metadata, {
     upstreamId: "sleep-1",
   });
-  assert.deepEqual(manifest.provenance.operatorMetadata, attemptedOverrides);
+  assert.deepEqual(ingest.provenance, attemptedOverrides);
 });
 
 test("importDeviceBatch retries reuse deterministic ids without duplicating ledgers", async () => {
@@ -908,7 +925,7 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
         },
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "recovery:sleep-1",
         fileName: "recovery-sleep-1.json",
@@ -932,10 +949,10 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
     relativePath: first.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
-  assert.equal(first.importId, second.importId);
+  assert.equal(first.ingestId, second.ingestId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
-  assert.equal(first.importId, "xfm_RHGFGAXGDZ3G4JXMSCZVWQSV2E");
+  assert.equal(first.ingestId, "xfm_W9VPQSQBYY653RHF4V96TWF0F6");
   assert.equal(first.events[0]?.id, "evt_30XC16ZG27S0ZM4TMPHDKJX7KP");
   assert.equal(first.samples[0]?.id, "smp_VJ3AZR2JBQVE89Z6B84EA60H0G");
   assert.equal(eventRecords.length, 1);
@@ -958,7 +975,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
         note: "single raw fallback",
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         content: {
           upstream: "payload",
@@ -971,12 +988,11 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
     vaultRoot,
     relativePath: result.eventShardPaths[0] as string,
   })) as EventRecord[];
-  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
 
-  assert.equal(result.importId, "xfm_SE4B94MXKQGEHK68NEVFXAFY4K");
+  assert.equal(result.ingestId, "xfm_RJYQQADKR5GN1K6R0ZJ4W9ETEB");
   assert.equal(result.events[0]?.id, "evt_2TSF1SDWFHHSQ8503JWDHCF47K");
   assert.equal(eventRecords[0]?.kind, "note");
-  assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "murph.event.v1",
@@ -989,11 +1005,13 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
       source: "device",
       title: "note",
       note: "single raw fallback",
-      rawRefs: ["raw/integrations/whoop/2026/03/xfm_SE4B94MXKQGEHK68NEVFXAFY4K/01-whoop-01.json"],
     },
   ]);
-  assert.equal(manifest.artifacts[0]?.role, "artifact-1");
-  assert.equal(manifest.artifacts[0]?.originalFileName, "whoop-01.json");
+  assert.deepEqual(ingest.outputs.events, [
+    { id: "evt_2TSF1SDWFHHSQ8503JWDHCF47K", roles: ["artifact-1"] },
+  ]);
+  assert.equal(ingest.parts[0]?.role, "artifact-1");
+  assert.equal(ingest.parts[0]?.fileName, "whoop-01.json");
 });
 
 test("importDeviceBatch writes Date raw artifact values as ISO strings", async () => {
@@ -1004,7 +1022,7 @@ test("importDeviceBatch writes Date raw artifact values as ISO strings", async (
     vaultRoot,
     provider: "junction",
     importedAt: "2026-04-22T12:00:00.000Z",
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "provider-snapshot",
         fileName: "snapshot.json",
@@ -1018,10 +1036,8 @@ test("importDeviceBatch writes Date raw artifact values as ISO strings", async (
     ],
   });
 
-  const rawText = await fs.readFile(
-    path.join(vaultRoot, result.rawArtifacts[0]?.relativePath ?? ""),
-    "utf8",
-  );
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  const rawText = ingest.parts[0]?.content ?? "";
 
   assert.equal(
     rawText,
@@ -1039,7 +1055,7 @@ test("importDeviceBatch rejects invalid Date raw artifact values", async () => {
         vaultRoot,
         provider: "junction",
         importedAt: "2026-04-22T12:00:00.000Z",
-        rawArtifacts: [
+        evidenceParts: [
           {
             role: "provider-snapshot",
             fileName: "snapshot.json",
@@ -1075,10 +1091,10 @@ test("importDeviceBatch does not implicitly attach synthetic wearable receipts a
         occurredAt: "2026-03-16T09:31:00.000Z",
         title: "explicit receipt reference",
         note: "explicit references are still honored",
-        rawArtifactRoles: ["wearable-raw-receipt:wearable_raw_test"],
+        evidenceRoles: ["wearable-raw-receipt:wearable_raw_test"],
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "wearable-raw-receipt:wearable_raw_test",
         fileName: "receipt.json",
@@ -1099,7 +1115,11 @@ test("importDeviceBatch does not implicitly attach synthetic wearable receipts a
 
   assert.equal(eventRecords[0]?.title, "implicit receipt fallback");
   assert.equal(Object.hasOwn(eventRecords[0] ?? {}, "rawRefs"), false);
-  assert.deepEqual(eventRecords[1]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
+  assert.equal(Object.hasOwn(eventRecords[1] ?? {}, "rawRefs"), false);
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  const rolesByEventId = new Map(ingest.outputs.events.map((event) => [event.id, event.roles]));
+  assert.deepEqual(rolesByEventId.get(eventRecords[0]?.id ?? ""), []);
+  assert.deepEqual(rolesByEventId.get(eventRecords[1]?.id ?? ""), ["wearable-raw-receipt:wearable_raw_test"]);
 });
 
 test("importDeviceBatch supports sample-only batches without raw artifacts", async () => {
@@ -1127,10 +1147,10 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
     relativePath: result.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
-  assert.equal(result.importId, "xfm_569JB3S5YXQTP6A255JC82WJDP");
+  assert.equal(result.ingestId, "xfm_FXSGXYHNPXP927CSE1YHR3YD0T");
   assert.equal(result.samples[0]?.id, "smp_Z2ZBJH4EBC7QVGQ5CQ8G95M8R4");
-  assert.equal(result.manifestPath, "");
-  assert.equal(result.rawArtifacts.length, 0);
+  assert.equal(result.ingestShardPath, "ledger/integration-ingests/2026/2026-03.jsonl");
+  assert.equal(result.evidencePartCount, 0);
   assert.deepEqual(sampleRecords, [
     {
       schemaVersion: "murph.sample.v1",
@@ -1252,10 +1272,10 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
           {
             kind: "note",
             occurredAt: "2026-03-16T07:30:00.000Z",
-            rawArtifactRoles: ["missing"],
+            evidenceRoles: ["missing"],
           },
         ],
-        rawArtifacts: [
+        evidenceParts: [
           { role: "other", content: { payload: true } },
         ],
       }),
@@ -1278,7 +1298,7 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
             },
           },
         ],
-        rawArtifacts: [
+        evidenceParts: [
           {
             content: { payload: true },
             metadata: invalidTestValue<Record<string, unknown>>("bad"),
@@ -1299,13 +1319,13 @@ test("importDeviceBatch rejects duplicate raw roles and missing raw-role referen
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
-        rawArtifacts: [
+        evidenceParts: [
           { role: "dup", content: { one: true } },
           { role: "dup", content: { two: true } },
         ],
-      }),
+    }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "VAULT_DUPLICATE_RAW_ROLE",
+      error instanceof VaultError && error.code === "VAULT_DUPLICATE_EVIDENCE_ROLE",
   );
 
   await assert.rejects(
@@ -1318,15 +1338,15 @@ test("importDeviceBatch rejects duplicate raw roles and missing raw-role referen
             kind: "note",
             occurredAt: "2026-03-16T07:30:00.000Z",
             note: "missing role",
-            rawArtifactRoles: ["missing"],
+            evidenceRoles: ["missing"],
           },
         ],
-        rawArtifacts: [
+        evidenceParts: [
           { role: "other", content: { payload: true } },
         ],
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "VAULT_RAW_ROLE_MISSING",
+      error instanceof VaultError && error.code === "VAULT_EVIDENCE_ROLE_MISSING",
   );
 });
 
@@ -1340,7 +1360,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
         vaultRoot,
         provider: "whoop",
         provenance: invalidTestValue<Record<string, unknown>>("not-an-object"),
-        rawArtifacts: [
+        evidenceParts: [
           { content: { payload: true } },
         ],
       }),
@@ -1353,7 +1373,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
-        rawArtifacts: [
+        evidenceParts: [
           {
             content: { payload: true },
             metadata: invalidTestValue<Record<string, unknown>>("bad"),
@@ -1369,7 +1389,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
-        rawArtifacts: [
+        evidenceParts: [
           {
             content: invalidTestValue<string>(undefined),
           },
@@ -1579,6 +1599,7 @@ test("raw artifact helpers normalize category paths and inferred media types", (
 });
 
 function buildJunctionStyleWorkoutEvent(overrides: {
+  occurredAt?: string;
   recordedAt?: string;
   durationMinutes?: number;
   heartRateZones?: Array<{
@@ -1595,7 +1616,7 @@ function buildJunctionStyleWorkoutEvent(overrides: {
 } = {}) {
   return {
     kind: "activity_session",
-    occurredAt: "2026-06-03T19:55:00.000Z",
+    occurredAt: overrides.occurredAt ?? "2026-06-03T19:55:00.000Z",
     recordedAt: overrides.recordedAt ?? "2026-06-03T20:30:00.000Z",
     title: "Running",
     externalRef: {
@@ -1629,7 +1650,7 @@ test("importDeviceBatch dedupes overlapping re-imports by externalRef across uns
     accountId,
     importedAt,
     events: [buildJunctionStyleWorkoutEvent()],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -1708,6 +1729,58 @@ test("importDeviceBatch updates changed provider records in place by externalRef
   );
 });
 
+test("importDeviceBatch updates changed provider records across month shards by externalRef", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-externalref-cross-month");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-30T23:55:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        occurredAt: "2026-06-30T23:15:00.000Z",
+        recordedAt: "2026-06-30T23:45:00.000Z",
+        durationMinutes: 34,
+      }),
+    ],
+  });
+  const second = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-07-01T00:55:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        occurredAt: "2026-07-01T00:05:00.000Z",
+        recordedAt: "2026-07-01T00:35:00.000Z",
+        durationMinutes: 36,
+      }),
+    ],
+  });
+
+  assert.deepEqual(first.eventShardPaths, ["ledger/events/2026/2026-06.jsonl"]);
+  assert.deepEqual(second.eventShardPaths, ["ledger/events/2026/2026-07.jsonl"]);
+  assert.equal(second.events[0]?.id, first.events[0]?.id);
+  assert.equal(second.events[0]?.lifecycle?.revision, 2);
+
+  const juneEvents = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-06.jsonl",
+  })) as EventRecord[];
+  const julyEvents = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+  })) as EventRecord[];
+
+  assert.equal(juneEvents.length + julyEvents.length, 2);
+  assert.deepEqual(
+    [...new Set([...juneEvents, ...julyEvents].map((record) => record.id))],
+    [first.events[0]?.id],
+  );
+});
+
 test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotently", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-hr-zone-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -1775,7 +1848,7 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -1969,7 +2042,7 @@ test("repairJunctionWorkoutHeartRateZones inherits provider context from an enve
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2027,7 +2100,7 @@ test("repairJunctionWorkoutHeartRateZones accepts raw hr_zones stored as numeric
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2083,7 +2156,7 @@ test("repairJunctionWorkoutHeartRateZones refuses candidates from shards with un
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2141,7 +2214,7 @@ test("repairJunctionWorkoutHeartRateZones skips malformed ledger rows instead of
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2200,7 +2273,7 @@ test("repairJunctionWorkoutHeartRateZones repairs non-Garmin Junction-backed pro
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2254,7 +2327,7 @@ test("repairJunctionWorkoutHeartRateZones refuses to repair an id that also appe
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2324,7 +2397,7 @@ test("repairJunctionWorkoutHeartRateZones repairs connection-backed workouts who
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2381,7 +2454,7 @@ test("repairJunctionWorkoutHeartRateZones refuses when a contradicting same-prov
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2445,7 +2518,7 @@ test("repairJunctionWorkoutHeartRateZones refuses when a same-id raw duplicate c
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2508,7 +2581,7 @@ test("repairJunctionWorkoutHeartRateZones refuses raw evidence whose durations d
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2565,7 +2638,7 @@ test("repairJunctionWorkoutHeartRateZones refuses an id whose latest revision is
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",
@@ -2614,11 +2687,11 @@ test("repairJunctionWorkoutHeartRateZones refuses an id whose latest revision is
   assert.equal(applied.mutated, false);
 });
 
-test("repairJunctionWorkoutHeartRateZones refuses when any rawRef is missing or unreadable", async () => {
-  // The joint cross-rawRef invariant only holds if every referenced raw
-  // artifact is actually inspected. A missing artifact could carry a
-  // same-id contradiction we'd never see, so fail closed.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-missing-rawref");
+test("repairJunctionWorkoutHeartRateZones refuses when any referenced evidence part is unreadable", async () => {
+  // The joint cross-evidence invariant only holds if every referenced part is
+  // actually inspected. An unreadable part could carry a same-id contradiction
+  // we'd never see, so fail closed.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-unreadable-evidence");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
   const garminResourceId = "workouts-garmin-missing-rawref";
@@ -2641,10 +2714,10 @@ test("repairJunctionWorkoutHeartRateZones refuses when any rawRef is missing or 
             durationMinutes,
           })),
         }),
-        rawArtifactRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
+        evidenceRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts-present",
         fileName: "junction-summary-workouts-present.json",
@@ -2664,13 +2737,23 @@ test("repairJunctionWorkoutHeartRateZones refuses when any rawRef is missing or 
     ],
   });
 
-  // Delete one of the rawRef files after import to simulate a corrupt or
-  // pruned artifact while the candidate still points at it.
-  const event = imported.events[0];
-  assert.ok(event);
-  const absentRef = event.rawRefs?.find((rawRef) => rawRef.includes("absent"));
-  assert.ok(typeof absentRef === "string");
-  await fs.unlink(path.join(vaultRoot, absentRef as string));
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, imported.ingestId);
+  const corruptContent = "not-json";
+  const corruptedIngest = {
+    ...ingest,
+    parts: ingest.parts.map((part) => part.role === "junction-summary-workouts-absent"
+      ? {
+          ...part,
+          content: corruptContent,
+          byteSize: Buffer.byteLength(corruptContent, "utf8"),
+          sha256: createHash("sha256").update(corruptContent, "utf8").digest("hex"),
+        }
+      : part),
+  };
+  await fs.writeFile(
+    path.join(vaultRoot, imported.ingestShardPath),
+    `${JSON.stringify(corruptedIngest)}\n`,
+  );
 
   const applied = await repairJunctionWorkoutHeartRateZones({
     vaultRoot,
@@ -2712,10 +2795,10 @@ test("repairJunctionWorkoutHeartRateZones decides across all rawRefs jointly", a
             durationMinutes,
           })),
         }),
-        rawArtifactRoles: ["junction-summary-workouts-a", "junction-summary-workouts-b"],
+        evidenceRoles: ["junction-summary-workouts-a", "junction-summary-workouts-b"],
       },
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts-a",
         fileName: "junction-summary-workouts-a.json",
@@ -2786,7 +2869,7 @@ test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a different 
         })),
       }),
     ],
-    rawArtifacts: [
+    evidenceParts: [
       {
         role: "junction-summary-workouts",
         fileName: "junction-summary-workouts.json",

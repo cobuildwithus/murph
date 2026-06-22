@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { assertCanonicalWritePort } from "../core-port.ts";
-import type { DeviceBatchImportPayload, DeviceRawArtifactPayload } from "../core-port.ts";
+import type { DeviceBatchImportPayload, DeviceEvidencePartPayload } from "../core-port.ts";
 import {
   optionalTrimmedStringSchema,
   parseInputObject,
@@ -94,28 +94,28 @@ export async function prepareDeviceProviderSnapshotImport(
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
   const normalized = await adapter.normalizeSnapshot(snapshot);
-  const rawSnapshot = adapter.sanitizeRawSnapshot
+  const sanitizedSnapshot = adapter.sanitizeRawSnapshot
     ? adapter.sanitizeRawSnapshot(snapshot)
     : request.snapshot;
-  const rawObservedAt = resolveStableRawReceiptObservedAt(request, normalized);
+  const observedAt = resolveStableRawReceiptObservedAt(request, normalized);
   const basePayload = stripUndefined({
     vaultRoot: request.vaultRoot,
     provider: normalized.provider,
     accountId: normalized.accountId ?? request.accountId,
-    importedAt: rawObservedAt,
+    importedAt: observedAt,
     source: normalized.source,
     dataOrigin: normalized.dataOrigin,
     events: normalized.events,
     samples: normalized.samples,
-    rawArtifacts: normalized.rawArtifacts,
+    evidenceParts: normalized.evidenceParts,
     provenance: normalized.provenance,
   });
-  const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
-  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(payloadWithRawEvidence);
+  const payloadWithEvidence = ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
+  const payloadWithSingleEvidenceFallback = attachSingleEvidenceRole(payloadWithEvidence);
   const rawReceipt = buildWearableRawIngestReceipt({
     provider: basePayload.provider,
-    payloadForHash: rawSnapshot,
-    rawArtifactRoles: (payloadWithLegacyRawRole.rawArtifacts ?? []).map((artifact) => artifact.role),
+    payloadForHash: sanitizedSnapshot,
+    rawArtifactRoles: (payloadWithSingleEvidenceFallback.evidenceParts ?? []).map((part) => part.role),
     userId: request.userId,
     accountId: basePayload.accountId,
     connectionId: request.connectionId,
@@ -125,21 +125,20 @@ export async function prepareDeviceProviderSnapshotImport(
     resourceId: request.resourceId,
     providerEventId: request.providerEventId,
     eventType: request.eventType,
-    observedAt: rawObservedAt,
+    observedAt,
     occurredAt: request.occurredAt,
     windowStart: request.windowStart,
     windowEnd: request.windowEnd,
     cursor: request.cursor,
     signatureVerified: request.signatureVerified,
   });
+  const ingestReceipt: Record<string, unknown> = { ...rawReceipt };
+
   return stripUndefined({
-    ...payloadWithLegacyRawRole,
-    rawArtifacts: [
-      ...(payloadWithLegacyRawRole.rawArtifacts ?? []),
-      buildRawReceiptArtifact(rawReceipt),
-    ],
+    ...payloadWithSingleEvidenceFallback,
+    ingestReceipt,
     provenance: stripUndefined({
-      ...(payloadWithLegacyRawRole.provenance ?? {}),
+      ...(payloadWithSingleEvidenceFallback.provenance ?? {}),
       wearableRawReceipt: {
         id: rawReceipt.id,
         deliveryMode: rawReceipt.deliveryMode,
@@ -151,51 +150,51 @@ export async function prepareDeviceProviderSnapshotImport(
   });
 }
 
-function attachSingleLegacyRawArtifactRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
-  if ((payload.rawArtifacts ?? []).length !== 1) {
+function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
+  if ((payload.evidenceParts ?? []).length !== 1) {
     return payload;
   }
 
-  const [rawArtifact] = payload.rawArtifacts ?? [];
-  if (!rawArtifact) {
+  const [evidencePart] = payload.evidenceParts ?? [];
+  if (!evidencePart) {
     return payload;
   }
 
   return {
     ...payload,
-    events: (payload.events ?? []).map((event) => event.rawArtifactRoles?.length
+    events: (payload.events ?? []).map((event) => event.evidenceRoles?.length
       ? event
-      : { ...event, rawArtifactRoles: [rawArtifact.role] }),
+      : { ...event, evidenceRoles: [evidencePart.role] }),
   };
 }
 
-function ensureProviderRawArtifact(
+function ensureProviderEvidencePart(
   payload: DeviceBatchImportPayload,
   rawSnapshot: unknown,
 ): DeviceBatchImportPayload {
-  if ((payload.rawArtifacts ?? []).length > 0 || !hasRetainableRawArtifactContent(rawSnapshot)) {
+  if ((payload.evidenceParts ?? []).length > 0 || !hasRetainableEvidencePartContent(rawSnapshot)) {
     return payload;
   }
 
   return {
     ...payload,
-    rawArtifacts: [buildProviderRawSnapshotArtifact(payload.provider, rawSnapshot)],
+    evidenceParts: [buildProviderSnapshotEvidencePart(payload.provider, rawSnapshot)],
   };
 }
 
-function buildProviderRawSnapshotArtifact(
+function buildProviderSnapshotEvidencePart(
   provider: string,
   rawSnapshot: unknown,
-): DeviceRawArtifactPayload {
+): DeviceEvidencePartPayload {
   return {
     role: "provider-snapshot",
-    fileName: `${sanitizeRawArtifactFileToken(provider)}-provider-snapshot.json`,
+    fileName: `${sanitizeEvidencePartFileToken(provider)}-provider-snapshot.json`,
     mediaType: "application/json",
     content: rawSnapshot,
   };
 }
 
-function hasRetainableRawArtifactContent(value: unknown): boolean {
+function hasRetainableEvidencePartContent(value: unknown): boolean {
   if (value === undefined || value === null) {
     return false;
   }
@@ -211,7 +210,7 @@ function hasRetainableRawArtifactContent(value: unknown): boolean {
   return true;
 }
 
-function sanitizeRawArtifactFileToken(value: string): string {
+function sanitizeEvidencePartFileToken(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "") || "provider";
 }
 
@@ -253,21 +252,6 @@ function firstValidTimestamp(...candidates: Array<string | undefined>): string |
     .sort((left, right) => Date.parse(left) - Date.parse(right));
 
   return validCandidates[0];
-}
-
-function buildRawReceiptArtifact(
-  rawReceipt: ReturnType<typeof buildWearableRawIngestReceipt>,
-): DeviceRawArtifactPayload {
-  return {
-    role: `wearable-raw-receipt:${rawReceipt.id}`,
-    fileName: `${rawReceipt.provider}-raw-ingest-receipt-${rawReceipt.id}.json`,
-    mediaType: "application/json",
-    content: rawReceipt,
-    metadata: {
-      schemaVersion: rawReceipt.schemaVersion,
-      payloadHash: rawReceipt.payloadHash,
-    },
-  };
 }
 
 export async function importDeviceProviderSnapshot<TResult = unknown>(

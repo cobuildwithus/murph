@@ -19,6 +19,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
   rawImportManifest: "murph.raw-import-manifest.v1",
+  integrationIngest: "murph.integration-ingest.v1",
   regimenFrontmatter: "murph.frontmatter.regimen.v1",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   metricSample: "murph.metric-sample.v1",
@@ -26,7 +27,8 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   vault: "murph.vault.v1",
 } as const);
 
-export const CURRENT_VAULT_FORMAT_VERSION = 1 as const;
+export const LEGACY_VAULT_FORMAT_VERSION = 1 as const;
+export const CURRENT_VAULT_FORMAT_VERSION = 2 as const;
 
 /**
  * Canonical production web origin for user-facing app links. Runtime env

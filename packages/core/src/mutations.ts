@@ -75,6 +75,15 @@ import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
+import {
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestAppendPlan,
+  buildIntegrationIngestRecord,
+  stageIntegrationIngestAppendPlan,
+  compactIntegrationIngestReceipt,
+  type IntegrationIngestAppendPlan,
+} from "./integration-ingests.ts";
+import type { IntegrationEvidencePart, IntegrationIngestEventOutput } from "@murphai/contracts";
 import { normalizeUniqueTextList } from "./bank/shared.ts";
 import {
   defaultTimeZone,
@@ -236,7 +245,7 @@ interface ImportSamplesResult {
   manifestPath: string;
 }
 
-interface DeviceRawArtifactInput extends LooseRecord {
+interface DeviceEvidencePartInput extends LooseRecord {
   role?: string;
   fileName?: string;
   mediaType?: string;
@@ -255,7 +264,7 @@ interface DeviceEventInput extends LooseRecord {
   note?: string;
   tags?: unknown;
   links?: unknown;
-  rawArtifactRoles?: unknown;
+  evidenceRoles?: unknown;
   externalRef?: unknown;
   dataOrigin?: unknown;
   fields?: unknown;
@@ -282,12 +291,14 @@ interface ImportDeviceBatchInput {
   source?: string;
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
-  rawArtifacts?: readonly DeviceRawArtifactInput[];
+  evidenceParts?: readonly DeviceEvidencePartInput[];
+  ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
 
-interface ImportDeviceBatchResult {
-  importId: string;
+export interface ImportDeviceBatchResult {
+  ingestId: string;
+  ingestShardPath: string;
   provider: string;
   accountId?: string;
   importedAt: string;
@@ -295,22 +306,14 @@ interface ImportDeviceBatchResult {
   samples: SampleRecord[];
   eventShardPaths: string[];
   sampleShardPaths: string[];
-  rawArtifacts: RawArtifact[];
+  evidencePartCount: number;
   auditPath: string;
-  manifestPath: string;
 }
 
-interface PreparedDeviceRawArtifact {
-  role: string;
-  content: string;
-  raw: RawArtifact;
-  metadata?: Record<string, unknown>;
-  sha256: string;
-}
 
 interface NormalizedDeviceEvent {
   seed: NormalizedEventSeed<EventKind>;
-  rawArtifactRoles: string[];
+  evidenceRoles: string[];
   recordId: string;
 }
 
@@ -319,7 +322,7 @@ interface NormalizedDeviceSample {
   recordId: string;
 }
 
-interface NormalizedDeviceRawArtifact {
+interface NormalizedDeviceEvidencePart {
   role: string;
   fileName: string;
   mediaType?: string;
@@ -333,12 +336,13 @@ interface NormalizedDeviceBatchInputs {
   provider: string;
   accountId?: string;
   importedAt: string;
-  source: string;
+  source: EventSource;
   defaultTimeZone?: string;
   provenance: LooseRecord;
+  ingestReceipt?: LooseRecord;
   events: NormalizedDeviceEvent[];
   samples: NormalizedDeviceSample[];
-  rawArtifacts: NormalizedDeviceRawArtifact[];
+  evidenceParts: NormalizedDeviceEvidencePart[];
 }
 
 interface PreparedJsonlEntry<RecordType extends { id: string }> {
@@ -358,12 +362,14 @@ interface DeviceBatchPlan {
   provider: string;
   accountId?: string;
   importedAt: string;
-  source: string;
+  source: EventSource;
   provenance: LooseRecord;
+  ingestReceipt?: LooseRecord;
   effectiveOccurredAt: string;
   preparedEvents: PreparedJsonlEntry<EventRecord>[];
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
-  preparedRawArtifacts: PreparedDeviceRawArtifact[];
+  preparedEvidenceParts: IntegrationEvidencePart[];
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
@@ -1152,7 +1158,7 @@ function normalizeDeviceEventInputs(
       `Device event ${index + 1} fields must be a plain object.`,
     ) ?? {};
     assertNoReservedDeviceEventFields(fields, index);
-    const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
+    const evidenceRoles = trimStringList(eventInput.evidenceRoles) ?? [];
     assertNoLegacyRelatedIds({
       value: eventInput.relatedIds,
       errorCode: "VAULT_INVALID_INPUT",
@@ -1178,13 +1184,13 @@ function normalizeDeviceEventInputs(
 
     return {
       seed,
-      rawArtifactRoles,
+      evidenceRoles,
       recordId: deterministicContractId(
         ID_PREFIXES.event,
         stableStringify({
           provider: context.provider,
           accountId: context.accountId ?? null,
-          rawArtifactRoles,
+          rawArtifactRoles: evidenceRoles,
           record: seedRecord,
         }),
       ),
@@ -1260,26 +1266,26 @@ function normalizeDeviceSampleInputs(
   });
 }
 
-function normalizeDeviceRawArtifactInputs(
-  rawArtifactInputs: readonly DeviceRawArtifactInput[],
+function normalizeDeviceEvidencePartInputs(
+  evidencePartInputs: readonly DeviceEvidencePartInput[],
   provider: string,
-): NormalizedDeviceRawArtifact[] {
-  const seenRawRoles = new Set<string>();
+): NormalizedDeviceEvidencePart[] {
+  const seenEvidenceRoles = new Set<string>();
 
-  return rawArtifactInputs.map((artifactInput, index) => {
+  return evidencePartInputs.map((artifactInput, index) => {
     const role = normalizeRequiredRole(
       artifactInput.role ?? `artifact-${index + 1}`,
-      `raw artifact ${index + 1} role`,
+      `evidence part ${index + 1} role`,
     );
 
-    if (seenRawRoles.has(role)) {
+    if (seenEvidenceRoles.has(role)) {
       throw new VaultError(
-        "VAULT_DUPLICATE_RAW_ROLE",
-        `Device raw artifact role "${role}" may only appear once per batch.`,
+        "VAULT_DUPLICATE_EVIDENCE_ROLE",
+        `Device evidence role "${role}" may only appear once per batch.`,
       );
     }
 
-    seenRawRoles.add(role);
+    seenEvidenceRoles.add(role);
     const content = normalizeInlineRawContent(artifactInput.content);
 
     return {
@@ -1336,7 +1342,8 @@ function normalizeDeviceBatchInputs({
   source = "device",
   events = [],
   samples = [],
-  rawArtifacts = [],
+  evidenceParts = [],
+  ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
   defaultTimeZone?: string;
@@ -1344,12 +1351,18 @@ function normalizeDeviceBatchInputs({
   const normalizedProvider = sanitizePathSegment(provider, "provider");
   const normalizedAccountId = typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
   const normalizedImportedAt = toIsoTimestamp(importedAt, "importedAt");
+  const normalizedSource = normalizeSource(source, EVENT_SOURCE_SET, "device");
   const defaultTimeZone = normalizeTimeZone(fallbackTimeZone);
   const normalizedProvenance = normalizeLooseRecord(
     provenance,
     "VAULT_INVALID_DEVICE_PROVENANCE",
     "Device import provenance must be a plain object.",
   ) ?? {};
+  const normalizedIngestReceipt = normalizeLooseRecord(
+    ingestReceipt,
+    "INTEGRATION_INGEST_RECEIPT_INVALID",
+    "Device ingest receipt must be a plain object.",
+  );
   const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
     value: events,
     code: "VAULT_INVALID_DEVICE_EVENTS",
@@ -1364,18 +1377,23 @@ function normalizeDeviceBatchInputs({
     itemCode: "VAULT_INVALID_SAMPLE",
     itemLabel: "Device sample",
   });
-  const rawArtifactInputs = normalizeDeviceBatchObjectArray<DeviceRawArtifactInput>({
-    value: rawArtifacts,
+  const evidencePartInputs = normalizeDeviceBatchObjectArray<DeviceEvidencePartInput>({
+    value: evidenceParts,
     code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",
-    message: "Device batch rawArtifacts must be an array when provided.",
+    message: "Device batch evidenceParts must be an array when provided.",
     itemCode: "VAULT_INVALID_RAW_ARTIFACT",
     itemLabel: "Device raw artifact",
   });
 
-  if (eventInputs.length === 0 && sampleInputs.length === 0 && rawArtifactInputs.length === 0) {
+  if (
+    eventInputs.length === 0
+    && sampleInputs.length === 0
+    && evidencePartInputs.length === 0
+    && !normalizedIngestReceipt
+  ) {
     throw new VaultError(
       "VAULT_INVALID_DEVICE_BATCH",
-      "importDeviceBatch requires at least one event, sample, or raw artifact.",
+      "importDeviceBatch requires at least one event, sample, evidence part, or ingest receipt.",
     );
   }
 
@@ -1383,96 +1401,83 @@ function normalizeDeviceBatchInputs({
     provider: normalizedProvider,
     accountId: normalizedAccountId,
     importedAt: normalizedImportedAt,
-    source,
+    source: normalizedSource,
     defaultTimeZone,
     provenance: normalizedProvenance,
+    ingestReceipt: normalizedIngestReceipt,
     events: normalizeDeviceEventInputs(eventInputs, {
       provider: normalizedProvider,
       accountId: normalizedAccountId,
       importedAt: normalizedImportedAt,
-      source,
+      source: normalizedSource,
       defaultTimeZone,
     }),
     samples: normalizeDeviceSampleInputs(sampleInputs, {
       provider: normalizedProvider,
       accountId: normalizedAccountId,
-      source,
+      source: normalizedSource,
       defaultTimeZone,
     }),
-    rawArtifacts: normalizeDeviceRawArtifactInputs(rawArtifactInputs, normalizedProvider),
+    evidenceParts: normalizeDeviceEvidencePartInputs(evidencePartInputs, normalizedProvider),
   };
 }
 
-function prepareDeviceRawArtifacts(
-  rawArtifacts: readonly NormalizedDeviceRawArtifact[],
-  options: {
-    importId: string;
-    provider: string;
-    effectiveOccurredAt: string;
-  },
-): PreparedDeviceRawArtifact[] {
-  return rawArtifacts.map((artifact) => ({
-    role: artifact.role,
-    content: artifact.content,
-    raw: prepareInlineRawArtifact({
-      fileName: artifact.fileName,
-      owner: {
-        kind: "device_batch",
-        id: options.importId,
-        partition: options.provider,
-      },
-      targetName: `${String(artifact.index + 1).padStart(2, "0")}-${artifact.fileName}`,
-      mediaType: artifact.mediaType,
-      occurredAt: options.effectiveOccurredAt,
-    }),
-    metadata: artifact.metadata,
-    sha256: artifact.sha256,
-  }));
+function prepareDeviceEvidenceParts(
+  evidenceParts: readonly NormalizedDeviceEvidencePart[],
+): IntegrationEvidencePart[] {
+  return evidenceParts.map((part) =>
+    buildIntegrationEvidencePart({
+      role: part.role,
+      fileName: part.fileName,
+      mediaType: part.mediaType ?? "application/json",
+      content: part.content,
+      metadata: part.metadata,
+    })
+  );
+}
+
+interface PreparedDeviceEventPlan {
+  entries: PreparedJsonlEntry<EventRecord>[];
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
 }
 
 function prepareDeviceEventEntries(
   events: readonly NormalizedDeviceEvent[],
-  preparedRawArtifacts: readonly PreparedDeviceRawArtifact[],
-): PreparedJsonlEntry<EventRecord>[] {
-  const rawArtifactPathByRole = new Map(
-    preparedRawArtifacts.map((artifact) => [artifact.role, artifact.raw.relativePath] as const),
-  );
-  const soleRawArtifact = preparedRawArtifacts.length === 1 ? preparedRawArtifacts[0] : undefined;
-  const soleRawArtifactPath = soleRawArtifact && isImplicitDeviceRawRefFallbackRole(soleRawArtifact.role)
-    ? soleRawArtifact.raw.relativePath
+  evidenceParts: readonly IntegrationEvidencePart[],
+): PreparedDeviceEventPlan {
+  const availableRoles = new Set(evidenceParts.map((part) => part.role));
+  const soleEvidencePart = evidenceParts.length === 1 ? evidenceParts[0] : undefined;
+  const soleEvidenceRole = soleEvidencePart && isImplicitDeviceEvidenceFallbackRole(soleEvidencePart.role)
+    ? soleEvidencePart.role
     : undefined;
+  const evidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();
 
-  return events.map((event) => {
-    const rawRefs = event.rawArtifactRoles.length > 0
-      ? event.rawArtifactRoles.map((role) => {
-          const rawPath = rawArtifactPathByRole.get(role);
-
-          if (!rawPath) {
+  const entries = events.map((event) => {
+    const roles = event.evidenceRoles.length > 0
+      ? event.evidenceRoles.map((role) => {
+          if (!availableRoles.has(role)) {
             throw new VaultError(
-              "VAULT_RAW_ROLE_MISSING",
-              `No staged raw artifact matched role "${role}" for device event ${event.recordId}.`,
+              "VAULT_EVIDENCE_ROLE_MISSING",
+              `No integration evidence part matched role "${role}" for device event ${event.recordId}.`,
+              { eventId: event.recordId, role },
             );
           }
-
-          return rawPath;
+          return role;
         })
-      : soleRawArtifactPath
-        ? [soleRawArtifactPath]
-        : undefined;
-    return prepareStoredEventLedgerEntry(
-      {
-        ...event.seed,
-        rawRefs,
-      },
-      event.recordId,
-    );
+      : soleEvidenceRole
+        ? [soleEvidenceRole]
+        : [];
+    const uniqueRoles = [...new Set(roles)];
+    evidenceRolesByPreparedRecordId.set(event.recordId, uniqueRoles);
+    return prepareStoredEventLedgerEntry(event.seed, event.recordId);
   });
+
+  return { entries, evidenceRolesByPreparedRecordId };
 }
 
-function isImplicitDeviceRawRefFallbackRole(role: string): boolean {
-  return !role.startsWith("wearable-raw-receipt:")
-    && !role.startsWith("wearable-raw-envelope:")
-    && !role.startsWith("wearable-canonical-records:");
+function isImplicitDeviceEvidenceFallbackRole(role: string): boolean {
+  return !role.startsWith("wearable-canonical-records:")
+    && !role.startsWith("wearable-raw-receipt:");
 }
 
 interface EventExternalRefReconciliation {
@@ -1603,7 +1608,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
-  const indexByShard = new Map<string, EventExternalRefIndex>();
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
@@ -1619,17 +1627,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    const shardIndex =
-      indexByShard.get(entry.relativePath) ??
-      (await indexLatestEventsByExternalRef(vaultRoot, [entry.relativePath]));
-
-    indexByShard.set(entry.relativePath, shardIndex);
-
     const refKey = eventExternalRefKey(externalRef);
-    const latest = shardIndex.latestByRefKey.get(refKey);
+    const latest = index.latestByRefKey.get(refKey);
 
     if (!latest) {
-      shardIndex.latestByRefKey.set(refKey, entry.record);
+      index.latestByRefKey.set(refKey, entry.record);
       appendEntries.push(entry);
       records.push(entry.record);
       continue;
@@ -1643,7 +1645,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     const revision = Math.max(
       eventSpineRevision(latest),
-      shardIndex.maxRevisionById.get(latest.id) ?? 0,
+      index.maxRevisionById.get(latest.id) ?? 0,
     ) + 1;
     const superseding: EventRecord = {
       ...entry.record,
@@ -1652,8 +1654,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
     };
 
     forceAppendIds.add(latest.id);
-    shardIndex.latestByRefKey.set(refKey, superseding);
-    shardIndex.maxRevisionById.set(latest.id, revision);
+    index.latestByRefKey.set(refKey, superseding);
+    index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
     records.push(superseding);
     supersededCount += 1;
@@ -1936,6 +1938,67 @@ export async function dedupeDeviceEventsByExternalRef({
   });
 }
 
+function mapPreparedDeviceEventsToCanonicalIds(
+  preparedEntries: readonly PreparedJsonlEntry<EventRecord>[],
+  reconciledRecords: readonly EventRecord[],
+): ReadonlyMap<string, string> {
+  const canonicalIdByIdentity = new Map<string, string>();
+  for (const record of reconciledRecords) {
+    const identity = record.externalRef
+      ? `external:${eventExternalRefKey(record.externalRef)}`
+      : `id:${record.id}`;
+    const existing = canonicalIdByIdentity.get(identity);
+    if (existing && existing !== record.id) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        `Device import produced multiple canonical event ids for identity "${identity}".`,
+      );
+    }
+    canonicalIdByIdentity.set(identity, record.id);
+  }
+
+  const result = new Map<string, string>();
+  for (const entry of preparedEntries) {
+    const identity = entry.record.externalRef
+      ? `external:${eventExternalRefKey(entry.record.externalRef)}`
+      : `id:${entry.record.id}`;
+    const canonicalId = canonicalIdByIdentity.get(identity);
+    if (!canonicalId) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+        `No reconciled canonical event matched prepared device event "${entry.record.id}".`,
+      );
+    }
+    result.set(entry.record.id, canonicalId);
+  }
+  return result;
+}
+
+function buildIntegrationEventOutputs(
+  preparedEntries: readonly PreparedJsonlEntry<EventRecord>[],
+  canonicalIdByPreparedId: ReadonlyMap<string, string>,
+  evidenceRolesByPreparedId: ReadonlyMap<string, readonly string[]>,
+): IntegrationIngestEventOutput[] {
+  const rolesByCanonicalId = new Map<string, Set<string>>();
+  for (const entry of preparedEntries) {
+    const canonicalId = canonicalIdByPreparedId.get(entry.record.id);
+    if (!canonicalId) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_MISSING",
+        `No canonical event id was recorded for prepared event "${entry.record.id}".`,
+      );
+    }
+    const roles = rolesByCanonicalId.get(canonicalId) ?? new Set<string>();
+    for (const role of evidenceRolesByPreparedId.get(entry.record.id) ?? []) {
+      roles.add(role);
+    }
+    rolesByCanonicalId.set(canonicalId, roles);
+  }
+  return [...rolesByCanonicalId.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, roles]) => ({ id, roles: [...roles].sort() }));
+}
+
 function buildDeviceBatchAuditSummary(input: {
   provider: string;
   eventCount: number;
@@ -1978,6 +2041,29 @@ function prepareDeviceSampleEntries(
   });
 }
 
+function buildLegacyReceiptFingerprint(
+  receipt: LooseRecord | undefined,
+  provider: string,
+): Array<{ role: string; fileName: string; mediaType: string; sha256: string }> {
+  if (!receipt) {
+    return [];
+  }
+  const receiptId = typeof receipt.id === "string" ? receipt.id.trim() : "";
+  if (!receiptId) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_RECEIPT_INVALID",
+      "Device ingest receipt requires an id.",
+    );
+  }
+  const content = normalizeInlineRawContent(receipt);
+  return [{
+    role: `wearable-raw-receipt:${receiptId}`,
+    fileName: `${provider}-raw-ingest-receipt-${receiptId}.json`,
+    mediaType: "application/json",
+    sha256: createHash("sha256").update(content).digest("hex"),
+  }];
+}
+
 function prepareDeviceBatchPlan({
   provider,
   accountId,
@@ -1986,7 +2072,8 @@ function prepareDeviceBatchPlan({
   source = "device",
   events = [],
   samples = [],
-  rawArtifacts = [],
+  evidenceParts = [],
+  ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
   defaultTimeZone?: string;
@@ -1999,7 +2086,8 @@ function prepareDeviceBatchPlan({
     source,
     events,
     samples,
-    rawArtifacts,
+    evidenceParts,
+    ingestReceipt,
     provenance,
   });
 
@@ -2010,27 +2098,32 @@ function prepareDeviceBatchPlan({
     ],
     normalizedInputs.importedAt,
   );
+  const legacyRawArtifactFingerprint = [
+    ...normalizedInputs.evidenceParts.map((part) => ({
+      role: part.role,
+      fileName: part.fileName,
+      mediaType: part.mediaType ?? null,
+      sha256: part.sha256,
+    })),
+    ...buildLegacyReceiptFingerprint(normalizedInputs.ingestReceipt, normalizedInputs.provider),
+  ];
+  const compactedIngestReceipt = compactIntegrationIngestReceipt(normalizedInputs.ingestReceipt);
   const importId = deterministicContractId(
     ID_PREFIXES.transform,
     stableStringify({
       provider: normalizedInputs.provider,
       accountId: normalizedInputs.accountId ?? null,
+      source: normalizedInputs.source,
+      importedAt: normalizedInputs.importedAt,
+      provenance: normalizedInputs.provenance,
+      receipt: compactedIngestReceipt ?? null,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
-      rawArtifacts: normalizedInputs.rawArtifacts.map((artifact) => ({
-        role: artifact.role,
-        fileName: artifact.fileName,
-        mediaType: artifact.mediaType ?? null,
-        sha256: artifact.sha256,
-      })),
+      evidenceParts: legacyRawArtifactFingerprint,
     }),
   );
-  const preparedRawArtifacts = prepareDeviceRawArtifacts(normalizedInputs.rawArtifacts, {
-    importId,
-    provider: normalizedInputs.provider,
-    effectiveOccurredAt,
-  });
-  const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedRawArtifacts);
+  const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts);
+  const eventPlan = prepareDeviceEventEntries(normalizedInputs.events, preparedEvidenceParts);
   const preparedSamples = prepareDeviceSampleEntries(normalizedInputs.samples);
 
   return {
@@ -2040,10 +2133,12 @@ function prepareDeviceBatchPlan({
     importedAt: normalizedInputs.importedAt,
     source: normalizedInputs.source,
     provenance: normalizedInputs.provenance,
+    ingestReceipt: normalizedInputs.ingestReceipt,
     effectiveOccurredAt,
-    preparedEvents,
+    preparedEvents: eventPlan.entries,
+    evidenceRolesByPreparedRecordId: eventPlan.evidenceRolesByPreparedRecordId,
     preparedSamples,
-    preparedRawArtifacts,
+    preparedEvidenceParts,
   };
 }
 
@@ -2529,7 +2624,8 @@ export async function importDeviceBatch({
   source = "device",
   events = [],
   samples = [],
-  rawArtifacts = [],
+  evidenceParts = [],
+  ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
   assertDeviceSampleRowLimit(Array.isArray(samples) ? samples.length : 0);
@@ -2542,7 +2638,8 @@ export async function importDeviceBatch({
     source,
     events,
     samples,
-    rawArtifacts,
+    evidenceParts,
+    ingestReceipt,
     provenance,
   });
   const eventReconciliation = await reconcileDeviceEventEntriesByExternalRef(
@@ -2561,6 +2658,39 @@ export async function importDeviceBatch({
     ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
   ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
+  const canonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
+    deviceBatchPlan.preparedEvents,
+    eventRecords,
+  );
+  const eventOutputs = buildIntegrationEventOutputs(
+    deviceBatchPlan.preparedEvents,
+    canonicalIdByPreparedId,
+    deviceBatchPlan.evidenceRolesByPreparedRecordId,
+  );
+  const ingestRecord = buildIntegrationIngestRecord({
+    id: deviceBatchPlan.importId,
+    provider: deviceBatchPlan.provider,
+    accountId: deviceBatchPlan.accountId,
+    source: deviceBatchPlan.source,
+    importedAt: deviceBatchPlan.importedAt,
+    receipt: deviceBatchPlan.ingestReceipt,
+    parts: deviceBatchPlan.preparedEvidenceParts,
+    eventOutputs,
+    eventIdsComplete: true,
+    sampleIds: sampleRecords.map((record) => record.id),
+    sampleIdsComplete: true,
+    eventCount: eventOutputs.length,
+    sampleCount: sampleRecords.length,
+    provenance: deviceBatchPlan.provenance,
+  });
+  const ingestAppendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord]);
+  const [ingestShardPath] = ingestAppendPlan.targetShardPaths;
+  if (!ingestShardPath) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_SHARD_INVALID",
+      `No integration ingest shard was prepared for "${ingestRecord.id}".`,
+    );
+  }
 
   return runCanonicalWrite({
     vaultRoot,
@@ -2568,56 +2698,12 @@ export async function importDeviceBatch({
     summary: `Import ${deviceBatchPlan.provider} device batch ${deviceBatchPlan.importId}`,
     occurredAt: deviceBatchPlan.effectiveOccurredAt,
     mutate: async ({ batch }) => {
-      const stagedRawArtifacts = [];
-
-      for (const artifact of deviceBatchPlan.preparedRawArtifacts) {
-        stagedRawArtifacts.push({
-          role: artifact.role,
-          raw: await batch.stageRawText({
-            targetRelativePath: artifact.raw.relativePath,
-            originalFileName: artifact.raw.originalFileName,
-            mediaType: artifact.raw.mediaType,
-            content: artifact.content,
-            allowExistingMatch: true,
-          }),
-        });
-      }
-
-      const manifestPath = stagedRawArtifacts.length > 0
-        ? await stageRawImportManifest({
-            batch,
-            importId: deviceBatchPlan.importId,
-            importKind: "device_batch",
-            importedAt: deviceBatchPlan.importedAt,
-            owner: {
-              kind: "device_batch",
-              id: deviceBatchPlan.importId,
-              partition: deviceBatchPlan.provider,
-            },
-            source: deviceBatchPlan.source ?? null,
-            artifacts: stagedRawArtifacts,
-            provenance: {
-              provider: deviceBatchPlan.provider,
-              accountId: deviceBatchPlan.accountId ?? null,
-              importedAt: deviceBatchPlan.importedAt,
-              eventCount: eventRecords.length,
-              sampleCount: sampleRecords.length,
-              rawArtifacts: deviceBatchPlan.preparedRawArtifacts.map((artifact) => ({
-                role: artifact.role,
-                relativePath: artifact.raw.relativePath,
-                sha256: artifact.sha256,
-                metadata: artifact.metadata ?? null,
-              })),
-            },
-            operatorMetadata: deviceBatchPlan.provenance,
-          })
-        : "";
+      await stageIntegrationIngestAppendPlan(batch, ingestAppendPlan);
       await stageJsonlAppendPlan(batch, eventAppendPlan);
       await stageJsonlAppendPlan(batch, sampleAppendPlan);
 
       const touchedPaths = [
-        ...deviceBatchPlan.preparedRawArtifacts.map((artifact) => artifact.raw.relativePath),
-        ...(manifestPath ? [manifestPath] : []),
+        ...ingestAppendPlan.targetShardPaths,
         ...eventAppendPlan.appendedShardPaths,
         ...sampleAppendPlan.appendedShardPaths,
       ];
@@ -2639,7 +2725,8 @@ export async function importDeviceBatch({
       });
 
       return {
-        importId: deviceBatchPlan.importId,
+        ingestId: deviceBatchPlan.importId,
+        ingestShardPath,
         provider: deviceBatchPlan.provider,
         accountId: deviceBatchPlan.accountId,
         importedAt: deviceBatchPlan.importedAt,
@@ -2647,9 +2734,8 @@ export async function importDeviceBatch({
         samples: sampleRecords,
         eventShardPaths: eventTargetShardPaths,
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
-        rawArtifacts: deviceBatchPlan.preparedRawArtifacts.map((artifact) => artifact.raw),
+        evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
         auditPath: audit.relativePath,
-        manifestPath,
       };
     },
   });

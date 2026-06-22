@@ -43,7 +43,7 @@ export {
   type DeviceDataOrigin,
   type DeviceEventPayload,
   type DeviceExternalRefPayload,
-  type DeviceRawArtifactPayload,
+  type DeviceEvidencePartPayload,
   type DeviceSamplePayload,
   type DeviceSampleValuePayload,
   type DocumentImportPayload,

@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   createVaultReadModel,
   type ProtocolSummary,
@@ -1457,7 +1458,7 @@ describe("record service seams", () => {
     const journalQuery = {
       readVault: vi.fn(async () => ({
         metadata: {
-          formatVersion: 1,
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
           vaultId: "vault_1",
           title: "Vault",
           timezone: "UTC",
@@ -1566,7 +1567,7 @@ describe("record service seams", () => {
     });
     assert.deepEqual(await journal.showVaultSummary("./vault"), {
       vault: "./vault",
-      formatVersion: 1,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       vaultId: "vault_1",
       title: "Vault",
       timezone: "UTC",
