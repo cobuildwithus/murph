@@ -1495,12 +1495,39 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
+  await recordReplacedWorkspaceSnapshotOrphanCandidate({
+    checkpoint,
+    env: input.env,
+    snapshotRef,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint,
     ok: true,
     snapshotRef,
   });
+}
+
+async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
+  checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
+  env: RunnerOutboundEnvironmentSource;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+  userId: string;
+}): Promise<void> {
+  const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
+  if (
+    !isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
+    || hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, input.snapshotRef)
+  ) {
+    return;
+  }
+  await recordWorkspaceSnapshotOrphanCandidate({
+    env: input.env,
+    objectKey: replacedSnapshotRef.objectKey,
+    snapshotId: replacedSnapshotRef.snapshotId,
+    userId: input.userId,
+  }).catch(() => undefined);
 }
 
 function hostedWorkspaceSnapshotV2RefsMatch(

@@ -69,7 +69,10 @@ export type InboxCaptureProjectionStoredCapture = Omit<StoredCapture, "attachmen
 };
 
 interface ProjectionReplacementStore {
-  replaceCaptureProjection(entries: ReadonlyArray<InboxCaptureProjectionEntry>): void;
+  replaceCaptureProjection(
+    entries: ReadonlyArray<InboxCaptureProjectionEntry>,
+    options?: { enqueueParserJobs?: boolean },
+  ): void;
 }
 
 export interface InboxCaptureMutationRecord {
@@ -1137,7 +1140,7 @@ function createInboxRuntimeStore(
           }
         : null;
     },
-    replaceCaptureProjection(entries) {
+    replaceCaptureProjection(entries, options = {}) {
       const normalizedEntries = entries.map((entry) => ({
         ...entry,
         stored: {
@@ -1170,11 +1173,13 @@ function createInboxRuntimeStore(
         for (const entry of normalizedEntries) {
           replayedCaptureIds.add(entry.captureId);
           upsertCaptureProjection(entry);
-          enqueueAttachmentParseJobsForProjection({
-            captureId: entry.captureId,
-            attachments: entry.stored.attachments,
-            createdAt: entry.stored.storedAt,
-          });
+          if (options.enqueueParserJobs === true) {
+            enqueueAttachmentParseJobsForProjection({
+              captureId: entry.captureId,
+              attachments: entry.stored.attachments,
+              createdAt: entry.stored.storedAt,
+            });
+          }
         }
 
         for (const captureId of previousCaptureIds) {
@@ -1191,13 +1196,16 @@ function createInboxRuntimeStore(
 
 export function replaceInboxCaptureProjection(input: {
   databasePath: string;
+  enqueueParserJobs?: boolean;
   entries: ReadonlyArray<InboxCaptureProjectionEntry>;
 }): void {
   const database = openInboxRuntimeDatabaseForPath(input.databasePath);
   const runtime = createInboxRuntimeStore(database, input.databasePath);
 
   try {
-    runtime.replaceCaptureProjection(input.entries);
+    runtime.replaceCaptureProjection(input.entries, {
+      enqueueParserJobs: input.enqueueParserJobs === true,
+    });
   } finally {
     runtime.close();
   }

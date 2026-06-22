@@ -1124,6 +1124,7 @@ export interface HostedWorkspaceCheckpointRequest {
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
   checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
+  replacedSnapshotRef?: HostedExecutionSnapshotRefState;
   workspace: HostedWorkspaceState;
 }
 

@@ -554,6 +554,10 @@ test("runInboxMediaRetention protects audio while its parser job is nonterminal"
   const runtime = await openInboxRuntime({ vaultRoot });
   try {
     await rebuildRuntimeFromVault({ vaultRoot, runtime });
+    runtime.enqueueDerivedJobs({
+      captureId,
+      stored: persisted.stored,
+    });
     const pendingJob = runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0];
     assert.ok(pendingJob);
     assert.equal(pendingJob.state, "pending");
@@ -881,11 +885,69 @@ test("runInboxMediaRetention does not let unmaterializable media consume the bat
   });
 
   assert.deepEqual(materializedPaths, [[missingPath]]);
-  assert.equal(result.expiredAttachments, 1);
+  assert.equal(result.expiredAttachments, 2);
   assert.equal(result.hasMoreEligibleAttachments, false);
-  assert.equal(result.records[0]?.storedPath, presentPath);
+  assert.deepEqual(result.records.map((record) => record.storedPath), [
+    missingPath,
+    presentPath,
+  ]);
   assert.equal(await fileExists(vaultRoot, missingPath), false);
   assert.equal(await fileExists(vaultRoot, presentPath), false);
+});
+
+test("runInboxMediaRetention bounds missing legacy materialization and tombstones misses", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-materialize-limit");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const paths: string[] = [];
+
+  for (const index of [1, 2, 3]) {
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: `cap_retention_materialize_limit_${index}`,
+      eventId: `evt_01HQW7K0M9N8P7Q6R5S4T3V2V${index}`,
+      storedAt: "2026-06-01T00:00:00.000Z",
+      input: buildOldImageCaptureInput({
+        externalId: `msg-materialize-limit-${index}`,
+        imageBytes,
+        text: `missing legacy media ${index}`,
+        threadId: "thread-materialize-limit",
+      }),
+    });
+    const storedPath = persisted.stored.attachments[0]?.storedPath ?? "";
+    assert.ok(storedPath);
+    await fs.unlink(path.join(vaultRoot, storedPath));
+    paths.push(storedPath);
+  }
+
+  const materializedPaths: string[][] = [];
+  const runOnce = () => runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+      return { missingStoredPaths: storedPaths };
+    },
+    maxAttachments: 1,
+    now: "2026-07-05T00:00:00.000Z",
+    vaultRoot,
+  });
+
+  const firstPass = await runOnce();
+  assert.deepEqual(materializedPaths, [[paths[0]]]);
+  assert.equal(firstPass.expiredAttachments, 1);
+  assert.equal(firstPass.hasMoreEligibleAttachments, true);
+  assert.equal(firstPass.records[0]?.storedPath, paths[0]);
+
+  const secondPass = await runOnce();
+  assert.deepEqual(materializedPaths, [[paths[0]], [paths[1]]]);
+  assert.equal(secondPass.expiredAttachments, 1);
+  assert.equal(secondPass.hasMoreEligibleAttachments, true);
+  assert.equal(secondPass.records[0]?.storedPath, paths[1]);
+
+  const thirdPass = await runOnce();
+  assert.deepEqual(materializedPaths, [[paths[0]], [paths[1]], [paths[2]]]);
+  assert.equal(thirdPass.expiredAttachments, 1);
+  assert.equal(thirdPass.hasMoreEligibleAttachments, false);
+  assert.equal(thirdPass.records[0]?.storedPath, paths[2]);
 });
 
 test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {

@@ -1278,6 +1278,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
     mocks.checkpointHostedWorkspace
       .mockResolvedValueOnce({
+        replacedSnapshotRef: createBundleRef("snapshot_1"),
         status: "updated",
         workspace: buildWorkspaceRecord({
           checkpointedAt: "2026-04-26T00:01:00.000Z",
@@ -1289,6 +1290,7 @@ describe("hosted runtime internal web routes", () => {
         }),
       })
       .mockResolvedValueOnce({
+        replacedSnapshotRef: null,
         status: "conflict",
         workspace: buildWorkspaceRecord({
           snapshotRef: createBundleRef("snapshot_current"),
@@ -1329,6 +1331,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(checkpointPayload).toMatchObject({
       checkpointed: true,
+      replacedSnapshotRef: createBundleRef("snapshot_1"),
       workspace: {
         version: "5",
       },

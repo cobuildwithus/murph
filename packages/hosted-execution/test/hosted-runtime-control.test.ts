@@ -1090,9 +1090,11 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     });
     expect(parseHostedWorkspaceCheckpointResponse({

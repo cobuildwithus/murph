@@ -21,6 +21,9 @@ import type {
   HostedRuntimeRedactedValue,
   HostedWorkspaceCheckpointReason,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedExecutionSnapshotRefState,
+} from "@murphai/hosted-execution";
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
@@ -197,6 +200,7 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
+  replacedSnapshotRef: HostedExecutionSnapshotRefState;
   status: "updated" | "conflict" | "foreground_pending";
   workspace: HostedWorkspaceRecord | null;
 }
@@ -367,6 +371,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     });
     if (!lockedWorkspace || lockedWorkspace.version !== expectedVersion) {
       return {
+        replacedSnapshotRef: null,
         status: "conflict",
         workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
       };
@@ -379,12 +384,25 @@ export async function checkpointHostedWorkspaceTx(input: {
       });
       if (pendingConversationSeq !== null) {
         return {
+          replacedSnapshotRef: null,
           status: "foreground_pending",
           workspace: projectHostedWorkspace(lockedWorkspace),
         };
       }
     }
   }
+
+  const currentWorkspace = await input.tx.hostedWorkspace.findUnique({
+    where: {
+      userId,
+    },
+  });
+  const replacedSnapshotRef = currentWorkspace
+    ? parseHostedExecutionSnapshotRef(
+        currentWorkspace.snapshotRef,
+        "Hosted workspace checkpoint replaced snapshotRef",
+      )
+    : null;
 
   const updated = await input.tx.hostedWorkspace.updateMany({
     data: updateData,
@@ -400,6 +418,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   });
 
   return {
+    replacedSnapshotRef: updated.count === 1 ? replacedSnapshotRef : null,
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };

@@ -613,6 +613,7 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
 }
 
 export async function rebuildRuntimeFromVault(input: {
+  enqueueParserJobs?: boolean;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
 }): Promise<void> {
@@ -664,6 +665,7 @@ export async function rebuildRuntimeFromVault(input: {
 
   replaceInboxCaptureProjection({
     databasePath: input.runtime.databasePath,
+    enqueueParserJobs: input.enqueueParserJobs === true,
     entries: projectionEntries,
   });
 }

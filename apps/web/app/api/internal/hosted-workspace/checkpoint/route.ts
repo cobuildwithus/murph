@@ -47,6 +47,9 @@ export const POST = withJsonError(async (request: Request) => {
       : result.status === "foreground_pending"
         ? { checkpointConflictReason: "foreground_pending" }
         : {}),
+    ...(result.status === "updated"
+      ? { replacedSnapshotRef: result.replacedSnapshotRef }
+      : {}),
     workspace: {
       browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
       checkpointedAt: result.workspace.checkpointedAt,

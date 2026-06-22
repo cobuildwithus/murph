@@ -692,9 +692,9 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   assert.deepEqual(runtime.getCursor("email", "self"), { messageId: "msg-rebuild-reset" });
   assert.equal(runtime.getCapture(staleCaptureId), null);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
   assert.equal(countRows(runtime.databasePath, "capture_mutation_tombstone"), 1);
-  assert.equal(rebuilt.attachments[0]?.parseState, "pending");
+  assert.equal(rebuilt.attachments[0]?.parseState ?? null, null);
   assert.equal(rebuilt.attachments[0]?.parserProviderId ?? null, null);
   assert.equal(rebuilt.attachments[0]?.derivedPath ?? null, null);
   assert.equal(rebuilt.attachments[0]?.extractedText ?? null, null);

@@ -1103,6 +1103,14 @@ export function parseHostedWorkspaceCheckpointResponse(
             HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
           ),
         }),
+    ...(record.replacedSnapshotRef === undefined
+      ? {}
+      : {
+          replacedSnapshotRef: parseHostedExecutionSnapshotRef(
+            record.replacedSnapshotRef,
+            "Hosted workspace checkpoint response replacedSnapshotRef",
+          ),
+        }),
     workspace: parseHostedWorkspaceState(record.workspace),
   };
 }

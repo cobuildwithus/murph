@@ -103,6 +103,7 @@ export async function runInboxMediaRetention(
   };
 
   try {
+    let materializeCandidateCount = 0;
     let presentCandidateCount = 0;
 
     captureLoop:
@@ -156,6 +157,11 @@ export async function runInboxMediaRetention(
           if (alreadyRetained || !input.materializeCandidatePaths) {
             continue;
           }
+          if (materializeCandidateCount >= maxAttachments) {
+            hasMoreEligibleAttachments = true;
+            continue;
+          }
+          materializeCandidateCount += 1;
         }
         if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
           continue;
@@ -215,8 +221,8 @@ export async function runInboxMediaRetention(
 
         for (const candidate of candidates) {
           throwIfRetentionAborted(input.signal);
+          const isMissingAfterMaterialization = missingAfterMaterialization.has(candidate.storedPath);
           if (
-            missingAfterMaterialization.has(candidate.storedPath) ||
             latestDurableRawInboxRefs.has(candidate.storedPath) ||
             protectedCaptureIds.has(candidate.capture.captureId) ||
             protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
@@ -226,19 +232,21 @@ export async function runInboxMediaRetention(
             continue;
           }
 
-          const integrity = await hashExistingVaultFile(
-            input.vaultRoot,
-            candidate.storedPath,
-            input.signal,
-          );
-          if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
-            continue;
+          if (!isMissingAfterMaterialization) {
+            const integrity = await hashExistingVaultFile(
+              input.vaultRoot,
+              candidate.storedPath,
+              input.signal,
+            );
+            if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
+              continue;
+            }
+            if (selectedCandidateCount >= maxAttachments) {
+              hasMoreEligibleAttachments = true;
+              break;
+            }
+            selectedCandidateCount += 1;
           }
-          if (selectedCandidateCount >= maxAttachments) {
-            hasMoreEligibleAttachments = true;
-            break;
-          }
-          selectedCandidateCount += 1;
 
           const alreadyRetained =
             alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
@@ -253,10 +261,12 @@ export async function runInboxMediaRetention(
               }),
             );
           }
-          storedPathsToDelete.push(candidate.storedPath);
+          if (!isMissingAfterMaterialization) {
+            storedPathsToDelete.push(candidate.storedPath);
+          }
         }
 
-        if (storedPathsToDelete.length === 0) {
+        if (records.length === 0 && storedPathsToDelete.length === 0) {
           return emptyRetentionResult({
             hasMoreEligibleAttachments,
             nextEligibleAt,

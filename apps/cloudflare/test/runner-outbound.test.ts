@@ -4317,6 +4317,92 @@ describe("handleRunnerOutboundRequest", () => {
     expect(head).toHaveBeenCalledWith(objectKey);
   });
 
+  it("records the replaced successful workspace snapshot for delayed orphan cleanup", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_replaces_previous";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_previous_success";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 5,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+      return new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            checkpointRequest.snapshotRef,
+          ),
+          replacedSnapshotRef,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey: replacedObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    }));
+    expect(runner.workspaceSnapshotOrphanCandidates.get(replacedSnapshotId)).toMatchObject({
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+    });
+  });
+
   it("verifies hosted-local direct-R2 snapshot objects through the local S3-compatible endpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
