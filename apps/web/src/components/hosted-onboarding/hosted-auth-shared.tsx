@@ -72,7 +72,7 @@ export function HostedAuthFinishingNotice() {
         <p className="font-serif text-[15px] font-medium leading-tight text-[#1A1F16]">
           Setting things up
         </p>
-        <p className="mt-1 text-xs leading-snug text-[#7A7870]">
+        <p className="mt-1 text-xs leading-snug text-pretty text-[#7A7870]">
           Keep this tab open — should just be a moment.
         </p>
       </div>
@@ -128,7 +128,7 @@ export function HostedAuthLegalNotice({
   className?: string;
 }) {
   return (
-    <p className={cn("text-xs leading-relaxed text-stone-500", className)}>
+    <p className={cn("text-xs leading-relaxed text-pretty text-stone-500", className)}>
       By continuing, you agree to our{" "}
       <a href={HOSTED_TERMS_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
         Terms

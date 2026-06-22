@@ -85,7 +85,7 @@ export function ExperimentHeader({
             {isActive && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-chart-5">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 tabular-nums text-chart-5">
                   <span className="size-1.5 rounded-full bg-amber-500" />
                   {day
                     ? inBaseline
@@ -98,7 +98,7 @@ export function ExperimentHeader({
             {isPaused && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 tabular-nums text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-muted-foreground" />
                   {day
                     ? inBaseline
@@ -111,7 +111,7 @@ export function ExperimentHeader({
             {isFinished && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-ring">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 tabular-nums text-ring">
                   <span className="size-1.5 rounded-full bg-ring" />
                   {dateRange ?? "Finished"}
                 </span>
@@ -120,7 +120,7 @@ export function ExperimentHeader({
             {isStopped && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 tabular-nums text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-muted-foreground" />
                   {dateRange ?? "Stopped"}
                 </span>
@@ -128,7 +128,7 @@ export function ExperimentHeader({
             )}
           </div>
 
-          <h1 className="font-serif text-3xl font-semibold leading-[110%] tracking-[-0.03em] text-foreground sm:text-[38px]">
+          <h1 className="font-serif text-3xl font-semibold leading-[110%] tracking-[-0.03em] text-balance text-foreground sm:text-[38px]">
             {title}
           </h1>
 
@@ -168,7 +168,7 @@ export function ExperimentHeader({
               />
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-sm font-semibold text-foreground">
+              <span className="text-sm font-semibold tabular-nums text-foreground">
                 {completionPercent}%
               </span>
               <span className="text-[8px] text-ring">complete</span>

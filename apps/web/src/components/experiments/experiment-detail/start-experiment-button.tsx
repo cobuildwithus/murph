@@ -220,7 +220,7 @@ function ContactOptionLink({ option }: { option: ExperimentStartContactOption })
             {option.description}
           </span>
         </span>
-        <span className="flex shrink-0 items-center px-2 text-muted-foreground transition group-hover/channel:translate-x-0.5 group-hover/channel:text-primary sm:px-4">
+        <span className="flex shrink-0 items-center px-2 text-muted-foreground transition-[color,transform] duration-150 group-hover/channel:translate-x-0.5 group-hover/channel:text-primary sm:px-4">
           <ChevronRightIcon data-icon="inline-end" />
         </span>
       </span>

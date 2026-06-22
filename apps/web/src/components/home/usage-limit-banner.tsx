@@ -59,14 +59,14 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
     >
       <div className="min-w-0">
         {resetLabel ? (
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] tabular-nums text-[#5a6e32]">
             {resetLabel}
           </p>
         ) : null}
-        <h2 className="mt-2 font-serif text-xl font-semibold tracking-tight text-foreground">
+        <h2 className="mt-2 font-serif text-xl font-semibold tracking-tight text-balance text-foreground">
           {copy.title}
         </h2>
-        <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-1 max-w-xl text-sm leading-relaxed text-pretty text-muted-foreground">
           {copy.body}
         </p>
       </div>
