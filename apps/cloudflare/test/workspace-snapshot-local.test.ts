@@ -21,6 +21,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   serializeHostedWorkspaceSnapshotV2Aad,
+  type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
@@ -29,6 +30,7 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
+  restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
 } from "../src/workspace-snapshot-local.js";
 
 describe("workspace snapshot local restore", () => {
@@ -162,6 +164,119 @@ describe("workspace snapshot local restore", () => {
       await expect(access(path.join(restoredVaultRoot, ".git", "config"))).rejects.toThrow();
       await expect(access(path.join(restoredOperatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt")))
         .rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("restores encrypted snapshots from an encrypted byte stream", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const snapshotId = "snapshot_stream_restore";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_stream_restore.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await mkdir(path.join(sourceDurableRoot, "vault"), { recursive: true });
+      await writeFile(path.join(sourceDurableRoot, "vault", "note.md"), "stream restored\n", "utf8");
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      const ref = buildWorkspaceSnapshotRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      const restoreTimings = await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedStream: streamEncryptedChunks(splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
+        postExtractIntegrityCheck: true,
+        ref,
+      });
+
+      expect(typeof restoreTimings.decryptMs).toBe("number");
+      expect(Number.isFinite(restoreTimings.decryptMs)).toBe(true);
+      await expect(readFile(path.join(restoredDurableRoot, "vault", "note.md"), "utf8"))
+        .resolves.toBe("stream restored\n");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("rejects encrypted stream auth failures without replacing durable state", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-auth-test-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const durableRoot = path.join(tempRoot, "durable");
+    const existingDurableFile = path.join(durableRoot, "existing.txt");
+    const snapshotId = "snapshot_stream_auth_fail";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_stream_auth_fail.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    try {
+      await mkdir(path.join(sourceDurableRoot, "vault"), { recursive: true });
+      await writeFile(path.join(sourceDurableRoot, "vault", "note.md"), "should not restore\n", "utf8");
+      await mkdir(durableRoot, { mode: 0o700, recursive: true });
+      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      const tamperedEncryptedBytes = Buffer.from(encryptedBytes);
+      tamperedEncryptedBytes[tamperedEncryptedBytes.byteLength - 1] ^= 0xff;
+      const ref = buildWorkspaceSnapshotRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        encryptedStream: streamEncryptedChunks([
+          tamperedEncryptedBytes.subarray(0, tamperedEncryptedBytes.byteLength - 2),
+          tamperedEncryptedBytes.subarray(tamperedEncryptedBytes.byteLength - 2),
+        ]),
+        ref,
+      })).rejects.toThrow();
+
+      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
+      await expect(access(path.join(durableRoot, "vault", "note.md"))).rejects.toThrow();
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -501,6 +616,60 @@ function writeTarOctal(buffer: Buffer, offset: number, length: number, value: nu
 
 function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function buildWorkspaceSnapshotRef(input: {
+  aad: HostedWorkspaceSnapshotV2Aad;
+  encrypted: Awaited<ReturnType<typeof createEncryptedWorkspaceSnapshotFile>>;
+  objectKey: string;
+  snapshotId: string;
+  userId: string;
+}): HostedWorkspaceSnapshotV2Ref {
+  return {
+    archive: {
+      compression: input.encrypted.compression,
+      encryptedByteSize: input.encrypted.encryptedByteSize,
+      encryptedObjectSha256: input.encrypted.encryptedObjectSha256,
+      fileCount: input.encrypted.fileCount,
+      format: "tar",
+      plaintextArchiveSha256: input.encrypted.plaintextArchiveSha256,
+      totalPlainBytes: input.encrypted.totalPlainBytes,
+    },
+    createdAt: "2026-05-20T00:00:00.000Z",
+    encryption: {
+      aad: input.aad,
+      ivBase64: input.encrypted.ivBase64,
+      rootKeyId: "root_key_test",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    objectKey: input.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+    snapshotId: input.snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: input.userId,
+  };
+}
+
+async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
+
+const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
+
+function splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes: Buffer): Uint8Array[] {
+  const ciphertextEnd =
+    encryptedBytes.byteLength - TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES;
+  const nearAuthTag = Math.max(1, ciphertextEnd - 3);
+  return [
+    encryptedBytes.subarray(0, 1),
+    encryptedBytes.subarray(1, nearAuthTag),
+    encryptedBytes.subarray(nearAuthTag, ciphertextEnd + 1),
+    encryptedBytes.subarray(ciphertextEnd + 1, ciphertextEnd + 8),
+    encryptedBytes.subarray(ciphertextEnd + 8),
+  ].filter((chunk) => chunk.byteLength > 0);
 }
 
 function zstdCompress(bytes: Buffer): Buffer {

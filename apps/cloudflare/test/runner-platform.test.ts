@@ -475,6 +475,63 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   }, 15_000);
 
+  it("cancels an opened snapshot object body when the data-key unwrap fails", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-open-body-cancel-"));
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
+    let objectBodyCanceled = false;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot open body cancel fetch");
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+        await delayWithAbort(50, request.signal);
+        return new Response("unwrap denied", { status: 403 });
+      }
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+        return new Response(JSON.stringify({
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          getUrl,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url === getUrl) {
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            objectBodyCanceled = true;
+          },
+        }), {
+          headers: {
+            "content-length": String(ref.archive.encryptedByteSize),
+            "content-type": "application/octet-stream",
+          },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot: path.join(tempRoot, "durable"),
+        ref,
+        scratchRoot: path.join(tempRoot, "scratch"),
+      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/);
+
+      expect(objectBodyCanceled).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  }, 15_000);
+
   it("aborts the in-flight presign request when the data-key unwrap fails", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-presign-abort-"));
     const ref = createWorkspaceSnapshotV2Ref({
@@ -1081,7 +1138,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
     const sourceRoot = path.join(tempRoot, "source");
-    const scratchRoot = path.join(tempRoot, "scratch");
+    const snapshotScratchRoot = path.join(tempRoot, "snapshot-scratch");
+    const restoreScratchRoot = path.join(tempRoot, "restore-scratch");
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
@@ -1106,7 +1164,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         durableRoot: sourceRoot,
         ivBase64: "AQIDBAUGBwgJCgsM",
         maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-        outputDir: scratchRoot,
+        outputDir: snapshotScratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
@@ -1189,12 +1247,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
           userId: "member_123",
         },
-        scratchRoot,
+        scratchRoot: restoreScratchRoot,
       });
       for (const key of [
         "sizeGuardMs",
         "dataKeyUnwrapMs",
-        "scratchPrepareMs",
         "presignGetMs",
         "objectFetchMs",
         "decryptMs",
@@ -1210,6 +1267,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
+      expect(restoreTimings?.scratchPrepareMs).toBeUndefined();
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       // The data-key unwrap runs concurrently with the presign/fetch chain,
@@ -1241,6 +1299,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
+      await expect(access(restoreScratchRoot)).rejects.toThrow();
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
         .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
@@ -1252,12 +1311,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "data_key_unwrap",
         "object_fetch",
         "presign_get",
-        "scratch_prepare",
         "size_guard",
       ]);
       expect(completedSteps[0]).toBe("size_guard");
       expect(completedSteps.at(-1)).toBe("archive_restore");
-      expect(completedSteps.indexOf("scratch_prepare")).toBeLessThan(completedSteps.indexOf("presign_get"));
       expect(completedSteps.indexOf("presign_get")).toBeLessThan(completedSteps.indexOf("object_fetch"));
       expect(workspaceSnapshotLogs[0]?.details).toEqual(expect.objectContaining({
         archiveEncryptedByteSize: encrypted.encryptedByteSize,
@@ -1274,7 +1331,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(sourceRoot);
       expect(serializedLogs).not.toContain(durableRoot);
-      expect(serializedLogs).not.toContain(scratchRoot);
+      expect(serializedLogs).not.toContain(snapshotScratchRoot);
+      expect(serializedLogs).not.toContain(restoreScratchRoot);
       expect(serializedLogs).not.toContain("note.md");
       expect(serializedLogs).not.toContain("restored through direct r2");
     } finally {

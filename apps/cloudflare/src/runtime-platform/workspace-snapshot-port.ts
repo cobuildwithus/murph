@@ -1,10 +1,6 @@
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { Readable, Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 
 import type {
   HostedRuntimePlatform,
@@ -32,7 +28,7 @@ import {
   encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "../workspace-snapshot-store.ts";
-import { restoreEncryptedWorkspaceSnapshot } from "../workspace-snapshot-local.ts";
+import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   HostedRuntimeControlPlaneFetchError,
@@ -247,135 +243,117 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         step: "size_guard",
       });
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
-      const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
-      const scratchPrepareStartedAt = Date.now();
-      const tempDir = await runHostedWorkspaceSnapshotRestoreStep({
-        details: restoreLogDetails,
-        run: async () => {
-          await mkdir(scratchRoot, { mode: 0o700, recursive: true });
-          return await mkdtemp(path.join(scratchRoot, "workspace-snapshot-fetch-"));
-        },
-        step: "scratch_prepare",
+      // The data-key unwrap (worker KMS round trip) and the encrypted-object
+      // leg (presign GET -> R2 response open) share no inputs. Run them
+      // concurrently, then let archive_restore consume the response body
+      // directly so R2 body reads overlap with decrypt/hash work instead of
+      // first writing ciphertext to a temp file.
+      const dataKeyPromise = (async () => {
+        const dataKeyUnwrapStartedAt = Date.now();
+        const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+          details: restoreLogDetails,
+          run: async () => await unwrapWorkspaceSnapshotDataKey({
+            aad: request.ref.encryption.aad,
+            fetchImpl: input.fetchImpl,
+            rootKeyId: request.ref.encryption.rootKeyId,
+            timeoutMs: input.timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            wrappedDataKey: request.ref.encryption.wrappedDataKey,
+          }),
+          step: "data_key_unwrap",
+        });
+        timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
+        return dataKey;
+      })();
+      const encryptedObjectAbort = new AbortController();
+      void dataKeyPromise.catch(() => {
+        encryptedObjectAbort.abort(
+          new Error("Hosted workspace snapshot data key unwrap failed; object fetch is unnecessary."),
+        );
       });
-      timing.scratchPrepareMs = readHostedRuntimeStepElapsedMs(scratchPrepareStartedAt);
-      const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
-      try {
-        // The data-key unwrap (worker KMS round trip) and the encrypted-object
-        // leg (presign GET -> R2 download) share no inputs, and the dominant
-        // cold-restore cost is exactly these two network legs run back to
-        // back. Run them concurrently and only join before archive_restore,
-        // which needs both. Per-step timings keep their own wall-clock, so
-        // concurrent step durations no longer sum to the restore total.
-        const dataKeyPromise = (async () => {
-          const dataKeyUnwrapStartedAt = Date.now();
-          const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-            details: restoreLogDetails,
-            run: async () => await unwrapWorkspaceSnapshotDataKey({
-              aad: request.ref.encryption.aad,
+      const encryptedObjectPromise = (async () => {
+        const presignGetStartedAt = Date.now();
+        const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+          details: restoreLogDetails,
+          run: async () => {
+            const result = await presignWorkspaceSnapshotGet({
               fetchImpl: input.fetchImpl,
-              rootKeyId: request.ref.encryption.rootKeyId,
+              objectKey: request.ref.objectKey,
+              ref: request.ref,
+              signal: encryptedObjectAbort.signal,
+              snapshotId: request.ref.snapshotId,
               timeoutMs: input.timeoutMs,
               workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-              wrappedDataKey: request.ref.encryption.wrappedDataKey,
-            }),
-            step: "data_key_unwrap",
-          });
-          timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
-          return dataKey;
-        })();
-        // A failed unwrap makes the (potentially large) R2 download useless;
-        // abort it instead of letting it run to completion before the join
-        // surfaces the unwrap error to the retry path.
-        const encryptedObjectAbort = new AbortController();
-        void dataKeyPromise.catch(() => {
-          encryptedObjectAbort.abort(
-            new Error("Hosted workspace snapshot data key unwrap failed; object fetch is unnecessary."),
-          );
+            });
+            const expiresAtMs = Date.parse(result.expiresAt);
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+              throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+            }
+            return {
+              ...result,
+              expiresAtMs,
+            };
+          },
+          step: "presign_get",
         });
-        const encryptedObjectPromise = (async () => {
-          const presignGetStartedAt = Date.now();
-          const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-            details: restoreLogDetails,
-            run: async () => {
-              const result = await presignWorkspaceSnapshotGet({
-                fetchImpl: input.fetchImpl,
-                objectKey: request.ref.objectKey,
-                ref: request.ref,
-                signal: encryptedObjectAbort.signal,
-                snapshotId: request.ref.snapshotId,
-                timeoutMs: input.timeoutMs,
-                workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-              });
-              const expiresAtMs = Date.parse(result.expiresAt);
-              if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-                throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-              }
-              return {
-                ...result,
-                expiresAtMs,
-              };
-            },
-            step: "presign_get",
-          });
-          timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
-          const objectFetchStartedAt = Date.now();
-          await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-            details: restoreLogDetails,
-            run: async () => {
-              const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
-                encryptedFilePath,
-                expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
-                fetchImpl: input.fetchImpl,
-                getUrl: presignedGet.getUrl,
-                signal: encryptedObjectAbort.signal,
-                timeoutMs: Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000),
-              });
-              if (!fetched) {
-                throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
-              }
-            },
-            step: "object_fetch",
-          });
-          timing.objectFetchMs = readHostedRuntimeStepElapsedMs(objectFetchStartedAt);
-        })();
-        // Settle both legs before throwing so a failed leg never leaves the
-        // other writing into a scratch dir that the finally block already
-        // removed. Prefer the unwrap failure deterministically.
-        const [dataKeySettled, encryptedObjectSettled] = await Promise.allSettled([
-          dataKeyPromise,
-          encryptedObjectPromise,
-        ]);
-        if (dataKeySettled.status === "rejected") {
-          throw dataKeySettled.reason;
-        }
-        if (encryptedObjectSettled.status === "rejected") {
-          throw encryptedObjectSettled.reason;
-        }
-        const dataKey = dataKeySettled.value;
-        const archiveTimings = await runHostedWorkspaceSnapshotRestoreStep({
+        timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+        const objectFetchStartedAt = Date.now();
+        const fetched = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
-          run: async () => await restoreEncryptedWorkspaceSnapshot({
-            dataKey,
-            durableRoot: request.durableRoot,
-            encryptedFilePath,
-            ref: request.ref,
-          }),
-          step: "archive_restore",
+          run: async () => {
+            const encryptedStream = await fetchHostedWorkspaceSnapshotEncryptedObjectStream({
+              expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
+              fetchImpl: input.fetchImpl,
+              getUrl: presignedGet.getUrl,
+              signal: encryptedObjectAbort.signal,
+              timeoutMs: Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000),
+            });
+            if (!encryptedStream) {
+              throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
+            }
+            return encryptedStream;
+          },
+          step: "object_fetch",
         });
-        timing.decryptMs = archiveTimings.decryptMs;
-        timing.archiveExtractMs = archiveTimings.archiveExtractMs;
-        timing.restorePreflightMs = archiveTimings.restorePreflightMs;
-        timing.durableRootReplaceMs = archiveTimings.durableRootReplaceMs;
-        timing.cleanupMs = archiveTimings.cleanupMs;
-        timing.extractMs = archiveTimings.extractMs;
-      } finally {
-        const cleanupStartedAt = Date.now();
-        try {
-          await rm(tempDir, { force: true, recursive: true });
-        } finally {
-          timing.cleanupMs = (timing.cleanupMs ?? 0) + readHostedRuntimeStepElapsedMs(cleanupStartedAt);
+        timing.objectFetchMs = readHostedRuntimeStepElapsedMs(objectFetchStartedAt);
+        return fetched;
+      })();
+      const [dataKeySettled, encryptedObjectSettled] = await Promise.allSettled([
+        dataKeyPromise,
+        encryptedObjectPromise,
+      ]);
+      if (dataKeySettled.status === "rejected") {
+        if (encryptedObjectSettled.status === "fulfilled") {
+          await encryptedObjectSettled.value.cancel();
         }
+        throw dataKeySettled.reason;
       }
+      if (encryptedObjectSettled.status === "rejected") {
+        throw encryptedObjectSettled.reason;
+      }
+      const encryptedObject = encryptedObjectSettled.value;
+      const archiveTimings = await runHostedWorkspaceSnapshotRestoreStep({
+        details: restoreLogDetails,
+        run: async () => {
+          try {
+            return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+              dataKey: dataKeySettled.value,
+              durableRoot: request.durableRoot,
+              encryptedStream: encryptedObject.encryptedStream,
+              ref: request.ref,
+            });
+          } finally {
+            await encryptedObject.cancel();
+          }
+        },
+        step: "archive_restore",
+      });
+      timing.decryptMs = archiveTimings.decryptMs;
+      timing.archiveExtractMs = archiveTimings.archiveExtractMs;
+      timing.restorePreflightMs = archiveTimings.restorePreflightMs;
+      timing.durableRootReplaceMs = archiveTimings.durableRootReplaceMs;
+      timing.cleanupMs = archiveTimings.cleanupMs;
+      timing.extractMs = archiveTimings.extractMs;
       return timing;
     },
 
@@ -403,6 +381,12 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
   };
   return port;
 }
+
+interface HostedWorkspaceSnapshotEncryptedObjectBody {
+  cancel(): Promise<void>;
+  encryptedStream: AsyncIterable<Uint8Array>;
+}
+
 function parseHostedWorkspaceSnapshotStartPayload(
   value: unknown,
   boundUserId: string,
@@ -609,14 +593,13 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
   return dataKey;
 }
 
-async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
-  encryptedFilePath: string;
+async function fetchHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
   getUrl: string;
   signal?: AbortSignal | null;
   timeoutMs: number;
-}): Promise<boolean> {
+}): Promise<HostedWorkspaceSnapshotEncryptedObjectBody | null> {
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
@@ -630,7 +613,11 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
     url: new URL(input.getUrl),
   });
   if (response.status === 404) {
-    return false;
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+    return null;
+  }
+  if (!response.ok) {
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
   }
   assertHostedOk(response, "Hosted workspace snapshot fetch");
   if (!response.body) {
@@ -638,60 +625,94 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
   }
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null && contentLength !== String(input.expectedEncryptedByteSize)) {
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot fetch content-length does not match its ref.");
   }
-  try {
-    await pipeline(
-      Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>),
-      createExpectedByteCountTransform({
-        expectedBytes: input.expectedEncryptedByteSize,
-        label: "Hosted workspace snapshot fetch",
-      }),
-      createWriteStream(input.encryptedFilePath, { mode: 0o600 }),
-    );
-  } catch (error) {
-    const wrappedError = new HostedRuntimeControlPlaneFetchError({
-      cause: error,
-      description: "Hosted workspace snapshot fetch response body read",
-      signalState: {
-        callerSignalAborted: false,
-        requestSignalAborted: false,
-        timeoutMs: input.timeoutMs,
-        timeoutSignalAborted: false,
-      },
-    });
-
-    if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
-      throw wrappedError;
-    }
-
-    throw error;
-  }
-  return true;
+  return createHostedWorkspaceSnapshotEncryptedObjectBody({
+    expectedEncryptedByteSize: input.expectedEncryptedByteSize,
+    responseBody: response.body,
+    timeoutMs: input.timeoutMs,
+  });
 }
 
-function createExpectedByteCountTransform(input: {
-  expectedBytes: number;
-  label: string;
-}): Transform {
+function createHostedWorkspaceSnapshotEncryptedObjectBody(input: {
+  expectedEncryptedByteSize: number;
+  responseBody: ReadableStream<Uint8Array>;
+  timeoutMs: number;
+}): HostedWorkspaceSnapshotEncryptedObjectBody {
   let byteCount = 0;
-  return new Transform({
-    flush(callback) {
-      if (byteCount !== input.expectedBytes) {
-        callback(new Error(`${input.label} byte count does not match its ref.`));
-        return;
+  let cancelPromise: Promise<void> | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let streamDone = false;
+
+  const cancel = async (): Promise<void> => {
+    if (streamDone) {
+      return;
+    }
+    cancelPromise ??= (reader
+      ? reader.cancel()
+      : input.responseBody.cancel())
+      .catch(() => undefined);
+    await cancelPromise;
+  };
+
+  async function* readBody(): AsyncIterable<Uint8Array> {
+    try {
+      reader = input.responseBody.getReader();
+      while (true) {
+        const next = await reader.read();
+        if (next.done) {
+          break;
+        }
+        byteCount += next.value.byteLength;
+        if (byteCount > input.expectedEncryptedByteSize) {
+          throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
+        }
+        yield next.value;
       }
-      callback();
-    },
-    transform(chunk: Buffer, _encoding, callback) {
-      byteCount += chunk.byteLength;
-      if (byteCount > input.expectedBytes) {
-        callback(new Error(`${input.label} exceeded its ref byte count.`));
-        return;
+      if (byteCount !== input.expectedEncryptedByteSize) {
+        throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
       }
-      callback(null, chunk);
-    },
-  });
+      streamDone = true;
+    } catch (error) {
+      const wrappedError = new HostedRuntimeControlPlaneFetchError({
+        cause: error,
+        description: "Hosted workspace snapshot fetch response body read",
+        signalState: {
+          callerSignalAborted: false,
+          requestSignalAborted: false,
+          timeoutMs: input.timeoutMs,
+          timeoutSignalAborted: false,
+        },
+      });
+
+      if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
+        throw wrappedError;
+      }
+
+      throw error;
+    } finally {
+      if (!streamDone) {
+        await cancel();
+      }
+      reader?.releaseLock();
+    }
+  }
+
+  return {
+    cancel,
+    encryptedStream: readBody(),
+  };
+}
+
+async function cancelHostedWorkspaceSnapshotResponseBody(
+  body: ReadableStream<Uint8Array> | null,
+): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // Best-effort cleanup only; preserve the original restore failure.
+  }
 }
 
 function parseHostedWorkspaceSnapshotCompletePayload(

@@ -25,7 +25,6 @@ export type HostedWorkspaceSnapshotRestoreStep =
   | "data_key_unwrap"
   | "object_fetch"
   | "presign_get"
-  | "scratch_prepare"
   | "size_guard";
 
 const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS =
@@ -34,7 +33,6 @@ const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS =
     "data_key_unwrap",
     "object_fetch",
     "presign_get",
-    "scratch_prepare",
     "size_guard",
   ]);
 
