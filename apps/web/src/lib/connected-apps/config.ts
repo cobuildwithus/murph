@@ -11,6 +11,8 @@ export interface HostedConnectedAppsConfig {
 
 const DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev";
 const DEFAULT_CONNECTED_APP_TOOLKITS = ["gmail", "googlecalendar"] as const;
+const MIN_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 2;
+const MAX_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 10;
 const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
   gmail: "Gmail",
   googlecalendar: "Google Calendar",
@@ -131,10 +133,14 @@ function normalizeMaxAccounts(value: string | undefined): number {
   if (!Number.isFinite(parsed)) {
     return 5;
   }
-  return Math.max(2, Math.min(parsed, 20));
+  return Math.max(
+    MIN_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT,
+    Math.min(parsed, MAX_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT),
+  );
 }
 
 function connectedAppsConfigurationError(_message: string) {
+  void _message;
   return hostedOnboardingError({
     code: "CONNECTED_APPS_CONFIGURATION_UNAVAILABLE",
     httpStatus: 503,

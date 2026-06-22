@@ -8,6 +8,7 @@ import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
+  ComposioConnectedAppsRequestError,
   createComposioConnectedAppsClient,
   type ComposioConnectedAccount,
 } from "../connected-apps/composio";
@@ -2267,15 +2268,38 @@ async function revokeConnectedAppsBestEffort(input: {
   }
 
   const results: HostedAccountProviderRevocationResult[] = [];
-  for (const account of accounts.filter(isComposioAccountRevokable)) {
+  for (const account of accounts.filter(isComposioAccountDeletable)) {
+    let status: HostedAccountProviderRevocationStatus = "not_needed";
+    let warningCode: string | null = null;
+
     try {
-      await client.disconnectAccount(account.id);
+      if (isComposioAccountRevokable(account)) {
+        try {
+          await client.disconnectAccount(account.id);
+          status = "revoked";
+        } catch (error) {
+          if (!isNonBlockingComposioRevokeError(error)) {
+            results.push({
+              connectionId: account.id,
+              errorCode: safeErrorCode(error),
+              providerLabel: formatConnectedAppProviderLabel(account),
+              status: "failed",
+              warningCode: null,
+            });
+            continue;
+          }
+          status = "warning";
+          warningCode = safeErrorCode(error);
+        }
+      }
+
+      await client.deleteAccount(account.id);
       results.push({
         connectionId: account.id,
         errorCode: null,
         providerLabel: formatConnectedAppProviderLabel(account),
-        status: "revoked",
-        warningCode: null,
+        status,
+        warningCode,
       });
     } catch (error) {
       results.push({
@@ -2291,9 +2315,17 @@ async function revokeConnectedAppsBestEffort(input: {
   return results;
 }
 
+function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean {
+  return account.status.toUpperCase() !== "DELETED";
+}
+
 function isComposioAccountRevokable(account: ComposioConnectedAccount): boolean {
-  const status = account.status.toUpperCase();
-  return status !== "DELETED" && status !== "REVOKED";
+  return account.status.toUpperCase() === "ACTIVE";
+}
+
+function isNonBlockingComposioRevokeError(error: unknown): boolean {
+  return error instanceof ComposioConnectedAppsRequestError
+    && (error.status === 400 || error.status === 409);
 }
 
 function formatConnectedAppProviderLabel(account: ComposioConnectedAccount): string {

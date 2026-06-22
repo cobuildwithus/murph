@@ -3,6 +3,7 @@ import "server-only";
 import type { HostedConnectedAppsConfig } from "./config";
 
 const COMPOSIO_REQUEST_TIMEOUT_MS = 30_000;
+const COMPOSIO_RESPONSE_LIMIT_BYTES = 512 * 1024;
 
 export interface ComposioConnectedAccount {
   alias: string | null;
@@ -43,7 +44,6 @@ export function createComposioConnectedAppsClient(input: {
             max_accounts_per_toolkit: input.config.maxAccountsPerToolkit,
             require_explicit_selection: true,
           },
-          preload: { tools: [] },
           search: { enable: true },
           tags: {
             disable: ["destructiveHint"],
@@ -199,6 +199,15 @@ export function createComposioConnectedAppsClient(input: {
         path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}/revoke`,
       });
     },
+
+    async deleteAccount(accountId: string): Promise<void> {
+      await requestJson({
+        config: input.config,
+        fetchImpl,
+        method: "DELETE",
+        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}`,
+      });
+    },
   };
 }
 
@@ -262,13 +271,85 @@ async function requestJson(input: {
   }
 
   try {
-    return await response.json();
-  } catch {
+    return await readBoundedJsonResponse(response);
+  } catch (error) {
+    if (error instanceof ComposioConnectedAppsRequestError) {
+      throw error;
+    }
     throw new ComposioConnectedAppsRequestError(
       "Composio returned an invalid JSON response.",
       response.status,
     );
   }
+}
+
+async function readBoundedJsonResponse(response: Response): Promise<unknown> {
+  const contentLength = parseContentLength(response.headers.get("content-length"));
+  if (contentLength !== null && contentLength > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+    throw new ComposioConnectedAppsRequestError(
+      "Composio response was too large.",
+      response.status,
+    );
+  }
+
+  const text = await readBoundedResponseText(response);
+  return JSON.parse(text);
+}
+
+async function readBoundedResponseText(response: Response): Promise<string> {
+  const body = response.body;
+  if (!body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+      throw new ComposioConnectedAppsRequestError(
+        "Composio response was too large.",
+        response.status,
+      );
+    }
+    return text;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new ComposioConnectedAppsRequestError(
+          "Composio response was too large.",
+          response.status,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function parseContentLength(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

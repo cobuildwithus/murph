@@ -4,7 +4,10 @@ import {
   ComposioConnectedAppsRequestError,
   createComposioConnectedAppsClient,
 } from "@/src/lib/connected-apps/composio";
-import type { HostedConnectedAppsConfig } from "@/src/lib/connected-apps/config";
+import {
+  readHostedConnectedAppsConfig,
+  type HostedConnectedAppsConfig,
+} from "@/src/lib/connected-apps/config";
 
 const config: HostedConnectedAppsConfig = {
   apiKey: "secret-test-key",
@@ -31,7 +34,6 @@ describe("Composio connected-app client", () => {
           max_accounts_per_toolkit: 5,
           require_explicit_selection: true,
         },
-        preload: { tools: [] },
         search: { enable: true },
         tags: {
           disable: ["destructiveHint"],
@@ -93,7 +95,7 @@ describe("Composio connected-app client", () => {
     ]);
   });
 
-  it("supports multiple connected accounts and explicit provider revoke", async () => {
+  it("supports multiple connected accounts and explicit provider revoke/delete", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -101,6 +103,11 @@ describe("Composio connected-app client", () => {
       const parsed = new URL(String(url));
       if (init?.method === "POST") {
         expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work/revoke");
+        expect(parsed.search).toBe("");
+        return jsonResponse({ success: true });
+      }
+      if (init?.method === "DELETE") {
+        expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work");
         expect(parsed.search).toBe("");
         return jsonResponse({ success: true });
       }
@@ -134,6 +141,7 @@ describe("Composio connected-app client", () => {
       userId: "hbm_member",
     })).resolves.toHaveLength(2);
     await client.disconnectAccount("ca_work");
+    await client.deleteAccount("ca_work");
   });
 
   it("paginates unfiltered owned account listing for deletion-time revocation", async () => {
@@ -206,6 +214,39 @@ describe("Composio connected-app client", () => {
     expect(String(error)).not.toContain("user@example.com");
     expect(String(error)).not.toContain("provider-secret");
     expect(String(error)).not.toContain("secret-test-key");
+  });
+
+  it("bounds provider response bodies before JSON parsing", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> => {
+      const encoder = new TextEncoder();
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`{"data":"${"x".repeat(600 * 1024)}"}`));
+          controller.close();
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    const error = await client.search({
+      query: "mail",
+      sessionId: "trs_session",
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(ComposioConnectedAppsRequestError);
+    expect(error).toMatchObject({ status: 200 });
+    expect(String(error)).toContain("too large");
+    expect(String(error)).not.toContain("secret-test-key");
+  });
+
+  it("caps multi-account config to Composio's supported maximum", () => {
+    expect(readHostedConnectedAppsConfig({
+      COMPOSIO_API_KEY: "secret-test-key",
+      COMPOSIO_MAX_ACCOUNTS_PER_TOOLKIT: "20",
+    }).maxAccountsPerToolkit).toBe(10);
   });
 });
 
