@@ -13,7 +13,6 @@ import {
   type ExperimentAdherenceCellStatus,
   type ExperimentAdherenceObservation,
 } from "../experiment-adherence.ts";
-import { matchesExperimentMetricIdentity } from "../experiment-metrics.ts";
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
@@ -342,7 +341,7 @@ export function selectBrowserVaultExperimentResults(
   const context = buildRunContext(client, entity, asOf);
   const metricWindow = buildMetricWindowContext(context.run.windows, context.asOfDate);
   const biomarkers = buildBiomarkerResults(client, context, metricWindow);
-  const adherence = buildAdherenceResult(context, client.replica.metricRows);
+  const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule);
   const outcome = buildOutcomeResult(context, biomarkers, progress);
@@ -556,7 +555,21 @@ function readAdherenceTargets(
     return [];
   }
 
+  if (!result.data.every(isBrowserSupportedAdherenceTarget)) {
+    diagnostics.push({
+      code: "invalid_schedule",
+      message: "The experiment has adherence targets outside the browser Results support set.",
+      severity: "warning",
+    });
+    return [];
+  }
+
   return result.data;
+}
+
+function isBrowserSupportedAdherenceTarget(target: ExperimentAdherenceTarget): boolean {
+  return target.evidence.kind === "linkedEventCount" &&
+    target.evidence.eventKind === "intervention_session";
 }
 
 function selectExperimentEvents(
@@ -1101,7 +1114,6 @@ function emptyMetricWindowSummary(
 
 function buildAdherenceResult(
   context: BrowserVaultExperimentRunContext,
-  metricRows: readonly BrowserVaultMetricRow[],
 ): BrowserVaultExperimentAdherenceResult | null {
   const adherenceTargets = context.adherenceTargets;
   const interventionStart = context.run.windows.interventionStart;
@@ -1119,7 +1131,7 @@ function buildAdherenceResult(
   try {
     const adherence = buildExperimentAdherenceCalendar({
       asOf: context.asOf,
-      observations: buildAdherenceObservations(context, metricRows, adherenceTargets),
+      observations: buildAdherenceObservations(context, adherenceTargets),
       targets: adherenceTargets,
       windows: context.run.windows,
     });
@@ -1171,7 +1183,6 @@ function buildScheduleResult(
 
 function buildAdherenceObservations(
   context: BrowserVaultExperimentRunContext,
-  metricRows: readonly BrowserVaultMetricRow[],
   targets: readonly ExperimentAdherenceTarget[],
 ): ExperimentAdherenceObservation[] {
   const observations: ExperimentAdherenceObservation[] = [];
@@ -1196,17 +1207,6 @@ function buildAdherenceObservations(
         break;
       case "metricPresence":
       case "metricThreshold":
-        const metricEvidence = target.evidence;
-        observations.push(...metricRows
-          .filter((row) => matchesExperimentMetricIdentity(metricEvidence.metricKey, row))
-          .map((row) => ({
-            comparator: row.comparator ?? null,
-            evidenceId: row.id,
-            localDate: row.date,
-            metricKey: metricEvidence.metricKey,
-            targetId: target.targetId,
-            value: row.value,
-          })));
         break;
     }
   }

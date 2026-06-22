@@ -301,7 +301,7 @@ test("browser vault replica keeps metric adherence targets", async () => {
   assert.equal((targets[1] as Record<string, unknown>).targetId, "steps");
 });
 
-test("browser vault replica includes custom metric adherence target rows", async () => {
+test("browser vault replica does not request custom metric rows for unsupported adherence targets", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "d".repeat(64),
@@ -351,10 +351,10 @@ test("browser vault replica includes custom metric adherence target rows", async
     }),
   });
 
-  assert.ok(replica.metricRows.some((row) =>
+  assert.equal(replica.metricRows.some((row) =>
     row.metricKey === "custom-reaction-time" &&
     row.recordIds.includes("smp_custom_reaction_time")
-  ));
+  ), false);
 });
 
 test("browser vault replica keeps old anchored metric points by contributing record id", async () => {

@@ -20,7 +20,11 @@ import {
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
-import { matchesExperimentMetricIdentity } from "./experiment-metrics.ts";
+import {
+  matchesExperimentMetricIdentity,
+  resolveExperimentMetricIdentity,
+} from "./experiment-metrics.ts";
+import { metricPointRecordIds } from "./metric-point-record-ids.ts";
 import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,
@@ -723,10 +727,10 @@ function selectMetricAdherenceRows(
   context: ExperimentSummaryContext,
   metricKey: string,
 ): Array<{ comparator: MetricPoint["comparator"]; date: string; id: string; value: number }> {
+  const selectedMetricKey = resolveExperimentMetricIdentity(metricKey).metricKey;
   const points = context.metricPoints.filter((point) =>
     point.effectiveDate <= context.asOf && matchesExperimentMetricIdentity(metricKey, point)
   );
-  const selectedMetricKey = points[0]?.metricKey ?? normalizeMetricKey(metricKey);
   return selectMetricSeries({
     metricKey: selectedMetricKey,
     points,
@@ -1531,20 +1535,6 @@ function collectAnchoredMetricWindow(
   }
 
   return metricWindowSelectionFromValues(values, anchors.length, unit);
-}
-
-function metricPointRecordIds(point: MetricPoint): string[] {
-  const contributingRecordIds = point.context.contributingRecordIds;
-  if (!Array.isArray(contributingRecordIds)) {
-    return [point.source.recordId];
-  }
-
-  return [...new Set([
-    ...contributingRecordIds.filter(
-      (value): value is string => typeof value === "string" && value.length > 0,
-    ),
-    point.source.recordId,
-  ])];
 }
 
 function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {

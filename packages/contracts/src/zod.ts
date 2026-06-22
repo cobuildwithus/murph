@@ -2013,7 +2013,7 @@ export const experimentMeasurementKindSchema = z.enum([
 ]);
 
 export const experimentMeasurementAnchorRecordIdSchema = patternedString(
-  "^(?:(?:evt|sample|batch|metric_sample)_[A-Za-z0-9][A-Za-z0-9_-]*|sample-summary:[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Za-z0-9_-]+:[A-Za-z0-9_.%/-]+)$",
+  "^(?:(?:evt|sample|batch|metric_sample)_[A-Za-z0-9][A-Za-z0-9_-]*|sample-summary:[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Za-z0-9_-]+:[A-Za-z0-9_.%/-]+|sample-summary:[A-Za-z0-9_-]+:[0-9]{4}-[0-9]{2}-[0-9]{2})$",
 );
 
 export const experimentMeasurementAnchorSchema = z

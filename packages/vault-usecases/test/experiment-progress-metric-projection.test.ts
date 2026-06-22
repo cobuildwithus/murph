@@ -402,13 +402,13 @@ analysisPlan:
   measurementAnchors:
     - role: baseline
       kind: wearable_summary
-      recordId: sample-summary:2026-06-01:glucose:mg_dL
+      recordId: sample-summary:glucose:2026-06-01
       biomarkerKeys:
         - biomarker:blood-glucose
       observedOn: 2026-06-01
     - role: followup
       kind: wearable_summary
-      recordId: sample-summary:2026-06-02:glucose:mg_dL
+      recordId: sample-summary:glucose:2026-06-02
       biomarkerKeys:
         - biomarker:blood-glucose
       observedOn: 2026-06-02

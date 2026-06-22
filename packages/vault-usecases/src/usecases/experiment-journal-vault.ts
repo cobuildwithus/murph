@@ -2091,10 +2091,7 @@ function collectExperimentMetricKeys(
       continue
     }
 
-    const metricKey =
-      resolveExperimentBiomarkerMetricKey(query, target.evidence.metricKey) ??
-      query.resolveMetricDefinition(target.evidence.metricKey)?.key ??
-      query.normalizeMetricKey(target.evidence.metricKey)
+    const metricKey = resolveExperimentMetricKey(query, target.evidence.metricKey)
     if (metricKey.length > 0) {
       metricKeys.add(metricKey)
     }
@@ -2128,10 +2125,22 @@ function resolveExperimentBiomarkerMetricKey(
     return null
   }
 
-  return (
-    query.resolveMetricDefinitionForBiomarker(biomarkerKey)?.key ??
-    query.resolveMetricDefinition(biomarkerKey.split(':').at(-1) ?? biomarkerKey)?.key ??
-    null
+  return resolveExperimentMetricKey(query, biomarkerKey)
+}
+
+function resolveExperimentMetricKey(
+  query: QueryRuntimeModule,
+  metricKey: string,
+): string {
+  const trimmedMetricKey = metricKey.trim()
+  const metricSlug = trimmedMetricKey.split(':').at(-1) ?? trimmedMetricKey
+  const definition = trimmedMetricKey.startsWith('biomarker:')
+    ? query.resolveMetricDefinitionForBiomarker(trimmedMetricKey) ??
+      query.resolveMetricDefinition(metricSlug)
+    : query.resolveMetricDefinition(trimmedMetricKey)
+
+  return definition?.key ?? query.normalizeMetricKey(
+    trimmedMetricKey.startsWith('biomarker:') ? metricSlug : trimmedMetricKey,
   )
 }
 

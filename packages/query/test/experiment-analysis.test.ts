@@ -922,6 +922,81 @@ test("metric adherence uses the selected same-day metric point", () => {
   assert.equal(progress.adherence.status, "not_started");
 });
 
+test("metric adherence exact-matches metrics that share a biomarker", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGD",
+    slug: "lowest-spo2-adherence",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+      adherenceTargets: [
+        {
+          targetId: "lowest-spo2-threshold",
+          label: "Lowest SpO2 threshold",
+          phase: "intervention",
+          calendar: {
+            kind: "daily",
+            timeZone: "UTC",
+          },
+          evidence: {
+            kind: "metricThreshold",
+            metricKey: "lowest-spo2",
+            op: ">=",
+            value: 90,
+            missing: "unknown",
+          },
+          rollup: {
+            targetCompletions: 1,
+            minimumUsefulCompletions: 1,
+          },
+        },
+      ],
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-oxygen-spo2",
+      desiredDirection: "increase",
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-adherence-exact-metric",
+    metadata: null,
+    entities: [experiment],
+  });
+  const metricPoints: MetricPoint[] = [
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:blood-oxygen-spo2",
+      date: "2026-06-02",
+      metricKey: "spo2",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Oxygen summary",
+      sourceRecordId: "spo2_2026_06_02",
+      unit: "%",
+      value: 96,
+    }),
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:blood-oxygen-spo2",
+      date: "2026-06-02",
+      metricKey: "lowest-spo2",
+      sourceKind: "sleep-summary",
+      sourceLabel: "Sleep oxygen summary",
+      sourceRecordId: "lowest_spo2_2026_06_02",
+      unit: "%",
+      value: 85,
+    }),
+  ];
+
+  const progress = summarizeExperimentProgress(vault, "lowest-spo2-adherence", {
+    asOf: "2026-06-02",
+    metricPoints,
+  });
+
+  assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.expectedSessionsByNow, 1);
+  assert.equal(progress.adherence.status, "not_started");
+});
+
 test("incomplete point measurement plans do not mix lab anchors with run windows", () => {
   const experiment = makeExperiment("completed", {
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",

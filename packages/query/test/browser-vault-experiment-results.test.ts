@@ -1147,7 +1147,7 @@ test("returns null schedule when the run has no structured schedule", () => {
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
 });
 
-test("uses explicit metric adherence targets instead of legacy schedule synthesis", () => {
+test("does not synthesize legacy schedules for unsupported explicit metric adherence targets", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       entities: [
@@ -1187,64 +1187,9 @@ test("uses explicit metric adherence targets instead of legacy schedule synthesi
   const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
 
   assert.ok(result);
-  assert.ok(result.schedule);
-  assert.equal(result.schedule.cells.every((cell) => cell.targetId === "step-floor"), true);
-  assert.equal(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"), false);
-});
-
-test("matches browser metric adherence targets through biomarker aliases", () => {
-  const client = createBrowserVaultQueryClient(
-    createReplica({
-      generatedAt: "2026-04-10T12:00:00.000Z",
-      entities: [
-        experimentEntity({
-          runPlan: {
-            baselineStart: "2026-04-01",
-            baselineEnd: "2026-04-07",
-            interventionStart: "2026-04-08",
-            interventionEnd: "2026-04-08",
-            adherenceTargets: [{
-              targetId: "sleep-efficiency-floor",
-              label: "Sleep efficiency floor",
-              phase: "intervention",
-              calendar: {
-                kind: "daily",
-                timeZone: "America/New_York",
-              },
-              evidence: {
-                kind: "metricThreshold",
-                metricKey: "biomarker:sleep-efficiency",
-                op: ">=",
-                value: 90,
-                missing: "unknown",
-              },
-              rollup: {
-                minimumUsefulCompletions: 1,
-                targetCompletions: 1,
-              },
-            }],
-          },
-        }),
-      ],
-      metricRows: [
-        metricRow({
-          biomarkerKey: "biomarker:sleep-efficiency",
-          date: "2026-04-08",
-          metricKey: "sleep-efficiency",
-          unit: "%",
-          value: 91,
-        }),
-      ],
-    }),
-  );
-
-  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
-
-  assert.ok(result);
-  assert.equal(result.schedule?.cells[0]?.kind, "completed");
-  assert.equal(result.schedule?.completedSessions, 1);
-  assert.equal(result.progress?.adherence.completedSessions, 1);
-  assert.equal(result.progress?.adherence.status, "met_target");
+  assert.equal(result.schedule, null);
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
 });
 
 test("keeps comparator-bounded metric thresholds unknown", () => {
@@ -1412,15 +1357,12 @@ test("does not replace metric adherence rollups with auxiliary session targets",
   const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
 
   assert.ok(result);
-  assert.equal(result.schedule?.cells.length, 2);
-  assert.equal(result.schedule?.cells.find((cell) => cell.targetId === "session-marker")?.kind, "completed");
-  assert.equal(result.schedule?.completedSessions, 0);
-  assert.equal(result.schedule?.unknownSessions, 1);
-  assert.equal(result.schedule?.plannedSessions, 1);
-  assert.equal(result.progress?.adherence.completedSessions, 0);
-  assert.equal(result.progress?.adherence.loggedSessions, 0);
-  assert.equal(result.progress?.adherence.targetSessions, 1);
-  assert.equal(result.progress?.adherence.status, "not_started");
+  assert.equal(result.schedule, null);
+  assert.equal(result.progress?.adherence.completedSessions, 1);
+  assert.equal(result.progress?.adherence.loggedSessions, 1);
+  assert.equal(result.progress?.adherence.targetSessions, null);
+  assert.equal(result.progress?.adherence.status, "on_track");
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {
