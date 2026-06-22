@@ -98,16 +98,37 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   const audioPath = oldEnvelope.attachments[1]?.storedPath ?? "";
   const documentPath = oldEnvelope.attachments[2]?.storedPath ?? "";
   const protectedPath = oldEnvelope.attachments[3]?.storedPath ?? "";
-  const audioManifestPath =
-    `derived/inbox/${captureId}/attachments/att_${captureId}_02/attempts/0001/manifest.json`;
+  const audioAttachmentId = `att_${captureId}_02`;
+  const audioAttemptDirectory = `derived/inbox/${captureId}/attachments/${audioAttachmentId}/attempts/0001`;
+  const audioManifestPath = `${audioAttemptDirectory}/manifest.json`;
+  const audioPlainTextPath = `${audioAttemptDirectory}/plain.txt`;
+  const audioMarkdownPath = `${audioAttemptDirectory}/normalized.md`;
+  const audioChunksPath = `${audioAttemptDirectory}/chunks.jsonl`;
+  const audioTranscriptText = "Retained voice transcript after raw audio expiry.";
+  await writeVaultFile(vaultRoot, audioPlainTextPath, `${audioTranscriptText}\n`);
+  await writeVaultFile(vaultRoot, audioMarkdownPath, `${audioTranscriptText}\n`);
+  await writeVaultFile(vaultRoot, audioChunksPath, "");
   await writeVaultFile(
     vaultRoot,
     audioManifestPath,
     `${JSON.stringify({
       schema: "murph.parser-manifest.v1",
+      providerId: "test-parser",
+      createdAt: "2026-06-01T00:01:00.000Z",
+      artifact: {
+        attachmentId: audioAttachmentId,
+        captureId,
+        fileName: "voice.m4a",
+        kind: "audio",
+        mime: "audio/mp4",
+        storedPath: audioPath,
+      },
+      metadata: {},
       paths: {
-        plainTextPath: `derived/inbox/${captureId}/attachments/att_${captureId}_02/attempts/0001/plain.txt`,
-        markdownPath: `derived/inbox/${captureId}/attachments/att_${captureId}_02/attempts/0001/normalized.md`,
+        chunksPath: audioChunksPath,
+        markdownPath: audioMarkdownPath,
+        plainTextPath: audioPlainTextPath,
+        tablesPath: null,
       },
     })}\n`,
   );
@@ -228,10 +249,16 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
     assert.equal(capture.attachments[0]?.contentStatus, "retention_expired");
     assert.equal(capture.attachments[1]?.storedPath, null);
     assert.equal(capture.attachments[1]?.contentStatus, "retention_expired");
+    assert.equal(capture.attachments[1]?.derivedPath, audioManifestPath);
+    assert.equal(capture.attachments[1]?.parseState, "succeeded");
+    assert.equal(capture.attachments[1]?.parserProviderId, "test-parser");
+    assert.equal(capture.attachments[1]?.transcriptText, audioTranscriptText);
+    assert.equal(capture.attachments[1]?.extractedText, null);
     assert.equal(capture.attachments[2]?.storedPath, documentPath);
     assert.equal(capture.attachments[2]?.contentStatus, "available");
     assert.equal(capture.attachments[3]?.storedPath, protectedPath);
     assert.equal(capture.attachments[3]?.contentStatus, "available");
+    assert.equal(runtime.searchCaptures({ limit: 10, text: "transcript" }).length, 1);
   } finally {
     runtime.close();
   }

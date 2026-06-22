@@ -24,6 +24,7 @@ import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 // (~40k tokens); below this the compact call costs more than it recovers.
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
+export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
@@ -54,6 +55,8 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  protectedAttachmentIds?: readonly string[];
+  protectedStoredPaths?: readonly string[];
   providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
@@ -92,6 +95,8 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.vaultRoot) {
       try {
         const retentionResult = await runInboxMediaRetention({
+          protectedAttachmentIds: input.protectedAttachmentIds,
+          protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
@@ -105,6 +110,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         }
         // Retention is opportunistic maintenance; a cleanup miss must not block
         // checkpointing or member-visible wake handling.
+        retentionWake = resolveInboxMediaRetentionFailureWake();
       }
     }
     if (abortController.signal.aborted) {
@@ -207,6 +213,13 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
+  return {
+    nextWakeAt: new Date(Date.now() + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS).toISOString(),
+    nextWakeReason: "inbox_media_retention",
+  };
 }
 
 function resolveInboxMediaRetentionWake(

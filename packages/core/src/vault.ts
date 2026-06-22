@@ -566,7 +566,18 @@ function resolveJsonlFamilyPostValidator(
     case "events":
       return async (record) => validateEventRecordReferences(vaultRoot, record);
     case "inboxCaptures":
-      return async (record) => validateInboxCaptureRecordReferences(vaultRoot, record);
+      {
+        let retentionIndexPromise: Promise<ReadonlySet<string>> | null = null;
+        const readRetentionIndex = () => {
+          retentionIndexPromise ??= readInboxAttachmentRetentionIndex(vaultRoot);
+          return retentionIndexPromise;
+        };
+        return async (record) => validateInboxCaptureRecordReferences(
+          vaultRoot,
+          record,
+          readRetentionIndex,
+        );
+      }
     default:
       return undefined;
   }
@@ -655,24 +666,33 @@ async function validateExistingVaultFile(
   return [];
 }
 
-async function hasExpiredInboxCaptureAttachmentRecord(
-  vaultRoot: string,
-  input: {
-    attachmentId: string;
-    captureId: string;
-    storedPath: string;
-  },
-): Promise<boolean> {
+function buildInboxAttachmentRetentionIndexKey(input: {
+  attachmentId: string;
+  captureId: string;
+  storedPath: string;
+}): string | null {
   let normalizedRelativePath: string;
   try {
     normalizedRelativePath = normalizeRelativeVaultPath(input.storedPath);
   } catch {
-    return false;
+    return null;
   }
 
   if (!normalizedRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)) {
-    return false;
+    return null;
   }
+
+  return [
+    input.captureId,
+    input.attachmentId,
+    normalizedRelativePath,
+  ].join("\u0000");
+}
+
+async function readInboxAttachmentRetentionIndex(
+  vaultRoot: string,
+): Promise<ReadonlySet<string>> {
+  const index = new Set<string>();
 
   const retentionLedgerPaths = await walkVaultFiles(
     vaultRoot,
@@ -694,22 +714,27 @@ async function hasExpiredInboxCaptureAttachmentRecord(
       );
       if (
         result.success &&
-        result.data.reason === "inbox_media_retention" &&
-        result.data.captureId === input.captureId &&
-        result.data.attachmentId === input.attachmentId &&
-        result.data.storedPath === normalizedRelativePath
+        result.data.reason === "inbox_media_retention"
       ) {
-        return true;
+        const key = buildInboxAttachmentRetentionIndexKey({
+          attachmentId: result.data.attachmentId,
+          captureId: result.data.captureId,
+          storedPath: result.data.storedPath,
+        });
+        if (key) {
+          index.add(key);
+        }
       }
     }
   }
 
-  return false;
+  return index;
 }
 
 async function validateInboxCaptureRecordReferences(
   vaultRoot: string,
   record: UnknownRecord,
+  readRetentionIndex: () => Promise<ReadonlySet<string>>,
 ): Promise<ValidationIssue[]> {
   const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record);
   if (!result.success) {
@@ -732,13 +757,12 @@ async function validateInboxCaptureRecordReferences(
     if (referenceIssues.length === 0) {
       continue;
     }
-    if (
-      await hasExpiredInboxCaptureAttachmentRecord(vaultRoot, {
-        attachmentId: attachment.attachmentId,
-        captureId: capture.captureId,
-        storedPath: attachment.storedPath,
-      })
-    ) {
+    const retentionKey = buildInboxAttachmentRetentionIndexKey({
+      attachmentId: attachment.attachmentId,
+      captureId: capture.captureId,
+      storedPath: attachment.storedPath,
+    });
+    if (retentionKey && (await readRetentionIndex()).has(retentionKey)) {
       continue;
     }
 

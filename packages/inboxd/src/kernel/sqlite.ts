@@ -18,6 +18,7 @@ import type {
 } from "../contracts/derived.ts";
 import type { InboxCaptureRecord, InboxListFilters, InboxSearchFilters, InboxSearchHit } from "../contracts/search.ts";
 import type {
+  IndexedAttachment,
   InboundCapture,
   PersistedCapture,
   StoredAttachment,
@@ -53,8 +54,19 @@ export interface InboxCaptureProjectionEntry {
   captureId: string;
   eventId: string;
   input: InboundCapture;
-  stored: StoredCapture;
+  stored: InboxCaptureProjectionStoredCapture;
 }
+
+export type InboxCaptureProjectionAttachment = StoredAttachment & Pick<
+  IndexedAttachment,
+  "derivedPath" | "extractedText" | "parseState" | "parserProviderId" | "transcriptText"
+> & {
+  parseUpdatedAt?: string | null;
+};
+
+export type InboxCaptureProjectionStoredCapture = Omit<StoredCapture, "attachments"> & {
+  attachments: InboxCaptureProjectionAttachment[];
+};
 
 interface ProjectionReplacementStore {
   replaceCaptureProjection(entries: ReadonlyArray<InboxCaptureProjectionEntry>): void;
@@ -689,6 +701,18 @@ function createInboxRuntimeStore(
         or capture_attachment.size_bytes is not excluded.size_bytes
     `,
   );
+  const updateAttachmentParseProjectionStatement = database.prepare(
+    `
+      update capture_attachment
+      set extracted_text = ?,
+          transcript_text = ?,
+          derived_path = ?,
+          parser_provider_id = ?,
+          parser_state = ?,
+          parse_updated_at = ?
+      where attachment_id = ?
+    `,
+  );
   const listCapturesAscendingStatement = database.prepare(
     `
       select *
@@ -904,6 +928,17 @@ function createInboxRuntimeStore(
         attachment.byteSize ?? null,
         input.stored.storedAt,
       );
+      if (hasAttachmentParseProjection(attachment)) {
+        updateAttachmentParseProjectionStatement.run(
+          normalizeNullable(attachment.extractedText),
+          normalizeNullable(attachment.transcriptText),
+          normalizeNullable(attachment.derivedPath),
+          normalizeNullable(attachment.parserProviderId),
+          normalizeNullable(attachment.parseState),
+          normalizeNullable(attachment.parseUpdatedAt),
+          attachment.attachmentId,
+        );
+      }
     }
 
     if (normalizedAttachments.length === 0) {
@@ -1207,9 +1242,9 @@ function assertCanonicalAttachmentRows(database: DatabaseSync): void {
 
 function normalizeRuntimeAttachments(
   captureId: string,
-  attachments: ReadonlyArray<StoredCapture["attachments"][number]>,
+  attachments: ReadonlyArray<InboxCaptureProjectionAttachment>,
   context: string,
-): StoredCapture["attachments"] {
+): InboxCaptureProjectionAttachment[] {
   return normalizeStoredAttachments(captureId, attachments, context).map((attachment) => {
     const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
     if (attachment.attachmentId !== expectedAttachmentId) {
@@ -1220,6 +1255,19 @@ function normalizeRuntimeAttachments(
 
     return attachment;
   });
+}
+
+function hasAttachmentParseProjection(
+  attachment: InboxCaptureProjectionAttachment,
+): boolean {
+  return Boolean(
+    attachment.parseState ||
+      attachment.parserProviderId ||
+      attachment.derivedPath ||
+      attachment.extractedText ||
+      attachment.transcriptText ||
+      attachment.parseUpdatedAt,
+  );
 }
 
 function normalizeAttachmentContentStatus(

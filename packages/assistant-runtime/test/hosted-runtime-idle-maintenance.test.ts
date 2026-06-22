@@ -18,6 +18,7 @@ vi.mock("@murphai/inboxd", () => ({
 import {
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+  HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
@@ -135,6 +136,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   });
 
   it("runs inbox media retention during idle maintenance and keeps compaction fail-open", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
     runInboxMediaRetention.mockRejectedValueOnce(new Error("retention unavailable"));
     compactWarmCodexThread.mockResolvedValue({
       kind: "skipped",
@@ -142,12 +145,62 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 20_000,
     });
 
-    const outcome = await runHostedIdleCheckpointMaintenance({
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      });
+
+      expect(runInboxMediaRetention).toHaveBeenCalledWith({
+        protectedAttachmentIds: undefined,
+        protectedStoredPaths: undefined,
+        signal: expect.any(AbortSignal),
+        vaultRoot: "/vault",
+      });
+      expect(outcome).toEqual({
+        kind: "skipped",
+        nextWakeAt: new Date(
+          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "inbox_media_retention",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("passes active pending attachment protections to inbox media retention", async () => {
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: null,
+      records: [],
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
-      providerName: "hosted-openai",
       pendingWork: false,
+      protectedAttachmentIds: ["att_pending"],
+      protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
+      providerName: "hosted-openai",
       recordUsage: null,
       resolveAssistantSessionId: null,
       shutdownSignal: null,
@@ -156,13 +209,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
 
     expect(runInboxMediaRetention).toHaveBeenCalledWith({
+      protectedAttachmentIds: ["att_pending"],
+      protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
-    });
-    expect(outcome).toEqual({
-      kind: "skipped",
-      reason: "below_threshold",
-      threadContextTokensBefore: 20_000,
     });
   });
 

@@ -34,6 +34,11 @@ export interface HostedPendingAssistantInputState {
   inputIds: string[];
 }
 
+export interface HostedPendingAssistantInputMediaRetentionProtections {
+  protectedAttachmentIds: string[];
+  protectedStoredPaths: string[];
+}
+
 interface HostedPendingAssistantInputStateReadResult {
   missing: boolean;
   state: HostedPendingAssistantInputState;
@@ -70,6 +75,46 @@ export async function readExistingHostedPendingAssistantInputIds(input: {
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
   return existing.missing ? [] : [...existing.state.inputIds];
+}
+
+export async function collectHostedPendingAssistantInputMediaRetentionProtections(input: {
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputMediaRetentionProtections> {
+  const inputIds = await compactHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
+  const protectedAttachmentIds = new Set<string>();
+  const protectedStoredPaths = new Set<string>();
+
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!event) {
+      continue;
+    }
+
+    for (const attachment of event.attachmentEvidence.attachments) {
+      if (!isRetainableAssistantInputMediaKind(attachment.kind)) {
+        continue;
+      }
+      if (attachment.sourceAttachmentId) {
+        protectedAttachmentIds.add(attachment.sourceAttachmentId);
+      }
+      if (attachment.descriptorAttachmentId) {
+        protectedAttachmentIds.add(attachment.descriptorAttachmentId);
+      }
+      if (attachment.raw?.path) {
+        protectedStoredPaths.add(attachment.raw.path);
+      }
+    }
+  }
+
+  return {
+    protectedAttachmentIds: [...protectedAttachmentIds].sort(),
+    protectedStoredPaths: [...protectedStoredPaths].sort(),
+  };
 }
 
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
@@ -583,6 +628,10 @@ function uniqueHostedPendingAssistantInputIds(inputIds: readonly string[]): stri
     unique.push(parsed);
   }
   return unique;
+}
+
+function isRetainableAssistantInputMediaKind(kind: string): boolean {
+  return kind === "audio" || kind === "image" || kind === "video";
 }
 
 function isNodeFileNotFoundError(error: unknown): boolean {

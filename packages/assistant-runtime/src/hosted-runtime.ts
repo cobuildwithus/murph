@@ -134,6 +134,9 @@ import {
   enqueueHostedSystemMailboxItem,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
+  collectHostedPendingAssistantInputMediaRetentionProtections,
+} from "./hosted-runtime/pending-input-index.ts";
+import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
@@ -1489,14 +1492,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
           continue;
         }
+        const idleMaintenancePendingWork =
+          accumulatedProjection.status === "budget_exhausted"
+          || (accumulatedProjection.nextWakeAt !== null
+            && Date.parse(accumulatedProjection.nextWakeAt) - Date.now()
+              < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
+        const mediaRetentionProtections = idleMaintenancePendingWork
+          ? {
+              protectedAttachmentIds: [],
+              protectedStoredPaths: [],
+            }
+          : await collectHostedPendingAssistantInputMediaRetentionProtections({
+              vaultRoot: restored.vaultRoot,
+            });
         const idleMaintenance = await runHostedIdleCheckpointMaintenance({
-          pendingWork:
-            accumulatedProjection.status === "budget_exhausted"
-            || (accumulatedProjection.nextWakeAt !== null
-              && Date.parse(accumulatedProjection.nextWakeAt) - Date.now()
-                < HOSTED_IDLE_COMPACT_TIMEOUT_MS),
+          pendingWork: idleMaintenancePendingWork,
+          protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
+          protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
           // The compact call rides the same warm-process credential as turns,
-          // so attribute it the same way: members on their own OPENAI_API_KEY
+          // so attribute it the same way: members using their own provider key
           // must not have platform allowance debited for it.
           credentialSource: resolveAssistantUsageCredentialSource({
             apiKeyEnv: null,

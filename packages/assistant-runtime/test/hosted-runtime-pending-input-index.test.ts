@@ -7,6 +7,9 @@ import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
+  updateAssistantInputAttachmentEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
@@ -15,6 +18,7 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
+  collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
@@ -65,6 +69,75 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("collects raw inbox media protections from active pending inputs", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_pending_media",
+        eventId: "evt_pending_media",
+        itemId: "item_pending_media",
+        laneSeq: "10",
+        messageId: "msg_pending_media",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "pending media input",
+      }),
+    });
+    const rawPath = "raw/inbox/linq/self/2026/06/cap_pending_media/attachments/01__photo.webp";
+
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [{
+          byteSize: 123,
+          derived: null,
+          descriptorAttachmentId: "descriptor_image_1",
+          fileName: "photo.webp",
+          inlineFragments: [],
+          kind: "image",
+          mime: "image/webp",
+          ordinal: 1,
+          parseState: null,
+          raw: {
+            byteSize: 123,
+            kind: "vault-relative-file",
+            mediaType: "image/webp",
+            path: rawPath,
+            sha256: "a".repeat(64),
+          },
+          sourceAttachmentId: "att_cap_pending_media_01",
+        }],
+        optionalInboxCaptureId: "cap_pending_media",
+        reasonCode: null,
+        source: "hosted-inbox-projection",
+        status: "available",
+        updatedAt: "2026-04-23T00:00:03.000Z",
+      },
+      inputId: event.inputId,
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
+      vaultRoot,
+    })).resolves.toEqual({
+      protectedAttachmentIds: ["att_cap_pending_media_01", "descriptor_image_1"],
+      protectedStoredPaths: [rawPath],
+    });
   });
 
   it("enqueues a fresh input without backfilling a missing rollout index", async () => {
