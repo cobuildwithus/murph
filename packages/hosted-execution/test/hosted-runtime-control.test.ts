@@ -787,7 +787,6 @@ describe("hosted runtime control contracts", () => {
         objectFetchMs: 5,
         decryptMs: 6,
         archiveExtractMs: 7,
-        restorePreflightMs: 8,
         durableRootReplaceMs: 9,
         cleanupMs: 10,
         extractMs: 11,

@@ -100,6 +100,9 @@
       "@murphai/hosted-execution/temporal-env": [
         "packages/hosted-execution/src/temporal-env.ts"
       ],
+      "@murphai/hosted-execution/workspace-snapshot-v2": [
+        "packages/hosted-execution/src/workspace-snapshot-v2.ts"
+      ],
       "@murphai/hosted-execution/vault-share": [
         "packages/hosted-execution/src/vault-share.ts"
       ],
@@ -324,6 +327,9 @@
       ],
       "@murphai/operator-config/linq-runtime": [
         "packages/operator-config/src/linq-runtime.ts"
+      ],
+      "@murphai/operator-config/message-formatting": [
+        "packages/operator-config/src/message-formatting.ts"
       ],
       "@murphai/operator-config/whatsapp-runtime": [
         "packages/operator-config/src/whatsapp-runtime.ts"

@@ -735,7 +735,6 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     objectFetchMs?: number;
     decryptMs?: number;
     archiveExtractMs?: number;
-    restorePreflightMs?: number;
     durableRootReplaceMs?: number;
     cleanupMs?: number;
     extractMs?: number;
@@ -792,7 +791,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "objectFetchMs",
     "decryptMs",
     "archiveExtractMs",
-    "restorePreflightMs",
     "durableRootReplaceMs",
     "cleanupMs",
     "extractMs",

@@ -368,7 +368,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         });
         timing.decryptMs = archiveTimings.decryptMs;
         timing.archiveExtractMs = archiveTimings.archiveExtractMs;
-        timing.restorePreflightMs = archiveTimings.restorePreflightMs;
         timing.durableRootReplaceMs = archiveTimings.durableRootReplaceMs;
         timing.cleanupMs = archiveTimings.cleanupMs;
         timing.extractMs = archiveTimings.extractMs;
