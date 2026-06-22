@@ -25,7 +25,7 @@ export function ExpertCard({
           <img
             src={profileImageUrl}
             alt={name}
-            className="aspect-square size-full rounded-full object-cover"
+            className="aspect-square size-full rounded-full object-cover outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
             onError={() => {
               setImageFailed(true);
             }}

@@ -62,7 +62,7 @@ export function HostedSettingsIdentityLinkDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 rounded-2xl border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
+      <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
         <DialogHeader className="gap-2 pr-10">
           <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">
             {copy.title}

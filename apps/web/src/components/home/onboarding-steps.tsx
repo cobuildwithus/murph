@@ -54,7 +54,7 @@ export interface OnboardingStepsProps {
 export function getOnboardingStepActionClass(isPrimary: boolean): string {
   return isPrimary
     ? "inline-flex items-center gap-2.5 rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2"
-    : "inline-flex items-center gap-2.5 rounded-2xl border border-foreground/12 px-6 py-3 text-sm font-medium text-foreground transition-all duration-200 hover:border-[#7a8c6e]/30 hover:bg-[#7a8c6e]/[0.04] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2";
+    : "inline-flex items-center gap-2.5 rounded-2xl border border-foreground/12 px-6 py-3 text-sm font-medium text-foreground transition-[background-color,border-color,color] duration-200 hover:border-[#7a8c6e]/30 hover:bg-[#7a8c6e]/[0.04] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2";
 }
 
 export function OnboardingSteps({
@@ -120,10 +120,10 @@ export function OnboardingSteps({
                   <Icon className="size-8 text-[#7a8c6e]" />
                 </div>
               </div>
-              <h2 className="mb-2.5 font-serif text-[22px] font-semibold tracking-tight text-foreground">
+              <h2 className="mb-2.5 font-serif text-[22px] font-semibold tracking-tight text-balance text-foreground">
                 {step.title}
               </h2>
-              <p className="mb-8 text-[13.5px] leading-relaxed text-muted-foreground">
+              <p className="mb-8 text-[13.5px] leading-relaxed text-pretty text-muted-foreground">
                 {step.description}
               </p>
             </div>

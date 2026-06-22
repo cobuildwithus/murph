@@ -1,9 +1,9 @@
 import { cn } from "@/src/lib/utils";
 
 const sentimentClassName: Record<string, string> = {
-  positive: "ml-2 text-sm font-semibold text-primary",
-  negative: "ml-2 text-sm font-semibold text-amber-600",
-  neutral: "ml-2 text-sm font-semibold text-muted-foreground",
+  positive: "ml-2 text-sm font-semibold tabular-nums text-primary",
+  negative: "ml-2 text-sm font-semibold tabular-nums text-amber-600",
+  neutral: "ml-2 text-sm font-semibold tabular-nums text-muted-foreground",
 };
 
 const arrows: Record<string, string> = {
@@ -52,7 +52,7 @@ export function MetricCard({
         {label}
       </span>
       <div className="flex items-baseline gap-1.5">
-        <span className="font-serif text-3xl font-semibold text-foreground">
+        <span className="font-serif text-3xl font-semibold tabular-nums text-foreground">
           {value}
         </span>
         {unit && <span className="text-sm text-foreground/50">{unit}</span>}
@@ -64,7 +64,7 @@ export function MetricCard({
       </div>
       {footer ? (
         <span
-          className="block min-w-0 max-w-full truncate text-xs text-foreground/45"
+          className="block min-w-0 max-w-full truncate text-xs tabular-nums text-foreground/45"
           title={footer}
         >
           {footer}

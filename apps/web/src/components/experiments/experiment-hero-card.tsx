@@ -45,7 +45,7 @@ export function ExperimentHeroCard({
   const isInteractive = resolvedHref !== null;
   const cardContent = (
     <>
-      <div className="relative h-56 w-full overflow-hidden rounded-t-xl outline-1 -outline-offset-1 outline-black/5 md:h-64">
+      <div className="relative h-56 w-full overflow-hidden rounded-t-xl outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10 md:h-64">
         <Image
           src={image}
           alt=""
@@ -75,7 +75,7 @@ export function ExperimentHeroCard({
               </Badge>
             ) : null}
             {typeof matchPercent === "number" ? (
-              <Badge variant="outline" className="text-[11px]">
+              <Badge variant="outline" className="text-[11px] tabular-nums">
                 {matchPercent}% match
               </Badge>
             ) : null}
@@ -88,7 +88,7 @@ export function ExperimentHeroCard({
           {metadata ?? (typeof durationDays === "number" ? `${durationDays} days` : "Protocol")}
         </span>
         {description ? (
-          <span className="line-clamp-3 text-sm text-muted-foreground">
+          <span className="line-clamp-3 text-sm text-pretty text-muted-foreground">
             {description}
           </span>
         ) : null}

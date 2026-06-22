@@ -14,7 +14,7 @@ export function FeatureHighlights() {
               <p className="text-sm font-semibold text-foreground">
                 {item.title}
               </p>
-              <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
+              <p className="mt-0.5 text-sm leading-relaxed text-pretty text-muted-foreground">
                 {item.body}
               </p>
             </div>
