@@ -361,6 +361,62 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("persists reply failure events after the ordinary automation event cap", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      for (let index = 0; index < 13; index += 1) {
+        input.onEvent?.({
+          safeDetails: "scan_started",
+          type: "scan.started",
+        });
+      }
+      input.onEvent?.({
+        errorCode: "ASSISTANT_PROVIDER_EMPTY_RESPONSE",
+        safeDetails:
+          "assistant provider failed (ASSISTANT_PROVIDER_EMPTY_RESPONSE)",
+        safeErrorMessage:
+          "Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.",
+        type: "input.reply-failed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_failure_cap",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_failure_cap",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Hosted assistant automation event: input.reply-failed.",
+          redacted: expect.objectContaining({
+            errorCode: "ASSISTANT_PROVIDER_EMPTY_RESPONSE",
+            safeErrorMessage:
+              "Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.",
+            type: "input.reply-failed",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("persists the typed cron failure code from cron.job.completed events", async () => {
     // June 2026 quota incident: provider quota failures on scheduled
     // reminders must land queryable in hosted_runtime_log.

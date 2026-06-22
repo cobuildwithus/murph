@@ -277,6 +277,48 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
   )
 }
 
+export async function writeAssistantAutoReplyRetryExhaustedEvidence(input: {
+  captureIds: readonly string[]
+  failedAttempts: number
+  inputIds?: readonly string[]
+  linqMessageIds?: readonly string[]
+  maxFailedAttempts: number
+  reason: string
+  recordedAt?: string
+  vault: string
+}): Promise<void> {
+  const group = normalizeEvidenceGroup({
+    captureIds: input.captureIds,
+    inputIds: input.inputIds,
+  })
+  const providerCleanup = createProviderCleanupState(input.linqMessageIds ?? [])
+  const failedAttempts = normalizeEvidenceAttemptCount(input.failedAttempts)
+  const maxFailedAttempts = normalizeEvidenceAttemptCount(input.maxFailedAttempts)
+
+  await Promise.all(
+    group.evidenceIds.map((evidenceId) =>
+      writeAssistantAutoReplyTerminalEvidence(input.vault, evidenceId, {
+        captureId: evidenceId,
+        groupCaptureIds: group.captureIds,
+        groupId: group.groupId,
+        groupInputIds: group.inputIds,
+        inputId: evidenceId,
+        primaryCaptureId: group.primaryCaptureId,
+        primaryInputId: group.primaryInputId,
+        providerCleanup,
+        recordedAt: input.recordedAt ?? new Date().toISOString(),
+        schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
+        terminal: {
+          failedAttempts,
+          kind: 'retry_exhausted',
+          maxFailedAttempts,
+          reason: input.reason,
+        },
+      }),
+    ),
+  )
+}
+
 export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {
   limit?: number
   vault: string
@@ -588,4 +630,8 @@ function normalizeUnknownNonNegativeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.trunc(value))
     : null
+}
+
+function normalizeEvidenceAttemptCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
 }

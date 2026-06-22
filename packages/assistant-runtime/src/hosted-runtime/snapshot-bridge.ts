@@ -784,7 +784,9 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       redactedJson.errorCode = diagnostics.errorCode;
     }
     if (typeof diagnostics.errorMessage === "string") {
-      redactedJson.safeErrorMessage = diagnostics.errorMessage;
+      redactedJson.safeErrorMessage = redactHostedRuntimeDiagnosticText(
+        diagnostics.errorMessage,
+      );
     }
     if (typeof diagnostics.errorName === "string") {
       redactedJson.errorName = diagnostics.errorName;

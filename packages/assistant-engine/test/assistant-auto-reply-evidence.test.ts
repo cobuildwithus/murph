@@ -9,6 +9,7 @@ import {
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
 import {
@@ -116,6 +117,51 @@ test('auto-reply terminal evidence reader accepts historical retry-exhausted evi
           kind: 'retry_exhausted',
           maxFailedAttempts: 3,
           reason: 'legacy retry limit reached',
+        },
+      },
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply terminal evidence writer records retry exhaustion by input id', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    await writeAssistantAutoReplyRetryExhaustedEvidence({
+      captureIds: [],
+      failedAttempts: 1,
+      inputIds: ['ain_retry_exhausted'],
+      maxFailedAttempts: 1,
+      reason: 'assistant provider failed (ASSISTANT_PROVIDER_EMPTY_RESPONSE)',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        vaultRoot,
+        'ain_retry_exhausted',
+      ),
+      {
+        captureId: 'ain_retry_exhausted',
+        groupCaptureIds: [],
+        groupId: 'group_ain_retry_exhausted',
+        groupInputIds: ['ain_retry_exhausted'],
+        inputId: 'ain_retry_exhausted',
+        primaryCaptureId: 'ain_retry_exhausted',
+        primaryInputId: 'ain_retry_exhausted',
+        providerCleanup: {
+          linqMessageIds: [],
+          queuedAt: null,
+        },
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        schema: 'murph.assistant-auto-reply-terminal-evidence.v1',
+        terminal: {
+          failedAttempts: 1,
+          kind: 'retry_exhausted',
+          maxFailedAttempts: 1,
+          reason: 'assistant provider failed (ASSISTANT_PROVIDER_EMPTY_RESPONSE)',
         },
       },
     )

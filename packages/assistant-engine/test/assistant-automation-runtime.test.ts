@@ -108,6 +108,7 @@ const evidenceMocks = vi.hoisted(() => ({
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
+  writeAssistantAutoReplyRetryExhaustedEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
 
@@ -128,6 +129,8 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplyRetryExhaustedEvidence:
+    evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence:
     evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
 }))
@@ -1134,6 +1137,9 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+    .mockReset()
+    .mockResolvedValue(undefined)
+  evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplySuppressionEvidence
@@ -2888,6 +2894,66 @@ describe('assistant auto-reply runtime', () => {
       safeDetails: 'assistant provider failed (ASSISTANT_CODEX_FAILED)',
       safeErrorMessage: 'Codex app-server turn failed. status failed.',
     }))
+  })
+
+  it('records terminal evidence for empty provider auto-reply results', async () => {
+    replyMocks.sendAssistantMessage.mockRejectedValue(
+      Object.assign(
+        new Error(
+          'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
+        ),
+        {
+          code: 'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
+        },
+      ),
+    )
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      checkpointRequired: true,
+      failed: 1,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 0,
+      stopScanning: true,
+    })
+    expect(replyMocks.writeAssistantChatErrorArtifacts).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
+      .toHaveBeenCalledOnce()
+    const retryEvidenceInput =
+      evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence.mock.calls[0]?.[0]
+    expect(retryEvidenceInput).toMatchObject({
+      captureIds: ['capture-1'],
+      failedAttempts: 1,
+      maxFailedAttempts: 1,
+      reason: 'safe failure',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(retryEvidenceInput?.inputIds)
+      .toEqual([expect.stringMatching(/^ain_/u)])
   })
 
   it('suppresses raw upstream billing exhaustion without storing provider text', async () => {
