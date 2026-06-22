@@ -288,7 +288,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("does not deliver model-authored progress updates from hosted Linq auto-replies", async () => {
+  it("delivers model-authored progress updates from hosted Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -347,7 +347,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+      expectedCount: outboundCountBeforeReply + 2,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -359,15 +359,17 @@ describe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel"]);
-    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
-    expect(newSendTexts).not.toContain(progressToolAttemptText);
+    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    expect(newSendTexts).toEqual([
+      progressToolAttemptText,
+      progressToolFinalReplyText,
+    ]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 1,
+      outboundCountBeforeReply + 2,
     );
   }, 300_000);
 
@@ -689,7 +691,9 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      computerToolsAvailable: true,
+    });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();

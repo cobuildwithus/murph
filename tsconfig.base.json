@@ -364,6 +364,9 @@
       "@murphai/assistant-engine/assistant-skill-env": [
         "packages/assistant-engine/src/assistant-skill-env.ts"
       ],
+      "@murphai/assistant-engine/assistant-runtime-residue": [
+        "packages/assistant-engine/src/assistant-runtime-residue.ts"
+      ],
       "@murphai/assistant-engine/knowledge": [
         "packages/assistant-engine/src/knowledge.ts"
       ],
