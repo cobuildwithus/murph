@@ -114,22 +114,6 @@ const junctionWorkoutHeartRateZoneRepairResultSchema = z.object({
   auditPath: pathSchema.nullable(),
 })
 
-const integrationStorageMigrationResultSchema = z.object({
-  mode: z.enum(['dry-run', 'apply']),
-  hasWork: z.boolean(),
-  mutated: z.boolean(),
-  formatVersionBefore: z.number().int().nonnegative().nullable(),
-  formatVersionAfter: z.number().int().nonnegative().nullable(),
-  legacyBundleCount: z.number().int().nonnegative(),
-  journalAppendCount: z.number().int().nonnegative(),
-  eventShardRewriteCount: z.number().int().nonnegative(),
-  deletedLegacyFileCount: z.number().int().nonnegative(),
-  blockerCount: z.number().int().nonnegative(),
-  blockers: z.array(z.string()),
-  touchedPathCount: z.number().int().nonnegative(),
-  auditPath: pathSchema.nullable(),
-})
-
 function installVaultCommandArgvContext(cli: Cli.Cli): void {
   if (vaultCommandArgvInstalled.has(cli)) {
     return
@@ -307,55 +291,6 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
         includeRecentDenseRaw: options.includeRecentDenseRaw,
         maxFiles: options.maxFiles,
         maxBytes: options.maxBytes,
-      })
-    },
-  })
-
-  vaultGroup.command('migrate-integration-storage', {
-    description:
-      'Dry-run or apply the v1 raw integration evidence migration into the integration ingest journal.',
-    args: emptyArgsSchema,
-    options: withBaseOptions({
-      dryRun: z.boolean().default(false).describe('Show planned migration work without mutating the vault. This is also the default when --apply is omitted.'),
-      apply: z.boolean().default(false).describe('Apply the migration after verification succeeds.'),
-      skipValidation: z.boolean().default(false).describe('Skip post-migration vault validation after apply.'),
-    }),
-    output: integrationStorageMigrationResultSchema,
-    async run({ options }) {
-      const applyWasExplicit = currentCommandIncludesFlag('--apply')
-      const skipValidationWasExplicit = currentCommandIncludesFlag('--skip-validation')
-
-      if (options.apply && !applyWasExplicit) {
-        throw new VaultCliError(
-          'invalid_options',
-          'Integration storage migration apply mode must be requested with --apply on the command line.',
-        )
-      }
-      if (options.apply && options.dryRun) {
-        throw new VaultCliError(
-          'invalid_options',
-          'Use either --apply or --dry-run for integration storage migration, not both.',
-        )
-      }
-      if (options.skipValidation && !skipValidationWasExplicit) {
-        throw new VaultCliError(
-          'invalid_options',
-          'Skipping post-migration validation must be requested with --skip-validation on the command line.',
-        )
-      }
-      if (options.skipValidation && !options.apply) {
-        throw new VaultCliError(
-          'invalid_options',
-          'Skipping post-migration validation only applies with --apply.',
-        )
-      }
-
-      await assertInitializedVaultRoot(options.vault)
-      return services.core.migrateIntegrationStorage({
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-        apply: options.apply,
-        validateAfter: !options.skipValidation,
       })
     },
   })

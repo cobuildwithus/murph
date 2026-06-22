@@ -180,8 +180,9 @@
             "minLength": 1,
             "maxLength": 255
           },
-          "content": {
-            "type": "string"
+          "relativePath": {
+            "type": "string",
+            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "byteSize": {
             "type": "integer",
@@ -205,7 +206,7 @@
           "role",
           "fileName",
           "mediaType",
-          "content",
+          "relativePath",
           "byteSize",
           "sha256"
         ],

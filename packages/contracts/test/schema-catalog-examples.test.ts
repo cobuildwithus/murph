@@ -338,7 +338,7 @@ describe("schema catalog and example seam", () => {
         role: `daily-activity-${String(index).padStart(3, "0")}`,
         fileName: `daily-activity-${String(index).padStart(3, "0")}.json`,
         mediaType: "application/json",
-        content: `{"day":${index}}`,
+        relativePath: `raw/integrations/oura/2026/03/xfm_0123456789ABCDEFGHJKMNPQRS/${String(index + 1).padStart(3, "0")}-daily-activity-${String(index).padStart(3, "0")}.json`,
         byteSize: Buffer.byteLength(`{"day":${index}}`),
         sha256: "a".repeat(64),
       })),

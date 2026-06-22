@@ -1102,7 +1102,6 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         targetRelativePath: raw.targetRelativePath,
         sha256: raw.sha256,
         byteLength: raw.byteLength,
-        ...(raw.allowAppendOnlyJsonl === true ? { allowAppendOnlyJsonl: true } : {}),
         effect: raw.effect,
         ...(contentRef ? { contentRef } : {}),
       };

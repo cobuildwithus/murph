@@ -27,7 +27,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   vault: "murph.vault.v1",
 } as const);
 
-export const CURRENT_VAULT_FORMAT_VERSION = 2 as const;
+export const CURRENT_VAULT_FORMAT_VERSION = 1 as const;
 
 /**
  * Canonical production web origin for user-facing app links. Runtime env

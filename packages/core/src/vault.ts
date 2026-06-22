@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   eventRecordSchema,
+  integrationIngestRecordSchema,
   rawImportManifestSchema,
   sampleRecordSchema,
   safeParseContract,
@@ -36,7 +37,10 @@ import {
 import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
-import { validateIntegrationIngestRecordForShard } from "./integration-ingests.ts";
+import {
+  validateIntegrationEvidencePartManifestBinding,
+  validateIntegrationIngestRecordForShard,
+} from "./integration-ingests.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
@@ -572,12 +576,13 @@ function resolveJsonlFamilyPostValidator(
       return async (record, context) => {
         eventIdsPromise ??= collectEventLedgerIds(vaultRoot);
         sampleIdsPromise ??= collectSampleLedgerIds(vaultRoot);
-        return validateIntegrationIngestRecordAgainstVault({
+        return await validateIntegrationIngestRecordAgainstVault({
           eventIds: await eventIdsPromise,
           record,
           relativePath: context.relativePath,
           sampleIds: await sampleIdsPromise,
           seenIngestIds,
+          vaultRoot,
         });
       };
     }
@@ -642,19 +647,21 @@ async function collectSampleLedgerIds(vaultRoot: string): Promise<Set<string>> {
   return sampleIds;
 }
 
-function validateIntegrationIngestRecordAgainstVault(input: {
+async function validateIntegrationIngestRecordAgainstVault(input: {
   eventIds: ReadonlySet<string>;
   record: UnknownRecord;
   relativePath: string;
   sampleIds: ReadonlySet<string>;
   seenIngestIds: Map<string, string>;
-}): ValidationIssue[] {
+  vaultRoot: string;
+}): Promise<ValidationIssue[]> {
   const issues = validateIntegrationIngestRecordForShard({
     record: input.record,
     relativePath: input.relativePath,
   }).map((message) =>
     validationIssue("INTEGRATION_INGEST_INVALID", message, input.relativePath)
   );
+  const parsedIngest = safeParseContract(integrationIngestRecordSchema, input.record);
 
   const id = typeof input.record.id === "string" ? input.record.id : null;
   if (id) {
@@ -709,16 +716,68 @@ function validateIntegrationIngestRecordAgainstVault(input: {
     }
   }
 
+  if (parsedIngest.success) {
+    for (const [index, part] of parsedIngest.data.parts.entries()) {
+      const referenceIssues = await validateExistingVaultFile(
+        input.vaultRoot,
+        part.relativePath,
+        "INTEGRATION_INGEST_PART_MISSING",
+        `Integration ingest part ${index + 1} raw artifact "${part.relativePath}" is missing.`,
+      );
+      issues.push(...referenceIssues);
+
+      if (referenceIssues.length === 0) {
+        const actual = await safeStatAndHashVaultFile(input.vaultRoot, part.relativePath);
+        if (actual.kind === "invalid") {
+          issues.push(
+            validationIssue(
+              actual.code,
+              actual.message,
+              part.relativePath,
+            ),
+          );
+        } else if (actual.kind === "missing") {
+          issues.push(
+            validationIssue(
+              "INTEGRATION_INGEST_PART_MISSING",
+              `Integration ingest part ${index + 1} raw artifact "${part.relativePath}" is missing.`,
+              part.relativePath,
+            ),
+          );
+        } else if (actual.integrity.byteSize !== part.byteSize || actual.integrity.sha256 !== part.sha256) {
+          issues.push(
+            validationIssue(
+              "INTEGRATION_INGEST_PART_INTEGRITY",
+              `Integration ingest part ${index + 1} bytes or sha256 do not match "${part.relativePath}".`,
+              input.relativePath,
+            ),
+          );
+        }
+      }
+
+      const manifestBinding = await validateIntegrationEvidencePartManifestBinding({
+        ingestId: parsedIngest.data.id,
+        part,
+        provider: parsedIngest.data.provider,
+        vaultRoot: input.vaultRoot,
+      });
+      if (!manifestBinding.ok) {
+        issues.push(
+          validationIssue(
+            manifestBinding.code,
+            manifestBinding.message,
+            manifestBinding.relativePath,
+          ),
+        );
+      }
+    }
+  }
+
   return issues;
 }
 
 function rawManifestDirectoryForArtifact(relativePath: string): string {
   return path.posix.dirname(relativePath);
-}
-
-function isLegacyIntegrationRawPath(relativePath: string): boolean {
-  return relativePath === VAULT_LAYOUT.rawIntegrationsDirectory
-    || relativePath.startsWith(`${VAULT_LAYOUT.rawIntegrationsDirectory}/`);
 }
 
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
@@ -837,17 +896,6 @@ async function validateEventRecordReferences(
   const manifestDirectories = new Set<string>();
 
   for (const referencedPath of [...referencedPaths].sort()) {
-    if (isLegacyIntegrationRawPath(referencedPath)) {
-      issues.push(
-        validationIssue(
-          "INTEGRATION_RAW_REF_FORBIDDEN",
-          `Event raw reference "${referencedPath}" uses legacy integration raw storage.`,
-          referencedPath,
-        ),
-      );
-      continue;
-    }
-
     issues.push(
       ...(await validateExistingVaultFile(
         vaultRoot,
@@ -1025,7 +1073,6 @@ async function validateRawManifestFile(
 
 async function validateRawImportManifests(
   vaultRoot: string,
-  options: { allowLegacyIntegrationRaw?: boolean } = {},
 ): Promise<ValidationIssue[]> {
   const rawFiles = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawDirectory);
   const artifactDirectories = new Set<string>();
@@ -1035,22 +1082,6 @@ async function validateRawImportManifests(
   const manifestDirectories = new Set<string>();
 
   for (const relativePath of rawFiles) {
-    if (isLegacyIntegrationRawPath(relativePath)) {
-      if (!options.allowLegacyIntegrationRaw) {
-        manifestFiles.push(relativePath);
-        continue;
-      }
-
-      if (isRawManifestFileName(path.posix.basename(relativePath))) {
-        manifestFiles.push(relativePath);
-        manifestDirectories.add(path.posix.dirname(relativePath));
-        continue;
-      }
-
-      artifactDirectories.add(path.posix.dirname(relativePath));
-      continue;
-    }
-
     const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
 
     if (inboxCaptureDirectory !== null) {
@@ -1081,23 +1112,6 @@ async function validateRawImportManifests(
   }
 
   const issues: ValidationIssue[] = [];
-
-  const legacyIntegrationManifestFiles = manifestFiles.filter((entry) => isLegacyIntegrationRawPath(entry));
-  if (!options.allowLegacyIntegrationRaw) {
-    for (const relativePath of legacyIntegrationManifestFiles.sort()) {
-      issues.push(
-        validationIssue(
-          "RAW_INTEGRATIONS_LEGACY_FORBIDDEN",
-          `Legacy integration raw file "${relativePath}" must be migrated to ${VAULT_LAYOUT.integrationIngestLedgerDirectory}.`,
-          relativePath,
-        ),
-      );
-    }
-  }
-
-  const currentManifestFiles = options.allowLegacyIntegrationRaw
-    ? manifestFiles
-    : manifestFiles.filter((entry) => !isLegacyIntegrationRawPath(entry));
 
   for (const captureDirectory of [...inboxCaptureDirectories].sort()) {
     const envelopePath = path.posix.join(captureDirectory, "envelope.json");
@@ -1131,7 +1145,7 @@ async function validateRawImportManifests(
     }
   }
 
-  for (const manifestPath of currentManifestFiles.sort()) {
+  for (const manifestPath of manifestFiles.sort()) {
     issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
   }
 
@@ -1180,6 +1194,7 @@ export async function validateVault({
   vaultRoot,
   allowLegacyIntegrationRaw = false,
 }: ValidateVaultInput = {}): Promise<ValidateVaultResult> {
+  void allowLegacyIntegrationRaw;
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const issues: ValidationIssue[] = [];
   let metadata: VaultMetadata | null = null;
@@ -1237,7 +1252,7 @@ export async function validateVault({
     issues.push(...(await validateJsonlValidationFamily(absoluteRoot, family)));
   }
 
-  issues.push(...(await validateRawImportManifests(absoluteRoot, { allowLegacyIntegrationRaw })));
+  issues.push(...(await validateRawImportManifests(absoluteRoot)));
   issues.push(...(await validateWriteOperations(absoluteRoot)));
 
   return {

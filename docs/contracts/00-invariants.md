@@ -17,7 +17,7 @@
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
 - Machine-facing truth lives in JSONL: `ledger/events`, `ledger/integration-ingests`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, and `audit`. Generic `ledger/samples` shards are not part of the default query/read/browser model.
 - Imported originals live in `raw/` and are immutable once copied into the vault, except for explicit core-owned repair tombstones that prove the old manifest byte/SHA and preserve durable product facts.
-- Current device/provider evidence lives in `ledger/integration-ingests`; `raw/integrations/**` is legacy v1 data accepted only by explicit migration/repair flows.
+- Current device/provider evidence lives as immutable raw artifacts under `raw/integrations/**` with raw import manifests; `ledger/integration-ingests` stores compact provider/source metadata, raw artifact paths, byte sizes, checksums, receipt metadata, and output role links.
 
 ## Query Metrics
 

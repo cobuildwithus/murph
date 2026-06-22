@@ -17,6 +17,7 @@ import {
   VAULT_LAYOUT,
   walkVaultFiles,
 } from '@murphai/core'
+import { CURRENT_VAULT_FORMAT_VERSION } from '@murphai/contracts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -2964,7 +2965,7 @@ test.sequential(
 
       assert.equal(metadata.title, 'Precision Health Vault')
       assert.equal(metadata.timezone, 'UTC')
-      assert.equal(metadata.formatVersion, 2)
+      assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION)
       assert.match(coreMarkdown, /^# Precision Health Vault/mu)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -3013,7 +3014,7 @@ test.sequential(
       }
 
       assert.deepEqual(repairedMetadata, initialMetadata)
-      assert.equal(repairedMetadata.formatVersion, 2)
+      assert.equal(repairedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION)
       const validated = await runSliceCli<{
         valid: boolean
         issues: Array<{ code: string }>
@@ -3109,102 +3110,6 @@ test.sequential(
 )
 
 test.sequential(
-  'vault migrate-integration-storage exposes dry-run and explicit apply controls',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-integration-storage-migration-'))
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      const dryRun = await runSliceCli<{
-        mode: 'dry-run' | 'apply'
-        hasWork: boolean
-        mutated: boolean
-        formatVersionBefore: number | null
-        formatVersionAfter: number | null
-        legacyBundleCount: number
-        journalAppendCount: number
-        eventShardRewriteCount: number
-        deletedLegacyFileCount: number
-        blockerCount: number
-        touchedPathCount: number
-        auditPath: string | null
-      }>([
-        'vault',
-        'migrate-integration-storage',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(dryRun.ok, true)
-      assert.equal(dryRun.meta?.command, 'vault migrate-integration-storage')
-      assert.equal(requireData(dryRun).mode, 'dry-run')
-      assert.equal(requireData(dryRun).hasWork, false)
-      assert.equal(requireData(dryRun).mutated, false)
-      assert.equal(requireData(dryRun).formatVersionBefore, 2)
-      assert.equal(requireData(dryRun).formatVersionAfter, 2)
-      assert.equal(requireData(dryRun).legacyBundleCount, 0)
-      assert.equal(requireData(dryRun).journalAppendCount, 0)
-      assert.equal(requireData(dryRun).eventShardRewriteCount, 0)
-      assert.equal(requireData(dryRun).deletedLegacyFileCount, 0)
-      assert.equal(requireData(dryRun).blockerCount, 0)
-      assert.equal(requireData(dryRun).touchedPathCount, 0)
-      assert.equal(requireData(dryRun).auditPath, null)
-
-      const applied = await runSliceCli<{
-        mode: 'dry-run' | 'apply'
-        hasWork: boolean
-        mutated: boolean
-        touchedPathCount: number
-        auditPath: string | null
-      }>([
-        'vault',
-        'migrate-integration-storage',
-        '--vault',
-        vaultRoot,
-        '--apply',
-      ])
-
-      assert.equal(applied.ok, true)
-      assert.equal(requireData(applied).mode, 'apply')
-      assert.equal(requireData(applied).hasWork, false)
-      assert.equal(requireData(applied).mutated, false)
-      assert.equal(requireData(applied).touchedPathCount, 0)
-      assert.equal(requireData(applied).auditPath, null)
-
-      const skipWithoutApply = await runSliceCli([
-        'vault',
-        'migrate-integration-storage',
-        '--vault',
-        vaultRoot,
-        '--skip-validation',
-      ])
-      const conflictingMode = await runSliceCli([
-        'vault',
-        'migrate-integration-storage',
-        '--vault',
-        vaultRoot,
-        '--dry-run',
-        '--apply',
-      ])
-
-      assert.equal(skipWithoutApply.ok, false)
-      if (!skipWithoutApply.ok) {
-        assert.equal(skipWithoutApply.error.code, 'invalid_options')
-        assert.match(skipWithoutApply.error.message ?? '', /only applies with --apply/u)
-      }
-      assert.equal(conflictingMode.ok, false)
-      if (!conflictingMode.ok) {
-        assert.equal(conflictingMode.error.code, 'invalid_options')
-        assert.match(conflictingMode.error.message ?? '', /either --apply or --dry-run/u)
-      }
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
   'vault repair-junction-hr-zones exposes dry-run and explicit apply controls',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-hr-zone-repair-'))
@@ -3265,52 +3170,6 @@ test.sequential(
       assert.equal(requireData(applied).unverifiedCandidateCount, 0)
       assert.equal(requireData(applied).repairedCount, 0)
       assert.equal(requireData(applied).auditPath, null)
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'vault migrate-integration-storage rejects apply loaded only from config',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-integration-storage-migration-config-'))
-    const configPath = path.join(vaultRoot, 'config.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-      await writeFile(
-        configPath,
-        `${JSON.stringify({
-          commands: {
-            vault: {
-              commands: {
-                'migrate-integration-storage': {
-                  options: {
-                    apply: true,
-                  },
-                },
-              },
-            },
-          },
-        }, null, 2)}\n`,
-        'utf8',
-      )
-
-      const result = await runSliceCli([
-        'vault',
-        'migrate-integration-storage',
-        '--vault',
-        vaultRoot,
-        '--config',
-        configPath,
-      ], { config: true })
-
-      assert.equal(result.ok, false)
-      if (!result.ok) {
-        assert.equal(result.error.code, 'invalid_options')
-        assert.match(result.error.message ?? '', /--apply/u)
-      }
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

@@ -456,37 +456,6 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
-    async migrateIntegrationStorage(input) {
-      const { vault } = input
-      const core = await loadCoreRuntime()
-      const result = await core.migrateIntegrationStorage({
-        apply: input.apply,
-        validateAfter: input.validateAfter,
-        vaultRoot: vault,
-      })
-
-      return {
-        mode: result.mode,
-        hasWork:
-          result.legacyBundleCount > 0
-          || result.journalAppendCount > 0
-          || result.eventShardRewriteCount > 0
-          || result.deletedLegacyFileCount > 0
-          || result.blockerCount > 0
-          || result.formatVersionBefore !== result.formatVersionAfter,
-        mutated: result.mutated,
-        formatVersionBefore: result.formatVersionBefore,
-        formatVersionAfter: result.formatVersionAfter,
-        legacyBundleCount: result.legacyBundleCount,
-        journalAppendCount: result.journalAppendCount,
-        eventShardRewriteCount: result.eventShardRewriteCount,
-        deletedLegacyFileCount: result.deletedLegacyFileCount,
-        blockerCount: result.blockerCount,
-        blockers: result.blockers,
-        touchedPathCount: result.touchedPaths.length,
-        auditPath: result.auditPath,
-      }
-    },
     async repairWearableStorage(input) {
       const { vault } = input
       const core = await loadCoreRuntime()

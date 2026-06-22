@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 
 import {
   CONTRACT_SCHEMA_VERSION,
   integrationIngestRecordSchema,
   jsonObjectSchema,
+  rawImportManifestSchema,
   safeParseContract,
   type IntegrationEvidencePart,
   type IntegrationIngestEventOutput,
@@ -14,8 +17,9 @@ import {
 
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { pathExists, walkVaultFiles } from "./fs.ts";
+import { pathExists, readJsonFile, walkVaultFiles } from "./fs.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { isRawManifestFileName } from "./operations/raw-manifests.ts";
 import { normalizeRelativeVaultPath, resolveVaultPath } from "./path-safety.ts";
 import { toIsoTimestamp } from "./time.ts";
 
@@ -26,7 +30,9 @@ export interface IntegrationEvidencePartSeed {
   role: string;
   fileName: string;
   mediaType?: string;
-  content: string;
+  relativePath: string;
+  byteSize: number;
+  sha256: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -63,9 +69,22 @@ export interface IntegrationIngestPartSummary {
   byteSize: number;
   fileName: string;
   mediaType: string;
+  relativePath: string;
   role: string;
   sha256: string;
 }
+
+export type IntegrationEvidencePartManifestBindingResult =
+  | {
+    manifestPath: string;
+    ok: true;
+  }
+  | {
+    code: string;
+    message: string;
+    ok: false;
+    relativePath: string;
+  };
 
 export interface IntegrationIngestEventSummary {
   accountId?: string;
@@ -79,12 +98,8 @@ export interface IntegrationIngestEventSummary {
   source: string;
 }
 
-function sha256Hex(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-function utf8ByteSize(content: string): number {
-  return Buffer.byteLength(content, "utf8");
+function sha256Hex(bytes: string | Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function stableSortValue(value: unknown): unknown {
@@ -146,14 +161,13 @@ export function toIntegrationIngestShardPath(importedAt: DateInput): string {
 }
 
 export function buildIntegrationEvidencePart(seed: IntegrationEvidencePartSeed): IntegrationEvidencePart {
-  const content = seed.content;
   return {
     role: seed.role,
     fileName: seed.fileName,
     mediaType: seed.mediaType ?? "application/octet-stream",
-    content,
-    byteSize: utf8ByteSize(content),
-    sha256: sha256Hex(content),
+    relativePath: normalizeRelativeVaultPath(seed.relativePath),
+    byteSize: seed.byteSize,
+    sha256: seed.sha256,
     ...(seed.metadata ? { metadata: normalizeJsonObject(seed.metadata, "Integration evidence part metadata") } : {}),
   };
 }
@@ -209,17 +223,6 @@ export function assertIntegrationIngestRecord(record: unknown): asserts record i
       errors: result.errors,
     });
   }
-
-  for (const [index, part] of result.data.parts.entries()) {
-    const actualByteSize = utf8ByteSize(part.content);
-    const actualSha256 = sha256Hex(part.content);
-    if (part.byteSize !== actualByteSize || part.sha256 !== actualSha256) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_INVALID",
-        `Integration ingest part ${index + 1} bytes or sha256 do not match content.`,
-      );
-    }
-  }
 }
 
 export function validateIntegrationIngestRecordForShard(input: {
@@ -236,15 +239,6 @@ export function validateIntegrationIngestRecordForShard(input: {
   const expectedPath = toIntegrationIngestShardPath(result.data.importedAt);
   if (normalizeRelativeVaultPath(input.relativePath) !== expectedPath) {
     errors.push(`$.importedAt: row belongs in ${expectedPath}.`);
-  }
-
-  for (const [index, part] of result.data.parts.entries()) {
-    if (part.byteSize !== utf8ByteSize(part.content)) {
-      errors.push(`$.parts[${index}].byteSize: byteSize must equal UTF-8 content bytes.`);
-    }
-    if (part.sha256 !== sha256Hex(part.content)) {
-      errors.push(`$.parts[${index}].sha256: sha256 must match content bytes.`);
-    }
   }
 
   return errors;
@@ -390,6 +384,7 @@ export async function listIntegrationIngestsForEvent(input: {
             byteSize: part.byteSize,
             fileName: part.fileName,
             mediaType: part.mediaType,
+            relativePath: part.relativePath,
             role: part.role,
             sha256: part.sha256,
           })),
@@ -418,18 +413,157 @@ export async function readIntegrationEvidencePart(input: {
   return match?.record.parts.find((part) => part.role === input.role) ?? null;
 }
 
+async function listRawManifestPathsForDirectory(input: {
+  rawDirectory: string;
+  vaultRoot: string;
+}): Promise<string[]> {
+  const rawFiles = await walkVaultFiles(input.vaultRoot, input.rawDirectory);
+
+  return rawFiles.filter((relativePath) =>
+    path.posix.dirname(relativePath) === input.rawDirectory
+    && isRawManifestFileName(path.posix.basename(relativePath)),
+  );
+}
+
+export async function validateIntegrationEvidencePartManifestBinding(input: {
+  ingestId: string;
+  part: IntegrationEvidencePart;
+  provider: string;
+  vaultRoot: string;
+}): Promise<IntegrationEvidencePartManifestBindingResult> {
+  if (!input.part.relativePath.startsWith(`${VAULT_LAYOUT.rawIntegrationsDirectory}/`)) {
+    return {
+      code: "INTEGRATION_INGEST_PART_RAW_PATH",
+      message: `Integration ingest part "${input.part.role}" raw artifact must be under "${VAULT_LAYOUT.rawIntegrationsDirectory}".`,
+      ok: false,
+      relativePath: input.part.relativePath,
+    };
+  }
+
+  const rawDirectory = path.posix.dirname(input.part.relativePath);
+  const manifestPaths = await listRawManifestPathsForDirectory({
+    rawDirectory,
+    vaultRoot: input.vaultRoot,
+  });
+
+  if (manifestPaths.length === 0) {
+    return {
+      code: "INTEGRATION_INGEST_PART_MANIFEST",
+      message: `Integration ingest part "${input.part.role}" raw directory "${rawDirectory}" is missing a matching raw import manifest.`,
+      ok: false,
+      relativePath: rawDirectory,
+    };
+  }
+
+  let ownerMatched = false;
+  for (const manifestPath of manifestPaths.sort()) {
+    let manifestValue: unknown;
+    try {
+      manifestValue = await readJsonFile(input.vaultRoot, manifestPath);
+    } catch {
+      continue;
+    }
+
+    const parsed = safeParseContract(rawImportManifestSchema, manifestValue);
+    if (!parsed.success) {
+      continue;
+    }
+
+    const manifest = parsed.data;
+    if (
+      manifest.rawDirectory !== rawDirectory ||
+      manifest.importKind !== "device_batch" ||
+      manifest.owner.kind !== "device_batch" ||
+      manifest.owner.id !== input.ingestId ||
+      manifest.owner.partition !== input.provider
+    ) {
+      continue;
+    }
+
+    ownerMatched = true;
+    const artifactMatched = manifest.artifacts.some((artifact) =>
+      artifact.relativePath === input.part.relativePath &&
+      artifact.role === input.part.role &&
+      artifact.byteSize === input.part.byteSize &&
+      artifact.sha256 === input.part.sha256
+    );
+    if (artifactMatched) {
+      return {
+        manifestPath,
+        ok: true,
+      };
+    }
+  }
+
+  if (!ownerMatched) {
+    return {
+      code: "INTEGRATION_INGEST_PART_MANIFEST_OWNER",
+      message: `Integration ingest part "${input.part.role}" raw directory "${rawDirectory}" is missing a device_batch manifest owned by ingest "${input.ingestId}" for provider "${input.provider}".`,
+      ok: false,
+      relativePath: rawDirectory,
+    };
+  }
+
+  return {
+    code: "INTEGRATION_INGEST_PART_MANIFEST_ARTIFACT",
+    message: `Integration ingest part "${input.part.role}" is not listed with matching integrity in its raw import manifest.`,
+    ok: false,
+    relativePath: input.part.relativePath,
+  };
+}
+
 export async function parseIntegrationEvidencePartJson(input: {
   ingestId: string;
   role: string;
   vaultRoot: string;
 }): Promise<unknown | null> {
-  const part = await readIntegrationEvidencePart(input);
+  const match = await readIntegrationIngestById({
+    id: input.ingestId,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!match) {
+    return null;
+  }
+
+  const part = match.record.parts.find((candidate) => candidate.role === input.role) ?? null;
   if (!part) {
     return null;
   }
 
+  const manifestBinding = await validateIntegrationEvidencePartManifestBinding({
+    ingestId: match.record.id,
+    part,
+    provider: match.record.provider,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!manifestBinding.ok) {
+    throw new VaultError(manifestBinding.code, manifestBinding.message, {
+      relativePath: manifestBinding.relativePath,
+    });
+  }
+
+  const resolved = resolveVaultPath(input.vaultRoot, part.relativePath);
+  let bytes: Uint8Array;
   try {
-    return JSON.parse(part.content);
+    bytes = await fs.readFile(resolved.absolutePath);
+  } catch (error) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_PART_MISSING",
+      `Integration ingest "${input.ingestId}" part "${input.role}" raw artifact is missing.`,
+      { cause: error instanceof Error ? error.message : String(error), relativePath: part.relativePath },
+    );
+  }
+
+  if (bytes.byteLength !== part.byteSize || sha256Hex(bytes) !== part.sha256) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_PART_INTEGRITY",
+      `Integration ingest "${input.ingestId}" part "${input.role}" raw artifact failed integrity verification.`,
+      { relativePath: part.relativePath },
+    );
+  }
+
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8"));
   } catch (error) {
     throw new VaultError(
       "INTEGRATION_INGEST_PART_NOT_JSON",

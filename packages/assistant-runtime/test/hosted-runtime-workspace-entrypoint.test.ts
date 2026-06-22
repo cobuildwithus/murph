@@ -6775,8 +6775,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const exactPayload = Buffer.from("restored exact hosted note\n", "utf8");
       const exactPayloadHash = sha256Hex(exactPayload);
-      const eventRewritePayload = Buffer.from("{\"id\":\"evt_restore\"}\n", "utf8");
-      const eventRewritePayloadHash = sha256Hex(eventRewritePayload);
       const receiptBytes = Buffer.from(`${JSON.stringify({
         actions: [
           {
@@ -6791,18 +6789,6 @@ describe("hosted workspace runtime entrypoint", () => {
             targetRelativePath: "journal/2026-04-28.md",
           },
           {
-            allowAppendOnlyJsonl: true,
-            byteLength: eventRewritePayload.byteLength,
-            contentRef: {
-              byteSize: eventRewritePayload.byteLength,
-              sha256: eventRewritePayloadHash,
-            },
-            effect: "update",
-            kind: "text_upsert",
-            sha256: eventRewritePayloadHash,
-            targetRelativePath: eventShardRelativePath,
-          },
-          {
             allowRaw: true,
             existedBefore: true,
             kind: "delete",
@@ -6813,7 +6799,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createdAt: TEST_NOW,
         occurredAt: TEST_NOW,
         operationId: "op_synthetic_canonical_restore",
-        operationType: "integration_storage_migration",
+        operationType: "hosted_canonical_write_test",
         schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
         summary: "Restore hosted canonical write receipt.",
         updatedAt: TEST_NOW,
@@ -6872,7 +6858,6 @@ describe("hosted workspace runtime entrypoint", () => {
         [baseHash, baseBundle],
         [hotHash, hotSnapshot.bundle],
         [exactPayloadHash, exactPayload],
-        [eventRewritePayloadHash, eventRewritePayload],
         [receiptHash, receiptBytes],
         [receiptLogHash, receiptLogBytes],
       ]);
@@ -6932,7 +6917,6 @@ describe("hosted workspace runtime entrypoint", () => {
         receiptLogHash,
         receiptHash,
         exactPayloadHash,
-        eventRewritePayloadHash,
       ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
@@ -6941,7 +6925,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(
         await readFile(path.join(vaultRoot, eventShardRelativePath), "utf8"),
-        eventRewritePayload.toString("utf8"),
+        `{"id":"evt_restore","rawRefs":["${legacyRawRelativePath}"]}\n`,
       );
       await assert.rejects(readFile(path.join(vaultRoot, legacyRawRelativePath), "utf8"));
       await assert.rejects(readFile(path.join(vaultRoot, "journal", "forged-local.md"), "utf8"));

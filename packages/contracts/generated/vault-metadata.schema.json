@@ -4,7 +4,7 @@
   "properties": {
     "formatVersion": {
       "type": "number",
-      "const": 2
+      "const": 1
     },
     "vaultId": {
       "type": "string",

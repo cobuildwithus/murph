@@ -73,7 +73,6 @@ export type HostedCanonicalWriteReceiptAction =
       targetRelativePath: string;
       sha256: string;
       byteLength: number;
-      allowAppendOnlyJsonl?: boolean;
       effect: "create" | "update" | "reuse";
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
@@ -489,9 +488,7 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalTextReceiptAction({
-          allowAppendOnlyJsonl: action.allowAppendOnlyJsonl === true,
           bytes,
-          operationType: input.receipt.operationType,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -577,28 +574,15 @@ async function readHostedCanonicalWriteReceiptPayload(input: {
 }
 
 async function applyHostedCanonicalTextReceiptAction(input: {
-  allowAppendOnlyJsonl: boolean;
   bytes: Uint8Array;
-  operationType: string;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
-  if (
-    input.allowAppendOnlyJsonl &&
-    !isHostedCanonicalAppendOnlyTextReplayAllowed(input.operationType, input.targetRelativePath)
-  ) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_ONLY_SCOPE",
-      "Hosted canonical text replay may only rewrite event ledger shards during integration storage migration.",
-      { operationType: input.operationType, targetRelativePath: input.targetRelativePath },
-    );
-  }
   const isRawTarget = isRawRelativePath(input.targetRelativePath, {
     caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot),
   });
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "text",
-    allowAppendOnlyJsonl: input.allowAppendOnlyJsonl,
     allowRaw: isRawTarget,
   });
   if (await targetMatchesBytes(target.absolutePath, input.bytes)) {
@@ -611,29 +595,6 @@ async function applyHostedCanonicalTextReceiptAction(input: {
     );
   }
   await writeTextFileAtomic(target.absolutePath, Buffer.from(input.bytes).toString("utf8"));
-}
-
-function isHostedCanonicalAppendOnlyTextReplayAllowed(
-  operationType: string,
-  relativePath: string,
-): boolean {
-  if (operationType !== "integration_storage_migration") {
-    return false;
-  }
-
-  let normalizedRelativePath: string;
-  try {
-    normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
-  } catch {
-    return false;
-  }
-
-  const eventLedgerDirectory = normalizeRelativeVaultPathForComparison(
-    VAULT_LAYOUT.eventLedgerDirectory,
-  );
-  const comparisonRelativePath = normalizeRelativeVaultPathForComparison(normalizedRelativePath);
-  return comparisonRelativePath.startsWith(`${eventLedgerDirectory}/`) &&
-    isJsonlRelativePath(normalizedRelativePath);
 }
 
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
@@ -1856,13 +1817,10 @@ export class WriteBatch {
     switch (action.kind) {
       case "text_write": {
         const payloadReceipt = await this.requireActionPayloadReceipt(action);
-        if (
-          action.allowAppendOnlyJsonl &&
-          !isHostedCanonicalAppendOnlyTextReplayAllowed(this.record.operationType, action.targetRelativePath)
-        ) {
+        if (action.allowAppendOnlyJsonl) {
           throw new VaultError(
-            "CANONICAL_WRITE_APPEND_ONLY_TEXT_SCOPE",
-            "Append-only JSONL text receipts are restricted to integration storage migration event rewrites.",
+            "CANONICAL_WRITE_APPEND_ONLY_TEXT_UNSUPPORTED",
+            "Hosted canonical write receipts do not support append-only JSONL text rewrites.",
             { operationType: this.record.operationType, targetRelativePath: action.targetRelativePath },
           );
         }
@@ -1871,7 +1829,6 @@ export class WriteBatch {
           targetRelativePath: action.targetRelativePath,
           sha256: payloadReceipt.sha256,
           byteLength: payloadReceipt.byteLength,
-          ...(action.allowAppendOnlyJsonl ? { allowAppendOnlyJsonl: true } : {}),
           effect: action.effect ?? "update",
           contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
         };

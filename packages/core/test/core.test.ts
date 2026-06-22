@@ -18,6 +18,7 @@ import {
   AUDIT_ACTORS as CONTRACT_AUDIT_ACTORS,
   AUDIT_STATUSES as CONTRACT_AUDIT_STATUSES,
   CONTRACT_SCHEMA_VERSION,
+  CURRENT_VAULT_FORMAT_VERSION,
   EVENT_KINDS as CONTRACT_EVENT_KINDS,
   EVENT_SOURCES as CONTRACT_EVENT_SOURCES,
   EXPERIMENT_STATUSES as CONTRACT_EXPERIMENT_STATUSES,
@@ -249,7 +250,7 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
     createdAt: "2026-03-12T12:00:00.000Z",
   });
 
-  assert.equal(initialized.metadata.formatVersion, 2);
+  assert.equal(initialized.metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
   assert.match(initialized.metadata.vaultId, /^vault_[0-9A-HJKMNP-TV-Z]{26}$/);
 
   const coreContent = await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8");
@@ -306,17 +307,17 @@ test("vault metadata helpers preserve the current format version and validate sc
   });
 
   assert.deepEqual(metadata, {
-    formatVersion: 2,
+    formatVersion: CURRENT_VAULT_FORMAT_VERSION,
     vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
     createdAt: "2026-03-12T12:00:00.000Z",
     title: "Baseline vault",
     timezone: "Australia/Melbourne",
   });
-  assert.equal(resolveVaultMetadataFormatVersion(metadata), 2);
-  assert.equal(detectVaultMetadataFormatVersion(metadata), 2);
+  assert.equal(resolveVaultMetadataFormatVersion(metadata), CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(detectVaultMetadataFormatVersion(metadata), CURRENT_VAULT_FORMAT_VERSION);
   assert.deepEqual(validateVaultMetadata(metadata, "VAULT_INVALID_METADATA", "broken"), {
     metadata,
-    storedFormatVersion: 2,
+    storedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
   });
 });
 
@@ -325,7 +326,7 @@ test("validateVaultMetadata remaps invalid schema details to the caller supplied
     () =>
       validateVaultMetadata(
         {
-          formatVersion: 2,
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
           vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
           createdAt: "2026-03-12T12:00:00.000Z",
           title: "",
@@ -743,7 +744,7 @@ test("repairVault recreates missing required directories when metadata is curren
 
   const loaded = await loadVault({ vaultRoot });
 
-  assert.equal(loaded.metadata.formatVersion, 2);
+  assert.equal(loaded.metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
   const validationBeforeRepair = await validateVault({ vaultRoot });
   assert.equal(validationBeforeRepair.valid, false);
   assert.equal(
@@ -2157,7 +2158,7 @@ test("validateVault reports invalid metadata before deeper validation", async ()
   await fs.writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify({
-      formatVersion: 2,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       title: "",
     }),
     "utf8",

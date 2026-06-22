@@ -252,7 +252,7 @@ describe("raw owner model", () => {
     ).toBe(true);
   });
 
-  it("rejects legacy v1 canonical raw manifests during validation", async () => {
+  it("rejects canonical raw manifests missing owner metadata during validation", async () => {
     const vaultRoot = await createTempVault();
     const rawDirectory = "raw/documents/2026/04/doc_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const rawFile = `${rawDirectory}/report.pdf`;

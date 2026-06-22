@@ -24,6 +24,7 @@ const encounterSource = readRepoFile("packages/cli/src/commands/encounter.ts");
 const mealSource = readRepoFile("packages/cli/src/commands/meal.ts");
 const measurementSource = readRepoFile("packages/cli/src/commands/measurement.ts");
 const workoutSource = readRepoFile("packages/cli/src/commands/workout.ts");
+const vaultServicesSource = readRepoFile("packages/vault-usecases/src/vault-services.ts");
 
 type CommandNode = {
   properties: {
@@ -234,6 +235,15 @@ describe("canonical CLI JSON input split", () => {
     expect(
       Object.keys(configCommand("intake").properties.commands?.properties ?? {}),
     ).not.toContain("raw");
+  });
+
+  it("does not expose the removed integration storage migration surface", () => {
+    expect(generatedTypes).not.toContain("'vault migrate-integration-storage'");
+    expect(commandManifestSource).not.toContain("path: ['vault', 'migrate-integration-storage']");
+    expect(vaultServicesSource).not.toContain("migrateIntegrationStorage");
+    expect(
+      Object.keys(configCommand("vault").properties.commands?.properties ?? {}),
+    ).not.toContain("migrate-integration-storage");
   });
 
   it("keeps command discovery aligned with newly discoverable JSON escape hatches", () => {

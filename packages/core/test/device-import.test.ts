@@ -1,21 +1,27 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import type { AuditRecord, EventRecord, IntegrationIngestRecord, SampleRecord } from "@murphai/contracts";
+import type { AuditRecord, EventRecord, IntegrationIngestRecord, RawImportManifest, SampleRecord } from "@murphai/contracts";
 
 import {
   dedupeDeviceEventsByExternalRef,
   deleteEvent,
   findEventByExternalRef,
+  buildRawImportManifest,
   importDeviceBatch,
   initializeVault,
+  parseIntegrationEvidencePartJson,
   readJsonlRecords,
   readIntegrationIngestById,
   readIntegrationEvidencePart,
   repairJunctionWorkoutHeartRateZones,
+  resolveRawAssetDirectory,
+  validateVault,
+  VAULT_LAYOUT,
   VaultError,
 } from "../src/index.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
@@ -37,14 +43,44 @@ async function readRequiredIntegrationIngest(input: {
   return match;
 }
 
-async function assertNoLegacyIntegrationRawDirectory(vaultRoot: string): Promise<void> {
-  await assert.rejects(
-    () => fs.access(path.join(vaultRoot, "raw/integrations")),
-    (error: unknown) =>
-      typeof error === "object"
-      && error !== null
-      && "code" in error
-      && (error as { code?: unknown }).code === "ENOENT",
+async function readVaultUtf8(vaultRoot: string, relativePath: string): Promise<string> {
+  return await fs.readFile(path.join(vaultRoot, relativePath), "utf8");
+}
+
+async function readRequiredRawManifest(input: {
+  rawDirectory: string;
+  vaultRoot: string;
+}): Promise<{ manifest: RawImportManifest; relativePath: string }> {
+  const entries = await fs.readdir(path.join(input.vaultRoot, input.rawDirectory));
+  const manifestNames = entries
+    .filter((entry) => entry === "manifest.json" || (entry.startsWith("manifest.") && entry.endsWith(".json")))
+    .sort();
+
+  assert.equal(manifestNames.length, 1);
+  const relativePath = path.posix.join(input.rawDirectory, manifestNames[0] as string);
+  const manifest = JSON.parse(await readVaultUtf8(input.vaultRoot, relativePath)) as RawImportManifest;
+
+  return { manifest, relativePath };
+}
+
+async function rewriteIntegrationIngestRecord(input: {
+  ingestId: string;
+  mutate: (record: IntegrationIngestRecord) => IntegrationIngestRecord;
+  relativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const records = (await readJsonlRecords({
+    vaultRoot: input.vaultRoot,
+    relativePath: input.relativePath,
+  })) as IntegrationIngestRecord[];
+  const rewritten = records.map((record) =>
+    record.id === input.ingestId ? input.mutate(record) : record
+  );
+
+  await fs.writeFile(
+    path.join(input.vaultRoot, input.relativePath),
+    `${rewritten.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
   );
 }
 
@@ -461,15 +497,27 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
   );
   assert.deepEqual(result.samples.map((record) => record.id), ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
   assert.equal(result.ingestShardPath, "ledger/integration-ingests/2026/2026-03.jsonl");
+  const rawDirectory = `raw/integrations/whoop/2026/03/${result.importId}`;
   assert.deepEqual(
     result.evidenceParts.map((part) => ({
       role: part.role,
       fileName: part.fileName,
       mediaType: part.mediaType,
+      relativePath: part.relativePath,
     })),
     [
-      { role: "sleep:sleep-1", fileName: "sleep-sleep-1.json", mediaType: "application/json" },
-      { role: "recovery:sleep-1", fileName: "recovery-sleep-1.json", mediaType: "application/json" },
+      {
+        role: "sleep:sleep-1",
+        fileName: "sleep-sleep-1.json",
+        mediaType: "application/json",
+        relativePath: `${rawDirectory}/001-sleep-sleep-1.json`,
+      },
+      {
+        role: "recovery:sleep-1",
+        fileName: "recovery-sleep-1.json",
+        mediaType: "application/json",
+        relativePath: `${rawDirectory}/002-recovery-sleep-1.json`,
+      },
     ],
   );
 
@@ -567,9 +615,13 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
   assert.equal(ingestRecord.parts.length, 2);
   assert.equal(ingestRecord.parts[0]?.role, "sleep:sleep-1");
   assert.equal(ingestRecord.parts[0]?.fileName, "sleep-sleep-1.json");
-  assert.equal(ingestRecord.parts[0]?.content, sleepEvidenceContent);
-  assert.equal(ingestRecord.parts[0]?.content.includes("\n  "), false);
+  assert.equal(ingestRecord.parts[0]?.relativePath, `${rawDirectory}/001-sleep-sleep-1.json`);
+  assert.equal(ingestRecord.parts[0]?.byteSize, Buffer.byteLength(sleepEvidenceContent, "utf8"));
   assert.equal(ingestRecord.parts[0]?.sha256, result.evidenceParts[0]?.sha256);
+  assert.equal("content" in (ingestRecord.parts[0] ?? {}), false);
+  const sleepRawContent = await readVaultUtf8(vaultRoot, ingestRecord.parts[0]?.relativePath as string);
+  assert.equal(sleepRawContent, sleepEvidenceContent);
+  assert.equal(sleepRawContent.includes("\n  "), false);
   assert.deepEqual(ingestRecord.outputs?.events, [
     { id: "evt_KBKEHWQT2XXW0K5XZCS1T5X9KA", roles: ["sleep:sleep-1"] },
     { id: "evt_S5K01TSPA86JJVS1DWVHT9RRZ1", roles: ["recovery:sleep-1"] },
@@ -585,7 +637,92 @@ test("importDeviceBatch writes integration ingest evidence and compact records",
       syncMode: "test",
     },
   });
-  await assertNoLegacyIntegrationRawDirectory(vaultRoot);
+  const { manifest, relativePath: manifestPath } = await readRequiredRawManifest({ vaultRoot, rawDirectory });
+  assert.equal(manifestPath.startsWith(`${rawDirectory}/manifest.`), true);
+  assert.equal(manifest.rawDirectory, rawDirectory);
+  assert.equal(manifest.importKind, "device_batch");
+  assert.deepEqual(manifest.owner, {
+    kind: "device_batch",
+    id: result.importId,
+    partition: "whoop",
+  });
+  assert.deepEqual(
+    manifest.artifacts.map((artifact) => ({
+      byteSize: artifact.byteSize,
+      relativePath: artifact.relativePath,
+      role: artifact.role,
+      sha256: artifact.sha256,
+    })),
+    ingestRecord.parts.map((part) => ({
+      byteSize: part.byteSize,
+      relativePath: part.relativePath,
+      role: part.role,
+      sha256: part.sha256,
+    })),
+  );
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
+test("validateVault accepts literal v1 compact integration ingest references", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-v1-compact");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    source: "device",
+    evidenceParts: [
+      {
+        role: "sleep:sleep-1",
+        fileName: "sleep-sleep-1.json",
+        mediaType: "application/json",
+        content: {
+          id: "sleep-1",
+          start: "2026-03-15T22:00:00.000Z",
+          end: "2026-03-16T07:00:00.000Z",
+        },
+      },
+    ],
+  });
+
+  const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+  const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as { formatVersion: number };
+  metadata.formatVersion = 1;
+  await fs.writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+
+  const part = await readIntegrationEvidencePart({
+    vaultRoot,
+    ingestId: result.importId,
+    role: "sleep:sleep-1",
+  });
+  assert.ok(part);
+  assert.equal(part.relativePath.startsWith("raw/integrations/whoop/2026/03/"), true);
+  assert.equal("content" in part, false);
+  assert.deepEqual(
+    await parseIntegrationEvidencePartJson({
+      vaultRoot,
+      ingestId: result.importId,
+      role: "sleep:sleep-1",
+    }),
+    {
+      end: "2026-03-16T07:00:00.000Z",
+      id: "sleep-1",
+      start: "2026-03-15T22:00:00.000Z",
+    },
+  );
+
+  const rawDirectory = `raw/integrations/whoop/2026/03/${result.importId}`;
+  const { manifest } = await readRequiredRawManifest({ vaultRoot, rawDirectory });
+  assert.deepEqual(manifest.owner, {
+    kind: "device_batch",
+    id: result.importId,
+    partition: "whoop",
+  });
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
 });
 
 test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaults", async () => {
@@ -1032,15 +1169,233 @@ test("importDeviceBatch writes Date evidence part values as ISO strings", async 
     ],
   });
 
-  const part = await readIntegrationEvidencePart({
+  const parsed = await parseIntegrationEvidencePartJson({
     vaultRoot,
     ingestId: result.importId,
     role: "provider-snapshot",
   });
 
+  assert.deepEqual(parsed, {
+    importedAt: "2026-04-22T12:00:00.000Z",
+    nested: {
+      windowStart: "2026-04-22T00:00:00.000Z",
+    },
+  });
+
+  const part = await readIntegrationEvidencePart({
+    vaultRoot,
+    ingestId: result.importId,
+    role: "provider-snapshot",
+  });
+  assert.ok(part);
   assert.equal(
-    part?.content,
+    await readVaultUtf8(vaultRoot, part.relativePath),
     '{"importedAt":"2026-04-22T12:00:00.000Z","nested":{"windowStart":"2026-04-22T00:00:00.000Z"}}\n',
+  );
+});
+
+test("validateVault rejects corrupted integration evidence raw artifacts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-corrupt-raw");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        content: {
+          importedAt: "2026-04-22T12:00:00.000Z",
+        },
+      },
+    ],
+  });
+  const part = await readIntegrationEvidencePart({
+    vaultRoot,
+    ingestId: result.importId,
+    role: "provider-snapshot",
+  });
+  assert.ok(part);
+
+  await fs.writeFile(path.join(vaultRoot, part.relativePath), "{\"corrupt\":true}\n", "utf8");
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.issues.some((issue) => issue.code === "INTEGRATION_INGEST_PART_INTEGRITY"),
+    true,
+  );
+  await assert.rejects(
+    () =>
+      parseIntegrationEvidencePartJson({
+        vaultRoot,
+        ingestId: result.importId,
+        role: "provider-snapshot",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "INTEGRATION_INGEST_PART_INTEGRITY",
+  );
+});
+
+test("validateVault rejects integration ingest raw parts missing from the matching manifest", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-unmanifested-raw");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        content: {
+          importedAt: "2026-04-22T12:00:00.000Z",
+        },
+      },
+    ],
+  });
+  const part = await readIntegrationEvidencePart({
+    vaultRoot,
+    ingestId: result.importId,
+    role: "provider-snapshot",
+  });
+  assert.ok(part);
+
+  const roguePath = path.posix.join(path.posix.dirname(part.relativePath), "999-rogue.json");
+  const rogueContent = "{\"importedAt\":\"2026-04-22T12:00:00.000Z\",\"rogue\":true}\n";
+  const rogueSha256 = createHash("sha256").update(rogueContent).digest("hex");
+  await fs.writeFile(path.join(vaultRoot, roguePath), rogueContent, "utf8");
+  await rewriteIntegrationIngestRecord({
+    vaultRoot,
+    relativePath: result.ingestShardPath,
+    ingestId: result.importId,
+    mutate: (record) => ({
+      ...record,
+      parts: record.parts.map((candidate) =>
+        candidate.role === "provider-snapshot"
+          ? {
+            ...candidate,
+            relativePath: roguePath,
+            byteSize: Buffer.byteLength(rogueContent, "utf8"),
+            sha256: rogueSha256,
+          }
+          : candidate
+      ),
+    }),
+  });
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.issues.some((issue) => issue.code === "INTEGRATION_INGEST_PART_MANIFEST_ARTIFACT"),
+    true,
+  );
+  await assert.rejects(
+    () =>
+      parseIntegrationEvidencePartJson({
+        vaultRoot,
+        ingestId: result.importId,
+        role: "provider-snapshot",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "INTEGRATION_INGEST_PART_MANIFEST_ARTIFACT",
+  );
+});
+
+test("validateVault rejects integration ingest raw parts outside raw integrations", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-non-integration-raw");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    evidenceParts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        content: {
+          importedAt: "2026-04-22T12:00:00.000Z",
+        },
+      },
+    ],
+  });
+
+  const owner = {
+    kind: "document" as const,
+    id: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  };
+  const rawDirectory = resolveRawAssetDirectory({
+    owner,
+    occurredAt: "2026-04-22T12:00:00.000Z",
+  });
+  const rawPath = `${rawDirectory}/provider.json`;
+  const rawContent = "{\"importedAt\":\"2026-04-22T12:00:00.000Z\",\"document\":true}\n";
+  const rawSha256 = createHash("sha256").update(rawContent).digest("hex");
+  await fs.mkdir(path.join(vaultRoot, rawDirectory), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, rawPath), rawContent, "utf8");
+  const manifest = buildRawImportManifest({
+    importId: owner.id,
+    importKind: "document",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    owner,
+    rawDirectory,
+    source: "manual",
+    artifacts: [
+      {
+        role: "provider-snapshot",
+        relativePath: rawPath,
+        originalFileName: "provider.json",
+        mediaType: "application/json",
+        byteSize: Buffer.byteLength(rawContent, "utf8"),
+        sha256: rawSha256,
+      },
+    ],
+    provenance: {},
+  });
+  await fs.writeFile(
+    path.join(vaultRoot, rawDirectory, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+  await rewriteIntegrationIngestRecord({
+    vaultRoot,
+    relativePath: result.ingestShardPath,
+    ingestId: result.importId,
+    mutate: (record) => ({
+      ...record,
+      parts: record.parts.map((candidate) =>
+        candidate.role === "provider-snapshot"
+          ? {
+            ...candidate,
+            relativePath: rawPath,
+            byteSize: Buffer.byteLength(rawContent, "utf8"),
+            sha256: rawSha256,
+          }
+          : candidate
+      ),
+    }),
+  });
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.issues.some((issue) => issue.code === "INTEGRATION_INGEST_PART_RAW_PATH"),
+    true,
+  );
+  await assert.rejects(
+    () =>
+      parseIntegrationEvidencePartJson({
+        vaultRoot,
+        ingestId: result.importId,
+        role: "provider-snapshot",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "INTEGRATION_INGEST_PART_RAW_PATH",
   );
 });
 

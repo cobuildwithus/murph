@@ -106,14 +106,14 @@ repo/
 - Append-only JSONL ledgers:
   - `ledger/inbox-captures/*.jsonl`
   - `ledger/events/*.jsonl`
-  - `ledger/integration-ingests/*.jsonl` for exact device/provider evidence and ingest receipts
+  - `ledger/integration-ingests/*.jsonl` for compact device/provider ingest indexes, receipt metadata, checksums, and output role links
   - `ledger/samples/**.jsonl` for explicit raw/debug sample inspection, not default query hydration
   - `audit/*.jsonl`
 - Immutable imported raw artifacts:
   - `raw/**`
   - stored under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, with a partition only for non-device batch families such as sample/workout imports)
   - each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the path
-  - excluding current provider/device snapshots; `raw/integrations/**` is legacy v1 data that must migrate into `ledger/integration-ingests/**`
+  - including current provider/device snapshots under `raw/integrations/<provider>/YYYY/MM/<importId>/`
 - Rebuildable parser artifacts:
   - `derived/inbox/**`
 - Rebuildable model-authored knowledge wiki:

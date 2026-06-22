@@ -124,8 +124,12 @@ type RawArtifactTombstonePredicate = (
 ) => boolean;
 
 interface RawArtifactRetentionMetadata {
-  artifactClass: "dense_provider_timeseries" | "sparse_provider_timeseries";
-  resourceCategory: "timeseries";
+  artifactClass:
+    | "compact_provider_timeseries_aggregate"
+    | "compact_provider_timeseries_reading"
+    | "dense_provider_timeseries"
+    | "sparse_provider_timeseries";
+  resourceCategory: "timeseries" | "timeseries_daily_aggregate" | "timeseries_reading";
   retentionClass: "debug_temporary" | "provider_evidence";
 }
 
@@ -1405,8 +1409,17 @@ function parseRawArtifactRetentionMetadata(
   }
   const { artifactClass, resourceCategory, retentionClass } = metadata;
   if (
-    (artifactClass !== "dense_provider_timeseries" && artifactClass !== "sparse_provider_timeseries")
-    || resourceCategory !== "timeseries"
+    (
+      artifactClass !== "compact_provider_timeseries_aggregate"
+      && artifactClass !== "compact_provider_timeseries_reading"
+      && artifactClass !== "dense_provider_timeseries"
+      && artifactClass !== "sparse_provider_timeseries"
+    )
+    || (
+      resourceCategory !== "timeseries"
+      && resourceCategory !== "timeseries_daily_aggregate"
+      && resourceCategory !== "timeseries_reading"
+    )
     || (retentionClass !== "debug_temporary" && retentionClass !== "provider_evidence")
   ) {
     return null;

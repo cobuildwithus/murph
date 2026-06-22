@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 
 import type {
   ContractSchema,
@@ -81,8 +82,7 @@ import {
 import { stageRawImportManifest } from "./operations/raw-manifests.ts";
 import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
 import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
-import { resolveVaultPath } from "./path-safety.ts";
-import { sanitizePathSegment } from "./path-safety.ts";
+import { normalizeRelativeVaultPath, resolveVaultPath, sanitizeFileName, sanitizePathSegment } from "./path-safety.ts";
 import { prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
 import { normalizeUniqueTextList } from "./bank/shared.ts";
 import {
@@ -310,6 +310,8 @@ interface ImportDeviceBatchResult {
     role: string;
     fileName: string;
     mediaType?: string;
+    relativePath: string;
+    byteSize: number;
     sha256: string;
   }>;
   evidencePartCount: number;
@@ -320,6 +322,8 @@ interface PreparedDeviceEvidencePart extends IntegrationEvidencePartSeed {
   role: string;
   content: string;
   metadata?: Record<string, unknown>;
+  relativePath: string;
+  byteSize: number;
   sha256: string;
 }
 
@@ -344,6 +348,7 @@ interface NormalizedDeviceEvidencePart {
   mediaType?: string;
   content: string;
   metadata?: LooseRecord;
+  byteSize: number;
   sha256: string;
   index: number;
 }
@@ -1319,6 +1324,7 @@ function normalizeDeviceEvidencePartInputs(
         "VAULT_INVALID_EVIDENCE_PART",
         `Device evidence part ${index + 1} metadata must be a plain object.`,
       ),
+      byteSize: Buffer.byteLength(content, "utf8"),
       sha256: createHash("sha256").update(content).digest("hex"),
       index,
     };
@@ -1448,6 +1454,7 @@ function normalizeDeviceBatchInputs({
 
 function prepareDeviceEvidenceParts(
   evidenceParts: readonly NormalizedDeviceEvidencePart[],
+  rawDirectory: string,
 ): PreparedDeviceEvidencePart[] {
   return evidenceParts.map((artifact) => ({
     role: artifact.role,
@@ -1455,6 +1462,13 @@ function prepareDeviceEvidenceParts(
     mediaType: artifact.mediaType,
     content: artifact.content,
     metadata: artifact.metadata,
+    relativePath: normalizeRelativeVaultPath(
+      path.posix.join(
+        rawDirectory,
+        `${String(artifact.index + 1).padStart(3, "0")}-${sanitizeFileName(artifact.fileName, "evidence.json")}`,
+      ),
+    ),
+    byteSize: artifact.byteSize,
     sha256: artifact.sha256,
   }));
 }
@@ -1989,6 +2003,37 @@ function buildDeviceIngestProvenance(
     : undefined;
 }
 
+function resolveDeviceBatchRawDirectory(input: {
+  importId: string;
+  importedAt: string;
+  provider: string;
+}): string {
+  const year = input.importedAt.slice(0, 4);
+  const month = input.importedAt.slice(5, 7);
+  return normalizeRelativeVaultPath(
+    `${VAULT_LAYOUT.rawIntegrationsDirectory}/${input.provider}/${year}/${month}/${input.importId}`,
+  );
+}
+
+function buildDeviceRawManifestProvenance(input: DeviceBatchPlan): Record<string, unknown> {
+  const rawArtifacts = input.preparedEvidenceParts
+    .filter((part) => part.metadata && Object.keys(part.metadata).length > 0)
+    .map((part) => ({
+      metadata: part.metadata,
+      relativePath: part.relativePath,
+      role: part.role,
+      sha256: part.sha256,
+    }));
+
+  return {
+    provider: input.provider,
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    source: input.source,
+    ...(input.ingestReceipt ? { ingestReceipt: input.ingestReceipt } : {}),
+    ...(rawArtifacts.length > 0 ? { rawArtifacts } : {}),
+  };
+}
+
 function buildIntegrationIngestEventOutputs(input: {
   preparedEvents: readonly PreparedDeviceEventEntry[];
   records: readonly EventRecord[];
@@ -2098,7 +2143,12 @@ function prepareDeviceBatchPlan({
       ingestReceipt: normalizedInputs.ingestReceipt ?? null,
     }),
   );
-  const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts);
+  const rawDirectory = resolveDeviceBatchRawDirectory({
+    importId,
+    importedAt: normalizedInputs.importedAt,
+    provider: normalizedInputs.provider,
+  });
+  const preparedEvidenceParts = prepareDeviceEvidenceParts(normalizedInputs.evidenceParts, rawDirectory);
   const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedEvidenceParts);
   const preparedSamples = prepareDeviceSampleEntries(normalizedInputs.samples);
 
@@ -2666,11 +2716,62 @@ export async function importDeviceBatch({
     summary: `Import ${deviceBatchPlan.provider} device batch ${deviceBatchPlan.importId}`,
     occurredAt: deviceBatchPlan.effectiveOccurredAt,
     mutate: async ({ batch }) => {
+      const stagedRawEvidenceParts: Array<{
+        role: string;
+        raw: {
+          relativePath: string;
+          originalFileName: string;
+          mediaType: string;
+          stagedAbsolutePath: string;
+        };
+      }> = [];
+      for (const part of deviceBatchPlan.preparedEvidenceParts) {
+        stagedRawEvidenceParts.push({
+          role: part.role,
+          raw: await batch.stageRawText({
+            targetRelativePath: part.relativePath,
+            originalFileName: part.fileName,
+            mediaType: part.mediaType ?? "application/octet-stream",
+            content: part.content,
+            allowExistingMatch: true,
+          }),
+        });
+      }
+
+      const rawDirectory = resolveDeviceBatchRawDirectory({
+        importId: deviceBatchPlan.importId,
+        importedAt: deviceBatchPlan.importedAt,
+        provider: deviceBatchPlan.provider,
+      });
+      const manifestPath = stagedRawEvidenceParts.length > 0
+        ? await stageRawImportManifest({
+            batch,
+            importId: deviceBatchPlan.importId,
+            importKind: "device_batch",
+            importedAt: deviceBatchPlan.importedAt,
+            owner: {
+              kind: "device_batch",
+              id: deviceBatchPlan.importId,
+              partition: deviceBatchPlan.provider,
+            },
+            rawDirectory,
+            source: deviceBatchPlan.source,
+            artifacts: stagedRawEvidenceParts,
+            provenance: buildDeviceRawManifestProvenance(deviceBatchPlan),
+            operatorMetadata:
+              Object.keys(deviceBatchPlan.provenance).length > 0
+                ? deviceBatchPlan.provenance
+                : undefined,
+          })
+        : null;
+
       await stageIntegrationIngestAppendPlan(batch, integrationIngestAppendPlan);
       await stageJsonlAppendPlan(batch, eventAppendPlan);
       await stageJsonlAppendPlan(batch, sampleAppendPlan);
 
       const touchedPaths = [
+        ...deviceBatchPlan.preparedEvidenceParts.map((part) => part.relativePath),
+        ...(manifestPath ? [manifestPath] : []),
         ...(integrationIngestAppendPlan.appended ? [integrationIngestAppendPlan.targetShardPath] : []),
         ...eventAppendPlan.appendedShardPaths,
         ...sampleAppendPlan.appendedShardPaths,
@@ -2706,6 +2807,8 @@ export async function importDeviceBatch({
           role: part.role,
           fileName: part.fileName,
           mediaType: part.mediaType,
+          relativePath: part.relativePath,
+          byteSize: part.byteSize,
           sha256: part.sha256,
         })),
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,

@@ -59,7 +59,7 @@ challenge behavior.
 
 Importer adapters own:
 - snapshot validation and parsing
-- evidence retention through device-batch `evidenceParts`, persisted by core under `ledger/integration-ingests/**`
+- evidence retention through device-batch `evidenceParts`; core persists exact bytes under `raw/integrations/**` and writes compact references under `ledger/integration-ingests/**`
 - conversion into `DeviceBatchImportPayload`
 - canonical event, sample, and provenance shaping
 
@@ -81,7 +81,7 @@ That split is the main guardrail for provider contributions. Treat shared metada
 
 - Keep provider credentials outside the canonical vault.
 - Keep stored runtime metadata shallow and sanitized; do not persist large nested profile payloads into account metadata.
-- Preserve useful upstream evidence as device-batch evidence parts when it helps replay, audit, or future re-normalization; core owns the integration-ingest journal write.
+- Preserve useful upstream evidence as device-batch evidence parts when it helps replay, audit, or future re-normalization; core owns the raw artifact write and integration-ingest journal reference.
 - Reuse existing canonical event kinds and metric names before inventing new ones. Treat generic sample streams as explicit CSV/import/debug ledgers, not provider firehose output.
 - If a provider supports webhooks, treat them as routing or freshness hints that enqueue work; normalization still happens through importer snapshots.
 - Reuse the shared descriptor and shared registry helper; do not reintroduce provider metadata drift between `device-syncd` and `importers`.

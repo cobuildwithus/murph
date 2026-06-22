@@ -476,6 +476,22 @@ test("dense raw classifier uses retention metadata before role fallback", async 
   });
   assert.equal(metadataSparseDetection.denseProviderRawTimeseriesCount, 0);
 
+  const metadataCompactVaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-blood-oxygen",
+    rawArtifactMetadata: {
+      artifactClass: "compact_provider_timeseries_aggregate",
+      resource: "blood_oxygen",
+      resourceCategory: "timeseries_daily_aggregate",
+      retentionClass: "provider_evidence",
+    },
+  });
+  const metadataCompactDetection = await detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: true,
+    now: REPAIR_NOW,
+    vaultRoot: metadataCompactVaultRoot,
+  });
+  assert.equal(metadataCompactDetection.denseProviderRawTimeseriesCount, 0);
+
   const incompleteMetadataVaultRoot = await createRawArtifactFixture({
     denseRole: "junction-timeseries-heartrate",
     rawArtifactMetadata: {

@@ -2589,21 +2589,12 @@ const integrationEvidencePartSchema = z
     role: boundedString(1, 160),
     fileName: patternedString(SINGLE_PATH_SEGMENT_PATTERN, 1, 255),
     mediaType: boundedString(1, 255),
-    content: z.string(),
+    relativePath: patternedString(RAW_PATH_PATTERN),
     byteSize: integerSchema(0),
     sha256: patternedString(SHA256_HEX_PATTERN, 64, 64),
     metadata: jsonObjectSchema.optional(),
   })
-  .strict()
-  .superRefine((part, context) => {
-    if (new TextEncoder().encode(part.content).byteLength !== part.byteSize) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Integration evidence part byteSize must equal UTF-8 content bytes.",
-        path: ["byteSize"],
-      });
-    }
-  });
+  .strict();
 
 export const integrationIngestReceiptSchema = z
   .object({

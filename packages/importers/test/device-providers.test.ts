@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -131,12 +131,14 @@ async function readEvidencePartProvenanceEntries(input: {
   });
   assert.ok(ingest);
 
-  return ingest.record.parts.map((part) => ({
-    content: part.content,
-    fileName: part.fileName,
-    metadata: part.metadata,
-    role: part.role,
-  }));
+  return await Promise.all(
+    ingest.record.parts.map(async (part) => ({
+      content: await readFile(join(input.vaultRoot, part.relativePath), "utf8"),
+      fileName: part.fileName,
+      metadata: part.metadata,
+      role: part.role,
+    })),
+  );
 }
 
 function hasCoreEventKind(events: readonly CoreDeviceImportEvent[], kind: string): boolean {

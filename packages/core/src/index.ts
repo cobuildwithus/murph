@@ -97,9 +97,6 @@ export type {
   IntegrationIngestOutputSeed,
   IntegrationIngestPartSummary,
 } from "./integration-ingests.ts";
-export type {
-  IntegrationStorageMigrationResult,
-} from "./integration-ingest-migration.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
 export {
@@ -131,7 +128,6 @@ export {
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
-  migrateIntegrationStorage,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairJunctionWorkoutHeartRateZones,

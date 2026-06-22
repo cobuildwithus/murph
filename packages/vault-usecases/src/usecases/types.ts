@@ -734,11 +734,6 @@ export interface JunctionWorkoutHeartRateZoneRepairInput extends CommandContext 
   apply?: boolean
 }
 
-export interface IntegrationStorageMigrationInput extends CommandContext {
-  apply?: boolean
-  validateAfter?: boolean
-}
-
 export interface JunctionWorkoutHeartRateZoneRepairResult {
   mode: "dry-run" | "apply"
   hasWork: boolean
@@ -747,22 +742,6 @@ export interface JunctionWorkoutHeartRateZoneRepairResult {
   candidateCount: number
   unverifiedCandidateCount: number
   repairedCount: number
-  touchedPathCount: number
-  auditPath: string | null
-}
-
-export interface IntegrationStorageMigrationResult {
-  mode: "dry-run" | "apply"
-  hasWork: boolean
-  mutated: boolean
-  formatVersionBefore: number | null
-  formatVersionAfter: number | null
-  legacyBundleCount: number
-  journalAppendCount: number
-  eventShardRewriteCount: number
-  deletedLegacyFileCount: number
-  blockerCount: number
-  blockers: string[]
   touchedPathCount: number
   auditPath: string | null
 }
@@ -1110,9 +1089,6 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   repairJunctionWorkoutHeartRateZones(
     input: JunctionWorkoutHeartRateZoneRepairInput,
   ): Promise<JunctionWorkoutHeartRateZoneRepairResult>
-  migrateIntegrationStorage(
-    input: IntegrationStorageMigrationInput,
-  ): Promise<IntegrationStorageMigrationResult>
   repairWearableStorage(input: WearableStorageRepairInput): Promise<WearableStorageRepairResult>
   projectAssessment(
     input: ProjectAssessmentInput,
@@ -1499,24 +1475,6 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     unverifiedCandidateCount: number
     repairedCount: number
     touchedPathCount: number
-    touchedPaths: string[]
-    auditPath: string | null
-  }>
-  migrateIntegrationStorage(input: {
-    vaultRoot: string
-    apply?: boolean
-    validateAfter?: boolean
-  }): Promise<{
-    mode: "dry-run" | "apply"
-    mutated: boolean
-    formatVersionBefore: number | null
-    formatVersionAfter: number | null
-    legacyBundleCount: number
-    journalAppendCount: number
-    eventShardRewriteCount: number
-    deletedLegacyFileCount: number
-    blockerCount: number
-    blockers: string[]
     touchedPaths: string[]
     auditPath: string | null
   }>
