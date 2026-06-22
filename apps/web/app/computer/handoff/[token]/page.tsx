@@ -2,6 +2,7 @@ import { CheckCircle2, Clock3, Monitor } from "lucide-react";
 
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
 import { ComputerHandoffDoneButton } from "@/src/components/computer-use/computer-handoff-done-button";
+import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -97,28 +98,28 @@ export default async function ComputerHandoffPage({
   const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
 
   return (
-    <main className="flex min-h-dvh flex-col bg-background text-foreground">
+    <main className="relative min-h-dvh bg-foreground text-foreground">
       <iframe
         allow={state.iframeAllow}
-        className="block min-h-0 w-full flex-1 border-0 bg-card"
+        className="block h-dvh w-full border-0 bg-foreground"
         referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
         src={state.liveViewUrl}
         title="Murph browser handoff"
       />
       <div
-        className="sticky bottom-0 z-10 flex justify-center px-3 pt-2 pb-3"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
       >
-        <div className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2 sm:w-auto">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-            <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          </span>
-          <p className="min-w-0 flex-1 text-sm text-muted-foreground sm:flex-none">
-            All set?
-          </p>
+        <ComputerHandoffFloatingIsland
+          handle={
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+              <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+            </span>
+          }
+        >
           <ComputerHandoffDoneButton endpoint={doneEndpoint} />
-        </div>
+        </ComputerHandoffFloatingIsland>
       </div>
     </main>
   );
