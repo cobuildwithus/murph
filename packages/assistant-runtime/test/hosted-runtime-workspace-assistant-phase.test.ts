@@ -1091,6 +1091,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("preserves durable outbox wakes after context snapshot refresh", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const outboxWakeAt = "2026-04-27T00:05:00.000Z";
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await writeHostedPhaseExperimentSource(vaultRoot);
+      await markAssistantContextSnapshotDirty({
+        domains: ["experiments"],
+        vaultRoot,
+      });
+      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(outboxWakeAt);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: outboxWakeAt,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          assistantContextSnapshotRefreshAttempted: true,
+          assistantContextSnapshotRefreshed: true,
+        }),
+      }));
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("preserves dirty assistant context snapshots and requests an immediate wake after preemption", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
     const vaultRoot = path.join(parentRoot, "vault");
@@ -2310,6 +2351,45 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt,
       nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
+  it("preserves durable outbox wakes after idle device-sync-only work", async () => {
+    const outboxWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(outboxWakeAt);
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: outboxWakeAt,
+      nextWakeReason: "assistant",
       progressed: true,
     }));
   });
@@ -3770,6 +3850,86 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: deviceSyncRetryAt,
       nextWakeReason: "device-sync.reconcile",
+    }));
+  });
+
+  it("preserves durable outbox wakes while recording unrelated system mailbox work", async () => {
+    const outboxWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(outboxWakeAt);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: outboxWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: outboxWakeAt,
+      nextWakeReason: "assistant",
+    }));
+  });
+
+  it("preserves future provider cleanup wakes while recording unrelated system mailbox work", async () => {
+    const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: providerCleanupWakeAt,
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: providerCleanupWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: providerCleanupWakeAt,
+      nextWakeReason: "assistant",
     }));
   });
 
