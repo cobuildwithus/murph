@@ -807,7 +807,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeAbortSignal: runtimeAbortController.signal,
         shutdownSignal: options.shutdownSignal ?? null,
         vaultRoot: restored.vaultRoot,
-        wakeSignal: null,
+        wakeSignal: options.runtimeWakeSignal ?? null,
         workspace: workspaceRead.workspace,
         workspacePort: foregroundWorkspacePort,
       });

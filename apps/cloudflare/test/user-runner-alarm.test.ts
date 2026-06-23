@@ -1305,6 +1305,7 @@ describe("HostedUserRunner execution coordination", () => {
       activeRuntime: {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
+        processingMode: "default",
         userId: TEST_USER_ID,
       },
       userId: TEST_USER_ID,
@@ -1314,6 +1315,42 @@ describe("HostedUserRunner execution coordination", () => {
       active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
+      wake_at: null,
+    });
+  });
+
+  it("does not coalesce retention-only requests into a default active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-retention",
+      processingMode: "inbox_media_retention",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
+    });
+
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
       wake_at: null,
     });
   });
@@ -1949,6 +1986,7 @@ describe("HostedUserRunner execution coordination", () => {
       activeRuntime: {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
+        processingMode: "default",
         userId: TEST_USER_ID,
       },
       userId: TEST_USER_ID,

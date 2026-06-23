@@ -49,6 +49,7 @@ import {
 } from "./runner-state-store.js";
 import type {
   DurableObjectStateLike,
+  RunnerRuntimeProcessingMode,
   RunnerStateRecord,
 } from "./types.js";
 import {
@@ -178,10 +179,20 @@ export class RuntimeProcessingController {
       });
     }
 
+    const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    if (activeFence.processingMode !== requestedProcessingMode) {
+      await this.syncRunnerAlarm(record);
+      return createRuntimeProcessingRetryLater({
+        reason: "container_busy",
+        userId: input.input.userId,
+      });
+    }
+
     const containerResult = await ensureActiveRuntimeProcessing({
       activeRuntime: {
         attemptId: activeFence.attemptId,
         leaseGeneration: String(activeFence.generation),
+        processingMode: activeFence.processingMode,
         userId: record.userId,
       },
       commandBudget: input.commandBudget,
@@ -223,6 +234,7 @@ export class RuntimeProcessingController {
             generation: String(activeFence.generation),
             kind: activeFence.kind,
             leaseGeneration: String(activeFence.generation),
+            processingMode: activeFence.processingMode,
             providerEgressToken: null,
             runnerContainerName: activeFence.runnerContainerName,
             startedAt: activeFence.startedAt,
@@ -315,6 +327,7 @@ export class RuntimeProcessingController {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
+        processingMode: normalizeRuntimeProcessingMode(input.input.processingMode),
         runnerContainerName,
         userId: input.input.userId,
       });
@@ -648,4 +661,10 @@ export class RuntimeProcessingController {
       return null;
     }
   }
+}
+
+function normalizeRuntimeProcessingMode(
+  value: RuntimeProcessingInput["processingMode"],
+): RunnerRuntimeProcessingMode {
+  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
 }

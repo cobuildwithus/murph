@@ -145,7 +145,7 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
   ]);
 
   return {
-    inboxMediaRetentionWakeAt: readRequiredNullableIsoTimestamp(
+    inboxMediaRetentionWakeAt: readOptionalNullableIsoTimestamp(
       record.inboxMediaRetentionWakeAt,
       "Hosted runtime reconciliation facts workspace inboxMediaRetentionWakeAt",
     ),
@@ -322,6 +322,14 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
 function readRequiredNullableIsoTimestamp(value: unknown, label: string): string | null {
   if (value === undefined) {
     throw new TypeError(`${label} must be a string or null.`);
+  }
+
+  return readNullableIsoTimestamp(value, label);
+}
+
+function readOptionalNullableIsoTimestamp(value: unknown, label: string): string | null {
+  if (value === undefined) {
+    return null;
   }
 
   return readNullableIsoTimestamp(value, label);

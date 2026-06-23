@@ -129,6 +129,24 @@ describe("hosted orchestration control contracts", () => {
       workspace,
     });
     expect(parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "7",
+      },
+    })).toEqual({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "7",
+      },
+    });
+    expect(parseHostedRuntimeReconciliationFacts({
       blocked: {
         reason: "ai_usage_gate_unavailable",
         retryAt: "2026-05-20T12:02:00.000Z",

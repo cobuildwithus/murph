@@ -257,15 +257,15 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   userId: string;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): Promise<boolean> {
-  if (isHostedRuntimeInboxMediaRetentionWakeDue(input.workspace, input.now)) {
-    return false;
-  }
-
   if (hasHostedFreshConversationMailboxLag({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
   })) {
     return true;
+  }
+
+  if (isHostedRuntimeInboxMediaRetentionWakeDue(input.workspace, input.now)) {
+    return false;
   }
 
   if (hasHostedMailboxLag(input.mailboxLag, "system")) {

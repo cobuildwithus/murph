@@ -241,8 +241,39 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(-1));
   });
 
-  it("runs due inbox media retention before mailbox or assistant work", async () => {
+  it("runs mailbox work before due inbox media retention", async () => {
     const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.latestMailboxPointer).toBeNull();
+    expect(continued.state?.mailboxSignalCount).toBe(0);
+  });
+
+  it("keeps retention-first replay behavior for histories before the mailbox-priority patch", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.mailboxBeforeInboxMediaRetention = false;
     runtime.facts.push(reconciliationFacts({
       mailboxLag: [mailboxLag({ lane: "conversation" })],
       workspace: workspaceProjection({
@@ -395,6 +426,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  mailboxBeforeInboxMediaRetention = true;
   reconciliationBeforeMailboxProcessing = true;
   suggestContinueAsNew = false;
   historyLength = 0;
@@ -427,6 +459,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   nowMs(): number {
     return this.now;
+  }
+
+  mailboxBeforeInboxMediaRetentionEnabled(): boolean {
+    return this.mailboxBeforeInboxMediaRetention;
   }
 
   reconciliationBeforeMailboxProcessingEnabled(): boolean {

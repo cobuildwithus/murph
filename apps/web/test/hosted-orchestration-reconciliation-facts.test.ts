@@ -287,7 +287,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       {
         lane: "conversation",
-        maxSeq: "3",
+        maxSeq: "2",
       },
       {
         lane: "system",
@@ -311,9 +311,9 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.mailboxLag).toEqual([
       {
         importedSeq: "2",
-        lag: "1",
+        lag: "0",
         lane: "conversation",
-        maxSeq: "3",
+        maxSeq: "2",
       },
       {
         importedSeq: "0",
@@ -325,6 +325,49 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("AI-gates fresh conversation work before a due inbox media retention wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      retryAt: "2026-05-20T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_gate_unavailable",
+      retryAt: "2026-05-20T12:00:30.000Z",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
   });
 
   it("keeps a future inbox media retention wake when assistant work is AI-denied", async () => {
