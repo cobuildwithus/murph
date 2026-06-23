@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
 import {
   DEFAULT_DATABASE_URL,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
+  USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   repoRoot,
 } from "./constants.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
@@ -234,6 +235,7 @@ export async function ensureHostedLocalWorktreeDatabase(
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (checkResult.status === 0) {
+    await assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(config);
     return;
   }
 
@@ -276,11 +278,11 @@ export async function stopHostedLocalWorktreeResources(input: {
     config: devConfig,
     owned: {
       cloudflareWorker: true,
-      healthCommons: true,
+      healthCommons: false,
       linqTunnel: true,
       stripe: true,
       temporalServer: true,
-      temporalWorker: true,
+      temporalWorker: false,
       web: true,
     },
     signal: "SIGTERM",
@@ -354,6 +356,31 @@ export function resolveHostedLocalWorktreeDevConfig(input: {
     slug,
   });
   return resolveHostedLocalDevConfig(config.env);
+}
+
+async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
+  config: HostedLocalWorktreeConfig,
+): Promise<void> {
+  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
+    return;
+  }
+
+  try {
+    await access(path.join(repoRoot, config.paths.cryptoStatePath));
+  } catch {
+    throw new Error(
+      [
+        `Refusing to reuse local Postgres database ${config.databaseName} because its paired hosted-local crypto state file is missing.`,
+        `Expected crypto state: ${config.paths.cryptoStatePath}`,
+        "Drop that slug database or restore the crypto state file before running the worktree stack again.",
+      ].join("\n"),
+    );
+  }
+}
+
+function isTruthyEnvValue(value: string | undefined): boolean {
+  return value !== undefined
+    && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function buildHostedLocalWorktreeEnv(input: {

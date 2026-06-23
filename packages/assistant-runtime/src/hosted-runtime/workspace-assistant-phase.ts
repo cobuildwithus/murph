@@ -266,7 +266,7 @@ export async function runHostedWorkspaceAssistantPhase(
     ) {
       return systemMailboxMaintenance.result;
     }
-    const continuingSystemMailboxResult = shouldContinueAssistantLane
+    let continuingSystemMailboxResult = shouldContinueAssistantLane
       ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
       : managedAutomationsResult;
     const initialProviderCleanupCheckpoint =
@@ -312,10 +312,6 @@ export async function runHostedWorkspaceAssistantPhase(
       });
     };
     const assistantMetrics = await runAutomationLane();
-    const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
-      deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
-      input,
-    });
     const currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     const foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -324,6 +320,7 @@ export async function runHostedWorkspaceAssistantPhase(
       hasFreshConversationInput,
       input,
     });
+    let deviceSyncMaintenanceRan = systemMailboxMaintenance.deviceSyncMaintenanceRan;
     if (
       shouldRunDeferredMaintenanceAfterPendingAssistantInput({
         assistantMetrics,
@@ -334,26 +331,31 @@ export async function runHostedWorkspaceAssistantPhase(
     ) {
       const deferredSystemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
         executionContext,
+        deferDeliveryAndProviderCleanup: true,
         hasFreshConversationInput,
         input,
         skipPendingAssistantInputWake: true,
         wake,
       });
-      const pendingAssistantInputAttemptResult = mergeContinuingSystemMailboxResult(
+      deviceSyncMaintenanceRan =
+        deviceSyncMaintenanceRan || deferredSystemMailboxMaintenance.deviceSyncMaintenanceRan;
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
         buildPendingAssistantInputAttemptResult({
           assistantMetrics,
           input,
           progressed: deferredSystemMailboxMaintenance.result === null,
         }),
       );
-      if (deferredSystemMailboxMaintenance.result) {
-        return mergeContinuingSystemMailboxAssistantPhaseResult({
-          assistantResult: pendingAssistantInputAttemptResult,
-          systemMailboxResult: deferredSystemMailboxMaintenance.result,
-        });
-      }
-      return pendingAssistantInputAttemptResult;
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
+        deferredSystemMailboxMaintenance.result,
+      );
     }
+    const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
+      deviceSyncMaintenanceRan,
+      input,
+    });
     const systemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -1716,6 +1718,7 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
 }
 
 async function runSystemMailboxMaintenancePhase(input: {
+  deferDeliveryAndProviderCleanup?: boolean;
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -1795,6 +1798,8 @@ async function runSystemMailboxMaintenancePhase(input: {
     ? null
     : await resolvePendingAssistantInputWakeAt(phaseInput);
   const initialProviderCleanupDue =
+    input.deferDeliveryAndProviderCleanup !== true
+    &&
     !shouldYieldAfterSystemMailboxPreparation
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
   const shouldRunDirtyDeviceSyncWorkSource = shouldRunIdleDeviceSyncMaintenance({
@@ -1875,10 +1880,12 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
   const systemMailboxDeliveryEffects =
-    shouldCollectSystemMailboxDeliveryEffects({
-      preparation: systemMailboxPreparation,
-      shouldYieldAfterSystemMailboxPreparation,
-    })
+    input.deferDeliveryAndProviderCleanup === true
+      ? []
+      : shouldCollectSystemMailboxDeliveryEffects({
+        preparation: systemMailboxPreparation,
+        shouldYieldAfterSystemMailboxPreparation,
+      })
       ? await collectHostedAssistantDeliverySideEffects({
         includeBackgroundDueIntents: true,
         preferredIntentIds: [],

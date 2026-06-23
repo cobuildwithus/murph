@@ -8,6 +8,7 @@ type SpawnSyncResult = {
 };
 
 const worktreeMocks = vi.hoisted(() => ({
+  access: vi.fn(async () => {}),
   cleanupHostedLocalMinioBuildContainersBestEffort: vi.fn(async () => {}),
   cleanupHostedRunnerContainers: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
@@ -32,6 +33,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  access: worktreeMocks.access,
   mkdir: worktreeMocks.mkdir,
   readFile: worktreeMocks.readFile,
   rename: worktreeMocks.rename,
@@ -75,6 +77,7 @@ const ports = {
 describe("hosted-local worktree config", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    worktreeMocks.access.mockResolvedValue(undefined);
     worktreeMocks.readFile.mockImplementation(async () => {
       const error = new Error("missing") as NodeJS.ErrnoException;
       error.code = "ENOENT";
@@ -258,6 +261,7 @@ describe("hosted-local worktree config", () => {
 
     await ensureHostedLocalWorktreeDatabase(config);
 
+    expect(worktreeMocks.access).not.toHaveBeenCalled();
     expect(worktreeMocks.spawnSync).toHaveBeenCalledTimes(1);
     expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
       "createdb",
@@ -296,6 +300,9 @@ describe("hosted-local worktree config", () => {
 
     await ensureHostedLocalWorktreeDatabase(config);
 
+    expect(worktreeMocks.access).toHaveBeenCalledWith(
+      expect.stringContaining(".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars"),
+    );
     expect(worktreeMocks.spawnSync).toHaveBeenNthCalledWith(
       2,
       "psql",
@@ -308,6 +315,32 @@ describe("hosted-local worktree config", () => {
       expect.objectContaining({
         encoding: "utf8",
       }),
+    );
+  });
+
+  it("refuses to reuse a slug database when its paired crypto state is missing", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.spawnSync
+      .mockReturnValueOnce({
+        status: 1,
+        stderr: "database already exists",
+        stdout: "",
+      })
+      .mockReturnValueOnce({
+        status: 0,
+        stderr: "",
+        stdout: "1",
+      });
+    worktreeMocks.access.mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
+
+    await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
+      "paired hosted-local crypto state file is missing",
     );
   });
 
@@ -403,9 +436,11 @@ describe("hosted-local worktree config", () => {
       expect.objectContaining({
         owned: expect.objectContaining({
           cloudflareWorker: true,
+          healthCommons: false,
           linqTunnel: true,
           stripe: true,
           web: true,
+          temporalWorker: false,
         }),
         signal: "SIGTERM",
         stripeForwardUrl: expect.stringMatching(
