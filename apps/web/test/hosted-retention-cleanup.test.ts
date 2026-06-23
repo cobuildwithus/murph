@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+  HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS,
+  HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
   HOSTED_MAILBOX_RETENTION_MS,
   HOSTED_RUN_LOG_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
@@ -15,7 +17,7 @@ describe("hosted retention cleanup", () => {
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
-    const hostedWorkspaceFindMany = vi.fn().mockResolvedValue([
+    const queryRaw = vi.fn().mockResolvedValue([
       { userId: "member_due_1" },
       { userId: "member_due_2" },
     ]);
@@ -24,6 +26,7 @@ describe("hosted retention cleanup", () => {
       .mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
       hostedComputerRun: {
         findMany: hostedComputerRunFindMany,
       },
@@ -32,9 +35,6 @@ describe("hosted retention cleanup", () => {
       },
       hostedWebSession: {
         deleteMany: hostedWebSessionDeleteMany,
-      },
-      hostedWorkspace: {
-        findMany: hostedWorkspaceFindMany,
       },
     };
 
@@ -85,21 +85,29 @@ describe("hosted retention cleanup", () => {
         ],
       },
     });
-    expect(hostedWorkspaceFindMany).toHaveBeenCalledWith({
-      orderBy: [
-        { inboxMediaRetentionWakeAt: "asc" },
-        { userId: "asc" },
-      ],
-      select: {
-        userId: true,
-      },
-      take: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
-      where: {
-        inboxMediaRetentionWakeAt: {
-          lte: now,
-        },
-      },
-    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const claimSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
+    expect(claimSql).toContain('UPDATE "hosted_workspace" AS workspace');
+    expect(claimSql).toContain("FOR UPDATE SKIP LOCKED");
+    expect(claimSql).toContain(`LIMIT ?`);
+    expect(claimSql).toContain('RETURNING workspace."user_id" AS "userId"');
+    expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
+      now,
+      HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+      new Date(now.getTime() + HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS),
+    ]);
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0],
+    );
+    expect(hostedRuntimeLogDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0],
+    );
+    expect(hostedWebSessionDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0],
+    );
+    expect(hostedComputerRunFindMany.mock.invocationCallOrder[0]).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0],
+    );
     expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
       userId: "member_due_1",
@@ -126,4 +134,67 @@ describe("hosted retention cleanup", () => {
       },
     });
   });
+
+  it("finishes database cleanup before timing out stuck media-retention signals", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = new Date("2026-04-25T12:00:00.000Z");
+      const executeRaw = vi.fn().mockResolvedValue(1);
+      const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
+      const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 3 });
+      const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
+      const queryRaw = vi.fn().mockResolvedValue([{ userId: "member_due_stuck" }]);
+      const signalRuntimeRecheck = vi.fn(() => new Promise(() => undefined));
+      const prisma = {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedComputerRun: {
+          findMany: hostedComputerRunFindMany,
+        },
+        hostedRuntimeLog: {
+          deleteMany: hostedRuntimeLogDeleteMany,
+        },
+        hostedWebSession: {
+          deleteMany: hostedWebSessionDeleteMany,
+        },
+      };
+
+      const cleanup = runHostedRetentionCleanup({
+        now,
+        prisma: prisma as never,
+        signalRuntimeRecheck,
+      });
+
+      for (let index = 0; index < 20 && queryRaw.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
+      await expect(cleanup).resolves.toEqual({
+        expiredComputerRunsCleanedUp: 0,
+        expiredMailboxItemsDeleted: 1,
+        inboxMediaRetentionRuntimeSignalFailures: 1,
+        inboxMediaRetentionRuntimeSignalsSent: 0,
+        oldRuntimeLogsDeleted: 2,
+        staleWebSessionsDeleted: 3,
+      });
+      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        queryRaw.mock.invocationCallOrder[0],
+      );
+      expect(hostedRuntimeLogDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+        queryRaw.mock.invocationCallOrder[0],
+      );
+      expect(hostedWebSessionDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+        queryRaw.mock.invocationCallOrder[0],
+      );
+      expect(hostedComputerRunFindMany.mock.invocationCallOrder[0]).toBeLessThan(
+        queryRaw.mock.invocationCallOrder[0],
+      );
+      expect(signalRuntimeRecheck).toHaveBeenCalledWith({
+        userId: "member_due_stuck",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  }, HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS + 1_000);
 });

@@ -1,4 +1,9 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
+import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedWorkspaceSnapshotUploadSession,
   WorkspaceSnapshotR2BucketLike,
@@ -28,6 +33,9 @@ import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceSnapshotV2Ref,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
+  readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
@@ -1511,6 +1519,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     bucket: input.bucket,
     checkpoint,
     env: input.env,
+    environment: input.environment,
     snapshotRef,
   }).catch(() => undefined);
 
@@ -1525,34 +1534,102 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }): Promise<void> {
   const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
-  if (
-    !isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
-    || hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, input.snapshotRef)
-    || !(await isHostedWorkspaceSnapshotV2RefOwnedByUser({
-      snapshotRef: replacedSnapshotRef,
-      userId: input.snapshotRef.userId,
-    }))
-  ) {
+  if (!replacedSnapshotRef) {
     return;
   }
-  try {
-    await recordWorkspaceSnapshotOrphanCandidate({
+
+  if (isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)) {
+    if (
+      hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, input.snapshotRef)
+      || !(await isHostedWorkspaceSnapshotV2RefOwnedByUser({
+        snapshotRef: replacedSnapshotRef,
+        userId: input.snapshotRef.userId,
+      }))
+    ) {
+      return;
+    }
+    try {
+      await recordWorkspaceSnapshotOrphanCandidate({
+        env: input.env,
+        objectKey: replacedSnapshotRef.objectKey,
+        snapshotId: replacedSnapshotRef.snapshotId,
+        userId: replacedSnapshotRef.userId,
+      });
+    } catch {
+      // Direct deletion below can still complete cleanup without a retry record.
+    }
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
       env: input.env,
       objectKey: replacedSnapshotRef.objectKey,
-      snapshotId: replacedSnapshotRef.snapshotId,
-      userId: replacedSnapshotRef.userId,
     });
-  } catch {
-    // Direct deletion below can still complete cleanup without a retry record.
+    return;
   }
-  await deleteWorkspaceSnapshotObjectBestEffort({
-    bucket: input.bucket,
+
+  await deleteReplacedLegacyWorkspaceSnapshotBundles({
     env: input.env,
-    objectKey: replacedSnapshotRef.objectKey,
+    environment: input.environment,
+    replacedSnapshotRef,
+    userId: input.snapshotRef.userId,
   });
+}
+
+async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  replacedSnapshotRef: HostedExecutionSnapshotRef;
+  userId: string;
+}): Promise<void> {
+  const bundleRefs = collectLegacyWorkspaceSnapshotBundleRefs(input.replacedSnapshotRef);
+  if (bundleRefs.length === 0) {
+    return;
+  }
+  const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.env.BUNDLES,
+    domain: "runtime",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const garbageCollector = new HostedBundleGarbageCollector(
+    input.env.BUNDLES,
+    cryptoContext.rootKey,
+    cryptoContext.rootKeyId,
+    cryptoContext.keysById,
+  );
+
+  await Promise.all(bundleRefs.map(async (previousBundleRef) => {
+    await garbageCollector.cleanupBundleTransition({
+      nextBundleRef: null,
+      previousBundleRef,
+      userId: input.userId,
+    });
+  }));
+}
+
+function collectLegacyWorkspaceSnapshotBundleRefs(
+  snapshotRef: HostedExecutionSnapshotRef,
+): HostedExecutionBundleRef[] {
+  const refs: HostedExecutionBundleRef[] = [];
+  const candidates = [
+    readHostedExecutionSnapshotBaseRef(snapshotRef),
+    readHostedExecutionSnapshotHotRef(snapshotRef),
+    readHostedExecutionSnapshotDeltaRef(snapshotRef),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (refs.some((existing) => existing.key === candidate.key)) {
+      continue;
+    }
+    refs.push(candidate);
+  }
+  return refs;
 }
 
 async function isHostedWorkspaceSnapshotV2RefOwnedByUser(input: {

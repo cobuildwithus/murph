@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { gzipSync } from "node:zlib";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,10 +31,16 @@ import {
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
 import {
+  sha256HostedBundleHex,
+} from "@murphai/runtime-state/node/hosted-bundle-codec";
+import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedExecutionWorkingSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -67,6 +74,10 @@ import {
 import type {
   R2PutValueLike,
 } from "../src/crypto.ts";
+import {
+  createHostedArtifactStore,
+  createHostedBundleStore,
+} from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
@@ -96,6 +107,7 @@ import {
   HOSTED_R2_CHECKSUM_MODE_HEADER,
 } from "../src/r2-presigned-url.ts";
 import {
+  hostedArtifactObjectKey,
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import {
@@ -4454,6 +4466,120 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("deletes replaced legacy workspace snapshot bundles and artifacts after checkpoint CAS", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_replaces_legacy";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const bucket = createWorkspaceSnapshotBundleTestBucket({
+      snapshotBytes: bytes,
+      snapshotRef,
+    });
+    const runtimeRootKey = Uint8Array.from({ length: 32 }, (_, index) => 101 + index);
+    const runtimeRootKeyId = "udrk:runtime:test-root";
+    const artifactStore = createHostedArtifactStore({
+      bucket: bucket.api,
+      key: runtimeRootKey,
+      keyId: runtimeRootKeyId,
+      userId: "member_123",
+    });
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: runtimeRootKey,
+      keyId: runtimeRootKeyId,
+      userId: "member_123",
+    });
+    const legacyArtifactBytes = Uint8Array.from(Buffer.from("legacy-audio"));
+    const legacyArtifactSha = sha256HostedBundleHex(legacyArtifactBytes);
+    await artifactStore.writeArtifact(legacyArtifactSha, legacyArtifactBytes);
+    const legacyBaseRef = await bundleStore.writeBundle(
+      "vault",
+      createArtifactOnlyWorkspaceBundleForTest(
+        legacyArtifactSha,
+        legacyArtifactBytes.byteLength,
+      ),
+    );
+    const legacyDeltaRef = await bundleStore.writeBundle(
+      "vault",
+      createArtifactOnlyWorkspaceBundleForTest("", 0),
+    );
+    const legacyArtifactKey = await hostedArtifactObjectKey({
+      sha256: legacyArtifactSha,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef),
+    );
+    const replacedSnapshotRef = buildHostedExecutionWorkingSnapshotRef({
+      base: legacyBaseRef,
+      delta: legacyDeltaRef,
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: bucket.api,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      if (String(args[0]) === `https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`) {
+        return await fixture.fetchMock(...args);
+      }
+      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+      return new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            checkpointRequest.snapshotRef,
+          ),
+          replacedSnapshotRef,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(bucket.objects.has(legacyBaseRef.key)).toBe(false);
+    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(false);
+    expect(bucket.objects.has(legacyArtifactKey)).toBe(false);
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      legacyBaseRef.key,
+      legacyDeltaRef.key,
+      legacyArtifactKey,
+    ]));
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("records the replaced successful workspace snapshot for retry when direct deletion fails", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -7274,6 +7400,91 @@ function createWorkspaceSnapshotUploadSession(
   return session;
 }
 
+function createWorkspaceSnapshotBundleTestBucket(input: {
+  snapshotBytes: Uint8Array;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+}) {
+  const objects = new Map<string, Uint8Array>([
+    [input.snapshotRef.objectKey, input.snapshotBytes],
+  ]);
+  const deleted: string[] = [];
+  const api: RunnerOutboundEnvironmentSource["BUNDLES"] = {
+    async delete(key: string | string[]) {
+      const keys = Array.isArray(key) ? key : [key];
+      for (const item of keys) {
+        deleted.push(item);
+        objects.delete(item);
+      }
+    },
+    async get(key: string) {
+      const value = objects.get(key);
+      if (value === undefined) {
+        return null;
+      }
+      return {
+        async arrayBuffer() {
+          return toArrayBuffer(value);
+        },
+        key,
+        size: value.byteLength,
+      };
+    },
+    async head(key: string) {
+      const value = objects.get(key);
+      if (value === undefined) {
+        return null;
+      }
+      if (key === input.snapshotRef.objectKey) {
+        return {
+          checksums: createWorkspaceSnapshotHeadChecksums(input.snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(input.snapshotRef),
+          key,
+          size: value.byteLength,
+        };
+      }
+      return {
+        key,
+        size: value.byteLength,
+      };
+    },
+    async put(key: string, value: R2PutValueLike) {
+      objects.set(key, await readTestR2PutValue(value));
+    },
+  };
+
+  return {
+    api,
+    deleted,
+    objects,
+  };
+}
+
+function createArtifactOnlyWorkspaceBundleForTest(
+  sha256: string,
+  byteSize: number,
+): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(JSON.stringify({
+        files: sha256.length === 0
+          ? []
+          : [
+              {
+                artifact: {
+                  byteSize,
+                  sha256,
+                },
+                path: "raw/inbox/legacy-audio.m4a",
+                root: "vault",
+              },
+            ],
+        kind: "vault",
+        schema: "murph.hosted-bundle.v1",
+      })),
+    ),
+  );
+}
+
 function createWorkspaceSnapshotBucket(
   get: (key: string) => Promise<{ key: string; size?: number } | null>,
   head?: (key: string) => Promise<{
@@ -7765,7 +7976,7 @@ async function createHostedRuntimeCryptoContextFixture(input: {
     userId: string;
   };
   env: Partial<RunnerOutboundEnvironmentSource>;
-  fetchMock: ReturnType<typeof vi.fn>;
+  fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 }> {
   const userId = input.userId ?? "member_123";
   const authoritySignKeyVersion = input.authoritySignKeyVersion
@@ -7808,7 +8019,7 @@ async function createHostedRuntimeCryptoContextFixture(input: {
     schema: "murph.hosted-runtime-crypto-context.v1" as const,
     userId,
   };
-  const fetchMock = vi.fn(async (
+  const fetchMock = vi.fn<typeof fetch>(async (
     ...args: Parameters<typeof fetch>
   ): Promise<Response> => {
     const [url, init] = args;

@@ -10,6 +10,9 @@ export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
+export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS = 2 * 60 * 60 * 1000;
+export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
+export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
 type HostedRuntimeRecheckSignal = (input: {
   userId: string;
@@ -31,11 +34,6 @@ export async function runHostedRetentionCleanup(input: {
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeRetentionDate(input.now ?? new Date());
-  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
-    now,
-    prisma,
-    signalRuntimeRecheck: input.signalRuntimeRecheck,
-  });
   const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
     now,
     prisma,
@@ -52,6 +50,11 @@ export async function runHostedRetentionCleanup(input: {
     now: () => now,
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
+  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
+    now,
+    prisma,
+    signalRuntimeRecheck: input.signalRuntimeRecheck,
+  });
 
   return {
     expiredComputerRunsCleanedUp,
@@ -68,20 +71,13 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   prisma: PrismaClient;
   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
 }): Promise<{ failures: number; sent: number }> {
-  const workspaces = await input.prisma.hostedWorkspace.findMany({
-    orderBy: [
-      { inboxMediaRetentionWakeAt: "asc" },
-      { userId: "asc" },
-    ],
-    select: {
-      userId: true,
-    },
-    take: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
-    where: {
-      inboxMediaRetentionWakeAt: {
-        lte: input.now,
-      },
-    },
+  const claimedUntil = new Date(
+    input.now.getTime() + HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS,
+  );
+  const workspaces = await claimDueInboxMediaRetentionSignalWorkspaces({
+    claimedUntil,
+    now: input.now,
+    prisma: input.prisma,
   });
 
   if (workspaces.length === 0) {
@@ -98,18 +94,77 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
 
   let failures = 0;
   let sent = 0;
-  for (const workspace of workspaces) {
-    try {
-      await signalRuntimeRecheck({
+  let nextIndex = 0;
+  const workerCount = Math.min(
+    HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY,
+    workspaces.length,
+  );
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const workspace = workspaces[nextIndex];
+      nextIndex += 1;
+      if (!workspace) {
+        return;
+      }
+      const ok = await signalRuntimeRecheckWithDeadline({
+        signalRuntimeRecheck,
         userId: workspace.userId,
       });
-      sent += 1;
-    } catch {
-      failures += 1;
+      if (ok) {
+        sent += 1;
+      } else {
+        failures += 1;
+      }
     }
-  }
+  }));
 
   return { failures, sent };
+}
+
+async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
+  claimedUntil: Date;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<Array<{ userId: string }>> {
+  return await input.prisma.$queryRaw<Array<{ userId: string }>>`
+    WITH due AS (
+      SELECT "user_id"
+      FROM "hosted_workspace"
+      WHERE "inbox_media_retention_wake_at" <= ${input.now}
+      ORDER BY "inbox_media_retention_wake_at" ASC, "user_id" ASC
+      LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "hosted_workspace" AS workspace
+    SET "inbox_media_retention_wake_at" = ${input.claimedUntil}
+    FROM due
+    WHERE workspace."user_id" = due."user_id"
+    RETURNING workspace."user_id" AS "userId"
+  `;
+}
+
+async function signalRuntimeRecheckWithDeadline(input: {
+  signalRuntimeRecheck: HostedRuntimeRecheckSignal;
+  userId: string;
+}): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timeout = setTimeout(
+      () => resolve("timeout"),
+      HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
+    );
+  });
+  const signalPromise = input.signalRuntimeRecheck({
+    userId: input.userId,
+  }).then(
+    () => "sent" as const,
+    () => "failed" as const,
+  );
+  const result = await Promise.race([signalPromise, timeoutPromise]);
+  if (timeout) {
+    clearTimeout(timeout);
+  }
+  return result === "sent";
 }
 
 async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRecheckSignal> {
