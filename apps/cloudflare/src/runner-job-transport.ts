@@ -9,6 +9,11 @@ import {
   parseHostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/parsers";
 
+import {
+  parseHostedWorkspaceSnapshotPreparedRestore,
+  type HostedWorkspaceSnapshotPreparedRestore,
+} from "./workspace-snapshot-restore-preparation.ts";
+
 export const HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND = "workspace-invocation";
 const HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN = /^[a-f0-9]{64}$/u;
 
@@ -20,6 +25,7 @@ export interface HostedExecutionWorkspaceInvocationJobInput
   extends HostedAssistantWorkspaceRuntimeJobInput {
   diagnostics?: HostedExecutionWorkspaceInvocationDiagnostics;
   kind: typeof HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
+  preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore;
 }
 
 export type HostedExecutionRunnerJobInput = HostedExecutionWorkspaceInvocationJobInput;
@@ -39,11 +45,18 @@ export function parseHostedExecutionRunnerJobInput(
   const record = requireRecord(value, "Hosted execution runner job input");
   const kind = requireHostedExecutionWorkspaceJobKind(record.kind);
   const diagnostics = parseHostedExecutionWorkspaceInvocationDiagnostics(record.diagnostics);
+  const preparedSnapshotRestore = record.preparedSnapshotRestore === undefined
+    ? undefined
+    : parseHostedWorkspaceSnapshotPreparedRestore(
+        record.preparedSnapshotRestore,
+        "Hosted execution runner job input.preparedSnapshotRestore",
+      );
 
   return {
     ...parsers.parseWorkspaceJobInput(record),
     ...(diagnostics ? { diagnostics } : {}),
     kind,
+    ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
   };
 }
 
