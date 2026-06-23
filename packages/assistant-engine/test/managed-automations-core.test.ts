@@ -8,11 +8,13 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  resolveMurphManagedAutomationDefinition,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -319,6 +321,91 @@ describe('applyMurphManagedAutomations core integration', () => {
       created: 0,
       skipped: 4,
       updated: 0,
+    })
+  })
+
+  it('does not create onboarding follow-up during managed automation maintenance', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      slug: 'finish-onboarding-followup',
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
+  it('updates an existing owned onboarding follow-up without changing route, status, or schedule', async () => {
+    const vaultRoot = await createVaultRoot()
+    const existingRoute = {
+      channel: 'linq' as const,
+      deliveryTarget: 'existing-onboarding-thread',
+      identityId: 'existing-onboarding-identity',
+      participantId: null,
+      threadId: null,
+    }
+
+    await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: existingRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'paused',
+      summary: 'Old onboarding follow-up summary.',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'murph-managed:onboarding-followup',
+      ],
+      title: 'Old onboarding follow-up',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const resolved = resolveMurphManagedAutomationDefinition(
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+    )
+    await expect(showAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
+      continuityPolicy: resolved.continuityPolicy,
+      instructions: resolved.instructions,
+      route: existingRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'paused',
+      summary: resolved.summary,
+      tags: resolved.tags,
+      title: resolved.title,
     })
   })
 

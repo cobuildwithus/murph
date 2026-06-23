@@ -88,11 +88,14 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 
 import {
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  reconcileExistingMurphManagedAutomationDefinition,
+  resolveMurphManagedAutomationDefinition,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -555,6 +558,145 @@ describe('applyMurphManagedAutomations', () => {
       .toMatchObject({
         status: 'paused',
       })
+  })
+
+  it('reconciles an existing active onboarding follow-up definition by owned slug', async () => {
+    const existingRoute = {
+      channel: 'linq',
+      deliveryTarget: 'existing-thread',
+      identityId: 'identity-1',
+      participantId: null,
+      threadId: null,
+    }
+    managedAutomationMocks.records.set('automation_onboarding_followup', {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: existingRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(reconcileExistingMurphManagedAutomationDefinition({
+      definition: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      syncSchedule: false,
+      vaultRoot,
+    })).resolves.toEqual({ updated: true })
+
+    const resolved = resolveMurphManagedAutomationDefinition(
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+    )
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: 'automation_onboarding_followup',
+        continuityPolicy: resolved.continuityPolicy,
+        instructions: resolved.instructions,
+        route: existingRoute,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '08:00',
+        },
+        slug: 'finish-onboarding-followup',
+        status: 'active',
+        summary: resolved.summary,
+        tags: resolved.tags,
+        title: resolved.title,
+      }),
+    )
+  })
+
+  it('updates a paused onboarding follow-up without reactivating it', async () => {
+    managedAutomationMocks.records.set('automation_onboarding_followup', {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'paused',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(reconcileExistingMurphManagedAutomationDefinition({
+      definition: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      syncSchedule: false,
+      vaultRoot,
+    })).resolves.toEqual({ updated: true })
+
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: 'automation_onboarding_followup',
+        route: defaultRoute,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '08:00',
+        },
+        status: 'paused',
+      }),
+    )
+  })
+
+  it('does not reconcile archived or user-owned onboarding follow-up slugs', async () => {
+    managedAutomationMocks.records.set('automation_archived_onboarding_followup', {
+      automationId: 'automation_archived_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'archived',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(reconcileExistingMurphManagedAutomationDefinition({
+      definition: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({ updated: false })
+
+    managedAutomationMocks.records.clear()
+    managedAutomationMocks.upsertAutomation.mockClear()
+    managedAutomationMocks.records.set('automation_user_onboarding_followup', {
+      automationId: 'automation_user_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'user-owned follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'User summary',
+      tags: ['assistant', 'scheduled'],
+      title: 'User follow-up',
+    })
+
+    await expect(reconcileExistingMurphManagedAutomationDefinition({
+      definition: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({ updated: false })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
   it('updates active seed-owned fields while preserving the existing route', async () => {

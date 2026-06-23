@@ -21,21 +21,38 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
+
+export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
 export type MurphManagedAutomationSchedule = Exclude<
   AutomationSchedule,
   { kind: 'deviceActivity' }
 >
 
-export interface MurphManagedAutomationSeed {
-  automationId: string
+export interface MurphManagedAutomationDefinition {
   continuityPolicy?: AutomationContinuityPolicy
   instructions: string
-  requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
   slug: string
   summary?: string
   tags?: readonly string[]
+  title: string
+}
+
+export interface MurphManagedAutomationSeed
+  extends MurphManagedAutomationDefinition {
+  automationId: string
+  requiredRuntimeEnvKeys?: readonly string[]
+}
+
+export interface ResolvedMurphManagedAutomationDefinition {
+  continuityPolicy: AutomationContinuityPolicy
+  instructions: string
+  schedule: MurphManagedAutomationSchedule
+  slug: string
+  summary: string | null
+  tags: string[]
   title: string
 }
 
@@ -53,6 +70,23 @@ export interface ApplyMurphManagedAutomationsResult {
   created: number
   skipped: number
   updated: number
+}
+
+export interface ReconcileExistingMurphManagedAutomationDefinitionInput {
+  definition: MurphManagedAutomationDefinition
+  now?: Date
+  requiredTags?: readonly string[]
+  syncSchedule?: boolean
+  vaultRoot: string
+}
+
+export interface ReconcileExistingMurphManagedAutomationDefinitionResult {
+  updated: boolean
+}
+
+interface MurphExistingManagedAutomationReconciliation {
+  definition: MurphManagedAutomationDefinition
+  syncSchedule?: boolean
 }
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
@@ -267,6 +301,15 @@ export const MURPH_MANAGED_AUTOMATIONS = [
   },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
+const MURPH_EXISTING_MANAGED_AUTOMATION_RECONCILIATIONS = [
+  {
+    definition: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+    // Signup chooses the first occurrence and later turns may accelerate it.
+    // Keep schedule user/runtime-owned once the follow-up already exists.
+    syncSchedule: false,
+  },
+] satisfies readonly MurphExistingManagedAutomationReconciliation[]
+
 export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
@@ -359,7 +402,7 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    if (!murphManagedAutomationSeedChanged(existing, seed)) {
+    if (!murphManagedAutomationDefinitionChanged(existing, seed)) {
       result.skipped += 1
       continue
     }
@@ -388,7 +431,81 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
+  for (const reconciliation of MURPH_EXISTING_MANAGED_AUTOMATION_RECONCILIATIONS) {
+    const reconciled = await reconcileExistingMurphManagedAutomationDefinition({
+      definition: reconciliation.definition,
+      now,
+      syncSchedule: reconciliation.syncSchedule,
+      vaultRoot: input.vaultRoot,
+    })
+    if (reconciled.updated) {
+      result.updated += 1
+    }
+  }
+
   return result
+}
+
+export async function reconcileExistingMurphManagedAutomationDefinition(
+  input: ReconcileExistingMurphManagedAutomationDefinitionInput,
+): Promise<ReconcileExistingMurphManagedAutomationDefinitionResult> {
+  const existing = await showAutomation({
+    slug: input.definition.slug,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!existing || existing.status === 'archived') {
+    return { updated: false }
+  }
+
+  const requiredTags =
+    input.requiredTags ??
+    resolveMurphManagedAutomationOwnershipTags(input.definition)
+  if (!murphManagedAutomationHasTags(existing, requiredTags)) {
+    return { updated: false }
+  }
+
+  if (!murphManagedAutomationDefinitionChanged(existing, input.definition, {
+    syncSchedule: input.syncSchedule,
+  })) {
+    return { updated: false }
+  }
+
+  const definition = resolveMurphManagedAutomationDefinition(input.definition)
+  const schedule = input.syncSchedule === false
+    ? existing.schedule
+    : definition.schedule
+  await upsertAutomation({
+    automationId: existing.automationId,
+    continuityPolicy: definition.continuityPolicy,
+    instructions: definition.instructions,
+    now: input.now,
+    route: existing.route,
+    schedule,
+    slug: existing.slug,
+    status: existing.status,
+    ...(definition.summary === null
+      ? {}
+      : { summary: definition.summary }),
+    tags: definition.tags,
+    title: definition.title,
+    vaultRoot: input.vaultRoot,
+  })
+
+  return { updated: true }
+}
+
+export function resolveMurphManagedAutomationDefinition(
+  definition: MurphManagedAutomationDefinition,
+): ResolvedMurphManagedAutomationDefinition {
+  return {
+    continuityPolicy: resolveMurphManagedAutomationContinuity(definition),
+    instructions: definition.instructions,
+    schedule: definition.schedule,
+    slug: definition.slug,
+    summary: normalizeMurphManagedAutomationSummary(definition),
+    tags: buildMurphManagedAutomationTags(definition),
+    title: definition.title,
+  }
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -424,41 +541,43 @@ async function resolveMurphManagedAutomationCreateRoute(
   )
 }
 
-function murphManagedAutomationSeedChanged(
+function murphManagedAutomationDefinitionChanged(
   existing: AutomationRecord,
-  seed: MurphManagedAutomationSeed,
+  definition: MurphManagedAutomationDefinition,
+  options?: { syncSchedule?: boolean },
 ): boolean {
   // A seed without a summary leaves the stored summary unmanaged. This must
   // match upsertAutomation's omitted-field semantics (an omitted summary
   // preserves the existing one); comparing against null here would report
   // "changed" on every run and rewrite the record forever.
-  const summary = normalizeMurphManagedAutomationSummary(seed)
-  return existing.title !== seed.title ||
+  const summary = normalizeMurphManagedAutomationSummary(definition)
+  return existing.title !== definition.title ||
     (summary !== null && existing.summary !== summary) ||
-    existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
-    existing.instructions !== seed.instructions ||
-    !murphManagedAutomationValuesEqual(existing.schedule, seed.schedule) ||
+    existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(definition) ||
+    existing.instructions !== definition.instructions ||
+    (options?.syncSchedule !== false &&
+      !murphManagedAutomationValuesEqual(existing.schedule, definition.schedule)) ||
     !murphManagedAutomationValuesEqual(
       existing.tags,
-      buildMurphManagedAutomationTags(seed),
+      buildMurphManagedAutomationTags(definition),
     )
 }
 
 function buildMurphManagedAutomationTags(
-  seed: MurphManagedAutomationSeed,
+  definition: MurphManagedAutomationDefinition,
 ): string[] {
   return [
     ...new Set([
       ...MURPH_MANAGED_AUTOMATION_BASE_TAGS,
-      ...(seed.tags ?? []),
+      ...(definition.tags ?? []),
     ].flatMap((tag) => normalizeMurphManagedAutomationText(tag) ?? [])),
   ]
 }
 
 function resolveMurphManagedAutomationContinuity(
-  seed: MurphManagedAutomationSeed,
+  definition: MurphManagedAutomationDefinition,
 ): AutomationContinuityPolicy {
-  return seed.continuityPolicy ?? 'preserve'
+  return definition.continuityPolicy ?? 'preserve'
 }
 
 function murphManagedAutomationRuntimeRequirementsMet(
@@ -475,9 +594,9 @@ function murphManagedAutomationRuntimeRequirementsMet(
 }
 
 function normalizeMurphManagedAutomationSummary(
-  seed: MurphManagedAutomationSeed,
+  definition: MurphManagedAutomationDefinition,
 ): string | null {
-  return normalizeMurphManagedAutomationText(seed.summary)
+  return normalizeMurphManagedAutomationText(definition.summary)
 }
 
 function normalizeMurphManagedAutomationText(
@@ -492,6 +611,22 @@ function murphManagedAutomationValuesEqual(
   right: unknown,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function resolveMurphManagedAutomationOwnershipTags(
+  definition: MurphManagedAutomationDefinition,
+): string[] {
+  return buildMurphManagedAutomationTags(definition).filter((tag) =>
+    tag === 'murph-managed' || tag.startsWith('murph-managed:')
+  )
+}
+
+function murphManagedAutomationHasTags(
+  automation: AutomationRecord,
+  requiredTags: readonly string[],
+): boolean {
+  const existingTags = new Set(automation.tags)
+  return requiredTags.every((tag) => existingTags.has(tag))
 }
 
 function isStaleMurphManagedOneShotSeed(
