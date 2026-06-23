@@ -304,12 +304,16 @@ describe('assistant execution prompt contract', () => {
       'Do not imply Murph stores raw credentials or card numbers.',
     )
     expect(prompt).toContain(
+      'For repeat action tasks such as reordering supplements or products, booking or rescheduling with a known provider, or using a known portal, run `vault-cli memory show` when saved preferences could materially change the site, product, provider, delivery, or scheduling choice.',
+    )
+    expect(prompt).toContain(
       'call `murph.computer_start_run` normally',
     )
     expect(prompt).toContain(
       'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
+    expect(prompt).toContain('standing instruction')
     expect(prompt).toContain(
       'Do not create a memory record for routine success',
     )

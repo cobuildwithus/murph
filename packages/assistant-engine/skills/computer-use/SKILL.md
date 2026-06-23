@@ -59,6 +59,12 @@ Do not turn this into an interview. Ask at most one narrow question when the
 missing answer would materially change safety, the website, the target, or the
 final terms. Otherwise inspect first and make safe progress.
 
+For repeat action tasks such as reordering supplements or products, booking or
+rescheduling with a known provider, or using a known portal, run
+`vault-cli memory show --vault "$VAULT" --format json` when saved preferences
+could materially change the site, product, provider, delivery, or scheduling
+choice.
+
 A bounded instruction can authorize choices inside the stated boundary. For
 example, "book any Tuesday morning with Dr. Lee next month under $75" authorizes
 a matching slot; "reorder my usual 90-day contacts under $200" authorizes the
