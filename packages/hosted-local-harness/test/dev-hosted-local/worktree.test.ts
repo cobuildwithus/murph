@@ -8,16 +8,19 @@ type SpawnSyncResult = {
 };
 
 const worktreeMocks = vi.hoisted(() => ({
+  mkdir: vi.fn(async () => {}),
   readFile: vi.fn(async () => {
     const error = new Error("missing") as NodeJS.ErrnoException;
     error.code = "ENOENT";
     throw error;
   }),
+  rm: vi.fn(async () => {}),
   spawnSync: vi.fn<() => SpawnSyncResult>(() => ({
     status: 0,
     stderr: "",
     stdout: "",
   })),
+  writeFile: vi.fn(async () => {}),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -25,10 +28,14 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  mkdir: worktreeMocks.mkdir,
   readFile: worktreeMocks.readFile,
+  rm: worktreeMocks.rm,
+  writeFile: worktreeMocks.writeFile,
 }));
 
 import {
+  acquireHostedLocalWorktreeLock,
   buildHostedLocalWorktreeConfig,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
@@ -115,6 +122,9 @@ describe("hosted-local worktree config", () => {
       stderr: "",
       stdout: "",
     }));
+    worktreeMocks.mkdir.mockResolvedValue(undefined);
+    worktreeMocks.rm.mockResolvedValue(undefined);
+    worktreeMocks.writeFile.mockResolvedValue(undefined);
   });
 
   it("derives isolated non-secret config from the slug", () => {
@@ -369,6 +379,52 @@ describe("hosted-local worktree config", () => {
         encoding: "utf8",
       }),
     );
+  });
+
+  it("holds one cross-worktree lock per slug database until released", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+
+    const lock = await acquireHostedLocalWorktreeLock(config);
+    await lock.release();
+
+    expect(worktreeMocks.mkdir).toHaveBeenCalledWith(
+      expect.stringContaining("murph-hosted-local-worktree-locks"),
+      expect.objectContaining({ recursive: true }),
+    );
+    expect(worktreeMocks.mkdir).toHaveBeenCalledWith(
+      expect.stringContaining("murph_dev_feature_a.lock"),
+      expect.objectContaining({ mode: 0o700 }),
+    );
+    expect(worktreeMocks.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("owner.json"),
+      expect.stringContaining('"databaseName":"murph_dev_feature_a"'),
+      expect.objectContaining({ mode: 0o600 }),
+    );
+    expect(worktreeMocks.rm).toHaveBeenCalledWith(
+      expect.stringContaining("murph_dev_feature_a.lock"),
+      { force: true, recursive: true },
+    );
+  });
+
+  it("refuses duplicate same-slug worktree locks", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.mkdir
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(Object.assign(new Error("exists"), { code: "EEXIST" }));
+
+    await expect(acquireHostedLocalWorktreeLock(config)).rejects.toThrow(
+      "another process already owns database murph_dev_feature_a",
+    );
+
+    expect(worktreeMocks.writeFile).not.toHaveBeenCalled();
   });
 
   it("accepts an existing local database when psql can connect", async () => {

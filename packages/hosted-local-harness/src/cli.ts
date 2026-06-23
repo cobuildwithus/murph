@@ -76,6 +76,7 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
   }
 
   const {
+    acquireHostedLocalWorktreeLock,
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
@@ -111,25 +112,50 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
         env: io.env ?? process.env,
         slug,
       });
-      const databaseState = await ensureHostedLocalWorktreeDatabase(config);
-      await runUp(["--profile", "worktree"], {
-        ...io,
-        env: config.env,
-      }, {
-        allowInternalWorktreeProfile: true,
-        onStartupFailure: async () => {
-          if (!databaseState.created) {
-            return;
+      const lock = await acquireHostedLocalWorktreeLock(config);
+      let databaseState: { created: boolean } | null = null;
+      let primaryError: unknown = null;
+      try {
+        databaseState = await ensureHostedLocalWorktreeDatabase(config);
+        await runUp(["--profile", "worktree"], {
+          ...io,
+          env: config.env,
+        }, {
+          allowInternalWorktreeProfile: true,
+        });
+      } catch (error) {
+        primaryError = error;
+        throw error;
+      } finally {
+        let finalizationError: unknown = null;
+        try {
+          if (databaseState?.created) {
+            const cleanup =
+              await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
+            if (cleanup.missingCryptoState && !cleanup.removed) {
+              (io.stderr ?? process.stderr).write(
+                `Warning: newly created worktree database ${config.databaseName} was left in place; drop it manually before retrying if startup failed before crypto state was written.\n`,
+              );
+            }
           }
-          const cleanup =
-            await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
-          if (cleanup.missingCryptoState && !cleanup.removed) {
-            (io.stderr ?? process.stderr).write(
-              `Warning: newly created worktree database ${config.databaseName} was left in place; drop it manually before retrying if startup failed before crypto state was written.\n`,
-            );
-          }
-        },
-      });
+        } catch (error) {
+          finalizationError = error;
+          (io.stderr ?? process.stderr).write(
+            `Warning: unable to verify or clean newly created worktree database ${config.databaseName}; drop it manually before retrying if startup failed before crypto state was written.\n`,
+          );
+        }
+        try {
+          await lock.release();
+        } catch (error) {
+          finalizationError ??= error;
+          (io.stderr ?? process.stderr).write(
+            `Warning: unable to release hosted-local worktree lock for ${config.databaseName}; remove the stale lock before retrying this slug.\n`,
+          );
+        }
+        if (primaryError === null && finalizationError !== null) {
+          throw finalizationError;
+        }
+      }
       return;
     }
     default:
@@ -142,7 +168,6 @@ async function runUp(
   io: HostedLocalCliIo,
   options: {
     allowInternalWorktreeProfile?: boolean;
-    onStartupFailure?: (error: unknown) => Promise<void>;
   } = {},
 ): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
@@ -281,7 +306,6 @@ async function runUp(
         await awaitTerminationCleanup();
         return;
       }
-      await options.onStartupFailure?.(error);
       await updateState({ status: "failed" });
       throw error;
     }
@@ -297,7 +321,6 @@ async function runUp(
         await awaitTerminationCleanup();
         return;
       }
-      await options.onStartupFailure?.(error);
       await updateState({ status: "failed" });
       throw error;
     }

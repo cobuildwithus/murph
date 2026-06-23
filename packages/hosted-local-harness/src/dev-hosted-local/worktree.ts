@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 
 import {
   DEFAULT_DATABASE_URL,
@@ -55,9 +57,15 @@ export interface HostedLocalWorktreeDatabaseCleanupResult {
   removed: boolean;
 }
 
+export interface HostedLocalWorktreeLock {
+  lockDir: string;
+  release(): Promise<void>;
+}
+
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
+const HOSTED_LOCAL_WORKTREE_LOCK_ROOT = "murph-hosted-local-worktree-locks";
 const HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE = 300;
 const HOSTED_LOCAL_WORKTREE_PORT_RANGES = {
   minio: 9100,
@@ -183,6 +191,57 @@ export async function ensureHostedLocalWorktreeDatabase(
       checkDiagnostic ? `psql: ${checkDiagnostic}` : null,
     ].filter(Boolean).join("\n"),
   );
+}
+
+export async function acquireHostedLocalWorktreeLock(
+  config: HostedLocalWorktreeConfig,
+): Promise<HostedLocalWorktreeLock> {
+  const lockRoot = path.join(os.tmpdir(), HOSTED_LOCAL_WORKTREE_LOCK_ROOT);
+  const lockDir = path.join(lockRoot, `${config.databaseName}.lock`);
+  await mkdir(lockRoot, { mode: 0o700, recursive: true });
+  try {
+    await mkdir(lockDir, { mode: 0o700 });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "EEXIST") {
+      throw new Error(
+        [
+          `Refusing to start hosted-local worktree ${config.slug} because another process already owns database ${config.databaseName}.`,
+          "Stop the existing `hosted-local worktree up` process for this slug before starting another one.",
+        ].join("\n"),
+      );
+    }
+    throw error;
+  }
+
+  try {
+    await writeFile(
+      path.join(lockDir, "owner.json"),
+      `${JSON.stringify({
+        databaseName: config.databaseName,
+        pid: process.pid,
+        slug: config.slug,
+      })}\n`,
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+  } catch (error) {
+    await rm(lockDir, { force: true, recursive: true }).catch(() => {});
+    throw error;
+  }
+
+  let released = false;
+  return {
+    lockDir,
+    release: async () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      await rm(lockDir, { force: true, recursive: true });
+    },
+  };
 }
 
 export function formatHostedLocalWorktreeEnv(

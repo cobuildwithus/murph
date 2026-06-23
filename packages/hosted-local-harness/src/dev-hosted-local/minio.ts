@@ -80,10 +80,10 @@ export async function maybeStartHostedLocalMinio(input: {
   const controlHost = publishTarget.controlHost;
   const buildIdLabelValue = sanitizeHostedLocalMinioNameSegment(input.buildId);
   const containerName = `${HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX}${buildIdLabelValue}`;
+  await assertHostedLocalMinioPortAvailable(port, publishTarget.publishHost);
   await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
     buildId: buildIdLabelValue,
   });
-  await assertHostedLocalMinioPortAvailable(port, publishTarget.publishHost);
   const dataDir = resolveHostedLocalMinioDataDir({
     env: input.env,
     tempDir: input.tempDir,

@@ -17,6 +17,10 @@ const runHostedLocalE2eSuite = vi.hoisted(() =>
 const startHostedLocalDevStack = vi.hoisted(() => vi.fn());
 const terminateKnownHostedLocalProcessResidue = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
+const releaseHostedLocalWorktreeLock = vi.hoisted(() => vi.fn(async () => {}));
+const acquireHostedLocalWorktreeLock = vi.hoisted(() =>
+  vi.fn(async () => ({ release: releaseHostedLocalWorktreeLock })),
+);
 const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
   vi.fn(async () => ({ created: false })),
 );
@@ -79,6 +83,7 @@ vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
 }));
 
 vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
+  acquireHostedLocalWorktreeLock,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
   removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
@@ -128,6 +133,10 @@ describe("hosted-local run CLI", () => {
     vi.clearAllMocks();
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
+    acquireHostedLocalWorktreeLock.mockResolvedValue({
+      release: releaseHostedLocalWorktreeLock,
+    });
+    releaseHostedLocalWorktreeLock.mockResolvedValue(undefined);
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
       .mockResolvedValue({ missingCryptoState: false, removed: false });
@@ -255,6 +264,9 @@ describe("hosted-local run CLI", () => {
       env: {},
       slug: "feature-a",
     });
+    expect(acquireHostedLocalWorktreeLock).toHaveBeenCalledWith(
+      createHostedLocalWorktreeConfig(),
+    );
     expect(ensureHostedLocalWorktreeDatabase).toHaveBeenCalledWith(
       createHostedLocalWorktreeConfig(),
     );
@@ -264,6 +276,7 @@ describe("hosted-local run CLI", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "worktree",
       }),
     }));
+    expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
   });
 
   test("drops a newly created worktree database when startup fails before crypto state exists", async () => {
@@ -283,7 +296,31 @@ describe("hosted-local run CLI", () => {
 
     expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
       .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
+  });
+
+  test("preserves the startup failure when created database cleanup fails", async () => {
+    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
+      .mockRejectedValueOnce(new Error("dropdb failed"));
+    startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
+    const output = createBufferedStdout();
+
+    await expect(
+      runHostedLocalCli(["worktree", "up", "feature-a"], {
+        env: {},
+        stderr: output.stdout,
+        stdout: output.stdout,
+      }),
+    ).rejects.toThrow("startup failed");
+
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
+      .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
+    expect(output.text()).toContain(
+      "Warning: unable to verify or clean newly created worktree database murph_dev_feature_a",
+    );
   });
 
   test("keeps an existing worktree database when stack startup fails", async () => {
@@ -300,10 +337,11 @@ describe("hosted-local run CLI", () => {
     ).rejects.toThrow("startup failed");
 
     expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing).not.toHaveBeenCalled();
+    expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
   });
 
-  test("keeps a created worktree database after the foreground stack has been ready", async () => {
+  test("preserves a created worktree database after the foreground stack has been ready", async () => {
     ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
     startHostedLocalDevStack.mockResolvedValueOnce(createHostedLocalStack({
       exitCode: 1,
@@ -318,8 +356,24 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("cloudflare exited with code 1");
 
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing).not.toHaveBeenCalled();
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
+      .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
+  });
+
+  test("rejects duplicate same-slug worktree up before database setup", async () => {
+    acquireHostedLocalWorktreeLock.mockRejectedValueOnce(new Error("slug already running"));
+
+    await expect(
+      runHostedLocalCli(["worktree", "up", "feature-a"], {
+        env: {},
+      }),
+    ).rejects.toThrow("slug already running");
+
+    expect(ensureHostedLocalWorktreeDatabase).not.toHaveBeenCalled();
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
+    expect(releaseHostedLocalWorktreeLock).not.toHaveBeenCalled();
   });
 
   test("rejects the internal worktree profile through the generic up command", async () => {

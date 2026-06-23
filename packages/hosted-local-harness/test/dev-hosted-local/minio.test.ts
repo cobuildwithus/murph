@@ -40,6 +40,7 @@ const childProcessMocks = vi.hoisted(() => ({
 }));
 
 const netMocks = vi.hoisted(() => ({
+  listenErrors: [] as Error[],
   listens: [] as Array<{
     host: string;
     port: number;
@@ -104,6 +105,11 @@ vi.mock("node:net", () => ({
       server.listen = (port, host) => {
         boundPort = port === 0 ? boundPort : port;
         netMocks.listens.push({ host, port: boundPort });
+        const listenError = netMocks.listenErrors.shift();
+        if (listenError) {
+          queueMicrotask(() => server.emit("error", listenError));
+          return;
+        }
         queueMicrotask(() => server.emit("listening"));
       };
       return server;
@@ -118,6 +124,7 @@ describe("hosted-local MinIO sidecar", () => {
     vi.clearAllMocks();
     childProcessMocks.spawnResponses = [];
     httpMocks.healthStatuses = [];
+    netMocks.listenErrors = [];
     netMocks.listens = [];
   });
 
@@ -220,6 +227,28 @@ describe("hosted-local MinIO sidecar", () => {
       ],
       expect.objectContaining({ stdio: ["ignore", "pipe", "ignore"] }),
     );
+  });
+
+  it("checks the MinIO publish port before removing existing containers", async () => {
+    netMocks.listenErrors = [new Error("busy")];
+    childProcessMocks.spawnResponses = [
+      ...(process.platform === "linux" ? [{ stdout: "172.17.0.1\n" }] : []),
+    ];
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_DEV_MINIO_PORT: "49123",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).rejects.toThrow("MURPH_DEV_MINIO_PORT port 49123 is already in use");
+
+    expect(childProcessMocks.spawn.mock.calls.some(([, args]) => args[0] === "rm"))
+      .toBe(false);
+    expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
   });
 
   it("fails symbolic Docker host aliases on Linux when the bridge gateway cannot be resolved", async () => {
