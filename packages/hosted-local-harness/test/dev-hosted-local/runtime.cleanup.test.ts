@@ -322,6 +322,44 @@ describe("cleanupHostedRunnerContainers", () => {
     ]);
   });
 
+  it("sweeps current-build worktree proxy containers after the labeled runner container is gone", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+      {
+        exitCode: 0,
+        stdout: [
+          "proxy123 workerd-murph-worktree-5523be6f1c22658f522a3b64-RunnerContainer-alpha-proxy",
+          "noise456 workerd-murph-hosted-RunnerContainer-alpha-proxy",
+        ].join("\n"),
+      },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+      },
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      "name=workerd-murph-worktree-5523be6f1c22658f522a3b64-",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "rm",
+      "-f",
+      "proxy123",
+    ]);
+  });
+
   it("can sweep stale E2E runner containers without matching the default dev namespace", async () => {
     const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
       {

@@ -17,6 +17,9 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  upsertAssistantInputEvent,
+} from "@murphai/assistant-engine";
 
 import {
   type HostedRuntimePlatform,
@@ -251,6 +254,35 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
 
+  it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const rawPath = "/tmp/private-hosted-runtime/token";
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async () => {
+        throw new Error(
+          `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON must be configured for ${rawPath}.`,
+        );
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toThrow("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON");
+
+    const failureEntry = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .find((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    const redactedJson = failureEntry?.redactedJson ?? {};
+    expect(JSON.stringify(redactedJson)).not.toContain(rawPath);
+    expect(JSON.stringify(redactedJson)).toContain("<redacted-path>");
+  });
+
   it("marks the local workspace clean for warm reuse after successful v2 checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -326,6 +358,57 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
     await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
+  });
+
+  it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const residuePaths = await writeSettledAssistantInputResidue(vaultRoot);
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.inputEvent)).toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.evidence)).toBe(false);
+    await expectMissing(path.join(vaultRoot, residuePaths.inputEvent));
+    await expectMissing(path.join(vaultRoot, residuePaths.evidence));
+  });
+
+  it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const pendingInputsPath = path.join(
+      vaultRoot,
+      ".runtime",
+      "operations",
+      "assistant",
+      "hosted-pending-inputs.json",
+    );
+    await mkdir(path.dirname(pendingInputsPath), { recursive: true });
+    await writeFile(pendingInputsPath, "{ not-json", "utf8");
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
   });
 
   it("continues checkpoint publication when terminal write-operation pruning fails", async () => {
@@ -499,6 +582,75 @@ async function writeOperationRecord(
   return relativePath;
 }
 
+async function writeSettledAssistantInputResidue(
+  vaultRoot: string,
+): Promise<{ evidence: string; inputEvent: string }> {
+  const recordedAt = "2026-01-01T00:00:00.000Z";
+  const event = await upsertAssistantInputEvent({
+    now: new Date(recordedAt),
+    vault: vaultRoot,
+    event: {
+      content: {
+        text: "old hosted input",
+      },
+      conversation: {
+        accountId: null,
+        actorId: "actor-residue",
+        actorIsSelf: false,
+        source: "email",
+        threadId: "thread-residue",
+        threadIsDirect: true,
+      },
+      occurredAt: recordedAt,
+      receivedAt: recordedAt,
+      replyTarget: {
+        channel: "email",
+        messageId: "message-residue",
+        threadId: "thread-residue",
+      },
+      sourceRef: {
+        dedupeKey: "dedupe-residue",
+        eventId: "event-residue",
+        itemId: "item-residue",
+        kind: "hosted-mailbox",
+        lane: "conversation",
+        laneSeq: "1",
+        payloadSchema: "test-payload",
+        payloadSource: "inline",
+        source: "hosted-mailbox",
+        wakeSchema: "test-wake",
+      },
+    },
+  });
+  const inputEvent = `.runtime/operations/assistant/input-events/${event.inputId}.json`;
+  const evidence = `.runtime/operations/assistant/auto-reply/evidence/${encodeURIComponent(event.inputId)}.json`;
+  await mkdir(path.dirname(path.join(vaultRoot, evidence)), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, evidence),
+    `${JSON.stringify({
+      captureId: event.inputId,
+      groupCaptureIds: [event.inputId],
+      groupId: `group_${event.inputId}`,
+      groupInputIds: [event.inputId],
+      inputId: event.inputId,
+      primaryCaptureId: event.inputId,
+      primaryInputId: event.inputId,
+      providerCleanup: {
+        linqMessageIds: [],
+        queuedAt: null,
+      },
+      recordedAt,
+      schema: "murph.assistant-auto-reply-terminal-evidence.v1",
+      terminal: {
+        kind: "suppressed",
+        reason: "already-handled",
+      },
+    })}\n`,
+    "utf8",
+  );
+  return { evidence, inputEvent };
+}
+
 async function expectPresent(absolutePath: string): Promise<void> {
   await access(absolutePath);
 }
@@ -571,11 +723,13 @@ function createSnapshotArchiveBuilder(): HostedWorkspaceSnapshotArchiveBuilder {
 }
 
 type WorkspaceSnapshotPort = NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]>;
+type RuntimeLogPort = NonNullable<HostedRuntimePlatform["logPort"]>;
 
 function createRuntimePlatform(): {
   calls: {
     abortSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["abortSnapshotSession"]>>;
     completeSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["completeSnapshotSession"]>>;
+    logWrite: ReturnType<typeof vi.fn<RuntimeLogPort["write"]>>;
     putSnapshotObjectDirect: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["putSnapshotObjectDirect"]>>;
     startSnapshotSession: ReturnType<typeof vi.fn<WorkspaceSnapshotPort["startSnapshotSession"]>>;
   };
@@ -624,11 +778,17 @@ function createRuntimePlatform(): {
   const abortSnapshotSession = vi.fn(async (
     _input: Parameters<WorkspaceSnapshotPort["abortSnapshotSession"]>[0],
   ) => {});
+  const logWrite = vi.fn(async (
+    input: Parameters<RuntimeLogPort["write"]>[0],
+  ) => ({
+    loggedCount: input.entries.length,
+  }));
 
   return {
     calls: {
       abortSnapshotSession,
       completeSnapshotSession,
+      logWrite,
       putSnapshotObjectDirect,
       startSnapshotSession,
     },
@@ -640,6 +800,9 @@ function createRuntimePlatform(): {
       effectsPort: {
         readRawEmailMessage: async () => null,
         sendEmail: async () => {},
+      },
+      logPort: {
+        write: logWrite,
       },
       workspaceSnapshotPort: {
         abortSnapshotSession,

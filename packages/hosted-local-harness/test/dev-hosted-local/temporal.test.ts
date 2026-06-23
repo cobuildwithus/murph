@@ -83,6 +83,7 @@ const baseConfig: HostedLocalDevConfig = {
   forceResetLocalDatabase: false,
   forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
+  linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
   linqWebhookTunnelName: "dev",

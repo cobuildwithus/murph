@@ -4,9 +4,6 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
-import {
-  describeDeviceSyncCallbackError,
-} from "@/src/components/settings/hosted-device-sync-settings-utils";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/settings-surface";
 
 import type {
@@ -264,6 +261,17 @@ function readHostedOnboardingErrorCode(error: unknown): string | null {
   }
 
   return typeof error.code === "string" ? error.code : null;
+}
+
+function describeDeviceSyncCallbackError(providerLabel: string, errorCode: string | null): string {
+  switch (errorCode) {
+    case "OAUTH_CALLBACK_REJECTED":
+      return `${providerLabel} was not connected this time. You can try again whenever you're ready.`;
+    case "OAUTH_STATE_INVALID":
+      return `${providerLabel} gave us an expired or invalid return from the last attempt. Start a fresh connection and try again.`;
+    default:
+      return `We could not finish connecting ${providerLabel}. Try again when you're ready.`;
+  }
 }
 
 function resolveCallbackSourceLabel(input: {

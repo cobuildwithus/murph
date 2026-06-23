@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { CheckCircle2, Monitor } from "lucide-react";
+import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -601,6 +603,30 @@ export function ComponentsContent() {
           <div className="flex items-stretch gap-4">
             <div className="flex-1"><ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} /></div>
             <ProfileStats completed={2} daysTracked={47} />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Floating Island">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Used on the computer handoff page to confirm a manual browser step. Drag the chip by the icon.
+          </p>
+          <div className="relative h-64 overflow-hidden rounded-2xl bg-foreground">
+            <div className="absolute inset-x-0 bottom-0 flex justify-center px-3 pb-4">
+              <ComputerHandoffFloatingIsland persistKey={null}
+                handle={
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                    <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                  </span>
+                }
+              >
+                <Button size="lg" type="button">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  Done
+                </Button>
+              </ComputerHandoffFloatingIsland>
+            </div>
           </div>
         </Section>
       </div>

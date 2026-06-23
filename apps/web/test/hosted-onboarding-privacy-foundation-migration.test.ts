@@ -3,6 +3,24 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedConnectedAppConnectIntent: [
+    'claimHash String @id @map("claim_hash")',
+    'memberId String @map("member_id")',
+    "toolkit String",
+    "alias String?",
+    'connectedAccountId String? @map("connected_account_id")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'expiresAt DateTime @map("expires_at")',
+    'startedAt DateTime? @map("started_at")',
+    'completedAt DateTime? @map("completed_at")',
+  ],
+  HostedConnectedAppsSession: [
+    'memberId String @id @map("member_id")',
+    'remoteSessionId String @unique @map("remote_session_id")',
+    'policyRevision Int @map("policy_revision")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
   HostedMember: [
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -101,11 +119,14 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedConsentGrant",
   "HostedInvite",
   "HostedLinqDailyState",
+  "HostedConnectedAppConnectIntent",
+  "HostedConnectedAppsSession",
   "HostedMember",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedProductFeedback",
   "HostedWebSession",
   "HostedMailboxItem",
   "HostedMailboxLaneCounter",
@@ -271,6 +292,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedSubscriptionCancellationEmailSentMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062101_hosted_subscription_cancellation_email_sent/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLatencyMilestonesMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026060300_hosted_latency_milestones/migration.sql",
@@ -288,6 +316,20 @@ describe("hosted Prisma baseline migration", () => {
     const singleMemberComputerProfileMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026062100_hosted_computer_single_member_profile/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const generalizeProductFeedbackMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260623170000_generalize_hosted_product_feedback/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const productFeedbackSummaryMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260623193000_hosted_product_feedback_summary/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -337,6 +379,11 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
       "2026062100_hosted_computer_single_member_profile",
+      "2026062101_hosted_subscription_cancellation_email_sent",
+      "20260622120000_connected_apps",
+      "20260622190000_add_hosted_product_feedback",
+      "20260623170000_generalize_hosted_product_feedback",
+      "20260623193000_hosted_product_feedback_summary",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -353,6 +400,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(singleMemberComputerProfileMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_computer_run_one_active_member_idx"',
     );
+    expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
+    expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
+    expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
+    expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
+    expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
+    expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',
@@ -546,6 +599,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("member.activated");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
+      'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',
+    );
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("UPDATE");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("CREATE TABLE");
+    expect(hostedSubscriptionCancellationEmailSentMigrationSql).not.toContain("CREATE INDEX");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');
@@ -774,7 +833,8 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(HostedMember\w*)\s+\{/gmu)].map((match) => match[1]);
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|Member\w*))\s+\{/gmu)]
+    .map((match) => match[1]);
 }
 
 function readPrismaScalarFields(schema: string, modelName: string): Array<[string, string]> {

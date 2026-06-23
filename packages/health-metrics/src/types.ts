@@ -161,6 +161,7 @@ export type MetricSeriesAggregation = "mean" | "median" | "min" | "max" | "sum" 
 
 export interface MetricSeriesPoint {
   biomarkerKey?: string | null;
+  comparator?: MetricComparator | null;
   confidence?: MetricConfidence;
   context?: MetricPointContext;
   date: string;

@@ -949,8 +949,8 @@ function buildRealCodexConfigToml(input: {
     `base_url = ${tomlString(baseUrl)}`,
     `env_key = ${tomlString(input.apiKeyEnv)}`,
     'wire_api = "responses"',
-    'request_max_retries = 0',
-    'stream_max_retries = 0',
+    'request_max_retries = 4',
+    'stream_max_retries = 5',
     'supports_websockets = false',
     '',
   ].join('\n')

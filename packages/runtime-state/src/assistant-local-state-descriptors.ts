@@ -115,7 +115,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Assistant outbox intents that must move with hosted delivery continuity.",
   ),
   definePortableAssistantSubtree(
-    ".runtime/operations/assistant/accepted-turn-inputs",
+    ".runtime/operations/assistant/state/accepted-turn-inputs",
     "Assistant active-turn accepted input journals that must move with hosted execution continuity.",
   ),
   defineMachineLocalAssistantSubtree(

@@ -160,7 +160,7 @@ export interface ComputerUseStore {
     runId: string;
   }): Promise<ComputerRunRecord>;
   markRunAwaitingUser(input: {
-    awaitingMessage: string;
+    awaitingMessage: string | null;
     awaitingReason: HostedComputerAwaitingReason;
     checkpointContext: ComputerRunCheckpointContext | null;
     now: Date;
@@ -675,7 +675,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }
 
   async markRunAwaitingUser(input: {
-    awaitingMessage: string;
+    awaitingMessage: string | null;
     awaitingReason: HostedComputerAwaitingReason;
     checkpointContext: ComputerRunCheckpointContext | null;
     now: Date;

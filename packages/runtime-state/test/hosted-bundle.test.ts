@@ -2944,11 +2944,23 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
 
     const hotVaultRoot = path.join(workspaceRoot, "hot-vault");
     const hotAssistantRoot = resolveAssistantStatePaths(hotVaultRoot).assistantStateRoot;
+    await mkdir(path.join(hotAssistantRoot, "accepted-turn-inputs"), { recursive: true });
     await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(hotAssistantRoot, "state", "accepted-turn-inputs"), { recursive: true });
     await mkdir(path.join(hotAssistantRoot, "diagnostics"), { recursive: true });
+    await writeFile(
+      path.join(hotAssistantRoot, "accepted-turn-inputs", "turn_old.json"),
+      "{\"schema\":\"murph.assistant-accepted-turn-input-journal.v1\"}\n",
+      "utf8",
+    );
     await writeFile(
       path.join(hotAssistantRoot, "sessions", "session.json"),
       "{\"session\":\"latest\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(hotAssistantRoot, "state", "accepted-turn-inputs", "turn_state.json"),
+      "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
       "utf8",
     );
     await writeFile(
@@ -2966,7 +2978,25 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
     const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
       vaultRoot: hotVaultRoot,
     });
-    assert.equal(hotSnapshot.fileCount, 1);
+    assert.equal(hotSnapshot.fileCount, 2);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/state/accepted-turn-inputs/turn_state.json",
+        root: "vault",
+      }),
+      "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/accepted-turn-inputs/turn_old.json",
+        root: "vault",
+      }),
+      null,
+    );
     assert.equal(
       readHostedBundleTextFile({
         bytes: hotSnapshot.bundle,
@@ -4438,6 +4468,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/accepted-turn-inputs/turn_1.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/accepted-turn-inputs/turn_1.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });

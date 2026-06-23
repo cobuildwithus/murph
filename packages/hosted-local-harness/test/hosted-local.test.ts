@@ -12,6 +12,7 @@ import {
   resolveHostedLocalE2eScenarios,
 } from "../src/e2e.ts";
 import {
+  listHostedLocalProfiles,
   applyHostedLocalProfile,
   resolveHostedLocalProfile,
 } from "../src/profiles.ts";
@@ -62,6 +63,7 @@ describe("hosted-local harness", () => {
       "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     );
     expect(scripts["dev"]).toBe("pnpm hosted-local up");
+    expect(scripts["dev:worktree"]).toBe("pnpm hosted-local worktree up");
     expect(scripts["dev:reset"]).toBe(
       "MURPH_DEV_FORCE_RESET_LOCAL_DB=1 MURPH_DEV_FORCE_RESET_TEMPORAL=1 MURPH_DEV_TEMPORAL=managed pnpm hosted-local up",
     );
@@ -241,6 +243,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_CODEX_BRIDGE).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(result.env.TEMPORAL_DEV_HEADLESS).toBe("1");
   });
 
   test("uses auto Temporal for the default interactive hosted-local profile", () => {
@@ -252,6 +255,13 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("dev");
     expect(result.env.MURPH_DEV_TEMPORAL).toBeUndefined();
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("auto");
+  });
+
+  test("keeps worktree off the public hosted-local profile list", () => {
+    expect(listHostedLocalProfiles().map((profile) => profile.name)).not.toContain("worktree");
+    expect(() => resolveHostedLocalProfile("worktree")).toThrow(
+      "Unsupported hosted-local profile",
+    );
   });
 
   test("keeps E2E profile defaults away from live tunnels and listeners", () => {
@@ -267,6 +277,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_VERCEL_PULL).toBe("1");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(result.env.TEMPORAL_DEV_HEADLESS).toBe("1");
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
 

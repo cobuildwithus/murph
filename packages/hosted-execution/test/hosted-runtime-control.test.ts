@@ -789,7 +789,6 @@ describe("hosted runtime control contracts", () => {
         objectFetchMs: 5,
         decryptMs: 6,
         archiveExtractMs: 7,
-        restorePreflightMs: 8,
         durableRootReplaceMs: 9,
         cleanupMs: 10,
         extractMs: 11,
@@ -1320,6 +1319,28 @@ describe("hosted runtime control contracts", () => {
         safeErrorMessage: "Hosted runtime accepted attempt failed.",
       },
     });
+    const computerToolFailureEntry = {
+      ...entry,
+      component: "assistant",
+      errorCode: "HOSTED_COMPUTER_EVAL_FAILED",
+      eventCode: "assistant.computer_tool_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        computerOperationKind: "act",
+        httpStatus: 502,
+        kernelErrorPresent: true,
+        kernelStderrPresent: false,
+        kernelStdoutPresent: false,
+        playwrightCodeHash: "abc123",
+        safeErrorMessage: "Hosted computer tool failed.",
+        timeoutMs: 20000,
+        unknownOutcome: true,
+      },
+    };
+    expect(parseHostedRuntimeLogEntry(computerToolFailureEntry)).toEqual(
+      computerToolFailureEntry,
+    );
     expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

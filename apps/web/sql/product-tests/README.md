@@ -222,13 +222,93 @@ The initial reviewed PlasticList remaps are committed at:
 apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv
 ```
 
-Apply them after the PlasticList import with:
+Reviewed open-product remaps and explicit stale-link resets are committed at:
+
+```text
+apps/web/sql/product-tests/remaps/open-product-reviewed.tsv
+```
+
+Apply reviewed remap files after their source imports with:
 
 ```sh
 PRODUCT_TEST_REMAPS_TSV_PATH=apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-product-test-remaps.sh
 ```
+
+## Supplement Label Imports
+
+Use the wrapper entrypoints for supplement source refreshes so the shared
+labels DB helper and reviewed serving-grams overlay receive repo-independent
+absolute paths:
+
+```sh
+DSLD_NDJSON_PATH=/path/to/dsld.ndjson \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/supplements/import.sh
+
+DAILYMED_NDJSON_PATH=/path/to/dailymed.ndjson \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/supplements/import-dailymed.sh
+```
+
+## Serving Grams Backfill
+
+Daily-exposure screening needs a label serving mass. After applying reviewed
+product-test remaps, the serving-grams backfill fills only missing
+`serving_grams` values on labels already linked by `product_tests` from two
+data-level sources:
+
+- strict gram evidence already present on the label: stored gram fields,
+  gram-unit serving-size fields such as USDA `GRM`, serving-specific food text
+  that contains a gram value, or an exact FDC household portion with a gram
+  weight
+- exact reviewed rows in
+  `apps/web/sql/product-tests/reviewed-serving-grams.tsv`, used when the linked
+  contaminant-test source itself publishes a serving mass for the tested product
+  or when a reviewed public nutrition source gives a clear serving mass
+
+It does not scan the full catalog and does not convert volume, count, or
+container servings automatically. Reviewed rows are exact label ids with source
+URLs and notes. Automatic parsed candidates update only rows where
+`serving_grams IS NULL`; exact reviewed rows update rows where the stored value
+differs from the reviewed value.
+
+Routine direct FDC, DSLD, and DailyMed label refreshes overwrite source fields
+from the current source snapshot, then immediately reapply the exact reviewed
+TSV overlay from `apply-reviewed-serving-grams.sql` in the same transaction.
+Prepared-food imports validate that same TSV and apply matching reviewed values
+to their temporary `foods_prepared` staging rows before the batched upserts, so
+managed labels DB imports keep bounded commit behavior. The overlay is a
+transient import step, not a database table. Food refreshes reapply only
+reviewed food rows, and supplement refreshes reapply only reviewed supplement
+rows, so concurrent source refreshes do not lock both label tables in opposite
+orders.
+
+Dry-run first:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh
+```
+
+Apply only after reviewing the dry-run summary:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh --apply
+```
+
+Override the reviewed TSV path only when testing a replacement reviewed file:
+
+```sh
+REVIEWED_SERVING_GRAMS_TSV_PATH=/path/to/reviewed-serving-grams.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh
+```
+
+The apply path never deletes label rows. It overwrites an existing serving mass
+only for an exact reviewed row that declares a different value.
 
 ## Open Product Source Seeds
 

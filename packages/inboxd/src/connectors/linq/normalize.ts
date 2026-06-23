@@ -503,6 +503,8 @@ function buildLinqCaptureRawMetadata(input: {
     link_part_count: linkPartCount,
     media_part_count: mediaPartCount,
     voice_memo_part_count: voiceMemoPartCount,
+    reaction_eligible: input.service?.trim().toLowerCase() === "imessage"
+      && input.parts.length === 1,
   };
 
   if (input.eventId) {

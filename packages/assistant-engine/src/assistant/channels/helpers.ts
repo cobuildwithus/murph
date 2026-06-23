@@ -337,10 +337,11 @@ export function normalizeOptionalText(value: string | null | undefined): string 
 }
 
 export function readDeliveredTarget(
-  delivered: { target?: string | null } | void,
+  delivered?: unknown,
 ): string | null {
   return delivered && typeof delivered === 'object'
-    ? normalizeOptionalText(delivered.target)
+    && 'target' in delivered
+    ? normalizeOptionalText((delivered as { target?: string | null }).target)
     : null
 }
 

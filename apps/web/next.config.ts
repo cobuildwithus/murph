@@ -11,7 +11,10 @@ import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
-import { readConfiguredComputerLiveViewOrigins } from "./src/lib/computer-use/live-view-origin";
+import {
+  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
+} from "./src/lib/computer-use/live-view-origin";
 
 interface StaticHeader {
   key: string;
@@ -133,12 +136,13 @@ export function buildHostedWebContentSecurityPolicy(
     ...privyFrameSources,
     ...TELEGRAM_REQUIRED_FRAME_SOURCES,
     ...TURNSTILE_SOURCES,
-    ...readConfiguredComputerLiveViewOrigins(environment),
+    ...KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
   ]);
   const connectSources = uniqueSources([
     "'self'",
     ...PRIVY_REQUIRED_CONNECT_SOURCES,
     ...privyOrigins,
+    ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([

@@ -1,5 +1,11 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-export const fraunces400FontPath = join(process.cwd(), "app", "fonts", "Fraunces-400.ttf");
-export const fraunces600FontPath = join(process.cwd(), "app", "fonts", "Fraunces-600.ttf");
-export const dmSans400FontPath = join(process.cwd(), "app", "fonts", "DMSans-400.ttf");
+const appDir = dirname(fileURLToPath(import.meta.url));
+
+export const fraunces400FontPath = join(appDir, "fonts", "Fraunces-400.ttf");
+export const fraunces600FontPath = join(appDir, "fonts", "Fraunces-600.ttf");
+export const dmSans400FontPath = join(appDir, "fonts", "DMSans-400.ttf");
+
+export const logoDarkSvgPath = join(appDir, "..", "public", "logo-dark.svg");
+export const logoSvgPath = join(appDir, "..", "public", "logo.svg");

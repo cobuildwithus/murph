@@ -1,12 +1,14 @@
 import {
+  patchAutomation,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
 } from '@murphai/core'
-import type {
-  AutomationContinuityPolicy,
-  AutomationRoute,
-  AutomationSchedule,
+import {
+  MURPH_PRODUCT_ORIGIN,
+  type AutomationContinuityPolicy,
+  type AutomationRoute,
+  type AutomationSchedule,
 } from '@murphai/contracts'
 import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -20,6 +22,9 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
+
+export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
 export type MurphManagedAutomationSchedule = Exclude<
   AutomationSchedule,
@@ -60,6 +65,8 @@ export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
+export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
+  'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
 
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
@@ -74,6 +81,21 @@ const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
   'assistant',
   'scheduled',
   'murph-managed',
+] as const
+
+const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
+  'This scheduled check helps continue Murph setup.',
+  '',
+  'First inspect onboarding status with `vault-cli assistant onboarding status`.',
+  '',
+  'If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.',
+  '',
+  'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
+].join('\n')
+
+const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
+  'assistant',
+  'onboarding',
 ] as const
 
 export const MURPH_MANAGED_AUTOMATIONS = [
@@ -226,6 +248,42 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Append one dated section to `weekly-health-research-scout`.',
     ].join('\n'),
   },
+  {
+    automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    slug: 'weekly-product-updates',
+    title: 'This week in Murph',
+    summary: 'A personalized weekly look at what is new in Murph.',
+    schedule: {
+      kind: 'cron',
+      expression: '30 11 * * 4',
+    },
+    continuityPolicy: 'fresh',
+    tags: [
+      'murph-managed:weekly-product-updates',
+    ],
+    instructions: [
+      'Each Thursday at 11:30 AM local time, compose one concise personalized in-chat update about what is new in Murph.',
+      '',
+      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=20&improvementLimit=5.`,
+      '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
+      '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
+      '',
+      'Choose 3-7 items that are most likely to matter to this user. Rank using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
+      '- Do not inspect raw health values solely to personalize product news.',
+      '- Prefer relevance, practical benefit, editorial priority, and novelty. Do not fill space with weak matches.',
+      '- Use the canonical title, summary, URL, and tryIt fields from the feed.',
+      '',
+      'Create the visual digest deterministically:',
+      '- Take the selected item ids in message order and join them with `~`.',
+      '- Replace `{ids}` in `links.digestCardTemplate` with that joined value.',
+      '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
+      '',
+      'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
+      'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
+      '',
+      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    ].join('\n'),
+  },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
 export async function applyMurphManagedAutomations(
@@ -349,7 +407,48 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
+  if (await reconcileExistingOnboardingFollowupAutomation({
+    now,
+    vaultRoot: input.vaultRoot,
+  })) {
+    result.updated += 1
+  }
+
   return result
+}
+
+async function reconcileExistingOnboardingFollowupAutomation(input: {
+  now: Date
+  vaultRoot: string
+}): Promise<boolean> {
+  const existing = await showAutomation({
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!existing || existing.status === 'archived') {
+    return false
+  }
+
+  if (!isManagedOnboardingFollowupAutomation(existing)) {
+    return false
+  }
+
+  if (!onboardingFollowupAutomationDefinitionChanged(existing)) {
+    return false
+  }
+
+  await patchAutomation({
+    continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+    instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    lookup: existing.automationId,
+    now: input.now,
+    summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+    tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+    title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    vaultRoot: input.vaultRoot,
+  })
+
+  return true
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -383,6 +482,45 @@ async function resolveMurphManagedAutomationCreateRoute(
     resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
     routeValidationProfile,
   )
+}
+
+function onboardingFollowupAutomationDefinitionChanged(
+  existing: AutomationRecord,
+): boolean {
+  return existing.title !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title ||
+    existing.summary !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary ||
+    existing.continuityPolicy !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy ||
+    existing.instructions !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions ||
+    !murphManagedAutomationValuesEqual(
+      existing.tags,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+    )
+}
+
+function isManagedOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  return isCurrentManagedOnboardingFollowupAutomation(automation) ||
+    isLegacySeededOnboardingFollowupAutomation(automation)
+}
+
+function isCurrentManagedOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  const tags = new Set(automation.tags)
+  return tags.has('murph-managed') &&
+    tags.has('murph-managed:onboarding-followup')
+}
+
+function isLegacySeededOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&
+    murphManagedAutomationValuesEqual(
+      automation.tags,
+      LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS,
+    )
 }
 
 function murphManagedAutomationSeedChanged(

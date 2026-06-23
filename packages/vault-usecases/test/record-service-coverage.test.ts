@@ -1500,6 +1500,33 @@ describe("record service seams", () => {
         family: "experiment",
         kind: "experiment",
       })]),
+      listMetricPoints: vi.fn(async () => {
+        throw new Error("Experiment follow-up should not read metric points.");
+      }),
+      listMetricPointsBatch: vi.fn(async () => {
+        throw new Error("Experiment follow-up should not read metric points.");
+      }),
+      decideExperimentFollowupDue: vi.fn(() => ({
+        schema: "murph.experiment-followup-due.v1",
+        kind: "missed-log",
+        action: "notify",
+        reason: "planned_session_log_missing",
+        date: "2026-04-08",
+        dedupeKey: "experiment-followup:exp_1:missed-log:2026-04-08",
+        experiment: {
+          id: "exp_1",
+          slug: "focus-sprint",
+          status: "active",
+          title: "Focus Sprint",
+        },
+        window: {
+          sessionDate: "2026-04-08",
+          baselineStart: null,
+          baselineEnd: null,
+          interventionStart: null,
+          interventionEnd: null,
+        },
+      })),
       showVaultSummary: vi.fn(async () => ({ title: "Vault", timezone: "UTC" })),
       showVaultStats: vi.fn(async () => ({ vault: "./vault" })),
     };
@@ -1565,6 +1592,144 @@ describe("record service seams", () => {
         },
       ],
     });
+    expect(await journal.showExperimentFollowupDue({
+      vault: "./vault",
+      lookup: "exp_1",
+      kind: "missed-log",
+      date: "2026-04-08",
+    })).toMatchObject({
+      experimentId: "exp_1",
+      lookupId: "exp_1",
+      slug: "focus-sprint",
+      kind: "missed-log",
+      decision: {
+        action: "notify",
+      },
+    });
+    expect(journalQuery.listMetricPoints).not.toHaveBeenCalled();
+
+    const anchoredExperimentId = "exp_01JNV4458HYPP53JDQCBP1QJAN";
+    const anchoredExperiment = sampleQueryRecord({
+      entityId: anchoredExperimentId,
+      primaryLookupId: anchoredExperimentId,
+      family: "experiment",
+      recordClass: "bank",
+      kind: "experiment",
+      status: "active",
+      experimentSlug: "glucose-anchors",
+      attributes: {
+        schemaVersion: "murph.frontmatter.experiment.v1",
+        docType: "experiment",
+        experimentId: anchoredExperimentId,
+        slug: "glucose-anchors",
+        status: "active",
+        title: "Glucose Anchors",
+        startedOn: "2026-06-01",
+        runPlan: {
+          baselineStart: "2026-06-01",
+          baselineEnd: "2026-06-03",
+          interventionStart: "2026-06-04",
+          interventionEnd: "2026-06-18",
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:blood-glucose",
+          desiredDirection: "decrease",
+          measurementAnchors: [
+            {
+              role: "baseline",
+              kind: "wearable_summary",
+              recordId: "metric_sample_glucose_baseline",
+              biomarkerKeys: ["biomarker:blood-glucose"],
+              observedOn: "2026-05-29",
+            },
+            {
+              role: "followup",
+              kind: "wearable_summary",
+              recordId: "metric_sample_glucose_followup",
+              biomarkerKeys: ["biomarker:blood-glucose"],
+              observedOn: "2026-06-18",
+            },
+          ],
+        },
+      },
+    });
+    const anchoredMetricPointFilters: unknown[] = [];
+    const anchoredMetricQuery = {
+      readVault: vi.fn(async () => journalQuery.readVault()),
+      lookupEntityById: vi.fn(() => anchoredExperiment),
+      listMetricPoints: vi.fn(async (_vault: string, filters: unknown) => {
+        anchoredMetricPointFilters.push(filters);
+        return [];
+      }),
+      listMetricPointsBatch: vi.fn(async (_vault: string, filtersList: readonly unknown[]) => {
+        anchoredMetricPointFilters.push(...filtersList);
+        return [];
+      }),
+      normalizeMetricKey: queryRuntime.normalizeMetricKey,
+      resolveMetricDefinition: queryRuntime.resolveMetricDefinition,
+      resolveMetricDefinitionForBiomarker: queryRuntime.resolveMetricDefinitionForBiomarker,
+      summarizeExperimentProgress: vi.fn(() => ({
+        schemaVersion: "murph.experiment-progress.v1",
+        asOf: "2026-06-18",
+        experiment: {
+          id: anchoredExperimentId,
+          slug: "glucose-anchors",
+          status: "active",
+          title: "Glucose Anchors",
+        },
+        phase: "review_due",
+        windows: {
+          baselineStart: "2026-06-01",
+          baselineEnd: "2026-06-03",
+          interventionStart: "2026-06-04",
+          interventionEnd: "2026-06-18",
+        },
+        setupReadiness: { status: "ready", blockingReasons: [] },
+        analysisReadiness: { status: "ready", blockingReasons: [] },
+        dataCoverage: {
+          status: "ready_for_review",
+          baselineDaysAvailable: 1,
+          interventionDaysAvailable: 1,
+          primaryBiomarkerKey: "biomarker:blood-glucose",
+          primaryMetricDaysAvailable: 2,
+          wearableProviders: [],
+        },
+        adherence: {
+          completedSessions: 0,
+          expectedSessionsByNow: null,
+          minimumUsefulSessions: null,
+          status: "unknown",
+          targetSessions: null,
+        },
+        signals: [],
+        earlySignals: [],
+        confounders: [],
+        recommendation: null,
+        commonsProtocolRef: null,
+        protocolRef: null,
+      })),
+    };
+    const anchoredJournal = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => anchoredMetricQuery),
+      })),
+    });
+    await anchoredJournal.showExperimentProgress({
+      vault: "./vault",
+      lookup: "glucose-anchors",
+      asOf: "2026-06-18",
+    });
+    expect(anchoredMetricPointFilters).toEqual([
+      {
+        limit: null,
+        metricKey: "glucose",
+        to: "2026-06-18",
+      },
+    ]);
+
     assert.deepEqual(await journal.showVaultSummary("./vault"), {
       vault: "./vault",
       formatVersion: CURRENT_VAULT_FORMAT_VERSION,
@@ -1628,6 +1793,8 @@ describe("record service seams", () => {
           tags: [],
           frontmatter: null,
         })),
+        listMetricPoints: vi.fn(async () => []),
+        listMetricPointsBatch: vi.fn(async () => []),
         analyzeExperimentOutcome: vi.fn(() => ({
           schemaVersion: "murph.experiment-outcome.v1",
           asOf: "2026-04-08",

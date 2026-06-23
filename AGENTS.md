@@ -97,6 +97,7 @@ Always read these before repo code/docs/test/config work:
 ## Notes
 
 - When debugging Codex CLI issues, check for a sibling checkout at `../codex`; if it is missing, clone the Codex CLI repo there so future debugging can reuse that location.
+- Before running `pnpm dev` from a secondary git worktree or branch-isolated checkout, read `agent-docs/operations/hosted-local-worktree-dev.md` and isolate the ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel target together.
 - Keep this file short and route-oriented. Move durable detail into `agent-docs/`.
 - DBHub MCP is only for production database inspection. For local database debugging, use the explicit local `DATABASE_URL` or repo-local tooling instead. DBHub JSON rendering is unsafe evidence for PostgreSQL `timestamp without time zone`; format those columns in SQL before interpreting times.
 - Target roughly 100 lines or fewer and preserve these sections: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.

@@ -361,6 +361,62 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("persists reply failure events after the ordinary automation event cap", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      for (let index = 0; index < 13; index += 1) {
+        input.onEvent?.({
+          safeDetails: "scan_started",
+          type: "scan.started",
+        });
+      }
+      input.onEvent?.({
+        errorCode: "ASSISTANT_PROVIDER_EMPTY_RESPONSE",
+        safeDetails:
+          "assistant provider failed (ASSISTANT_PROVIDER_EMPTY_RESPONSE)",
+        safeErrorMessage:
+          "Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.",
+        type: "input.reply-failed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_failure_cap",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_failure_cap",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Hosted assistant automation event: input.reply-failed.",
+          redacted: expect.objectContaining({
+            errorCode: "ASSISTANT_PROVIDER_EMPTY_RESPONSE",
+            safeErrorMessage:
+              "Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.",
+            type: "input.reply-failed",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("persists the typed cron failure code from cron.job.completed events", async () => {
     // June 2026 quota incident: provider quota failures on scheduled
     // reminders must land queryable in hosted_runtime_log.
@@ -2714,6 +2770,88 @@ describe("runHostedAssistantAutomationLane", () => {
     await Promise.resolve();
     expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+  });
+
+  it("records provider trace diagnostics from the maintenance automation lane", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-provider-plan-diagnostics.v1",
+          type: "assistant.provider.plan",
+          codexContinuation: "provider-state-optimization",
+          providerRequestOrdinal: 0,
+          resumeCodexThreadIdPresent: true,
+          routePlanningElapsedMs: 42,
+          routePlanningRawPath: "/tmp/raw-provider-path",
+          prompt: "raw prompt text should not persist",
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        },
+        updates: [],
+      });
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_provider_trace",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_provider_trace",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    const providerLog = (result.redactedLogEntries ?? []).find((entry) =>
+      entry.component === "runtime.provider"
+    );
+    expect(providerLog).toEqual(expect.objectContaining({
+      component: "runtime.provider",
+      eventId: "evt_assistant_provider_trace",
+      level: "info",
+      message: "Hosted assistant provider plan captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexContinuation: "provider-state-optimization",
+        providerPlanKind: "provider.plan",
+        providerRequestOrdinal: 0,
+        requestId: "req_provider_trace",
+        resumeCodexThreadIdPresent: true,
+        routePlanningElapsedMs: 42,
+        workingDirectoryKind: "hosted-stable-proc-cwd",
+      }),
+    }));
+    expect(providerLog?.redacted).not.toHaveProperty("providerSessionId");
+    expect(providerLog?.redacted).not.toHaveProperty("routePlanningRawPath");
+    expect(providerLog?.redacted).not.toHaveProperty("prompt");
+    expect(JSON.stringify(providerLog?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(providerLog?.redacted)).not.toContain("/tmp/raw-provider-path");
+    expect(JSON.stringify(providerLog?.redacted)).not.toContain("raw prompt text");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime.provider",
+        details: expect.objectContaining({
+          codexContinuation: "provider-state-optimization",
+          providerPlanKind: "provider.plan",
+          requestId: "req_provider_trace",
+        }),
+        message: "Hosted assistant provider plan captured.",
+        phase: "wake.running",
+      }),
+    );
   });
 
   it("uses prepared hosted assistant readiness without re-reading ambient config", async () => {

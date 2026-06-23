@@ -190,6 +190,8 @@ CREATE TEMP TABLE fdc_measure_unit_raw (
 \copy fdc_category_raw FROM PROGRAM 'if [ -n "$FDC_CATEGORY_CSV" ]; then cat "$FDC_CATEGORY_CSV"; else echo "FDC_CATEGORY_CSV is required" >&2; exit 1; fi' WITH (FORMAT csv, HEADER true)
 \copy fdc_measure_unit_raw FROM PROGRAM 'if [ -n "$FDC_MEASURE_UNIT_CSV" ]; then cat "$FDC_MEASURE_UNIT_CSV"; else echo "FDC_MEASURE_UNIT_CSV is required" >&2; exit 1; fi' WITH (FORMAT csv, HEADER true)
 
+BEGIN;
+
 WITH food_nutrients AS (
   SELECT
     fdc_id,
@@ -383,9 +385,24 @@ prepared AS (
     ) AS search_text,
     CASE
       WHEN source_rows.serving_size IS NOT NULL
-        AND lower(source_rows.serving_size_unit) IN ('g', 'gram', 'grams')
+        AND source_rows.serving_size > 0
+        AND source_rows.serving_size <= 2000
+        AND lower(source_rows.serving_size_unit) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
         THEN source_rows.serving_size
-      ELSE food_portions.first_portion_gram_weight
+      WHEN food_portions.first_portion_gram_weight IS NOT NULL
+        AND food_portions.first_portion_gram_weight > 0
+        AND food_portions.first_portion_gram_weight <= 2000
+        AND COALESCE(btrim(food_portions.first_portion_description), '') <> ''
+        AND (
+          source_rows.data_type <> 'branded_food'
+          OR (
+            source_rows.branded_household_serving IS NOT NULL
+            AND lower(btrim(food_portions.first_portion_description)) = lower(btrim(source_rows.branded_household_serving))
+          )
+        )
+        AND lower(btrim(food_portions.first_portion_description)) !~ '^[0-9.[:space:]]*(fl\.?[[:space:]]*oz|fluid[[:space:]]+ounces?|cups?|tbsp|tablespoons?|tsp|teaspoons?|ml|milliliters?|millilitres?|l|liters?|litres?|bottles?|jars?|cans?|containers?|packages?|packs?|packets?|pouches?|tablets?|capsules?|caps?|softgels?|soft[[:space:]]+gels?|gummies?|scoops?)([^[:alpha:]]|$)'
+        THEN food_portions.first_portion_gram_weight
+      ELSE NULL
     END AS serving_grams,
     jsonb_strip_nulls(
       jsonb_build_object(
@@ -393,6 +410,7 @@ prepared AS (
         'notSignificantSourceOf', source_rows.not_significant_source_of,
         'servingSize', source_rows.serving_size,
         'servingSizeUnit', source_rows.serving_size_unit,
+        'servingGramsContractVersion', 'fdc_strict_serving_grams_v1',
         'householdServing', COALESCE(
           source_rows.branded_household_serving,
           food_portions.first_portion_description
@@ -481,3 +499,9 @@ SELECT
   count(*) FILTER (WHERE brand IS NULL) AS null_brand_rows,
   count(*) FILTER (WHERE fdc_release_date = :'fdc_release_date'::date) AS current_release_rows
 FROM foods;
+
+\set reviewed_serving_grams_entity_type food
+\ir ../product-tests/apply-reviewed-serving-grams.sql
+\unset reviewed_serving_grams_entity_type
+
+COMMIT;

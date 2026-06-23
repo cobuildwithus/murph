@@ -62,7 +62,7 @@ export const HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT =
 export const HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
   "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
 export const HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT =
-  "What should I call you? And out of those, which ones matter most to you right now?";
+  "Which of those health goals matters most to you right now?";
 
 const hostedLocalRunnerProviderHost = "host.docker.internal";
 
@@ -305,25 +305,14 @@ export async function startHostedLocalTelegramStub(input: {
   }
 
   function createTelegramSendMessageMatcher(userId: string): ObservedTelegramRequestMatcher {
-    const expectedMessageIdPrefix = buildTelegramMessageId(userId);
-
     return (request) => {
       const parsed = parseObservedTelegramJson(request.body);
-      const replyToMessageId =
-        parsed && "reply_to_message_id" in parsed
-          ? parsed.reply_to_message_id
-          : null;
-
       return Boolean(
         parsed
         && parsed.chat_id === buildTelegramThreadId(userId)
-        && (
-          typeof replyToMessageId === "number"
-            ? String(replyToMessageId).startsWith(expectedMessageIdPrefix)
-            : false
-        )
         && typeof parsed.text === "string"
-        && parsed.text.length > 0,
+        && parsed.text.length > 0
+        && !("reply_to_message_id" in parsed),
       );
     };
   }

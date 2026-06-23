@@ -4529,10 +4529,10 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 11 -> 12 bump would keep every
-      // constant-relative assertion green while legacy v11 stores still carried
-      // full metric point JSON payloads.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 12);
+      // Pin the literal version: a revert of the latest bump would keep every
+      // constant-relative assertion green while legacy stores still carried old
+      // projected metric point identities.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 13);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4665,6 +4665,7 @@ test("listMetricPointsRuntime preserves full compact metric point context from r
     const sampleSummary = points.find((point) => point.source.kind === "sample-summary");
 
     assert.ok(sampleSummary);
+    assert.equal(sampleSummary.source.recordId, "sample-summary:2026-04-01:glucose:mg_dL");
     assert.equal(sampleSummary.context.firstSampleAt, "2026-04-01T08:00:00Z");
     assert.equal(sampleSummary.context.lastSampleAt, "2026-04-01T12:15:00Z");
     assert.equal(sampleSummary.context.numericSampleCount, 2);

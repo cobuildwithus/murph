@@ -65,6 +65,8 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // compactions.
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 128_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
+const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
+const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -178,7 +180,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     buildHostedCodexConfigToml({
       chatGptAuth: chatGptAuthJson !== null,
-      disableProviderRetries: usesTestProviderBaseUrlOverride,
+      writeProviderRetryDefaults: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
       reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
@@ -412,7 +414,7 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  disableProviderRetries?: boolean;
+  writeProviderRetryDefaults?: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
@@ -430,10 +432,10 @@ export function buildHostedCodexConfigToml(input: {
       ? ["supports_websockets = true"]
       : []),
     "requires_openai_auth = false",
-    ...(input.disableProviderRetries
+    ...(input.writeProviderRetryDefaults
       ? [
-          "request_max_retries = 0",
-          "stream_max_retries = 0",
+          `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
+          `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
         ]
       : []),
     "",

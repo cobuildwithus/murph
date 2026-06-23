@@ -417,6 +417,10 @@ function buildSchedule(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["schedule"] {
   const schedule = results.schedule;
+  if (!schedule && hasUnsupportedExplicitAdherence(results)) {
+    return undefined;
+  }
+
   const windows = results.experiment.windows;
   const firstCellDate = schedule?.cells[0]?.localDate ?? null;
   const lastCellDate = schedule?.cells.at(-1)?.localDate ?? null;
@@ -447,6 +451,12 @@ function buildSchedule(
     loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
+}
+
+function hasUnsupportedExplicitAdherence(results: BrowserVaultExperimentResultsView): boolean {
+  return results.diagnostics.some((diagnostic) =>
+    diagnostic.code === "invalid_schedule" && diagnostic.message.includes("adherence targets")
+  );
 }
 
 function buildSessionContext(

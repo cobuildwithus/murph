@@ -66,7 +66,7 @@ const typingLoopUserId = `member_local_linq_typing_loop_${Date.now()}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
-  "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
+  "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
 const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
@@ -288,7 +288,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("does not deliver model-authored progress updates from hosted Linq auto-replies", async () => {
+  it("delivers model-authored progress updates from hosted Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -347,7 +347,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+      expectedCount: outboundCountBeforeReply + 2,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -359,15 +359,17 @@ describe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel"]);
-    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
-    expect(newSendTexts).not.toContain(progressToolAttemptText);
+    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    expect(newSendTexts).toEqual([
+      progressToolAttemptText,
+      progressToolFinalReplyText,
+    ]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 1,
+      outboundCountBeforeReply + 2,
     );
   }, 300_000);
 
@@ -609,7 +611,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const assistantProviderResponseCountBefore =
       countAssistantProviderResponsesApiRequests();
     const assistantQuestionText =
-      "What should I call you? And what health-wise have you been working on lately?";
+      "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
     const assistantSecondReplyText =
       "Got it. I will remember that and we can work from those goals.";
     requireScenario().queueAssistantResponses([
@@ -689,7 +691,9 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      computerToolsAvailable: true,
+    });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();

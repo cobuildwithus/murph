@@ -25,6 +25,11 @@ export {
   searchFoods,
 } from "./foods";
 
+const SUPPLEMENT_SEARCH_WEAK_QUERY_TOKENS = [
+  "supplement",
+  "supplements",
+] as const;
+
 export type SupplementSearchItem = ProductLabelSearchItem;
 export type SupplementDetail = ProductLabelDetail;
 
@@ -49,6 +54,7 @@ export function createSupplementsQueries(client: ProductLabelsQueryClient): {
 } {
   const queries = createProductLabelsQueries(client, "supplements", {
     brandScoping: true,
+    weakQueryTokens: SUPPLEMENT_SEARCH_WEAK_QUERY_TOKENS,
   });
 
   return {

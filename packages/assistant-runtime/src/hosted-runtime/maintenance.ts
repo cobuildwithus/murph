@@ -62,6 +62,7 @@ import {
 import {
   createHostedAssistantTurnEnvironment,
 } from "./environment.ts";
+import { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 import {
   summarizeHostedAssistantAutoReplyEligibleAfter,
   summarizeHostedRuntimeStatusCounts,
@@ -69,7 +70,6 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
-import { emitHostedAssistantProviderTraceLog } from "./events.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
@@ -404,10 +404,15 @@ export async function runHostedAssistantAutomation(
         });
         if (
           shouldPersistHostedAssistantAutomationEvent(event.type)
-          && redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
+          && (
+            shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
+            || redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
+          )
         ) {
           redactedLogEntries.push(logEntry);
-          redactedAutomationEventLogCount += 1;
+          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
+            redactedAutomationEventLogCount += 1;
+          }
         }
       },
       onProviderRequestStarted: (event) => {
@@ -851,6 +856,10 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "reply.scan.started",
     "scan.started",
   ]).has(type);
+}
+
+function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
+  return type === "input.reply-failed";
 }
 
 export async function runHostedDeviceSyncPass(

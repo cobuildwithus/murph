@@ -3,8 +3,12 @@ import {
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
+  setLinqMessageReaction,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
+import type {
+  AssistantMessageReaction,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import {
   isLinqChatNotFoundSendMessageError,
   markLinqChatRead,
@@ -41,6 +45,7 @@ import type {
 export interface HostedProviderEffectDependencies {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
+  onProviderDispatchEntered?: (() => void) | null;
   signal?: AbortSignal;
 }
 
@@ -168,6 +173,28 @@ export async function sendHostedProviderLinqVoiceMemo(
     "Hosted Linq voice memo delivery",
   );
   return await sendLinqVoiceMemoMessage(request, {
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
+  });
+}
+
+export async function setHostedProviderLinqMessageReaction(
+  request: {
+    reaction: AssistantMessageReaction;
+    targetMessageId: string;
+  },
+  dependencies: HostedProviderEffectDependencies,
+): Promise<{
+  reaction: AssistantMessageReaction;
+  targetMessageId: string;
+}> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq reaction delivery",
+  );
+  dependencies.onProviderDispatchEntered?.();
+  return await setLinqMessageReaction(request, {
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,

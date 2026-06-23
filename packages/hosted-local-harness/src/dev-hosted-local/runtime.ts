@@ -73,6 +73,7 @@ const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
   "DeploySmokeRunnerContainer",
 ] as const;
 const HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-e2e-";
+const HOSTED_LOCAL_WORKTREE_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-worktree-";
 
 export function redactHostedLocalDiagnosticText(value: string): string {
   return redactHostedLocalPaths(value)
@@ -1270,16 +1271,16 @@ async function listHostedRunnerContainerIds(input: {
       result: proxyResult,
     };
   }
-  const e2eProxyResult = await addCurrentHostedLocalE2eRunnerProxyContainerIds({
+  const orphanProxyResult = await addCurrentHostedLocalIsolatedRunnerProxyContainerIds({
     containerIds,
     cwd: input.cwd,
     env: input.env,
     timeoutMs: input.timeoutMs,
   });
-  if (e2eProxyResult !== null) {
+  if (orphanProxyResult !== null) {
     return {
       containerIds: [...containerIds],
-      result: e2eProxyResult,
+      result: orphanProxyResult,
     };
   }
   return {
@@ -1383,14 +1384,14 @@ async function addHostedRunnerProxyContainerIds(input: {
   return null;
 }
 
-async function addCurrentHostedLocalE2eRunnerProxyContainerIds(input: {
+async function addCurrentHostedLocalIsolatedRunnerProxyContainerIds(input: {
   containerIds: Set<string>;
   cwd: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs: number;
 }): Promise<BoundedCommandResult | null> {
   const namePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
-  if (!namePrefix.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)) {
+  if (!isHostedLocalIsolatedRunnerContainerNamePrefix(namePrefix)) {
     return null;
   }
 
@@ -1408,7 +1409,7 @@ async function addCurrentHostedLocalE2eRunnerProxyContainerIds(input: {
   for (const proxy of proxies.containers) {
     if (
       proxy.name.startsWith(namePrefix)
-      && isHostedLocalE2eRunnerProxyContainerName(proxy.name)
+      && isHostedLocalIsolatedRunnerProxyContainerName(proxy.name)
     ) {
       input.containerIds.add(proxy.id);
     }
@@ -1439,6 +1440,19 @@ function parseWhitespaceSeparatedDockerIds(output: string): string[] {
 
 function isHostedLocalE2eRunnerProxyContainerName(name: string): boolean {
   return name.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)
+    && isHostedLocalIsolatedRunnerProxyContainerName(name);
+}
+
+function isHostedLocalIsolatedRunnerContainerNamePrefix(namePrefix: string): boolean {
+  return namePrefix.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)
+    || namePrefix.startsWith(HOSTED_LOCAL_WORKTREE_WORKER_CONTAINER_NAME_PREFIX);
+}
+
+function isHostedLocalIsolatedRunnerProxyContainerName(name: string): boolean {
+  return (
+    name.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)
+    || name.startsWith(HOSTED_LOCAL_WORKTREE_WORKER_CONTAINER_NAME_PREFIX)
+  )
     && name.endsWith("-proxy")
     && HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES.some((className) =>
       name.includes(`-${className}-`)

@@ -686,6 +686,33 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
+export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
+  "feature_interest",
+  "feature_request",
+  "frustration",
+] as const;
+
+export type HostedProductFeedbackKind =
+  (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
+
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+
+export interface HostedRuntimeProductFeedbackRecord {
+  idempotencyKey: string;
+  kind: HostedProductFeedbackKind;
+  relatedChangelogItemIds: string[];
+  summary: string;
+}
+
+export interface HostedRuntimeProductFeedbackRecordRequest {
+  feedback: HostedRuntimeProductFeedbackRecord;
+}
+
+export interface HostedRuntimeProductFeedbackRecordResponse {
+  feedbackId: string;
+  recorded: boolean;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }
@@ -735,7 +762,6 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     objectFetchMs?: number;
     decryptMs?: number;
     archiveExtractMs?: number;
-    restorePreflightMs?: number;
     durableRootReplaceMs?: number;
     cleanupMs?: number;
     extractMs?: number;
@@ -792,7 +818,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "objectFetchMs",
     "decryptMs",
     "archiveExtractMs",
-    "restorePreflightMs",
     "durableRootReplaceMs",
     "cleanupMs",
     "extractMs",
@@ -1205,6 +1230,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
   "assistant.automation_detail",
+  "assistant.computer_tool_failed",
   "assistant.pass_finished",
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",

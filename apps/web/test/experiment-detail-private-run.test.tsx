@@ -837,6 +837,75 @@ describe("experiment detail private-run composition", () => {
     expect(scheduleMarkup).not.toContain("1 missed");
   });
 
+  it("does not synthesize a schedule grid for unsupported explicit adherence", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createSessionEntity({
+            date: "2026-04-08",
+            experimentId: "exp_sauna_metric_adherence",
+            experimentSlug: "finnish-sauna",
+            sessionStatus: "completed",
+          }),
+        ],
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_metric_adherence",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-08",
+              interventionStart: "2026-04-08",
+              adherenceTargets: [{
+                targetId: "step-floor",
+                label: "Step floor",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "metricThreshold",
+                  metricKey: "steps",
+                  op: ">=",
+                  value: 8000,
+                  missing: "unknown",
+                },
+                rollup: {
+                  targetCompletions: 1,
+                  minimumUsefulCompletions: 1,
+                },
+              }],
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna metric-adherence run",
+          }),
+          id: "exp_sauna_metric_adherence",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Metric adherence is not yet supported in browser Results.",
+          tags: ["sauna"],
+          title: "Private sauna metric-adherence run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.schedule).toBeUndefined();
+  });
+
   it("renders browser-vault session confounders in private results context", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 

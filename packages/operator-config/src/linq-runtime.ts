@@ -26,6 +26,9 @@ import {
   type MessageTextDecoration,
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import type {
+  AssistantMessageReaction,
+} from './assistant-cli-contracts.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
@@ -58,6 +61,7 @@ type LinqOperation =
   | 'mark_read'
   | 'send_message'
   | 'send_voice_memo'
+  | 'set_message_reaction'
   | 'typing_start'
   | 'typing_stop'
 
@@ -151,6 +155,11 @@ export interface SendLinqVoiceMemoResult {
   target: string
   voiceMemoAttachmentId: string | null
   voiceMemoUrl: string | null
+}
+
+export interface LinqMessageReactionDelivery {
+  reaction: AssistantMessageReaction
+  targetMessageId: string
 }
 
 export function resolveLinqApiToken(env: NodeJS.ProcessEnv): string | null {
@@ -439,6 +448,45 @@ export async function deleteLinqMessage(
     }
 
     throw error
+  }
+}
+
+export async function setLinqMessageReaction(
+  input: {
+    reaction: AssistantMessageReaction
+    targetMessageId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<LinqMessageReactionDelivery> {
+  const targetMessageId = normalizeRequiredString(
+    input.targetMessageId,
+    'message id',
+  )
+
+  await requestLinqJson<unknown>({
+    details: {
+      hasIdempotencyKey: false,
+      operation: 'set_message_reaction',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: `/messages/${encodeURIComponent(targetMessageId)}/reactions`,
+    body: {
+      operation: 'add',
+      type: resolveLinqReactionType(input.reaction),
+    },
+    signal: dependencies.signal,
+  })
+
+  return {
+    reaction: input.reaction,
+    targetMessageId,
   }
 }
 
@@ -894,6 +942,19 @@ function buildLinqErrorResponseDiagnostics(
   return {
     responseBodyKind: `json_${typeof payload}`,
     responseBodyTextLength: serialized.length,
+  }
+}
+
+function resolveLinqReactionType(
+  reaction: AssistantMessageReaction,
+): 'laugh' | 'like' | 'love' {
+  switch (reaction) {
+    case 'heart':
+      return 'love'
+    case 'thumbs_up':
+      return 'like'
+    case 'laugh':
+      return 'laugh'
   }
 }
 

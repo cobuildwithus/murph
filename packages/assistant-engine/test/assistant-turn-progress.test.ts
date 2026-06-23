@@ -242,14 +242,14 @@ describe('assistant turn progress', () => {
     ).toBe('assistant-progress:turn-1:1')
   })
 
-  it('does not create progress delivery for auto-reply turns', () => {
+  it('creates progress delivery for auto-reply turns', () => {
     expect(
       shouldCreateAssistantProgressDelivery(
         createMessageInput({
           turnTrigger: 'automation-auto-reply',
         }),
       ),
-    ).toBe(false)
+    ).toBe(true)
     expect(shouldCreateAssistantProgressDelivery(createMessageInput())).toBe(true)
   })
 })

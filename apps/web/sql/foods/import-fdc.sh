@@ -71,7 +71,9 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../../../.." && pwd)"
+product_tests_script_dir="$repo_root/apps/web/sql/product-tests"
 work_dir="$repo_root/.fdc-work/foods-import"
+export REVIEWED_SERVING_GRAMS_TSV_PATH="${REVIEWED_SERVING_GRAMS_TSV_PATH:-$product_tests_script_dir/reviewed-serving-grams.tsv}"
 
 # shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
 . "$repo_root/apps/web/sql/product-tests/labels-db-psql.sh"

@@ -9,6 +9,7 @@ import {
 } from "./catalog.ts";
 import { formatMetricDisplayValue } from "./format.ts";
 import { unitsEquivalent } from "./normalize.ts";
+import { metricPointRecordIds } from "./record-ids.ts";
 import type {
   MetricConfidence,
   MetricDefinition,
@@ -347,18 +348,6 @@ function lowestMetricConfidence(values: readonly MetricConfidence[]): MetricConf
     high: 3,
   };
   return values.reduce<MetricConfidence>((worst, value) => rank[value] < rank[worst] ? value : worst, "high");
-}
-
-function metricPointRecordIds(point: MetricPoint): string[] {
-  const contributingRecordIds = point.context.contributingRecordIds;
-  if (Array.isArray(contributingRecordIds)) {
-    return uniqueStrings([
-      ...contributingRecordIds.filter((value): value is string => typeof value === "string" && value.length > 0),
-      point.source.recordId,
-    ]);
-  }
-
-  return [point.source.recordId];
 }
 
 function subtractIsoDays(value: string, days: number): string {

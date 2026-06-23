@@ -33,11 +33,13 @@ import {
   readDeliveredProviderThreadId,
   readDeliveredTarget,
   readDeliveredTargetKind,
+  readDeliveredTargetMessageId,
 } from './helpers.js'
 import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
   sendEmailMessage,
   sendLinqMessage,
+  setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
@@ -410,6 +412,29 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),
       providerMessageId: readDeliveredProviderMessageId(delivered),
       providerThreadId: providerThreadId ?? deliveredTarget,
+    }
+  },
+  async setMessageReaction({ candidate, dependencies, reaction, targetMessageId }) {
+    const delivered = dependencies.setLinqMessageReaction
+      ? await dependencies.setLinqMessageReaction({
+          reaction,
+          target: candidate.target,
+          targetMessageId,
+          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        })
+      : await setLinqMessageReaction(
+          {
+            reaction,
+            targetMessageId,
+          },
+          dependencies.signal ? { signal: dependencies.signal } : {},
+        )
+
+    return {
+      target: readDeliveredTarget(delivered) ?? candidate.target,
+      targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
+      targetMessageId:
+        readDeliveredTargetMessageId(delivered) ?? targetMessageId,
     }
   },
 })

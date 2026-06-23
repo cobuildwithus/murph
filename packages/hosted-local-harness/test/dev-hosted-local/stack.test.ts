@@ -45,6 +45,7 @@ const defaultConfig: HostedLocalDevConfig = {
   forceResetLocalDatabase: false,
   forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
+  linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
   linqWebhookTunnelName: "dev",
@@ -367,6 +368,10 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
       !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
         && source.MURPH_DEV_SKIP_WORKERS_AI !== "1",
   ),
+  isHostedLocalTruthyEnvValue: vi.fn((value: string | undefined) => {
+    const normalized = value?.trim().toLowerCase();
+    return normalized !== undefined && ["1", "true", "yes", "on"].includes(normalized);
+  }),
   usesWranglerLocalDevTestRoutes: vi.fn(
     (source: Readonly<Record<string, string | undefined>>) =>
       source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1",
@@ -428,6 +433,9 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
       || profile === "e2e:live"
     ) {
       return null;
+    }
+    if (env.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH) {
+      return `/repo/${env.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH}`;
     }
     return "/tmp/murph-dev-crypto-state.dev.vars";
   }),
@@ -551,6 +559,19 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+    vi.mocked(access).mockImplementation(async (filePath) => {
+      const value = String(filePath);
+      if (
+        /node_modules[/\\](?:zod|jose)$/u.test(value)
+        || /node_modules[/\\]@cloudflare[/\\]containers$/u.test(value)
+      ) {
+        return;
+      }
+
+      const error = new Error("not found") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -670,6 +691,30 @@ describe("hosted local dev stack", () => {
       "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/.deploy/runner-bundle",
       { recursive: true },
     );
+    expect(vi.mocked(copyFile)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]assistant-engine[/\\]package\.json$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/assistant-engine/package.json",
+    );
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]assistant-engine[/\\]dist$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/assistant-engine/dist",
+      { recursive: true },
+    );
+    expect(vi.mocked(symlink)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]contracts[/\\]node_modules[/\\]zod$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/contracts/node_modules/zod",
+      "dir",
+    );
+    expect(vi.mocked(symlink)).toHaveBeenCalledWith(
+      expect.stringMatching(/apps[/\\]cloudflare[/\\]node_modules[/\\]jose$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/jose",
+      "dir",
+    );
+    expect(vi.mocked(symlink)).not.toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/node_modules"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules",
+      "dir",
+    );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
@@ -705,13 +750,23 @@ describe("hosted local dev stack", () => {
         mode: 0o600,
       },
     );
-    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+    const cryptoStateWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      String(filePath).startsWith("/tmp/murph-dev-crypto-state.dev.vars.")
+      && String(filePath).endsWith(".tmp")
+    );
+    if (!cryptoStateWrite) {
+      throw new Error("missing atomic crypto state temp write");
+    }
+    const [cryptoStateTempPath, cryptoStateText, cryptoStateWriteOptions] =
+      cryptoStateWrite;
+    expect(cryptoStateText).toBe('HOSTED_CRYPTO_ENV="local"\n');
+    expect(cryptoStateWriteOptions).toMatchObject({
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(
+      cryptoStateTempPath,
       "/tmp/murph-dev-crypto-state.dev.vars",
-      'HOSTED_CRYPTO_ENV="local"\n',
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
     );
     expect(vi.mocked(symlink)).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
@@ -725,13 +780,8 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "all-builds",
     }));
-    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(2);
-    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      ignoreErrors: true,
-      scope: "all-builds",
-    }));
-    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      ignoreErrors: true,
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
     }));
     expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1028,6 +1078,30 @@ describe("hosted local dev stack", () => {
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
+  it("rejects worktree-scoped startup when asked to reuse an existing worker", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      webPort: 31001,
+      workerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
+      workerPort: 32001,
+    });
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_DEV_REUSE_EXISTING_WORKER: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+    })).rejects.toThrow(/MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled/u);
+
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+  });
+
   it("allows E2E isolation when ports, persist dir, and web artifacts are isolated", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -1114,10 +1188,79 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "current-build",
     }));
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
+    }));
     expect(maybeStartHostedLocalMinio).toHaveBeenCalledWith(expect.objectContaining({
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",
+    }));
+  });
+
+  it("isolates worktree runner cleanup and generated crypto state without E2E-only skips", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      webPort: 3101,
+      workerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
+      workerPort: 8801,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
+          ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+        MURPH_DEV_WEB_PORT: "3101",
+        MURPH_DEV_WORKER_PORT: "8801",
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "feature-a",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const worktreeCryptoStateWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      String(filePath).startsWith(
+        "/repo/.tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars.",
+      )
+      && String(filePath).endsWith(".tmp")
+    );
+    if (!worktreeCryptoStateWrite) {
+      throw new Error("missing atomic worktree crypto state temp write");
+    }
+    const [
+      worktreeCryptoStateTempPath,
+      worktreeCryptoStateText,
+      worktreeCryptoStateWriteOptions,
+    ] = worktreeCryptoStateWrite;
+    expect(worktreeCryptoStateText).toBe('HOSTED_CRYPTO_ENV="local"\n');
+    expect(worktreeCryptoStateWriteOptions).toMatchObject({
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    expect(rename).toHaveBeenCalledWith(
+      worktreeCryptoStateTempPath,
+      "/repo/.tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+    );
+    expect(symlink).not.toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
+      expect.stringContaining("apps/cloudflare/.dev.vars"),
+    );
+    expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      scope: "current-build",
+    }));
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
     }));
   });
 
@@ -1608,7 +1751,6 @@ describe("hosted local dev stack", () => {
         ["-SIGKILL", "-f", "workerd.*127\\.0\\.0\\.1:8787"],
         ["-SIGKILL", "-f", "apps/web/scripts/dev-local\\.ts.*--port 3000"],
         ["-SIGKILL", "-f", "next/dist/telemetry/detached-flush\\.js dev .*apps/web"],
-        ["-SIGKILL", "-f", "pnpm health-commons:generate:watch"],
         [
           "-SIGKILL",
           "-f",
@@ -2179,6 +2321,7 @@ describe("hosted local dev stack", () => {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       }),
+      registrationCachePath: ".tmp/linq-webhook-registration.json",
       setup: expect.objectContaining({
         targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
       }),
@@ -2881,11 +3024,13 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
+        scope: "current-build",
       }),
     );
     expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
+        scope: "current-build",
       }),
     );
   });
@@ -2952,6 +3097,18 @@ describe("hosted local dev stack", () => {
       env: process.env,
     })).rejects.toThrow(
       "MURPH_DEV_TEMP_DIR must resolve inside the repo-local .tmp directory.",
+    );
+  });
+
+  it("rejects temp dir overrides inside hosted-local worktree state", async () => {
+    vi.stubEnv("MURPH_DEV_TEMP_DIR", ".tmp/hosted-local-worktrees/feature-a");
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: process.env,
+    })).rejects.toThrow(
+      "MURPH_DEV_TEMP_DIR must not resolve inside the hosted-local worktree state directory.",
     );
   });
 

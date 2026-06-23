@@ -16,6 +16,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
+const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -45,10 +46,8 @@ export function AuthProvider({
   }, []);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
-    if (shouldResumeCurrentDeviceConnectIntentUrl(payload)) {
-      navigateHostedAuthRedirect(
-        `${window.location.pathname}${window.location.search}${window.location.hash}`,
-      );
+    if (shouldResumeCurrentAuthUrl(payload)) {
+      navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
     }
 
@@ -80,6 +79,17 @@ export function AuthProvider({
   );
 }
 
+function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
+  return (
+    shouldResumeCurrentDeviceConnectIntentUrl(payload)
+    || shouldResumeCurrentComputerHandoffUrl(payload)
+  );
+}
+
+function readCurrentBrowserPath(): string {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
 function shouldResumeCurrentDeviceConnectIntentUrl(
   payload: HostedPrivyCompletionPayload,
 ): boolean {
@@ -97,6 +107,20 @@ function shouldResumeCurrentDeviceConnectIntentUrl(
     && DEVICE_CONNECT_INTENT_CLAIM_PATTERN.test(params.get("deviceConnectIntent") ?? "")
     && params.get("connectSource")?.trim(),
   );
+}
+
+function shouldResumeCurrentComputerHandoffUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return COMPUTER_HANDOFF_PATH_PATTERN.test(window.location.pathname);
 }
 
 function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {

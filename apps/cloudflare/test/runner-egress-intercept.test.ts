@@ -4326,6 +4326,15 @@ describe("hostedRunnerIntercept", () => {
       path: "/chats/chat_1/voicememo",
     },
     {
+      body: {
+        operation: "add",
+        type: "love",
+      },
+      method: "POST",
+      name: "message reaction",
+      path: "/messages/message_1/reactions",
+    },
+    {
       method: "POST",
       name: "typing start",
       path: "/chats/chat_1/typing",
@@ -4515,7 +4524,7 @@ describe("hostedRunnerIntercept", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
         LINQ_API_TOKEN: "linq-worker-secret",
-        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },

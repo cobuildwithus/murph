@@ -25,6 +25,8 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -76,6 +78,9 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeProductFeedbackRecordRequest,
+  type HostedRuntimeProductFeedbackRecordResponse,
+  type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
@@ -93,6 +98,7 @@ import {
   requireBoolean,
   requireNumber,
   requireObject,
+  readOptionalStringArray,
   requireString,
   readNullableString,
 } from "./assertions.ts";
@@ -595,6 +601,135 @@ export function parseHostedRuntimeUsageRecordResponse(
   };
 }
 
+export function parseHostedRuntimeProductFeedbackRecordRequest(
+  value: unknown,
+): HostedRuntimeProductFeedbackRecordRequest {
+  const record = requireObject(value, "Hosted runtime product feedback request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["feedback"]),
+    "Hosted runtime product feedback request",
+  );
+  const feedback = requireObject(
+    record.feedback,
+    "Hosted runtime product feedback request feedback",
+  );
+  assertAllowedObjectKeys(
+    feedback,
+    new Set([
+      "idempotencyKey",
+      "kind",
+      "relatedChangelogItemIds",
+      "summary",
+    ]),
+    "Hosted runtime product feedback request feedback",
+  );
+  const idempotencyKey = requireString(
+    feedback.idempotencyKey,
+    "Hosted runtime product feedback idempotencyKey",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(idempotencyKey)) {
+    throw new TypeError(
+      "Hosted runtime product feedback idempotencyKey must be a SHA-256 hex digest.",
+    );
+  }
+  const kind = parseHostedProductFeedbackKind(feedback.kind);
+  const summary = parseHostedProductFeedbackSummary(feedback.summary);
+  const relatedChangelogItemIds = parseHostedProductFeedbackSlugArray(
+    readOptionalStringArray(
+      feedback.relatedChangelogItemIds,
+      "Hosted runtime product feedback relatedChangelogItemIds",
+    ) ?? [],
+    {
+      itemLabel: "Hosted runtime product feedback related changelog item id",
+      label: "Hosted runtime product feedback relatedChangelogItemIds",
+      maxLength: 120,
+    },
+  );
+  if (kind === "feature_interest" && relatedChangelogItemIds.length === 0) {
+    throw new TypeError(
+      "Hosted runtime product feedback feature interest must reference at least one changelog item.",
+    );
+  }
+
+  return {
+    feedback: {
+      idempotencyKey,
+      kind,
+      relatedChangelogItemIds,
+      summary,
+    },
+  };
+}
+
+export function parseHostedRuntimeProductFeedbackRecordResponse(
+  value: unknown,
+): HostedRuntimeProductFeedbackRecordResponse {
+  const record = requireObject(value, "Hosted runtime product feedback response");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["feedbackId", "recorded"]),
+    "Hosted runtime product feedback response",
+  );
+  return {
+    feedbackId: requireString(
+      record.feedbackId,
+      "Hosted runtime product feedback response feedbackId",
+    ),
+    recorded: requireBoolean(
+      record.recorded,
+      "Hosted runtime product feedback response recorded",
+    ),
+  };
+}
+
+function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKind {
+  const kind = requireString(value, "Hosted runtime product feedback kind");
+  if (!HOSTED_PRODUCT_FEEDBACK_KINDS.includes(kind as HostedProductFeedbackKind)) {
+    throw new TypeError("Hosted runtime product feedback kind is not supported.");
+  }
+  return kind as HostedProductFeedbackKind;
+}
+
+function parseHostedProductFeedbackSummary(value: unknown): string {
+  const summary = requireString(value, "Hosted runtime product feedback summary")
+    .trim()
+    .replace(/\s+/gu, " ");
+  if (
+    summary.length === 0 ||
+    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `Hosted runtime product feedback summary must be between 1 and ${HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH} characters.`,
+    );
+  }
+  return summary;
+}
+
+function parseHostedProductFeedbackSlugArray(
+  value: readonly string[],
+  options: {
+    itemLabel: string;
+    label: string;
+    maxLength: number;
+  },
+): string[] {
+  const entries = value.map((entry, index) => {
+    const slug = requireString(entry, `${options.itemLabel}[${index}]`);
+    if (
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) ||
+      slug.length > options.maxLength
+    ) {
+      throw new TypeError(`${options.itemLabel} must be a lowercase slug.`);
+    }
+    return slug;
+  });
+  if (entries.length > 7 || new Set(entries).size !== entries.length) {
+    throw new TypeError(`${options.label} must contain at most seven unique items.`);
+  }
+  return entries;
+}
+
 export function parseHostedRuntimeIssueExportRequest(
   value: unknown,
 ): HostedRuntimeIssueExportRequest {
@@ -833,7 +968,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "objectFetchMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "decryptMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "archiveExtractMs", restoreLabel),
-      ...requireOptionalNonNegativeInteger(restore, "restorePreflightMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "durableRootReplaceMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "cleanupMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),

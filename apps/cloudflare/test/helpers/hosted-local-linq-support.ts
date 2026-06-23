@@ -122,7 +122,7 @@ export const HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT =
 export const HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
   "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
 export const HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT =
-  "What should I call you? And out of those, which ones matter most to you right now?";
+  "Which of those health goals matters most to you right now?";
 export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
   "%PDF-1.7",
   "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",

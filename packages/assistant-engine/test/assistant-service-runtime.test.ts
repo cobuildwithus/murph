@@ -995,6 +995,120 @@ describe("assistant delivery orchestration seam", () => {
     );
   });
 
+  it("suppresses Telegram auto-reply native reply anchors for final text delivery", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-telegram-auto",
+        messageLength: 5,
+        providerMessageId: "provider-telegram-auto",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-telegram-auto",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryReplyToMessageId: "telegram-inbound-message",
+        prompt: "hello",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      response: "reply",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-telegram-auto-no-native-anchor",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "telegram",
+        message: "reply",
+        replyToMessageId: null,
+        turnTrigger: "automation-auto-reply",
+      }),
+    );
+  });
+
+  it("keeps explicit Telegram native reply anchors for manual final text delivery", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-telegram-manual",
+        messageLength: 5,
+        providerMessageId: "provider-telegram-manual",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-telegram-manual",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryReplyToMessageId: "manual-reply-message",
+        prompt: "hello",
+        turnTrigger: "manual-ask",
+        vault: "/vault",
+      },
+      response: "reply",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-telegram-manual-native-anchor",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "telegram",
+        message: "reply",
+        replyToMessageId: "manual-reply-message",
+        turnTrigger: "manual-ask",
+      }),
+    );
+  });
+
   it("sends progress directly without creating receipt-owning outbox intents", async () => {
     const session = createAssistantSession({
       binding: {
@@ -1046,6 +1160,58 @@ describe("assistant delivery orchestration seam", () => {
       turnId: "turn-progress-direct",
       signal: undefined,
       vault: "/vault",
+      }),
+    );
+  });
+
+  it("suppresses Telegram auto-reply native reply anchors for progress text delivery", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await deliverAssistantProgressUpdate({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "reply-key",
+        prompt: "hello",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      ordinal: 0,
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+            explicitTarget: "audience-target",
+            replyToMessageId: "reply-audience",
+          },
+        },
+      }),
+      text: "Still extracting the PDF.",
+      turnId: "turn-progress-telegram-auto",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+    expect(seamMocks.sendAssistantOutboxDispatchMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "telegram",
+        deliveryIdempotencyKey: "reply-key:progress:0",
+        explicitTarget: "audience-target",
+        message: "Still extracting the PDF.",
+        replyToMessageId: null,
+        turnId: "turn-progress-telegram-auto",
       }),
     );
   });
