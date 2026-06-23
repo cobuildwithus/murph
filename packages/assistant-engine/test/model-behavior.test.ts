@@ -1156,13 +1156,19 @@ Execution context:
       'If the exact Murph welcome is visible in this same thread and the user\'s latest message is a short acceptance',
     )
     expect(prompt).toContain(
-      'no broad vault resume check is needed, and the next step is the name/context question unless the visible thread already answers it.',
+      'no broad vault resume check is needed, and the next step is the name plus optional age/gender question unless the visible thread already answers it.',
     )
     expect(prompt).toContain(
-      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded resume check before sending the onboarding welcome or asking the next onboarding question',
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make the bounded resume check defined by the onboarding skill before sending the onboarding welcome or asking the next onboarding question',
     )
     expect(prompt).toContain(
-      'Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+      'run `vault-cli assistant onboarding resume-context --format json`',
+    )
+    expect(prompt).toContain(
+      'Treat saved facts from that snapshot as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+    )
+    expect(prompt).toContain(
+      'Do not fan this resume check out into separate setup-surface commands unless the resume-context command is unavailable or returns an error for the specific surface you still need.',
     )
     expect(prompt).toContain(
       'If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.',

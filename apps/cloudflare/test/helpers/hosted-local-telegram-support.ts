@@ -62,7 +62,7 @@ export const HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT =
 export const HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
   "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
 export const HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT =
-  "What should I call you? And out of those, which ones matter most to you right now?";
+  "Which of those health goals matters most to you right now?";
 
 const hostedLocalRunnerProviderHost = "host.docker.internal";
 
