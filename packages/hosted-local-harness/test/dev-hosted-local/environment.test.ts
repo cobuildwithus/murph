@@ -700,6 +700,43 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBeUndefined();
   });
 
+  it("lets explicit worktree remote-crypto disable override existing env files", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/prod/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nREMOTE\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
+      },
+      oidcIdentity,
+      overrides: {
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "0",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
+      generatedAuthorityPrivateJwkJson,
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+  });
+
   it("uses the shared truthy parser for remote hosted crypto opt-in", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,

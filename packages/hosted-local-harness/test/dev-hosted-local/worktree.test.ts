@@ -44,6 +44,7 @@ import {
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
 } from "../../src/dev-hosted-local/worktree.ts";
+import { applyHostedLocalProfile } from "../../src/profiles.ts";
 
 const ports = {
   minio: 9101,
@@ -210,7 +211,7 @@ describe("hosted-local worktree config", () => {
     }
   });
 
-  it("strips inherited E2E isolation and disables broad Temporal reset", () => {
+  it("pins inherited E2E isolation and broad Temporal reset off", () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {
         MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
@@ -220,7 +221,7 @@ describe("hosted-local worktree config", () => {
       slug: "feature-a",
     });
 
-    expect(config.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBeUndefined();
+    expect(config.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("0");
     expect(config.env.MURPH_DEV_FORCE_RESET_TEMPORAL).toBe("0");
 
     const devConfig = resolveHostedLocalWorktreeDevConfig({
@@ -231,6 +232,27 @@ describe("hosted-local worktree config", () => {
       slug: "feature-a",
     });
     expect(devConfig.forceResetLocalTemporal).toBe(false);
+  });
+
+  it("keeps forbidden worktree flags off after profile application", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    const profiled = applyHostedLocalProfile({
+      env: {
+        ...config.env,
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "0",
+      },
+      profileName: config.profileName,
+    });
+
+    expect(profiled.env.MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS).toBe("0");
+    expect(profiled.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("0");
   });
 
   it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {
