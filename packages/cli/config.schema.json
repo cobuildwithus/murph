@@ -248,7 +248,7 @@
                           "description": "Maximum legacy integration bundles to process in one apply pass.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
-                          "maximum": 250
+                          "maximum": 500
                         },
                         "maxBytes": {
                           "description": "Maximum legacy source bytes to inspect in one pass.",

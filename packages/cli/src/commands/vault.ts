@@ -363,7 +363,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       dryRun: z.boolean().default(false).describe('Show migration work without mutating the vault. This is also the default when --apply is omitted.'),
       apply: z.boolean().default(false).describe('Apply one bounded migration pass.'),
       finalize: z.boolean().default(true).describe('Advance the vault to the current format after all legacy work is gone. Pass --no-finalize to stage multiple apply passes.'),
-      maxBundles: z.number().int().positive().max(250).optional().describe('Maximum legacy integration bundles to process in one apply pass.'),
+      maxBundles: z.number().int().positive().max(500).optional().describe('Maximum legacy integration bundles to process in one apply pass.'),
       maxBytes: z.number().int().positive().optional().describe('Maximum legacy source bytes to inspect in one pass.'),
     }),
     output: integrationIngestRepairResultSchema,

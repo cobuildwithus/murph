@@ -3055,6 +3055,8 @@ test.sequential(
         'repair-integration-ingests',
         '--vault',
         vaultRoot,
+        '--max-bundles',
+        '500',
       ])
 
       assert.equal(dryRun.ok, true)
