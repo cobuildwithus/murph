@@ -205,20 +205,39 @@ export function buildCodexTurnFailedError(input: {
     parts.push(detail)
   }
   const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
+  const connectionLost =
+    !usageLimit &&
+    (input.errorInfo
+      ? isCodexConnectionLossErrorInfo(input.errorInfo)
+      : detail !== null && isCodexConnectionLossText(detail))
 
   return new VaultCliError(
-    usageLimit ? ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE : 'ASSISTANT_CODEX_FAILED',
-    parts.join(' '),
+    connectionLost
+      ? 'ASSISTANT_CODEX_CONNECTION_LOST'
+      : usageLimit
+        ? ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE
+        : 'ASSISTANT_CODEX_FAILED',
+    connectionLost
+      ? buildCodexConnectionFailureMessage({
+          code: null,
+          fallback: detail,
+          codexThreadId: input.codexThreadId,
+          signal: null,
+          stderr: '',
+        })
+      : parts.join(' '),
     {
+      connectionLost,
       codexFailureDetailPresent: detail !== null,
       codexDiagnosticsPresent: true,
-      codexFailureStage: 'turn_failed',
+      codexFailureStage: connectionLost ? 'connection_lost' : 'turn_failed',
       codexTurnStatus: input.status,
       ...buildCodexErrorInfoContext(input.errorInfo),
       providerActionCount: input.providerActionCount,
       codexThreadIdPresent: input.codexThreadId !== null,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
-      retryable: false,
+      recoverableConnectionLoss: connectionLost,
+      retryable: connectionLost,
     },
   )
 }

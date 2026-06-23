@@ -559,6 +559,19 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+    vi.mocked(access).mockImplementation(async (filePath) => {
+      const value = String(filePath);
+      if (
+        /node_modules[/\\](?:zod|jose)$/u.test(value)
+        || /node_modules[/\\]@cloudflare[/\\]containers$/u.test(value)
+      ) {
+        return;
+      }
+
+      const error = new Error("not found") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -677,6 +690,30 @@ describe("hosted local dev stack", () => {
       expect.stringContaining("apps/cloudflare/.deploy/runner-bundle"),
       "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/.deploy/runner-bundle",
       { recursive: true },
+    );
+    expect(vi.mocked(copyFile)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]assistant-engine[/\\]package\.json$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/assistant-engine/package.json",
+    );
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]assistant-engine[/\\]dist$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/assistant-engine/dist",
+      { recursive: true },
+    );
+    expect(vi.mocked(symlink)).toHaveBeenCalledWith(
+      expect.stringMatching(/packages[/\\]contracts[/\\]node_modules[/\\]zod$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/@murphai/contracts/node_modules/zod",
+      "dir",
+    );
+    expect(vi.mocked(symlink)).toHaveBeenCalledWith(
+      expect.stringMatching(/apps[/\\]cloudflare[/\\]node_modules[/\\]jose$/u),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules/jose",
+      "dir",
+    );
+    expect(vi.mocked(symlink)).not.toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/node_modules"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/node_modules",
+      "dir",
     );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
