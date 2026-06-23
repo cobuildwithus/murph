@@ -9,10 +9,12 @@ import {
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
@@ -60,6 +62,9 @@ describe("hosted Codex auth store", () => {
       },
     }));
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () => ({
+      id: "mailbox_item_codex_auth",
+    }));
   });
 
   it("dedupes fresh connect attempts and replaces stale ones with a new runtime wake", async () => {
@@ -103,7 +108,7 @@ describe("hosted Codex auth store", () => {
 
     expect(retry).toEqual({
       attemptId: first.attemptId,
-      mailboxItemId: null,
+      mailboxItemId: "mailbox_item_codex_auth",
       view: {
         state: "connecting",
         userCode: null,
@@ -111,6 +116,11 @@ describe("hosted Codex auth store", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: `codex-auth:connect:${first.attemptId}`,
+      prisma: prisma.tx,
+      userId: "member_123",
+    });
 
     prisma.setRecord({
       ...prisma.getRecord()!,
@@ -135,6 +145,36 @@ describe("hosted Codex auth store", () => {
       verificationUrl: null,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses a fresh disconnect wake so route retries can re-signal runtime", async () => {
+    const prisma = createCodexAuthPrismaHarness({
+      attemptId: "hca_disconnectattempt",
+      memberId: "member_123",
+      state: "disconnecting",
+      updatedAt: new Date("2026-06-23T12:00:00.000Z"),
+      userCode: null,
+      verificationUrl: null,
+    });
+
+    const retry = await beginHostedCodexAuthAttempt({
+      action: "disconnect",
+      memberId: "member_123",
+      now: new Date("2026-06-23T12:01:00.000Z"),
+      prisma: prisma.client,
+    });
+
+    expect(retry).toEqual({
+      attemptId: "hca_disconnectattempt",
+      mailboxItemId: "mailbox_item_codex_auth",
+      view: { state: "disconnecting" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: "codex-auth:disconnect:hca_disconnectattempt",
+      prisma: prisma.tx,
+      userId: "member_123",
+    });
   });
 
   it("applies callback updates only to the active attempt and idempotently records terminals", async () => {
@@ -280,6 +320,133 @@ describe("hosted Codex auth store", () => {
       memberId: "member_123",
       prisma: prisma.client,
     })).resolves.toEqual({ state: "disconnected" });
+  });
+
+  it("preserves the failed in-flight action in projected error states", async () => {
+    const prisma = createCodexAuthPrismaHarness({
+      attemptId: "hca_connectattempt",
+      memberId: "member_123",
+      state: "connecting",
+      updatedAt: new Date("2026-06-23T12:00:00.000Z"),
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/device",
+    });
+
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_connectattempt",
+        phase: "failed",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      state: "connect_error",
+      userCode: null,
+      verificationUrl: null,
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_connectattempt",
+        phase: "failed",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "already_applied",
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_connectattempt",
+        phase: "connected",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      state: "connected",
+      userCode: null,
+      verificationUrl: null,
+    });
+
+    prisma.setRecord({
+      attemptId: "hca_disconnectattempt",
+      memberId: "member_123",
+      state: "disconnecting",
+      updatedAt: new Date("2026-06-23T12:02:00.000Z"),
+      userCode: null,
+      verificationUrl: null,
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_disconnectattempt",
+        phase: "failed",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      state: "disconnect_error",
+      userCode: null,
+      verificationUrl: null,
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_disconnectattempt",
+        phase: "disconnected",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      state: "disconnected",
+      userCode: null,
+      verificationUrl: null,
+    });
+  });
+
+  it("projects stale in-flight attempts to action-specific errors", async () => {
+    const prisma = createCodexAuthPrismaHarness({
+      attemptId: "hca_connectattempt",
+      memberId: "member_123",
+      state: "connecting",
+      updatedAt: new Date("2026-06-23T11:44:59.999Z"),
+      userCode: null,
+      verificationUrl: null,
+    });
+
+    await expect(readHostedCodexAuthConnectionView({
+      memberId: "member_123",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    })).resolves.toEqual({ state: "connect_error" });
+
+    prisma.setRecord({
+      attemptId: "hca_disconnectattempt",
+      memberId: "member_123",
+      state: "disconnecting",
+      updatedAt: new Date("2026-06-23T11:44:59.999Z"),
+      userCode: null,
+      verificationUrl: null,
+    });
+    await expect(readHostedCodexAuthConnectionView({
+      memberId: "member_123",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    })).resolves.toEqual({ state: "disconnect_error" });
   });
 });
 

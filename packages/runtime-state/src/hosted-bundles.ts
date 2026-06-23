@@ -36,6 +36,7 @@ import {
   type HostedBundleInlineRestoreInput,
   type HostedBundleSnapshotArchiveDiagnostics,
 } from "./hosted-bundle-node.ts";
+import { parseHostedLocalCodexSubscriptionHostAuth } from "./hosted-codex-subscription-auth.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
@@ -2731,56 +2732,11 @@ function isHostedCodexManagedAuthJson(raw: string): boolean {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
+    parseHostedLocalCodexSubscriptionHostAuth(parsed);
   } catch {
     return false;
   }
-  if (!isPlainRecord(parsed) || parsed.auth_mode !== "chatgpt") {
-    return false;
-  }
-  if (
-    parsed.OPENAI_API_KEY !== undefined
-    && parsed.OPENAI_API_KEY !== null
-  ) {
-    return false;
-  }
-  if (!isRfc3339UtcTimestamp(parsed.last_refresh)) {
-    return false;
-  }
-  if (!isPlainRecord(parsed.tokens)) {
-    return false;
-  }
-  return isNonEmptyString(parsed.tokens.access_token)
-    && isNonEmptyString(parsed.tokens.account_id)
-    && isJsonJwtString(parsed.tokens.id_token)
-    && isNonEmptyString(parsed.tokens.refresh_token);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
-function isRfc3339UtcTimestamp(value: unknown): value is string {
-  return isNonEmptyString(value)
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(value)
-    && Number.isFinite(Date.parse(value));
-}
-
-function isJsonJwtString(value: unknown): value is string {
-  if (!isNonEmptyString(value)) {
-    return false;
-  }
-  const segments = value.split(".");
-  if (segments.length !== 3 || segments.some((segment) => segment.length === 0)) {
-    return false;
-  }
-  try {
-    const payload: unknown = JSON.parse(
-      Buffer.from(segments[1], "base64url").toString("utf8"),
-    );
-    return isPlainRecord(payload);
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function createHostedCodexContinuitySnapshotArtifactPathSet(

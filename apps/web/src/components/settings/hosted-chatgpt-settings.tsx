@@ -12,6 +12,7 @@ import type { HostedCodexAuthConnectionView } from "@/src/lib/codex-auth/store";
 
 const HOSTED_CODEX_AUTH_POLL_MS = 1_500;
 const HOSTED_CODEX_AUTH_POPUP_NAME = "murph-chatgpt-connect";
+const HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE = "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE";
 
 export function HostedChatGptSettings(props: {
   initialConnection: HostedCodexAuthConnectionView;
@@ -102,6 +103,9 @@ export function HostedChatGptSettings(props: {
     } catch (error) {
       popup?.close();
       popupRef.current = null;
+      if (isHostedCodexAuthRuntimeUnavailableError(error)) {
+        setConnection({ state: "connect_error" });
+      }
       setErrorMessage(formatHostedChatGptError(error));
     } finally {
       setPending(false);
@@ -123,6 +127,9 @@ export function HostedChatGptSettings(props: {
       });
       setConnection(next);
     } catch (error) {
+      if (isHostedCodexAuthRuntimeUnavailableError(error)) {
+        setConnection({ state: "disconnect_error" });
+      }
       setErrorMessage(formatHostedChatGptError(error));
     } finally {
       setPending(false);
@@ -132,9 +139,14 @@ export function HostedChatGptSettings(props: {
   const connecting = connection.state === "connecting";
   const connected = connection.state === "connected";
   const disconnecting = connection.state === "disconnecting";
-  const failed = connection.state === "error";
+  const connectFailed = connection.state === "connect_error" || connection.state === "error";
+  const disconnectFailed = connection.state === "disconnect_error";
   const visibleErrorMessage = errorMessage
-    ?? (failed ? "Could not finish ChatGPT sign in. Try connecting again." : null);
+    ?? (connectFailed
+      ? "Could not finish ChatGPT sign in. Try connecting again."
+      : disconnectFailed
+        ? "Could not disconnect ChatGPT. Try disconnecting again."
+        : null);
 
   return (
     <div className="flex flex-col gap-4 pb-2 sm:flex-row sm:items-start sm:justify-between">
@@ -150,9 +162,11 @@ export function HostedChatGptSettings(props: {
                 ? "Connecting"
                 : disconnecting
                   ? "Disconnecting"
-                  : failed
-                    ? "Connection failed"
-                    : "Not connected"}
+                  : disconnectFailed
+                    ? "Disconnect failed"
+                    : connectFailed
+                      ? "Connection failed"
+                      : "Not connected"}
           </Badge>
         </div>
         <p className="max-w-xl text-sm text-pretty text-muted-foreground">
@@ -188,7 +202,7 @@ export function HostedChatGptSettings(props: {
       </div>
 
       <div className="shrink-0">
-        {connected || disconnecting ? (
+        {connected || disconnecting || disconnectFailed ? (
           <Button
             disabled={pending || disconnecting}
             onClick={() => void disconnectChatGpt()}
@@ -215,4 +229,12 @@ function formatHostedChatGptError(error: unknown): string {
   return error instanceof HostedOnboardingApiError
     ? error.message
     : "Could not update your ChatGPT connection right now.";
+}
+
+function isHostedCodexAuthRuntimeUnavailableError(
+  error: unknown,
+): error is HostedOnboardingApiError {
+  return error instanceof HostedOnboardingApiError
+    && error.code === HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE
+    && error.retryable;
 }

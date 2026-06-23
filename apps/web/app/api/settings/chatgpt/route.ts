@@ -42,6 +42,7 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
   });
   await signalHostedCodexAuthAttempt({
+    action: "connect",
     attemptId: attempt.attemptId,
     mailboxItemId: attempt.mailboxItemId,
     memberId: auth.member.id,
@@ -58,6 +59,7 @@ export const DELETE = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
   });
   await signalHostedCodexAuthAttempt({
+    action: "disconnect",
     attemptId: attempt.attemptId,
     mailboxItemId: attempt.mailboxItemId,
     memberId: auth.member.id,
@@ -66,6 +68,7 @@ export const DELETE = withJsonError(async (request: Request) => {
 });
 
 async function signalHostedCodexAuthAttempt(input: {
+  action: "connect" | "disconnect";
   attemptId: string | null;
   mailboxItemId: string | null;
   memberId: string;
@@ -87,7 +90,9 @@ async function signalHostedCodexAuthAttempt(input: {
     throw hostedOnboardingError({
       code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
       httpStatus: 503,
-      message: "Could not start ChatGPT connection right now.",
+      message: input.action === "disconnect"
+        ? "Could not disconnect ChatGPT right now."
+        : "Could not start ChatGPT connection right now.",
       retryable: true,
     });
   }

@@ -134,6 +134,31 @@ describe("ChatGPT settings route", () => {
     });
   });
 
+  it("re-signals an existing attempt when the store recovers its mailbox item", async () => {
+    mocks.beginHostedCodexAuthAttempt.mockResolvedValueOnce({
+      attemptId: "hca_abcdefghijklmnop",
+      mailboxItemId: "mailbox_item_recovered",
+      view: {
+        state: "connecting",
+        userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.openai.com/device",
+      },
+    });
+
+    const response = await route.POST(jsonRequest("POST", {}));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      state: "connecting",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/device",
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_recovered",
+    });
+  });
+
   it("rejects non-empty mutation bodies before starting an attempt", async () => {
     const response = await route.POST(jsonRequest("POST", {
       unexpected: true,
@@ -175,6 +200,32 @@ describe("ChatGPT settings route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_codex_auth_disconnect",
+    });
+  });
+
+  it("marks a disconnect attempt with a retryable disconnect error when runtime signaling fails", async () => {
+    mocks.beginHostedCodexAuthAttempt.mockResolvedValueOnce({
+      attemptId: "hca_disconnectattempt",
+      mailboxItemId: "mailbox_item_codex_auth_disconnect",
+      view: {
+        state: "disconnecting",
+      },
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("temporal offline"));
+
+    const response = await route.DELETE(jsonRequest("DELETE", {}));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
+        message: "Could not disconnect ChatGPT right now.",
+        retryable: true,
+      },
+    });
+    expect(mocks.markHostedCodexAuthAttemptError).toHaveBeenCalledWith({
+      attemptId: "hca_disconnectattempt",
+      memberId: "member_123",
     });
   });
 });
