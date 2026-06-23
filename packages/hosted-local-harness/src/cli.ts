@@ -112,10 +112,23 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
       });
       const lock = await acquireHostedLocalWorktreeLock(config);
       let databaseState: { created: boolean } | null = null;
+      let databaseCreatedByThisInvocation = false;
+      let databaseCreationRecorded = false;
       let stackBecameReady = false;
       let primaryError: unknown = null;
       try {
-        databaseState = await ensureHostedLocalWorktreeDatabase(config);
+        databaseState = await ensureHostedLocalWorktreeDatabase(config, {
+          onCreated: async () => {
+            databaseCreatedByThisInvocation = true;
+            await lock.recordDatabaseCreated();
+            databaseCreationRecorded = true;
+          },
+        });
+        if (databaseState.created && !databaseCreationRecorded) {
+          databaseCreatedByThisInvocation = true;
+          await lock.recordDatabaseCreated();
+          databaseCreationRecorded = true;
+        }
         await runUp(["--profile", config.profileName], {
           ...io,
           env: config.env,
@@ -130,7 +143,10 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
       } finally {
         let finalizationError: unknown = null;
         try {
-          if (databaseState?.created && !stackBecameReady) {
+          if (
+            (databaseState?.created || databaseCreatedByThisInvocation)
+            && !stackBecameReady
+          ) {
             const cleanup =
               await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
             if (cleanup.missingCryptoState && !cleanup.removed) {

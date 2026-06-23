@@ -18,8 +18,12 @@ const startHostedLocalDevStack = vi.hoisted(() => vi.fn());
 const terminateKnownHostedLocalProcessResidue = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
 const releaseHostedLocalWorktreeLock = vi.hoisted(() => vi.fn(async () => {}));
+const recordHostedLocalWorktreeDatabaseCreated = vi.hoisted(() => vi.fn(async () => {}));
 const acquireHostedLocalWorktreeLock = vi.hoisted(() =>
-  vi.fn(async () => ({ release: releaseHostedLocalWorktreeLock })),
+  vi.fn(async () => ({
+    recordDatabaseCreated: recordHostedLocalWorktreeDatabaseCreated,
+    release: releaseHostedLocalWorktreeLock,
+  })),
 );
 const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
   vi.fn(async () => ({ created: false })),
@@ -134,8 +138,10 @@ describe("hosted-local run CLI", () => {
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
     acquireHostedLocalWorktreeLock.mockResolvedValue({
+      recordDatabaseCreated: recordHostedLocalWorktreeDatabaseCreated,
       release: releaseHostedLocalWorktreeLock,
     });
+    recordHostedLocalWorktreeDatabaseCreated.mockResolvedValue(undefined);
     releaseHostedLocalWorktreeLock.mockResolvedValue(undefined);
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
@@ -269,6 +275,9 @@ describe("hosted-local run CLI", () => {
     );
     expect(ensureHostedLocalWorktreeDatabase).toHaveBeenCalledWith(
       createHostedLocalWorktreeConfig(),
+      expect.objectContaining({
+        onCreated: expect.any(Function),
+      }),
     );
     expect(startHostedLocalDevStack).toHaveBeenCalledWith(expect.objectContaining({
       env: expect.objectContaining({
@@ -281,7 +290,10 @@ describe("hosted-local run CLI", () => {
   });
 
   test("drops a newly created worktree database when startup fails before crypto state exists", async () => {
-    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    ensureHostedLocalWorktreeDatabase.mockImplementationOnce(async (_config, options) => {
+      await options?.onCreated?.();
+      return { created: true };
+    });
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
       .mockResolvedValueOnce({ missingCryptoState: true, removed: true });
     startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
@@ -297,12 +309,16 @@ describe("hosted-local run CLI", () => {
 
     expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
       .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(recordHostedLocalWorktreeDatabaseCreated).toHaveBeenCalled();
     expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
   });
 
   test("preserves the startup failure when created database cleanup fails", async () => {
-    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    ensureHostedLocalWorktreeDatabase.mockImplementationOnce(async (_config, options) => {
+      await options?.onCreated?.();
+      return { created: true };
+    });
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
       .mockRejectedValueOnce(new Error("dropdb failed"));
     startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
@@ -343,7 +359,10 @@ describe("hosted-local run CLI", () => {
   });
 
   test("preserves a created worktree database after the foreground stack has been ready", async () => {
-    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    ensureHostedLocalWorktreeDatabase.mockImplementationOnce(async (_config, options) => {
+      await options?.onCreated?.();
+      return { created: true };
+    });
     startHostedLocalDevStack.mockResolvedValueOnce(createHostedLocalStack({
       exitCode: 1,
     }));

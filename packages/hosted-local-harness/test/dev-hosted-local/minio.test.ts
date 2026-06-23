@@ -247,7 +247,7 @@ describe("hosted-local MinIO sidecar", () => {
     );
   });
 
-  it("checks the MinIO publish port before removing existing containers", async () => {
+  it("removes owned stale MinIO containers before checking whether the publish port is still busy", async () => {
     netMocks.listenErrors = [new Error("busy")];
     childProcessMocks.spawnResponses = [
       ...(process.platform === "linux" ? [{ stdout: "172.17.0.1\n" }] : []),
@@ -265,7 +265,7 @@ describe("hosted-local MinIO sidecar", () => {
     })).rejects.toThrow("MURPH_DEV_MINIO_PORT port 49123 is already in use");
 
     expect(childProcessMocks.spawn.mock.calls.some(([, args]) => args[0] === "rm"))
-      .toBe(false);
+      .toBe(true);
     expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
   });
 

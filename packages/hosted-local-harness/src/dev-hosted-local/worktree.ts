@@ -65,7 +65,15 @@ export interface HostedLocalWorktreeDatabaseCleanupResult {
 
 export interface HostedLocalWorktreeLock {
   lockDir: string;
+  recordDatabaseCreated(): Promise<void>;
   release(): Promise<void>;
+}
+
+interface HostedLocalWorktreeLockOwner {
+  databaseCreated: boolean;
+  databaseName: string;
+  pid: number;
+  slug: string;
 }
 
 const HOSTED_LOCAL_WORKTREE_PROFILE = "dev";
@@ -146,6 +154,9 @@ export function buildHostedLocalWorktreeConfig(input: {
 
 export async function ensureHostedLocalWorktreeDatabase(
   config: HostedLocalWorktreeConfig,
+  options: {
+    onCreated?: (() => Promise<void> | void) | null;
+  } = {},
 ): Promise<HostedLocalWorktreeDatabaseState> {
   assertHostedLocalWorktreeLocalCryptoMode(config.env);
   if (config.env[HOSTED_LOCAL_WORKTREE_DB_CREATE_SKIP_ENV]?.trim() === "1") {
@@ -164,6 +175,7 @@ export async function ensureHostedLocalWorktreeDatabase(
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (createResult.status === 0) {
+    await options.onCreated?.();
     return { created: true };
   }
 
@@ -206,10 +218,18 @@ export async function acquireHostedLocalWorktreeLock(
   const lockRoot = path.join(os.tmpdir(), HOSTED_LOCAL_WORKTREE_LOCK_ROOT);
   const lockDir = path.join(lockRoot, `${config.databaseName}.lock`);
   await mkdir(lockRoot, { mode: 0o700, recursive: true });
-  try {
-    await mkdir(lockDir, { mode: 0o700 });
-  } catch (error) {
-    if (isNodeError(error) && error.code === "EEXIST") {
+
+  for (;;) {
+    try {
+      await mkdir(lockDir, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (!(isNodeError(error) && error.code === "EEXIST")) {
+        throw error;
+      }
+      if (await reclaimDeadHostedLocalWorktreeLock(config, lockDir)) {
+        continue;
+      }
       throw new Error(
         [
           `Refusing to start hosted-local worktree ${config.slug} because another process already owns database ${config.databaseName}.`,
@@ -217,22 +237,16 @@ export async function acquireHostedLocalWorktreeLock(
         ].join("\n"),
       );
     }
-    throw error;
   }
 
+  let owner: HostedLocalWorktreeLockOwner = {
+    databaseCreated: false,
+    databaseName: config.databaseName,
+    pid: process.pid,
+    slug: config.slug,
+  };
   try {
-    await writeFile(
-      path.join(lockDir, "owner.json"),
-      `${JSON.stringify({
-        databaseName: config.databaseName,
-        pid: process.pid,
-        slug: config.slug,
-      })}\n`,
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
+    await writeHostedLocalWorktreeLockOwner(lockDir, owner);
   } catch (error) {
     await rm(lockDir, { force: true, recursive: true }).catch(() => {});
     throw error;
@@ -241,6 +255,16 @@ export async function acquireHostedLocalWorktreeLock(
   let released = false;
   return {
     lockDir,
+    recordDatabaseCreated: async () => {
+      if (released) {
+        return;
+      }
+      owner = {
+        ...owner,
+        databaseCreated: true,
+      };
+      await writeHostedLocalWorktreeLockOwner(lockDir, owner);
+    },
     release: async () => {
       if (released) {
         return;
@@ -249,6 +273,98 @@ export async function acquireHostedLocalWorktreeLock(
       await rm(lockDir, { force: true, recursive: true });
     },
   };
+}
+
+async function reclaimDeadHostedLocalWorktreeLock(
+  config: HostedLocalWorktreeConfig,
+  lockDir: string,
+): Promise<boolean> {
+  const owner = await readHostedLocalWorktreeLockOwner(lockDir);
+  if (owner && isHostedLocalWorktreeLockOwnerAlive(owner)) {
+    return false;
+  }
+
+  if (
+    owner?.databaseCreated === true
+    && owner.databaseName === config.databaseName
+    && owner.slug === config.slug
+  ) {
+    const cleanup = await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
+    if (cleanup.missingCryptoState && !cleanup.removed) {
+      throw new Error(
+        [
+          `Refusing to reclaim stale hosted-local worktree lock for ${config.slug} because database ${config.databaseName} was created by the dead owner but could not be removed.`,
+          "Drop that slug database manually before retrying.",
+        ].join("\n"),
+      );
+    }
+  }
+
+  await rm(lockDir, { force: true, recursive: true });
+  return true;
+}
+
+async function readHostedLocalWorktreeLockOwner(
+  lockDir: string,
+): Promise<HostedLocalWorktreeLockOwner | null> {
+  let contents: string;
+  try {
+    contents = await readFile(path.join(lockDir, "owner.json"), "utf8");
+  } catch {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(contents) as unknown;
+    if (!isRecord(parsed)) {
+      return null;
+    }
+    const pid = parsed.pid;
+    const databaseName = parsed.databaseName;
+    const slug = parsed.slug;
+    if (
+      typeof pid !== "number"
+      || !Number.isInteger(pid)
+      || pid <= 0
+      || typeof databaseName !== "string"
+      || typeof slug !== "string"
+    ) {
+      return null;
+    }
+    return {
+      databaseCreated: parsed.databaseCreated === true,
+      databaseName,
+      pid,
+      slug,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isHostedLocalWorktreeLockOwnerAlive(
+  owner: HostedLocalWorktreeLockOwner,
+): boolean {
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (error) {
+    return !(isNodeError(error) && error.code === "ESRCH");
+  }
+}
+
+async function writeHostedLocalWorktreeLockOwner(
+  lockDir: string,
+  owner: HostedLocalWorktreeLockOwner,
+): Promise<void> {
+  await writeFile(
+    path.join(lockDir, "owner.json"),
+    `${JSON.stringify(owner)}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
 }
 
 export function formatHostedLocalWorktreeEnv(

@@ -1,3 +1,4 @@
+import process from "node:process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type SpawnSyncResult = {
@@ -513,12 +514,87 @@ describe("hosted-local worktree config", () => {
     worktreeMocks.mkdir
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(Object.assign(new Error("exists"), { code: "EEXIST" }));
+    worktreeMocks.readFile.mockResolvedValueOnce(`${JSON.stringify({
+      databaseCreated: false,
+      databaseName: "murph_dev_feature_a",
+      pid: process.pid,
+      slug: "feature-a",
+    })}\n`);
 
     await expect(acquireHostedLocalWorktreeLock(config)).rejects.toThrow(
       "another process already owns database murph_dev_feature_a",
     );
 
     expect(worktreeMocks.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("reclaims a dead lock owner and drops its helper-created database when crypto state is missing", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    const deadPid = 9_999_999;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === deadPid) {
+        const error = new Error("missing process") as NodeJS.ErrnoException;
+        error.code = "ESRCH";
+        throw error;
+      }
+      return true;
+    });
+    worktreeMocks.mkdir
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(Object.assign(new Error("exists"), { code: "EEXIST" }))
+      .mockResolvedValueOnce(undefined);
+    worktreeMocks.readFile.mockResolvedValueOnce(`${JSON.stringify({
+      databaseCreated: true,
+      databaseName: "murph_dev_feature_a",
+      pid: deadPid,
+      slug: "feature-a",
+    })}\n`);
+
+    try {
+      const lock = await acquireHostedLocalWorktreeLock(config);
+      await lock.release();
+    } finally {
+      killSpy.mockRestore();
+    }
+
+    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
+      "dropdb",
+      expect.arrayContaining([
+        "--if-exists",
+        "murph_dev_feature_a",
+      ]),
+      expect.any(Object),
+    );
+    expect(worktreeMocks.rm).toHaveBeenCalledWith(
+      expect.stringContaining("murph_dev_feature_a.lock"),
+      { force: true, recursive: true },
+    );
+    expect(worktreeMocks.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("owner.json"),
+      expect.stringContaining('"databaseCreated":false'),
+      expect.objectContaining({ mode: 0o600 }),
+    );
+  });
+
+  it("records database creation in the lock owner", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    const lock = await acquireHostedLocalWorktreeLock(config);
+    await lock.recordDatabaseCreated();
+    await lock.release();
+
+    expect(worktreeMocks.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("owner.json"),
+      expect.stringContaining('"databaseCreated":true'),
+      expect.objectContaining({ mode: 0o600 }),
+    );
   });
 
   it("accepts an existing local database when psql can connect", async () => {
@@ -562,6 +638,28 @@ describe("hosted-local worktree config", () => {
       expect.objectContaining({
         encoding: "utf8",
       }),
+    );
+  });
+
+  it("runs the created-database hook before returning created database state", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    const onCreated = vi.fn();
+
+    await expect(
+      ensureHostedLocalWorktreeDatabase(config, { onCreated }),
+    ).resolves.toEqual({
+      created: true,
+    });
+
+    expect(onCreated).toHaveBeenCalledOnce();
+    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
+      "createdb",
+      expect.arrayContaining(["murph_dev_feature_a"]),
+      expect.any(Object),
     );
   });
 
