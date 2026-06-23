@@ -1,15 +1,37 @@
-import type { MurphManagedAutomationDefinition } from './managed-automations.js'
+import type {
+  AutomationContinuityPolicy,
+  AutomationSchedule,
+} from '@murphai/contracts'
+
+export type MurphOnboardingFollowupAutomationSchedule = Exclude<
+  AutomationSchedule,
+  { kind: 'deviceActivity' }
+>
+
+export interface MurphOnboardingFollowupAutomationDefinition {
+  continuityPolicy: AutomationContinuityPolicy
+  instructions: string
+  schedule: MurphOnboardingFollowupAutomationSchedule
+  slug: string
+  summary: string
+  tags: readonly string[]
+  title: string
+}
 
 export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
   {
     slug: 'finish-onboarding-followup',
     title: 'Finish Murph onboarding follow-up',
     summary: 'Daily setup continuation check until Murph onboarding is complete.',
+    continuityPolicy: 'preserve',
     schedule: {
       kind: 'dailyLocal',
       localTime: '13:30',
     },
     tags: [
+      'assistant',
+      'scheduled',
+      'murph-managed',
       'onboarding',
       'murph-managed:onboarding-followup',
     ],
@@ -30,4 +52,4 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       "Output: send one brief, natural, low-pressure in-chat question only when a real unresolved step remains. Do not mention internal state or this automation, and do not use a fixed script. The user's answer will be handled by the next normal Murph onboarding turn.",
     ].join('\n'),
-  } satisfies MurphManagedAutomationDefinition
+  } satisfies MurphOnboardingFollowupAutomationDefinition

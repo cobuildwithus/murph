@@ -1,7 +1,6 @@
 import { createHmac } from "node:crypto";
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-  resolveMurphManagedAutomationDefinition,
 } from "@murphai/assistant-engine";
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -35,13 +34,11 @@ import {
 
 const userId = `member_local_linq_onboarding_followup_${Date.now()}`;
 const linqWebhookSecret = "linq-local-onboarding-followup-secret";
-const followupAutomationDefinition =
-  resolveMurphManagedAutomationDefinition(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION);
-const followupSlug = followupAutomationDefinition.slug;
-const followupTitle = followupAutomationDefinition.title;
-const followupSummary = followupAutomationDefinition.summary ?? "";
-const followupInstructions = followupAutomationDefinition.instructions;
-const followupTags = followupAutomationDefinition.tags;
+const followupSlug = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug;
+const followupTitle = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title;
+const followupSummary = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary;
+const followupInstructions = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions;
+const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";

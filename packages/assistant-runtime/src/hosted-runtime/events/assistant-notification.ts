@@ -4,7 +4,6 @@ import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-  resolveMurphManagedAutomationDefinition,
   sendAssistantNotification,
   upsertAssistantCronAutomation,
   type AssistantExecutionContext,
@@ -36,9 +35,6 @@ import {
 import { emitHostedAssistantProviderTraceLog } from "./provider-trace-log.ts";
 
 type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
-
-const ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION =
-  resolveMurphManagedAutomationDefinition(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION);
 
 export async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
@@ -213,13 +209,13 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
-      instructions: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.instructions,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
-      schedule: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.schedule,
-      slug: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.slug,
-      summary: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.summary,
-      tags: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.tags,
-      title: ONBOARDING_FOLLOWUP_AUTOMATION_DEFINITION.title,
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vault: input.vaultRoot,
     });
     return job?.enabled ? job.state.nextRunAt : null;
