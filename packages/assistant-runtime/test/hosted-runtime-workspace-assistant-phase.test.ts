@@ -3720,6 +3720,59 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("preserves a future device-sync retry while recording unrelated system mailbox work", async () => {
+    const deviceSyncRetryAt = "2026-04-27T00:00:30.000Z";
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce("2026-04-27T01:00:00.000Z");
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: deviceSyncRetryAt,
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: deviceSyncRetryAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: deviceSyncRetryAt,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+  });
+
   it("preserves system mailbox retry wake without running idle device sync", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       errorCode: "system_mailbox.retryable",
