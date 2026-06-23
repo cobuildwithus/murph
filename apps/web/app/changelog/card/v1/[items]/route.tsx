@@ -1,6 +1,5 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 
 import {
   parseChangelogCardItemSegment,
@@ -12,11 +11,10 @@ import {
   dmSans400FontPath,
   fraunces400FontPath,
   fraunces600FontPath,
+  logoDarkSvgPath,
 } from "../../../../font-files";
 
 export const dynamic = "force-dynamic";
-
-const LOGO_PATH = path.join(process.cwd(), "apps/web/public/logo-dark.svg");
 
 const SIZE = { width: 1200, height: 630 };
 const COLOR = {
@@ -48,7 +46,7 @@ export async function GET(
     readFile(fraunces400FontPath).then(toArrayBuffer),
     readFile(fraunces600FontPath).then(toArrayBuffer),
     readFile(dmSans400FontPath).then(toArrayBuffer),
-    readFile(LOGO_PATH),
+    readFile(logoDarkSvgPath),
   ]);
   const logoDataUri = `data:image/svg+xml;base64,${logoBuffer.toString("base64")}`;
 

@@ -404,7 +404,7 @@ const PREVIEW_CARD_IMAGE = {
 } as const;
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Changelog · Murph",
+  title: "Murph Changelog — new features, improvements, and what to try",
   description: DESCRIPTION,
   alternates: {
     canonical: "/changelog",
