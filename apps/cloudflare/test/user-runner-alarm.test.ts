@@ -785,6 +785,53 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("measures how long runtime preparation remains pending after container readiness", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const runnerSecretsReadStarted = createDeferred<void>();
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: TEST_USER_ID });
+    const bucket = new DelayedGetMemoryEncryptedR2Bucket({
+      delayMs: 2_000,
+      key: runnerSecretsKey,
+      onDelayedGet: () => runnerSecretsReadStarted.resolve(),
+    });
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner } = createRunnerHarness({
+      bucket,
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+    await runnerSecretsReadStarted.promise;
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(response).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimePreparationWaitAfterContainerReadyMs: 2_000,
+        }),
+        message: "Hosted runner runtime processing accepted.",
+      }),
+    );
+  });
+
   it("does not invoke a prepared startup job after its write fence changes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

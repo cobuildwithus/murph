@@ -3,6 +3,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedWorkspaceSnapshotV2FingerprintSha256,
   buildHostedWorkspaceSnapshotV2Aad,
   decodeHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
@@ -55,16 +56,17 @@ describe("workspace snapshot restore preparation", () => {
       });
 
       expect(prepared).not.toBeNull();
-      expect(prepared?.encryptedObjectSha256).toBe(
-        fixture.ref.archive.encryptedObjectSha256,
+      expect(prepared?.snapshotFingerprint).toBe(
+        buildHostedWorkspaceSnapshotV2FingerprintSha256(fixture.ref),
       );
-      expect(Date.parse(prepared?.expiresAt ?? "")).toBeGreaterThan(Date.now());
       const getUrl = new URL(prepared?.getUrl ?? "");
       expect(getUrl.hostname).toBe("account123.r2.cloudflarestorage.com");
       expect(getUrl.pathname).toContain("/murph-test/");
+      expect(getUrl.searchParams.get("X-Amz-Date")).toMatch(/^\d{8}T\d{6}Z$/u);
+      expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("300");
 
       const decoded = decodeHostedWorkspaceSnapshotV2DataKey(
-        prepared?.dataKeyBase64 ?? "",
+        prepared?.dataKey ?? "",
       );
       try {
         expect(decoded).toEqual(fixture.dataKey);
@@ -107,7 +109,7 @@ describe("workspace snapshot restore preparation", () => {
         kind: "workspace-invocation",
         preparedSnapshotRestore: {
           ...prepared,
-          encryptedObjectSha256: "not-a-sha256",
+          snapshotFingerprint: "not-a-sha256",
         },
         request: {
           attemptId: "attempt_snapshot_restore_prepare",
@@ -116,7 +118,23 @@ describe("workspace snapshot restore preparation", () => {
           workspace: fixture.workspace,
           workspaceVersion: fixture.workspace.version,
         },
-      })).toThrow(/encryptedObjectSha256/u);
+      })).toThrow(/snapshotFingerprint/u);
+      expect(() => parseHostedExecutionRunnerJobInput({
+        kind: "workspace-invocation",
+        preparedSnapshotRestore: {
+          ...prepared,
+          getUrl: "not a url",
+        },
+        request: {
+          attemptId: "attempt_snapshot_restore_prepare",
+          leaseGeneration: "7",
+          userId: TEST_USER_ID,
+          workspace: fixture.workspace,
+          workspaceVersion: fixture.workspace.version,
+        },
+      })).toThrow(
+        "Hosted execution runner job input.preparedSnapshotRestore.getUrl must be a valid URL.",
+      );
     } finally {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
@@ -125,7 +143,7 @@ describe("workspace snapshot restore preparation", () => {
 
   it("uses prepared restore data without calling unwrap or presign control routes", async () => {
     const fixture = await createSnapshotFixture();
-    const getUrl = "https://r2.example.test/prepared-snapshot.enc?X-Amz-Signature=test";
+    const getUrl = createPreparedGetUrl("prepared-snapshot.enc");
     const fetchMock = vi.fn(async () => new Response("unavailable", { status: 500 }));
     const port = createCloudflareWorkspaceSnapshotPort({
       boundUserId: TEST_USER_ID,
@@ -158,8 +176,8 @@ describe("workspace snapshot restore preparation", () => {
       boundUserId: TEST_USER_ID,
       fetchImpl: fetchMock as typeof fetch,
       preparedSnapshotRestore: {
-        ...createPreparedRestore(fixture, "https://r2.example.test/mismatch.enc"),
-        encryptedObjectSha256: "f".repeat(64),
+        ...createPreparedRestore(fixture, createPreparedGetUrl("mismatch.enc")),
+        snapshotFingerprint: "f".repeat(64),
       },
       timeoutMs: 5_000,
       workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
@@ -171,6 +189,34 @@ describe("workspace snapshot restore preparation", () => {
         ref: fixture.ref,
       })).rejects.toThrow(
         "Hosted workspace snapshot prepared restore did not match the selected snapshot.",
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
+  it("fails closed before fetch when prepared data is expired", async () => {
+    const fixture = await createSnapshotFixture();
+    const fetchMock = vi.fn(async () => new Response("unexpected", { status: 500 }));
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(
+        fixture,
+        createPreparedGetUrl("expired.enc", 1, Date.now() - 60_000),
+      ),
+      timeoutMs: 5_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      await expect(port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-expired-snapshot-restore",
+        ref: fixture.ref,
+      })).rejects.toThrow(
+        "Hosted workspace snapshot prepared restore URL is expired or too close to expiry.",
       );
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
@@ -323,11 +369,21 @@ function createPreparedRestore(
   getUrl: string,
 ): HostedWorkspaceSnapshotPreparedRestore {
   return {
-    dataKeyBase64: fixture.dataKeyBase64,
-    encryptedObjectSha256: fixture.ref.archive.encryptedObjectSha256,
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    dataKey: fixture.dataKeyBase64,
     getUrl,
+    snapshotFingerprint: buildHostedWorkspaceSnapshotV2FingerprintSha256(fixture.ref),
   };
+}
+
+function createPreparedGetUrl(
+  pathname: string,
+  expiresSeconds = 60,
+  issuedAtMs = Date.now(),
+): string {
+  const issuedAt = new Date(issuedAtMs).toISOString()
+    .replace(/[:-]/gu, "")
+    .replace(/\.\d{3}Z$/u, "Z");
+  return `https://r2.example.test/${pathname}?X-Amz-Date=${issuedAt}&X-Amz-Expires=${expiresSeconds}&X-Amz-Signature=test`;
 }
 
 function createWorkspaceCheckpointBridge() {

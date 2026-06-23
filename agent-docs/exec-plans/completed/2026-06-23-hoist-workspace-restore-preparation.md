@@ -14,15 +14,20 @@ Remove the measured data-key unwrap and R2 GET presign latency from the cold-res
 
 ## Implementation
 
-1. Add one app-local prepared-restore value and parser owned by `apps/cloudflare`.
+1. Add one prepared-restore value carried by `apps/cloudflare`, using the shared v2 snapshot fingerprint as its only snapshot identity.
 2. In runtime preparation, validate the selected v2 snapshot, resolve and unwrap its data key, and mint its short-lived GET URL concurrently.
 3. Carry the prepared value in the existing secret-bearing runner job and consume it in the snapshot port.
 4. Parallelize the legacy fallback's unwrap and presign operations.
-5. Add focused tests for overlap, prepared-path bypass, mismatch rejection, and transport parsing.
+5. Log how long runtime preparation remains unfinished after the runner is ready.
+6. Add the missing hosted AI usage period counter backfill migration expected by the current migration guard.
+7. Add focused tests for overlap, prepared-path bypass, expiry/mismatch rejection, and transport parsing.
 
 ## Verification
 
 - Run the narrowest truthful Cloudflare diff/coverage lane available, plus typecheck.
 - Exercise a prepared restore and prove no unwrap/presign control-plane calls occur.
-- Exercise malformed/mismatched prepared data and prove restore fails before object fetch.
+- Exercise malformed/expired/mismatched prepared data and prove restore fails before object fetch.
 - Review the final diff for secret-safe logging and deploy-skew behavior.
+Status: completed
+Updated: 2026-06-23
+Completed: 2026-06-23

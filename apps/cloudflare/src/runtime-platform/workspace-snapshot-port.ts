@@ -256,7 +256,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
         });
-        dataKey = prepared.dataKeyBase64;
+        dataKey = prepared.dataKey;
         presignedGet = {
           expiresAtMs: prepared.expiresAtMs,
           getUrl: prepared.getUrl,

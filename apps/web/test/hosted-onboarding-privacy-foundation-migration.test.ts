@@ -313,6 +313,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsagePeriodCounterBackfillMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062100_hosted_ai_usage_period_counter_backfill/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const singleMemberComputerProfileMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026062100_hosted_computer_single_member_profile/migration.sql",
@@ -407,6 +414,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
     expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
     expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");
+    expect(hostedAiUsagePeriodCounterBackfillMigrationSql).toContain(
+      'UPDATE "hosted_ai_usage_period"',
+    );
+    expect(hostedAiUsagePeriodCounterBackfillMigrationSql).toContain(
+      'FROM "hosted_ai_usage"',
+    );
+    expect(hostedAiUsagePeriodCounterBackfillMigrationSql).toContain(
+      '"allowance_counted" = true',
+    );
+    expect(hostedAiUsagePeriodCounterBackfillMigrationSql).toContain(
+      '"spent_usd_micros" = period_spend."spent_usd_micros"',
+    );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

@@ -5,6 +5,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedWorkspaceSnapshotV2FingerprintSha256,
   decodeHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
   readHostedWorkspaceSnapshotV2DataKeyWrapRootKeyId,
@@ -26,12 +27,13 @@ import {
 const HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS = 5 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_MIN_REMAINING_MS = 5_000;
 const HOSTED_WORKSPACE_SNAPSHOT_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const HOSTED_R2_PRESIGNED_AMZ_DATE_PATTERN =
+  /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/u;
 
 export interface HostedWorkspaceSnapshotPreparedRestore {
-  dataKeyBase64: string;
-  encryptedObjectSha256: string;
-  expiresAt: string;
+  dataKey: string;
   getUrl: string;
+  snapshotFingerprint: string;
 }
 
 export async function prepareHostedWorkspaceSnapshotRestore(input: {
@@ -58,7 +60,7 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
   }
 
   const presignEnvironment = readHostedR2PresignEnvironment(input.configSource);
-  const dataKeyBase64Promise = (async () => {
+  const dataKeyPromise = (async () => {
     const rootKey = ref.encryption.rootKeyId === input.crypto.rootKeyId
       ? input.crypto.rootKey
       : await input.crypto.resolveKeyById(ref.encryption.rootKeyId);
@@ -82,16 +84,15 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
     expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS,
     key: ref.objectKey,
   });
-  const [dataKeyBase64, presignedGet] = await Promise.all([
-    dataKeyBase64Promise,
+  const [dataKey, presignedGet] = await Promise.all([
+    dataKeyPromise,
     presignedGetPromise,
   ]);
 
   return {
-    dataKeyBase64,
-    encryptedObjectSha256: ref.archive.encryptedObjectSha256,
-    expiresAt: presignedGet.expiresAt,
+    dataKey,
     getUrl: presignedGet.url,
+    snapshotFingerprint: buildHostedWorkspaceSnapshotV2FingerprintSha256(ref),
   };
 }
 
@@ -104,32 +105,28 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
   }
 
   const record = value as Record<string, unknown>;
-  const dataKeyBase64 = requirePreparedRestoreString(
-    record.dataKeyBase64,
-    `${label}.dataKeyBase64`,
+  const dataKey = requirePreparedRestoreString(
+    record.dataKey,
+    `${label}.dataKey`,
   );
-  const decodedDataKey = decodeHostedWorkspaceSnapshotV2DataKey(dataKeyBase64);
+  const decodedDataKey = decodeHostedWorkspaceSnapshotV2DataKey(dataKey);
   decodedDataKey.fill(0);
 
-  const encryptedObjectSha256 = requirePreparedRestoreString(
-    record.encryptedObjectSha256,
-    `${label}.encryptedObjectSha256`,
+  const snapshotFingerprint = requirePreparedRestoreString(
+    record.snapshotFingerprint,
+    `${label}.snapshotFingerprint`,
   );
-  if (!HOSTED_WORKSPACE_SNAPSHOT_SHA256_PATTERN.test(encryptedObjectSha256)) {
-    throw new TypeError(`${label}.encryptedObjectSha256 must be a lowercase SHA-256 hex digest.`);
-  }
-
-  const expiresAt = requirePreparedRestoreString(
-    record.expiresAt,
-    `${label}.expiresAt`,
-  );
-  const expiresAtMs = Date.parse(expiresAt);
-  if (!Number.isFinite(expiresAtMs)) {
-    throw new TypeError(`${label}.expiresAt must be a valid ISO date string.`);
+  if (!HOSTED_WORKSPACE_SNAPSHOT_SHA256_PATTERN.test(snapshotFingerprint)) {
+    throw new TypeError(`${label}.snapshotFingerprint must be a lowercase SHA-256 hex digest.`);
   }
 
   const getUrlText = requirePreparedRestoreString(record.getUrl, `${label}.getUrl`);
-  const getUrl = new URL(getUrlText);
+  let getUrl: URL;
+  try {
+    getUrl = new URL(getUrlText);
+  } catch {
+    throw new TypeError(`${label}.getUrl must be a valid URL.`);
+  }
   if (
     (getUrl.protocol !== "https:" && getUrl.protocol !== "http:")
     || getUrl.username.length > 0
@@ -138,12 +135,12 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
   ) {
     throw new TypeError(`${label}.getUrl must be an HTTP(S) URL without credentials or a fragment.`);
   }
+  readHostedR2PresignedGetUrlExpiresAtMs(getUrl, label);
 
   return {
-    dataKeyBase64,
-    encryptedObjectSha256,
-    expiresAt: new Date(expiresAtMs).toISOString(),
+    dataKey,
     getUrl: getUrl.href,
+    snapshotFingerprint,
   };
 }
 
@@ -152,11 +149,14 @@ export function requireHostedWorkspaceSnapshotPreparedRestoreForRef(input: {
   ref: HostedWorkspaceSnapshotV2Ref;
 }): HostedWorkspaceSnapshotPreparedRestore & { expiresAtMs: number } {
   const prepared = parseHostedWorkspaceSnapshotPreparedRestore(input.prepared);
-  if (prepared.encryptedObjectSha256 !== input.ref.archive.encryptedObjectSha256) {
+  if (prepared.snapshotFingerprint !== buildHostedWorkspaceSnapshotV2FingerprintSha256(input.ref)) {
     throw new Error("Hosted workspace snapshot prepared restore did not match the selected snapshot.");
   }
 
-  const expiresAtMs = Date.parse(prepared.expiresAt);
+  const expiresAtMs = readHostedR2PresignedGetUrlExpiresAtMs(
+    new URL(prepared.getUrl),
+    "Hosted workspace snapshot prepared restore",
+  );
   if (expiresAtMs <= Date.now() + HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_MIN_REMAINING_MS) {
     throw new Error("Hosted workspace snapshot prepared restore URL is expired or too close to expiry.");
   }
@@ -184,6 +184,55 @@ async function assertHostedWorkspaceSnapshotRestoreRefOwnership(input: {
   ) {
     throw new Error("Hosted workspace snapshot restore ref is outside the bound user namespace.");
   }
+}
+
+function readHostedR2PresignedGetUrlExpiresAtMs(
+  getUrl: URL,
+  label: string,
+): number {
+  const amzDate = getUrl.searchParams.get("X-Amz-Date");
+  const expires = getUrl.searchParams.get("X-Amz-Expires");
+  const dateMatch = amzDate?.match(HOSTED_R2_PRESIGNED_AMZ_DATE_PATTERN) ?? null;
+  if (!dateMatch) {
+    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
+  }
+  if (!expires || !/^\d+$/u.test(expires)) {
+    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Expires query parameter.`);
+  }
+
+  const expiresSeconds = Number.parseInt(expires, 10);
+  if (!Number.isSafeInteger(expiresSeconds) || expiresSeconds <= 0) {
+    throw new TypeError(`${label}.getUrl X-Amz-Expires must be a positive safe integer.`);
+  }
+
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+  ] = dateMatch;
+  const issuedAtMs = Date.UTC(
+    Number.parseInt(yearText ?? "", 10),
+    Number.parseInt(monthText ?? "", 10) - 1,
+    Number.parseInt(dayText ?? "", 10),
+    Number.parseInt(hourText ?? "", 10),
+    Number.parseInt(minuteText ?? "", 10),
+    Number.parseInt(secondText ?? "", 10),
+  );
+  if (!Number.isFinite(issuedAtMs) || formatHostedR2AmzDate(issuedAtMs) !== amzDate) {
+    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
+  }
+
+  return issuedAtMs + expiresSeconds * 1000;
+}
+
+function formatHostedR2AmzDate(timestampMs: number): string {
+  return new Date(timestampMs).toISOString()
+    .replace(/[:-]/gu, "")
+    .replace(/\.\d{3}Z$/u, "Z");
 }
 
 function requirePreparedRestoreString(value: unknown, label: string): string {
