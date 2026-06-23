@@ -29,7 +29,6 @@ import {
   MealCard,
   MetricCardMock,
   StatBlock,
-  TerminalMock,
   VoiceBubble,
 } from "./visuals";
 
@@ -93,7 +92,14 @@ const VISUALS: Record<string, ReactNode> = {
     />
   ),
   "thread-auto-compaction": (
-    <StatBlock label="Auto-compact at" value="128k" caption="tokens" />
+    <MetricCardMock
+      label="In long chats"
+      title="Murph stays trim"
+      value="Lower"
+      delta={{ direction: "down", text: "AI cost" }}
+      sparkline={[28, 32, 36, 38, 30, 22, 18, 16]}
+      caption="History compacts itself in the background."
+    />
   ),
   "junction-hourly-reconcile": (
     <StatBlock
@@ -113,20 +119,19 @@ const VISUALS: Record<string, ReactNode> = {
     <StatBlock label="DSLD catalog" value="214k+" caption="supplement labels" />
   ),
   "vault-cli-cold-start": (
-    <TerminalMock
-      lines={[
-        { command: "murph device list", timing: "0.27s" },
-        { command: "murph experiment current", timing: "0.31s" },
-        { command: "murph commons protocol show", timing: "0.24s" },
-      ]}
+    <StatBlock
+      label="Behind the scenes"
+      before="Slow start"
+      after="Snappy"
+      caption="internal tools start faster"
     />
   ),
   "faster-cli-startup": (
-    <TerminalMock
-      lines={[
-        { command: "murph device list", timing: "0.21s" },
-        { command: "murph experiment list", timing: "0.28s" },
-      ]}
+    <StatBlock
+      label="First reply of the day"
+      before="Pause"
+      after="Right away"
+      caption="warm tools, faster first reply"
     />
   ),
   "food-label-database": (
