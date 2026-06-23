@@ -1058,6 +1058,27 @@ export async function runHostedDeviceSyncPass(
   }
 }
 
+export function resolveHostedDeviceSyncNextWakeAt(input: {
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  platformEnv?: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}): string | null {
+  const service = createHostedDeviceSyncRuntime({
+    deviceSyncConfig: input.deviceSyncConfig,
+    platformEnv: input.platformEnv ?? {},
+    vaultRoot: input.vaultRoot,
+  });
+  if (!service) {
+    return null;
+  }
+
+  try {
+    return service.getNextWakeAt();
+  } finally {
+    closeHostedRuntimeDeviceSyncService(service);
+  }
+}
+
 function createHostedDeviceSyncYieldPredicate(
   shouldYield: (() => boolean) | null,
   signal: AbortSignal | null,

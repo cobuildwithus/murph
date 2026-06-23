@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
+  resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   resetHostedPreparedAssistantDeliveryEffects: vi.fn(),
   runHostedAssistantAutomationLane: vi.fn(),
@@ -115,6 +116,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  resolveHostedDeviceSyncNextWakeAt: mocks.resolveHostedDeviceSyncNextWakeAt,
   runHostedAssistantAutomationLane: mocks.runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
 }));
@@ -335,6 +337,7 @@ beforeEach(() => {
   });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
+  mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resetHostedPreparedAssistantDeliveryEffects.mockResolvedValue(undefined);
   mocks.runHostedAssistantAutomationLane.mockResolvedValue({
@@ -4597,7 +4600,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
-      nextWakeAt,
+      nextWakeAt: null,
       redactedStatus: expect.objectContaining({
         hostedSystemMailboxRecorded: 1,
       }),

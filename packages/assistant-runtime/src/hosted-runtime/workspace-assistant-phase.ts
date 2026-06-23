@@ -61,6 +61,7 @@ import {
 import {
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane,
+  resolveHostedDeviceSyncNextWakeAt,
 } from "./maintenance.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -368,6 +369,8 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
     });
+    const localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input);
+    const deviceSyncFollowUpWake = localDeviceSyncScheduledWake ?? skippedDeviceSyncWake;
     const systemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -386,7 +389,7 @@ export async function runHostedWorkspaceAssistantPhase(
         currentTurnDeliveryIntentIds,
         deferredProviderCleanupWakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt,
         input,
-        skippedDeviceSyncWake,
+        skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWakeAt,
         wake,
       });
@@ -436,7 +439,7 @@ export async function runHostedWorkspaceAssistantPhase(
           assistantMetrics,
           deferredProviderCleanupWakeAt,
           input,
-          skippedDeviceSyncWake,
+          skippedDeviceSyncWake: deviceSyncFollowUpWake,
           systemMailboxWakeAt,
         }),
         assistantCronWakeAfterPassCandidate,
@@ -459,7 +462,7 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantMetrics,
         input,
         nextWakeAt,
-        skippedDeviceSyncWakeAt: skippedDeviceSyncWake?.at ?? null,
+        skippedDeviceSyncWakeAt: deviceSyncFollowUpWake?.at ?? null,
       });
       const progressed = assistantMetricsProgressed({
         ...assistantMetrics,
@@ -518,7 +521,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const nextWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
       assistantCronWakeAfterPassCandidate,
-      skippedDeviceSyncWake,
+      deviceSyncFollowUpWake,
       createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
       createHostedRuntimeWakeCandidate(systemMailboxWakeAt, "assistant"),
       createHostedRuntimeWakeCandidate(deferredProviderCleanupWakeAt, "assistant"),
@@ -528,7 +531,7 @@ export async function runHostedWorkspaceAssistantPhase(
       assistantMetrics,
       input,
       nextWakeAt,
-      skippedDeviceSyncWakeAt: skippedDeviceSyncWake?.at ?? null,
+      skippedDeviceSyncWakeAt: deviceSyncFollowUpWake?.at ?? null,
     });
     const progressed = assistantMetricsProgressed({
       ...assistantMetrics,
@@ -580,7 +583,7 @@ export async function runHostedWorkspaceAssistantPhase(
               const baseNextWake = selectHostedRuntimeWakeCandidate([
                 createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
                 assistantCronWakeAfterPassCandidate,
-                skippedDeviceSyncWake,
+                deviceSyncFollowUpWake,
                 createHostedRuntimeWakeCandidate(systemMailboxWakeAt, "assistant"),
                 createHostedRuntimeWakeCandidate(deferredProviderCleanupWakeAt, "assistant"),
               ]);
@@ -743,17 +746,9 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
     return input.result;
   }
 
-  const baseNextWake = Object.hasOwn(input.result, "nextWakeAt")
-    || Object.hasOwn(input.result, "nextWakeReason")
-    ? createHostedRuntimeWakeCandidate(
-        input.result.nextWakeAt ?? null,
-        input.result.nextWakeReason ?? "assistant",
-      )
-    : null;
   return {
     ...input.result,
     afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
-      baseNextWake,
       callbacks: [
         input.result.afterCheckpoint,
         async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
@@ -916,7 +911,6 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     input.systemMailboxResult.browserVaultReplicaRefreshRequested === true
     || input.assistantResult.browserVaultReplicaRefreshRequested === true;
   const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
-    baseNextWake: hasNextWakeAt ? nextWake : null,
     callbacks: [
       input.systemMailboxResult.afterCheckpoint,
       input.assistantResult.afterCheckpoint,
@@ -966,7 +960,6 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
 }
 
 function composeHostedAssistantPhaseAfterCheckpoint(input: {
-  baseNextWake: HostedRuntimeWakeCandidate | null;
   callbacks: readonly HostedWorkspaceRunnerAssistantPhaseResult["afterCheckpoint"][];
 }): HostedWorkspaceRunnerAssistantPhaseResult["afterCheckpoint"] {
   const activeCallbacks = input.callbacks.filter(
@@ -985,26 +978,9 @@ function composeHostedAssistantPhaseAfterCheckpoint(input: {
       if (!result) {
         continue;
       }
-      const base = merged ?? buildHostedAssistantPhaseBasePostCheckpoint(input.baseNextWake);
-      merged = mergeHostedAssistantPhasePostCheckpoint(base, result);
+      merged = mergeHostedAssistantPhasePostCheckpoint(merged, result);
     }
     return merged;
-  };
-}
-
-function buildHostedAssistantPhaseBasePostCheckpoint(
-  baseNextWake: HostedRuntimeWakeCandidate | null,
-): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
-  if (!baseNextWake) {
-    return null;
-  }
-
-  return {
-    checkpointReason: "assistant_runtime_commit",
-    nextWakeAt: baseNextWake.at,
-    ...(shouldExposeHostedAssistantPhaseNextWakeReason(baseNextWake.reason)
-      ? { nextWakeReason: baseNextWake.reason }
-      : {}),
   };
 }
 
@@ -3205,6 +3181,28 @@ function shouldRescheduleSkippedDeviceSyncWake(
     !consumedScheduledWorkspaceWake(input)
     || hasFreshHostedConversationInput(input)
     || input.shouldYieldBackgroundMaintenance?.() === true
+  );
+}
+
+function resolveHostedLocalDeviceSyncScheduledWake(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): HostedRuntimeWakeCandidate | null {
+  if (!hasHostedDeviceSyncRuntimeConfigured(input)) {
+    return null;
+  }
+
+  const nextWakeAt = resolveHostedDeviceSyncNextWakeAt({
+    deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
+    platformEnv: input.runtime.platformEnv,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  if (!nextWakeAt) {
+    return null;
+  }
+
+  return createHostedRuntimeWakeCandidate(
+    nextWakeAt,
+    HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   );
 }
 

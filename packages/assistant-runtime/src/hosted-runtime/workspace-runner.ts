@@ -75,6 +75,7 @@ import {
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
+  HOSTED_ASSISTANT_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
@@ -586,8 +587,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           platform: input.platform,
           runtimeLogContext: input.runtimeLogContext,
         });
-        projectedWakeRequiresCheckpoint = true;
-        mergeDeferredPostCheckpointWake({
+        projectedWakeRequiresCheckpoint = mergeDeferredPostCheckpointWake({
           assistantPhaseResult,
           postCheckpoint,
         });
@@ -2034,33 +2034,45 @@ function requireHostedWorkspaceAssistantPhaseCheckpointReason(
 function mergeDeferredPostCheckpointWake(input: {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
-}): void {
+}): boolean {
   if (input.assistantPhaseResult.progressed !== true) {
-    return;
+    return false;
   }
 
   if (!Object.hasOwn(input.postCheckpoint, "nextWakeAt")) {
-    return;
+    return false;
   }
 
+  const previousWake = createHostedRuntimeWakeCandidate(
+    input.assistantPhaseResult.nextWakeAt ?? null,
+    input.assistantPhaseResult.nextWakeReason ?? null,
+  );
   if (input.postCheckpoint.nextWakeAt === null || input.postCheckpoint.nextWakeAt === undefined) {
     input.assistantPhaseResult.nextWakeAt = null;
     input.assistantPhaseResult.nextWakeReason = null;
-    return;
+    return false;
   }
 
+  const postCheckpointWake = createHostedRuntimeWakeCandidate(
+    input.postCheckpoint.nextWakeAt ?? null,
+    input.postCheckpoint.nextWakeReason ?? null,
+  );
   const selectedWake = selectHostedRuntimeWakeCandidate([
-    createHostedRuntimeWakeCandidate(
-      input.assistantPhaseResult.nextWakeAt ?? null,
-      input.assistantPhaseResult.nextWakeReason ?? null,
-    ),
-    createHostedRuntimeWakeCandidate(
-      input.postCheckpoint.nextWakeAt ?? null,
-      input.postCheckpoint.nextWakeReason ?? null,
-    ),
+    previousWake,
+    postCheckpointWake,
   ]);
   input.assistantPhaseResult.nextWakeAt = selectedWake.at;
   input.assistantPhaseResult.nextWakeReason = selectedWake.reason;
+  if (
+    selectedWake.at !== postCheckpointWake.at
+    || selectedWake.reason !== postCheckpointWake.reason
+  ) {
+    return false;
+  }
+
+  return selectedWake.at !== previousWake.at
+    || selectedWake.reason !== previousWake.reason
+    || postCheckpointWake.reason !== HOSTED_ASSISTANT_WAKE_REASON;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {
