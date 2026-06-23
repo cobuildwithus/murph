@@ -141,6 +141,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
+const HOSTED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
@@ -323,6 +324,36 @@ export async function runHostedWorkspaceAssistantPhase(
       hasFreshConversationInput,
       input,
     });
+    if (
+      shouldRunDeferredMaintenanceAfterPendingAssistantInput({
+        assistantMetrics,
+        currentTurnDeliveryIntentIds,
+        foregroundAssistantPass,
+        pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+      })
+    ) {
+      const deferredSystemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
+        executionContext,
+        hasFreshConversationInput,
+        input,
+        skipPendingAssistantInputWake: true,
+        wake,
+      });
+      const pendingAssistantInputAttemptResult = mergeContinuingSystemMailboxResult(
+        buildPendingAssistantInputAttemptResult({
+          assistantMetrics,
+          input,
+          progressed: deferredSystemMailboxMaintenance.result === null,
+        }),
+      );
+      if (deferredSystemMailboxMaintenance.result) {
+        return mergeContinuingSystemMailboxAssistantPhaseResult({
+          assistantResult: pendingAssistantInputAttemptResult,
+          systemMailboxResult: deferredSystemMailboxMaintenance.result,
+        });
+      }
+      return pendingAssistantInputAttemptResult;
+    }
     const systemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -827,6 +858,54 @@ function isHostedForegroundAssistantDeliveryPass(input: {
   return input.currentTurnDeliveryIntentIds.length > 0
     || input.hasFreshConversationInput
     || input.assistantMetrics.activeTurnInputIngested === true;
+}
+
+function shouldRunDeferredMaintenanceAfterPendingAssistantInput(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
+  currentTurnDeliveryIntentIds: readonly string[];
+  foregroundAssistantPass: boolean;
+  pendingAssistantInputWakeAt: string | null;
+}): boolean {
+  return input.pendingAssistantInputWakeAt !== null
+    && !input.foregroundAssistantPass
+    && input.currentTurnDeliveryIntentIds.length === 0
+    && input.assistantMetrics.assistantAutomationProgressed !== true;
+}
+
+function buildPendingAssistantInputAttemptResult(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  progressed: boolean;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.nextWakeAt,
+  });
+  const nextWakeAt = assistantNextWakeAt ?? new Date(
+    resolveHostedAssistantPhaseNowMs(input.input) + HOSTED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS,
+  ).toISOString();
+  const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
+    deliveryEffectCount: 0,
+    nextWakeAt,
+    outboxTerminalizedSendingCount: 0,
+    progressed: input.progressed,
+    systemMailboxPrepared: 0,
+    systemMailboxRetryableFailed: 0,
+  });
+  if (input.progressed) {
+    return {
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt,
+      progressed: true,
+      redactedStatus,
+    };
+  }
+
+  return {
+    nextWakeAt,
+    progressed: false,
+    redactedStatus,
+  };
 }
 
 function mergeHostedAssistantPhaseResults(
@@ -1640,11 +1719,14 @@ async function runSystemMailboxMaintenancePhase(input: {
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  pendingAssistantInputWakeAt?: string | null;
+  skipPendingAssistantInputWake?: boolean;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<{
   continueAssistantLane: boolean;
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
+  pendingAssistantInputWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   if (
@@ -1655,6 +1737,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint: null,
+      pendingAssistantInputWakeAt: null,
       result: null,
     };
   }
@@ -1680,9 +1763,22 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt: null,
         result: null,
       };
     }
+  }
+  const preflightPendingAssistantInputWakeAt = input.skipPendingAssistantInputWake === true
+    ? null
+    : input.pendingAssistantInputWakeAt ?? await resolvePendingAssistantInputWakeAt(phaseInput);
+  if (preflightPendingAssistantInputWakeAt) {
+    return {
+      continueAssistantLane: true,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt: preflightPendingAssistantInputWakeAt,
+      result: null,
+    };
   }
 
   const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -1695,7 +1791,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
-  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
+  const pendingAssistantInputWakeAt = input.skipPendingAssistantInputWake === true
+    ? null
+    : await resolvePendingAssistantInputWakeAt(phaseInput);
   const initialProviderCleanupDue =
     !shouldYieldAfterSystemMailboxPreparation
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
@@ -1725,6 +1823,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: null,
       };
     }
@@ -1734,6 +1833,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: dirtyAssistantCronWakeState.dueNow,
         deviceSyncMaintenanceRan: true,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1755,6 +1855,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: withHostedAssistantCronWakeCandidate({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1769,6 +1870,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
       result: null,
     };
   }
@@ -1886,6 +1988,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldYieldAfterSystemMailboxPreparation
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
+    pendingAssistantInputWakeAt,
     result: {
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
