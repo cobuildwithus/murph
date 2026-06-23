@@ -59,7 +59,10 @@ describe("hosted product feedback record route", () => {
       expect.objectContaining({ payloadText: expect.any(String) }),
     );
     expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
-      feedback,
+      feedback: {
+        ...feedback,
+        topic: "changelog",
+      },
       memberId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({

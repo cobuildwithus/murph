@@ -197,7 +197,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted product feedback rows",
     deletion: "live-delete",
     export: "decoded-redacted-data",
-    note: "Deletes assistant-captured product feedback rows. Export includes published changelog item ids and safe row metadata while omitting the internal feedback id.",
+    note: "Deletes assistant-captured product feedback rows. Export includes safe kind/topic metadata and optional published changelog item ids while omitting the internal feedback id.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -875,6 +875,7 @@ export async function buildHostedDataExport(input: {
         kind: true,
         memberId: true,
         relatedChangelogItemIdsJson: true,
+        topic: true,
       },
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
@@ -1099,6 +1100,7 @@ export async function buildHostedDataExport(input: {
         kind: entry.kind,
         memberId: entry.memberId,
         relatedChangelogItemIds: entry.relatedChangelogItemIdsJson,
+        topic: entry.topic,
       })),
     },
     computerUse: {

@@ -3605,6 +3605,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      topic: "changelog",
     });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",

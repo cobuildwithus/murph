@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_FEEDBACK_TOPICS,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -186,7 +187,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record product feedback only after the user explicitly expresses interest in shipped changelog items. Do not infer feedback silently, and do not submit new feature requests or conversation details.',
+    'Record structured product feedback after the user explicitly expresses product frustration, asks for a feature, or shows interest in shipped changelog items. Never include raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -195,10 +196,15 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
       },
+      topic: {
+        type: 'string',
+        enum: [...HOSTED_PRODUCT_FEEDBACK_TOPICS],
+      },
       relatedChangelogItemIds: {
         type: 'array',
-        minItems: 1,
+        minItems: 0,
         maxItems: 7,
+        default: [],
         items: {
           type: 'string',
           maxLength: 120,
@@ -206,7 +212,25 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         },
       },
     },
-    required: ['kind', 'relatedChangelogItemIds'],
+    required: ['kind', 'topic'],
+    oneOf: [
+      {
+        properties: {
+          kind: { enum: ['feature_interest'] },
+          relatedChangelogItemIds: {
+            type: 'array',
+            minItems: 1,
+          },
+        },
+        required: ['kind', 'relatedChangelogItemIds'],
+      },
+      {
+        properties: {
+          kind: { enum: ['feature_request', 'frustration'] },
+        },
+        required: ['kind'],
+      },
+    ],
   },
 } as const
 
@@ -499,12 +523,22 @@ const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const submitProductFeedbackArgumentsSchema = z
   .object({
     kind: z.enum(HOSTED_PRODUCT_FEEDBACK_KINDS),
+    topic: z.enum(HOSTED_PRODUCT_FEEDBACK_TOPICS),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
-      .min(1)
       .max(7)
+      .default([]),
   })
   .strict()
+  .superRefine((feedback, context) => {
+    if (feedback.kind === 'feature_interest' && feedback.relatedChangelogItemIds.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'feature_interest requires relatedChangelogItemIds',
+        path: ['relatedChangelogItemIds'],
+      })
+    }
+  })
 
 const computerRunIdSchema = z.string().trim().min(1)
 

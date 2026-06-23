@@ -320,6 +320,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const generalizeProductFeedbackMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260623170000_generalize_hosted_product_feedback/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -368,6 +375,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
       "20260622190000_add_hosted_product_feedback",
+      "20260623170000_generalize_hosted_product_feedback",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -384,6 +392,9 @@ describe("hosted Prisma baseline migration", () => {
     expect(singleMemberComputerProfileMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_computer_run_one_active_member_idx"',
     );
+    expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
+    expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
+    expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

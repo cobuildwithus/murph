@@ -72,7 +72,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
-- bounded hosted product-feedback rows for explicit interest in published changelog items
+- bounded hosted product-feedback rows for explicit structured product feedback
 - Kernel-backed hosted computer runs and handoff checkpoints
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -127,8 +127,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
-- `HostedProductFeedback` owns assistant-captured feature interest in published
-  changelog items without storing model-authored free text
+- `HostedProductFeedback` owns assistant-captured structured product feedback
+  without storing raw conversation text, health details, tags, or free-form feature prose
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;

@@ -26,6 +26,7 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_FEEDBACK_TOPICS,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -80,6 +81,7 @@ import {
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedProductFeedbackKind,
+  type HostedProductFeedbackTopic,
   type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
@@ -97,6 +99,7 @@ import {
   requireBoolean,
   requireNumber,
   requireObject,
+  readOptionalStringArray,
   requireString,
   readNullableString,
 } from "./assertions.ts";
@@ -614,7 +617,12 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
   );
   assertAllowedObjectKeys(
     feedback,
-    new Set(["idempotencyKey", "kind", "relatedChangelogItemIds"]),
+    new Set([
+      "idempotencyKey",
+      "kind",
+      "relatedChangelogItemIds",
+      "topic",
+    ]),
     "Hosted runtime product feedback request feedback",
   );
   const idempotencyKey = requireString(
@@ -627,28 +635,23 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
     );
   }
   const kind = parseHostedProductFeedbackKind(feedback.kind);
-  const relatedChangelogItemIds = requireArray(
-    feedback.relatedChangelogItemIds,
-    "Hosted runtime product feedback relatedChangelogItemIds",
-  ).map((entry) => {
-    const id = requireString(
-      entry,
-      "Hosted runtime product feedback related changelog item id",
-    );
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) || id.length > 120) {
-      throw new TypeError(
-        "Hosted runtime product feedback related changelog item ids must be lowercase slugs.",
-      );
-    }
-    return id;
-  });
-  if (
-    relatedChangelogItemIds.length === 0 ||
-    relatedChangelogItemIds.length > 7 ||
-    new Set(relatedChangelogItemIds).size !== relatedChangelogItemIds.length
-  ) {
+  const topic = feedback.topic === undefined
+    ? defaultHostedProductFeedbackTopic(kind)
+    : parseHostedProductFeedbackTopic(feedback.topic);
+  const relatedChangelogItemIds = parseHostedProductFeedbackSlugArray(
+    readOptionalStringArray(
+      feedback.relatedChangelogItemIds,
+      "Hosted runtime product feedback relatedChangelogItemIds",
+    ) ?? [],
+    {
+      itemLabel: "Hosted runtime product feedback related changelog item id",
+      label: "Hosted runtime product feedback relatedChangelogItemIds",
+      maxLength: 120,
+    },
+  );
+  if (kind === "feature_interest" && relatedChangelogItemIds.length === 0) {
     throw new TypeError(
-      "Hosted runtime product feedback must reference one to seven unique changelog items.",
+      "Hosted runtime product feedback feature interest must reference at least one changelog item.",
     );
   }
 
@@ -657,6 +660,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       idempotencyKey,
       kind,
       relatedChangelogItemIds,
+      topic,
     },
   };
 }
@@ -688,6 +692,44 @@ function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKi
     throw new TypeError("Hosted runtime product feedback kind is not supported.");
   }
   return kind as HostedProductFeedbackKind;
+}
+
+function parseHostedProductFeedbackTopic(value: unknown): HostedProductFeedbackTopic {
+  const topic = requireString(value, "Hosted runtime product feedback topic");
+  if (!HOSTED_PRODUCT_FEEDBACK_TOPICS.includes(topic as HostedProductFeedbackTopic)) {
+    throw new TypeError("Hosted runtime product feedback topic is not supported.");
+  }
+  return topic as HostedProductFeedbackTopic;
+}
+
+function defaultHostedProductFeedbackTopic(
+  kind: HostedProductFeedbackKind,
+): HostedProductFeedbackTopic {
+  return kind === "feature_interest" ? "changelog" : "other";
+}
+
+function parseHostedProductFeedbackSlugArray(
+  value: readonly string[],
+  options: {
+    itemLabel: string;
+    label: string;
+    maxLength: number;
+  },
+): string[] {
+  const entries = value.map((entry, index) => {
+    const slug = requireString(entry, `${options.itemLabel}[${index}]`);
+    if (
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) ||
+      slug.length > options.maxLength
+    ) {
+      throw new TypeError(`${options.itemLabel} must be a lowercase slug.`);
+    }
+    return slug;
+  });
+  if (entries.length > 7 || new Set(entries).size !== entries.length) {
+    throw new TypeError(`${options.label} must contain at most seven unique items.`);
+  }
+  return entries;
 }
 
 export function parseHostedRuntimeIssueExportRequest(
