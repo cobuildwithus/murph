@@ -135,6 +135,7 @@ function quoteShellArgument(value: string): string {
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
+    connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     messageReactionsAvailable?: boolean;
   } = {},
@@ -147,6 +148,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.computerToolsAvailable !== true
         && name.startsWith("murph.computer_")
+      ) {
+        return false;
+      }
+
+      if (
+        options.connectedAppsAvailable !== true
+        && name.startsWith("murph.connected_apps_")
       ) {
         return false;
       }

@@ -12,7 +12,10 @@ import {
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
-import { buildExperimentAdherenceCalendar } from "../src/experiment-adherence.ts";
+import {
+  buildExperimentAdherenceCalendar,
+  type ExperimentAdherenceObservation,
+} from "../src/experiment-adherence.ts";
 
 test("returns null when no matching private run exists", () => {
   const client = createBrowserVaultQueryClient(createReplica());
@@ -1144,7 +1147,7 @@ test("returns null schedule when the run has no structured schedule", () => {
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
 });
 
-test("does not synthesize a legacy schedule when explicit browser targets are unsupported", () => {
+test("does not synthesize legacy schedules for unsupported explicit metric adherence targets", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       entities: [
@@ -1185,7 +1188,52 @@ test("does not synthesize a legacy schedule when explicit browser targets are un
 
   assert.ok(result);
   assert.equal(result.schedule, null);
-  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
+  assert.equal(result.progress?.adherence.status, "unknown");
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
+});
+
+test("keeps comparator-bounded metric thresholds unknown", () => {
+  const target = {
+    targetId: "glucose-ceiling",
+    label: "Glucose ceiling",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "UTC",
+    },
+    evidence: {
+      kind: "metricThreshold",
+      metricKey: "glucose",
+      op: "<=",
+      value: 100,
+      missing: "unknown",
+    },
+  } satisfies ExperimentAdherenceTarget;
+  const observations: Array<ExperimentAdherenceObservation & { comparator: ">" }> = [{
+    comparator: ">",
+    evidenceId: "evt_glucose_1",
+    localDate: "2026-04-08",
+    metricKey: "glucose",
+    targetId: "glucose-ceiling",
+    value: 100,
+  }];
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-10",
+    observations,
+    targets: [target],
+    windows: {
+      baselineEnd: null,
+      baselineStart: null,
+      interventionEnd: "2026-04-08",
+      interventionStart: "2026-04-08",
+    },
+  });
+
+  assert.equal(result.cells[0]?.status, "unknown");
+  assert.equal(result.cells[0]?.score, null);
+  assert.deepEqual(result.cells[0]?.evidenceIds, ["evt_glucose_1"]);
 });
 
 test("uses adherence target rollups for browser progress targets", () => {
@@ -1199,24 +1247,40 @@ test("uses adherence target rollups for browser progress targets", () => {
             baselineEnd: "2026-04-07",
             interventionStart: "2026-04-08",
             interventionEnd: "2026-04-10",
-            adherenceTargets: [{
-              targetId: "sauna",
-              label: "Sauna",
-              phase: "intervention",
-              calendar: {
-                kind: "daily",
-                timeZone: "America/New_York",
+            adherenceTargets: [
+              {
+                targetId: "session-marker",
+                label: "Session marker",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
               },
-              evidence: {
-                kind: "linkedEventCount",
-                eventKind: "intervention_session",
-                missing: "missed_after_grace",
+              {
+                targetId: "sauna",
+                label: "Sauna",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                rollup: {
+                  targetCompletions: 2,
+                  minimumUsefulCompletions: 1,
+                },
               },
-              rollup: {
-                targetCompletions: 2,
-                minimumUsefulCompletions: 1,
-              },
-            }],
+            ],
           },
         }),
         sessionEvent("2026-04-08", "completed"),
@@ -1231,6 +1295,86 @@ test("uses adherence target rollups for browser progress targets", () => {
   assert.equal(result.progress?.adherence.targetSessions, 2);
   assert.equal(result.progress?.adherence.minimumUsefulSessions, 1);
   assert.equal(result.progress?.adherence.status, "met_target");
+  assert.equal(result.schedule?.completedSessions, 2);
+  assert.equal(result.schedule?.plannedSessions, 3);
+  assert.equal(result.schedule?.cells.length, 6);
+  assert.equal(result.schedule?.cells.filter((cell) => cell.targetId === "sauna").length, 3);
+});
+
+test("does not replace metric adherence rollups with auxiliary session targets", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-10T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-08",
+            adherenceTargets: [
+              {
+                targetId: "step-floor",
+                label: "Step floor",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "metricThreshold",
+                  metricKey: "steps",
+                  op: ">=",
+                  value: 8000,
+                  missing: "unknown",
+                },
+                rollup: {
+                  targetCompletions: 1,
+                  minimumUsefulCompletions: 1,
+                },
+              },
+              {
+                targetId: "session-marker",
+                label: "Session marker",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+              },
+            ],
+          },
+        }),
+        sessionEvent("2026-04-08", "completed"),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 62],
+        ["2026-04-02", 61],
+        ["2026-04-03", 63],
+        ["2026-04-08", 58],
+        ["2026-04-09", 57],
+        ["2026-04-10", 59],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.schedule, null);
+  assert.equal(result.progress?.adherence.completedSessions, 0);
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
+  assert.equal(result.progress?.adherence.targetSessions, null);
+  assert.equal(result.progress?.adherence.status, "unknown");
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
+  assert.ok(result.outcome?.confidence.reasons.includes(
+    "Browser Results cannot evaluate this experiment's adherence target yet.",
+  ));
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {

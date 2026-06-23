@@ -21,7 +21,7 @@ export function HomeExperiments({ inProgress, history }: HomeExperimentsProps) {
   const browseAction = (
     <Link
       href="/experiments"
-      className="group inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      className="group relative inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
     >
       Browse experiments
       <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />

@@ -75,6 +75,7 @@ function toBrowserVaultMetricRow(point: MetricSeriesPoint): BrowserVaultMetricRo
 
   return [{
     biomarkerKey: point.biomarkerKey ?? null,
+    comparator: point.comparator ?? null,
     confidence: point.confidence ?? "none",
     context: point.context ?? {},
     date: point.date,
@@ -105,6 +106,7 @@ function dedupeEquivalentMetricRows(
       row.metricKey,
       row.date,
       row.unit,
+      row.comparator,
       String(row.value),
       [...row.recordIds].sort().join(","),
     ].join("\u0000");
@@ -126,6 +128,7 @@ function dedupeEquivalentMetricRows(
 export function browserMetricRowToSeriesPoint(row: BrowserVaultMetricRow): MetricSeriesPoint {
   return {
     biomarkerKey: row.biomarkerKey,
+    comparator: row.comparator,
     confidence: row.confidence,
     context: row.context,
     date: row.date,

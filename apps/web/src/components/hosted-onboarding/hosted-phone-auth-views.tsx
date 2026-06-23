@@ -151,7 +151,7 @@ export function HostedAuthenticatedPhoneAuthState({
 }: AuthenticatedStateProps) {
   if (view === "loading") {
     return (
-      <Alert className="border-stone-200 bg-stone-50">
+      <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
         <AlertTitle>{title}</AlertTitle>
         <AlertDescription>{body}</AlertDescription>
       </Alert>
@@ -160,7 +160,7 @@ export function HostedAuthenticatedPhoneAuthState({
 
   if (view === "manual-resume") {
     return (
-      <Alert className="border-stone-200 bg-stone-50">
+      <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
         <AlertTitle>You already started logging in or signing up.</AlertTitle>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
@@ -185,7 +185,7 @@ export function HostedAuthenticatedPhoneAuthState({
 
   if (view === "restart") {
     return (
-      <Alert className="border-stone-200 bg-stone-50">
+      <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
         <AlertTitle>Sign in with this phone again</AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">

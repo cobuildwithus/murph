@@ -6,6 +6,14 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "../hosted-runtime.ts";
 import {
+  pruneTerminalWriteOperationRecords,
+  type PruneTerminalWriteOperationRecordsResult,
+} from "@murphai/core";
+import {
+  pruneAssistantRuntimeResidue,
+  type AssistantRuntimeResiduePruneResult,
+} from "@murphai/assistant-engine/assistant-runtime-residue";
+import {
   collectHostedWorkspaceSnapshotArchivePlan,
   createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
   type HostedWorkspaceSnapshotArchiveEntry,
@@ -15,6 +23,9 @@ import {
 import type {
   RuntimeWakeNotification,
 } from "./runtime-wake.ts";
+import {
+  compactHostedPendingAssistantInputIds,
+} from "./pending-input-index.ts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -67,6 +78,7 @@ import {
 import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
@@ -157,6 +169,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           redactedStatus: checkpointInput.redactedStatus ?? null,
           snapshotRef: null,
         },
+        previousWorkspaceCheckpointedAt: input.request.workspace?.checkpointedAt ?? null,
         snapshotDiagnosticsHashSecret:
           normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(
             input.snapshotDiagnosticsHashSecret,
@@ -191,6 +204,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
@@ -254,6 +268,7 @@ interface HostedWorkspaceBridgeV2SnapshotInput {
     ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
   >;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
@@ -304,6 +319,8 @@ async function createHostedWorkspaceV2Snapshot(
   let checkpointAttempted = false;
   let localWorkspaceCleanForWarmReuse = false;
   let prunedRuntimeSymlinkCount = 0;
+  let terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null = null;
+  let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
     leaseCheckCount += 1;
@@ -335,6 +352,82 @@ async function createHostedWorkspaceV2Snapshot(
         },
         level: "warn",
         message: "Hosted workspace snapshot pruned runtime-owned symlinks.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
+    try {
+      terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
+        checkpointedAfter: input.previousWorkspaceCheckpointedAt,
+        vaultRoot: input.vaultRoot,
+      });
+      if (terminalWriteOperationPruneResult.prunedCount > 0) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            ...createTerminalWriteOperationPruneLogDetails(
+              terminalWriteOperationPruneResult,
+            ),
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          },
+          level: "info",
+          message: "Hosted workspace snapshot pruned terminal write-operation records.",
+          phase: "checkpoint",
+          userId: input.userId,
+        });
+      }
+    } catch (cleanupError) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          terminalWriteOperationPruneFailed: true,
+        },
+        error: cleanupError,
+        level: "warn",
+        message: "Hosted workspace terminal write-operation cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
+    try {
+      const pendingInputIds = await compactHostedPendingAssistantInputIds({
+        vaultRoot: input.vaultRoot,
+      });
+      assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
+        now: new Date(),
+        pendingInputIds,
+        vault: input.vaultRoot,
+      });
+      if (
+        hasAssistantRuntimeResiduePrunedFiles(
+          assistantRuntimeResiduePruneResult,
+        )
+      ) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            ...createAssistantRuntimeResiduePruneLogDetails(
+              assistantRuntimeResiduePruneResult,
+            ),
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          },
+          level: "info",
+          message: "Hosted workspace snapshot pruned assistant runtime residue.",
+          phase: "checkpoint",
+          userId: input.userId,
+        });
+      }
+    } catch (cleanupError) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          assistantRuntimeResiduePruneFailed: true,
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        },
+        error: cleanupError,
+        level: "warn",
+        message: "Hosted workspace assistant runtime residue cleanup failed.",
         phase: "checkpoint",
         userId: input.userId,
       });
@@ -373,6 +466,9 @@ async function createHostedWorkspaceV2Snapshot(
             archivePlan,
             hashSecret: input.snapshotDiagnosticsHashSecret,
           });
+        if (archivePlan.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+          throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
+        }
         return await input.snapshotArchiveBuilder.buildEncryptedSnapshot({
           aad: activeSnapshotSession.encryption.aad,
           archiveEntries: archivePlan.entries,
@@ -550,6 +646,12 @@ async function createHostedWorkspaceV2Snapshot(
               runtimeSymlinkPruneScope: "operator-home",
             }
           : {}),
+        ...createTerminalWriteOperationPruneLogDetails(
+          terminalWriteOperationPruneResult,
+        ),
+        ...createAssistantRuntimeResiduePruneLogDetails(
+          assistantRuntimeResiduePruneResult,
+        ),
         ...snapshotTimings,
         ...(workspaceSnapshotFileCount > 0
           ? { workspaceSnapshotFileCount }
@@ -594,12 +696,14 @@ async function createHostedWorkspaceV2Snapshot(
   }
 
   await writeHostedCheckpointSnapshotMetricLog({
+    assistantRuntimeResiduePruneResult,
     encryptedByteSize,
     fileCount: workspaceSnapshotFileCount,
     leaseCheckCount,
     plainByteSize: workspaceSnapshotPlainBytes,
     platform: input.platform,
     prunedRuntimeSymlinkCount,
+    terminalWriteOperationPruneResult,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
@@ -734,7 +838,9 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       redactedJson.errorCode = diagnostics.errorCode;
     }
     if (typeof diagnostics.errorMessage === "string") {
-      redactedJson.safeErrorMessage = diagnostics.errorMessage;
+      redactedJson.safeErrorMessage = redactHostedRuntimeDiagnosticText(
+        diagnostics.errorMessage,
+      );
     }
     if (typeof diagnostics.errorName === "string") {
       redactedJson.errorName = diagnostics.errorName;
@@ -817,13 +923,77 @@ function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
   };
 }
 
+function createTerminalWriteOperationPruneLogDetails(
+  result: PruneTerminalWriteOperationRecordsResult | null,
+): HostedRuntimeRedactedJson {
+  if (!result || result.prunedCount === 0) {
+    return {};
+  }
+
+  return {
+    prunedTerminalWriteOperationBytes: result.prunedByteCount,
+    prunedTerminalWriteOperationCount: result.prunedCount,
+    prunedTerminalWriteOperationFileCount: result.prunedFileCount,
+    terminalWriteOperationPruneErroredCount: result.retainedErroredTerminalCount,
+    terminalWriteOperationPruneInvalidCount: result.invalidCount,
+    terminalWriteOperationPruneNewestRetainedCount: result.retainedNewestTerminalCount,
+    terminalWriteOperationPruneScannedCount: result.scannedCount,
+    terminalWriteOperationPruneStageDirectoryCount: result.retainedStageDirectoryCount,
+  };
+}
+
+function hasAssistantRuntimeResiduePrunedFiles(
+  result: AssistantRuntimeResiduePruneResult | null,
+): boolean {
+  return countAssistantRuntimeResiduePrunedFiles(result) > 0;
+}
+
+function countAssistantRuntimeResiduePrunedFiles(
+  result: AssistantRuntimeResiduePruneResult | null,
+): number {
+  if (!result) {
+    return 0;
+  }
+  return (
+    result.acceptedTurnInputJournalsPruned +
+    result.autoReplyEvidenceFilesPruned +
+    result.autoReplyIntentProvenancePruned +
+    result.inputEventsPruned +
+    result.receiptsPruned
+  );
+}
+
+function createAssistantRuntimeResiduePruneLogDetails(
+  result: AssistantRuntimeResiduePruneResult | null,
+): HostedRuntimeRedactedJson {
+  if (!result || !hasAssistantRuntimeResiduePrunedFiles(result)) {
+    return {};
+  }
+  return {
+    prunedAssistantRuntimeAcceptedTurnInputJournalCount:
+      result.acceptedTurnInputJournalsPruned,
+    prunedAssistantRuntimeAutoReplyEvidenceFileCount:
+      result.autoReplyEvidenceFilesPruned,
+    prunedAssistantRuntimeAutoReplyEvidenceGroupCount:
+      result.autoReplyEvidenceGroupsPruned,
+    prunedAssistantRuntimeAutoReplyIntentProvenanceCount:
+      result.autoReplyIntentProvenancePruned,
+    prunedAssistantRuntimeInputEventCount: result.inputEventsPruned,
+    prunedAssistantRuntimeReceiptCount: result.receiptsPruned,
+    prunedAssistantRuntimeResidueFileCount:
+      countAssistantRuntimeResiduePrunedFiles(result),
+  };
+}
+
 async function writeHostedCheckpointSnapshotMetricLog(input: {
+  assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
   leaseCheckCount: number;
   plainByteSize: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   prunedRuntimeSymlinkCount: number;
+  terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null;
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
@@ -844,6 +1014,12 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
           runtimeSymlinkPruneScope: "operator-home",
         }
       : {}),
+    ...createTerminalWriteOperationPruneLogDetails(
+      input.terminalWriteOperationPruneResult,
+    ),
+    ...createAssistantRuntimeResiduePruneLogDetails(
+      input.assistantRuntimeResiduePruneResult,
+    ),
     ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,

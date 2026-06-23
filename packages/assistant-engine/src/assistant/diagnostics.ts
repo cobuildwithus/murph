@@ -121,17 +121,19 @@ export async function recordAssistantDiagnosticEvent(input: {
       ]),
     })
     await writeJsonFileAtomic(paths.diagnosticSnapshotPath, nextSnapshot)
-    await appendAssistantRuntimeEventAtPaths(paths, {
-      at,
-      component: 'diagnostics',
-      code: event.code,
-      entityId: input.turnId ?? input.sessionId ?? input.intentId ?? input.kind,
-      entityType: 'diagnostic-event',
-      kind: 'diagnostics.event.recorded',
-      level: event.level,
-      message: `${input.component}/${input.kind}: ${input.message}`,
-      data: input.data ?? undefined,
-    }).catch(() => undefined)
+    if (event.level === 'warn' || event.level === 'error') {
+      await appendAssistantRuntimeEventAtPaths(paths, {
+        at,
+        component: 'diagnostics',
+        code: event.code,
+        entityId: input.turnId ?? input.sessionId ?? input.intentId ?? input.kind,
+        entityType: 'diagnostic-event',
+        kind: 'diagnostics.event.recorded',
+        level: event.level,
+        message: `${input.component}/${input.kind}: ${input.message}`,
+        data: input.data ?? undefined,
+      }).catch(() => undefined)
+    }
 
     return event
   })

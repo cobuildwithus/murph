@@ -46,7 +46,7 @@ export function SourceCard({
           <h2 className="font-serif text-lg font-semibold text-foreground">
             {source.name}
           </h2>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-sm leading-relaxed text-pretty text-muted-foreground">
             {source.description}
           </p>
         </div>
@@ -59,7 +59,7 @@ export function SourceCard({
                 aria-label={`Disconnect ${source.name}`}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
-                className="self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
                 {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
@@ -73,7 +73,7 @@ export function SourceCard({
         ) : (
           <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
             {source.requiresReconnect ? (
-              <p className="max-w-[22rem] text-sm leading-relaxed text-destructive">
+              <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 Please reconnect {source.name} to resume syncing.
               </p>
             ) : null}

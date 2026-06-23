@@ -1,6 +1,6 @@
 import { createDecipheriv } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -49,6 +49,7 @@ import {
   buildHostedWorkspaceSnapshotV2Aad,
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
@@ -909,6 +910,66 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         eventCode: "checkpoint.snapshot_failed",
         redactedJson: expect.objectContaining({
           safeErrorDetail: "Hosted workspace snapshot exceeds the configured size limit.",
+          snapshotArchiveBuildElapsedMs: expect.any(Number),
+          snapshotMode: "workspace_snapshot_v2",
+        }),
+      }),
+    );
+  });
+
+  it("fails before direct PUT at the total plain size guard", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "oversized-plain.txt"), "");
+    await truncate(path.join(vaultRoot, "oversized-plain.txt"), HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES);
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow(/total plain size limit/u);
+
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          safeErrorDetail: "Hosted workspace snapshot exceeds the total plain size limit.",
           snapshotArchiveBuildElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
         }),
@@ -2004,7 +2065,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceSnapshotClassSummary: expect.arrayContaining([
           `class=raw,files=1,inlineBytes=${rawArtifactBytes},externalBytes=0,externalCount=0`,
           expect.stringMatching(
-            /^class=runtime-assistant,files=1,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
+            /^class=runtime-assistant,files=[1-9]\d*,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
           ),
         ]),
         workspaceSnapshotExternalArtifactBytes: 0,

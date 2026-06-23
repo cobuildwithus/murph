@@ -416,12 +416,13 @@ export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
 export const hostedComputerPauseForUserRequestSchema = z
   .object({
     handoffPurpose: z.enum(HOSTED_COMPUTER_HANDOFF_PURPOSES).nullable().default(null),
-    message: z.string().trim().min(1).max(1_000),
+    message: z.string().trim().min(1).max(1_000).optional(),
     pauseDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     reason: z.enum(HOSTED_COMPUTER_AWAITING_REASONS),
     suggestedReply: z.string().trim().min(1).max(200).nullable().default(null),
   })
-  .strict();
+  .strict()
+  .transform(({ message: _legacyMessage, ...request }) => request);
 
 export const hostedComputerFinishRunRequestSchema = z
   .object({

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -21,6 +23,14 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted workspace snapshot v2 refs", () => {
+  it("keeps the encrypted snapshot object limit bounded for memory restore", () => {
+    expect(HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES).toBe(512 * 1024 * 1024);
+  });
+
+  it("keeps the total plain snapshot limit bounded for restore extraction", () => {
+    expect(HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES).toBe(1024 * 1024 * 1024);
+  });
+
   it("parses the single encrypted object snapshot contract", () => {
     const ref = createWorkspaceSnapshotV2Ref();
 

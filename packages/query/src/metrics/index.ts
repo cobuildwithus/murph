@@ -19,6 +19,7 @@ import {
   inferWearableObservationGrain,
 } from "../wearables/observation.ts";
 import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
+import { buildSampleSummaryId } from "../sample-summary-id.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -54,6 +55,7 @@ export {
   formatMetricDisplayValue,
   listMetricPoints,
   listMetricDefinitions,
+  metricPointRecordIds,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
@@ -168,7 +170,7 @@ function metricPointFromSampleSummary(summary: SampleSummaryMetricEvidence): Met
       family: "sample",
       kind: "sample-summary",
       path: "",
-      recordId: `sample-summary:${summary.stream}:${summary.date}`,
+      recordId: buildSampleSummaryId(summary),
       resultIndex: null,
     },
     statistic: "mean",

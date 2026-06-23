@@ -6,7 +6,7 @@ import {
   normalizeMurphTelegramUsername,
 } from "../murph-contact-routing";
 import { getPrisma } from "../prisma";
-import { normalizeNullableString, parseInteger } from "../primitives";
+import { normalizeNullableString } from "../primitives";
 import {
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
@@ -17,12 +17,14 @@ import {
   readHostedMemberEmailAuthorization,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
+import {
+  HostedResendPlainTextEmailError,
+  readHostedResendPlainTextEmailConfig,
+  sendHostedResendPlainTextEmail,
+  type HostedResendPlainTextEmailConfig,
+} from "./resend-plain-text-email";
 
-const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
 const HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT = "Welcome to Murph";
-const HOSTED_SIGNUP_WELCOME_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
-const HOSTED_SIGNUP_WELCOME_EMAIL_MIN_TIMEOUT_MS = 1_000;
-const HOSTED_SIGNUP_WELCOME_EMAIL_MAX_TIMEOUT_MS = 30_000;
 const HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
 
 type HostedSignupWelcomeEmailEnv = Readonly<Record<string, string | undefined>>;
@@ -43,17 +45,8 @@ export type HostedSignupWelcomeEmailResult =
       status: "sent";
     };
 
-export class HostedSignupWelcomeEmailError extends Error {
-  code: string;
-  providerStatus: number | null;
-
-  constructor(message: string, input: { code: string; providerStatus?: number | null }) {
-    super(message);
-    this.name = "HostedSignupWelcomeEmailError";
-    this.code = input.code;
-    this.providerStatus = input.providerStatus ?? null;
-  }
-}
+export const HostedSignupWelcomeEmailError = HostedResendPlainTextEmailError;
+export type HostedSignupWelcomeEmailError = HostedResendPlainTextEmailError;
 
 export async function sendHostedSignupWelcomeEmailForRecentMember(input: {
   env?: HostedSignupWelcomeEmailEnv;
@@ -236,45 +229,27 @@ async function sendHostedSignupWelcomeEmailWithConfig(input: {
   murphStartLine?: string | null;
   recipientEmail: string;
 }): Promise<HostedSignupWelcomeEmailResult> {
-  const response = await (input.fetchImpl ?? fetch)(RESEND_EMAILS_ENDPOINT, {
-    body: JSON.stringify({
-      from: input.config.from,
-      subject: HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT,
-      text: buildHostedSignupWelcomeEmailText({
-        founderName: input.config.founderName,
-        murphStartLine: input.murphStartLine,
-      }),
-      to: [input.recipientEmail],
+  const result = await sendHostedResendPlainTextEmail({
+    config: input.config.resend,
+    fetchImpl: input.fetchImpl,
+    idempotencyKey: buildHostedSignupWelcomeEmailIdempotencyKey(input.memberId),
+    subject: HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT,
+    text: buildHostedSignupWelcomeEmailText({
+      founderName: input.config.founderName,
+      murphStartLine: input.murphStartLine,
     }),
-    headers: {
-      Authorization: `Bearer ${input.config.apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": buildHostedSignupWelcomeEmailIdempotencyKey(input.memberId),
-    },
-    method: "POST",
-    signal: AbortSignal.timeout(input.config.timeoutMs),
+    to: [input.recipientEmail],
   });
 
-  if (!response.ok) {
-    throw new HostedSignupWelcomeEmailError("Hosted signup welcome email send failed.", {
-      code: "RESEND_SEND_FAILED",
-      providerStatus: response.status,
-    });
-  }
-
-  const payload = await readResendJsonPayload(response);
-
   return {
-    providerMessageId: readResendMessageId(payload),
+    providerMessageId: result.providerMessageId,
     status: "sent",
   };
 }
 
 type HostedSignupWelcomeEmailConfig = {
-  apiKey: string;
   founderName: string;
-  from: string;
-  timeoutMs: number;
+  resend: HostedResendPlainTextEmailConfig;
 };
 
 type HostedSignupWelcomeEmailRecipient = {
@@ -305,33 +280,17 @@ function readHostedSignupWelcomeEmailRecipient(
 function readHostedSignupWelcomeEmailConfig(
   source: HostedSignupWelcomeEmailEnv,
 ): HostedSignupWelcomeEmailConfig | null {
-  const apiKey = normalizeNullableString(source.RESEND_API_KEY);
-  const from = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FROM);
+  const resend = readHostedResendPlainTextEmailConfig(source);
   const founderName = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME);
 
-  if (!apiKey || !from || !founderName) {
+  if (!resend || !founderName) {
     return null;
   }
 
   return {
-    apiKey,
     founderName,
-    from,
-    timeoutMs: readHostedSignupWelcomeEmailTimeoutMs(source),
+    resend,
   };
-}
-
-function readHostedSignupWelcomeEmailTimeoutMs(source: HostedSignupWelcomeEmailEnv): number {
-  const configured = parseInteger(source.HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS);
-
-  if (!configured) {
-    return HOSTED_SIGNUP_WELCOME_EMAIL_DEFAULT_TIMEOUT_MS;
-  }
-
-  return Math.min(
-    Math.max(configured, HOSTED_SIGNUP_WELCOME_EMAIL_MIN_TIMEOUT_MS),
-    HOSTED_SIGNUP_WELCOME_EMAIL_MAX_TIMEOUT_MS,
-  );
 }
 
 function isHostedSignupWelcomeEmailRecentMember(input: {
@@ -354,9 +313,9 @@ function buildHostedSignupWelcomeEmailText(input: {
   return [
     "Hey, welcome to Murph!",
     "",
-    `I'm ${input.founderName}, the founder. I built Murph because I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
+    `I'm ${input.founderName}, the founder. I built Murph because I wanted my own personal health assistant. I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
     "",
-    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers (without having to build a spreadsheet to track it all).",
+    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers and made me feel (without having to build a spreadsheet to track it all).",
     "",
     "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
     "",
@@ -421,21 +380,4 @@ function formatHostedSignupWelcomeEmailPhoneNumber(phoneNumber: string): string 
 
 function buildHostedSignupWelcomeEmailIdempotencyKey(memberId: string): string {
   return `hosted-signup-welcome/${memberId}`.slice(0, 256);
-}
-
-async function readResendJsonPayload(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function readResendMessageId(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const id = "id" in value ? value.id : null;
-  return typeof id === "string" && id ? id : null;
 }

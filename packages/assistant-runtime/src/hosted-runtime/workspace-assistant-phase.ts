@@ -194,11 +194,15 @@ export async function runHostedWorkspaceAssistantPhase(
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
+        connectedAppsAvailable:
+          input.runtime.platform.connectedAppsAvailable === true,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
+          effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           ...(input.initialMailboxImport.importResult.latestLinqDeliveryContext
             ? { linqDeliveryContext: input.initialMailboxImport.importResult.latestLinqDeliveryContext }
             : {}),
+          platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           signal: channelAbortController.signal,
           userEnv: input.runtime.userEnv,
@@ -218,6 +222,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
         generatedImageUploaderRequired: true,
+        ...(input.runtime.platform.productFeedbackPort
+          ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
+          : {}),
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
@@ -3367,6 +3374,7 @@ function redactHostedRuntimeLogString(key: string, value: string): string | unde
   const redacted = normalized
     .replace(/<HOME_DIR>(?:\/[^\s)"']*)?/gu, "<REDACTED_PATH>")
     .replace(/file:\/\/[^\s)"']+/giu, "<REDACTED_PATH>")
+    .replace(/\bhttps?:\/\/[^\s)"']+/giu, "<REDACTED_URL>")
     .replace(/(^|[\s(])\/[^\s)"']+/gu, "$1<REDACTED_PATH>")
     .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(
@@ -3416,6 +3424,7 @@ function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
   return !(
     /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
+    || /\bhttps?:\/\//iu.test(value)
     || /\+\d[\d().\s-]{7,}\d/u.test(value)
     || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
       .test(value)

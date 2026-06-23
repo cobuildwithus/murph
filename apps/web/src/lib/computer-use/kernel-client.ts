@@ -3,6 +3,8 @@ import Kernel, { ConflictError, NotFoundError } from "@onkernel/sdk";
 import { computerUseError } from "./errors";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
+const KERNEL_PLAYWRIGHT_FAILURE_TEXT_MAX_LENGTH = 8_000;
+const KERNEL_PLAYWRIGHT_FAILURE_MESSAGE_LINE_MAX_LENGTH = 600;
 
 export interface KernelBrowserHandle {
   liveViewUrl: string;
@@ -100,10 +102,12 @@ export class KernelComputerClient implements ComputerKernelClient {
     });
 
     if (!response.success) {
+      const details = buildKernelPlaywrightFailureDetails(response);
       throw computerUseError({
         code: "HOSTED_COMPUTER_EVAL_FAILED",
+        details,
         httpStatus: 502,
-        message: "Computer browser evaluation failed.",
+        message: buildKernelPlaywrightFailureMessage(details),
         retryable: true,
       });
     }
@@ -134,6 +138,54 @@ export class KernelComputerClient implements ComputerKernelClient {
       throw error;
     }
   }
+}
+
+function buildKernelPlaywrightFailureDetails(response: {
+  error?: unknown;
+  stderr?: unknown;
+  stdout?: unknown;
+}): Record<string, unknown> {
+  return {
+    ...readKernelPlaywrightFailureTextField("kernelError", response.error),
+    ...readKernelPlaywrightFailureTextField("kernelStderr", response.stderr),
+    ...readKernelPlaywrightFailureTextField("kernelStdout", response.stdout),
+  };
+}
+
+function readKernelPlaywrightFailureTextField(
+  key: "kernelError" | "kernelStderr" | "kernelStdout",
+  value: unknown,
+): Record<string, string> {
+  if (typeof value !== "string") {
+    return {};
+  }
+
+  const text = value.trim();
+  if (!text) {
+    return {};
+  }
+
+  return {
+    [key]: text.slice(0, KERNEL_PLAYWRIGHT_FAILURE_TEXT_MAX_LENGTH),
+  };
+}
+
+function buildKernelPlaywrightFailureMessage(details: Record<string, unknown>): string {
+  const firstLine = readKernelPlaywrightFailureFirstLine(details.kernelError);
+  return firstLine
+    ? `Computer browser evaluation failed: ${firstLine}`
+    : "Computer browser evaluation failed.";
+}
+
+function readKernelPlaywrightFailureFirstLine(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const firstLine = value.split(/\r?\n/u).find((line) => line.trim().length > 0)?.trim();
+  return firstLine
+    ? firstLine.slice(0, KERNEL_PLAYWRIGHT_FAILURE_MESSAGE_LINE_MAX_LENGTH)
+    : null;
 }
 
 function requireKernelApiKey(source: EnvSource): string {

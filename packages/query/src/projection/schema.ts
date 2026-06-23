@@ -13,8 +13,8 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-// 11: wearable public-provider conflict evidence and generic observation metric extraction.
-export const QUERY_PROJECTION_SQLITE_VERSION = 11;
+// 13: canonical sample-summary metric point source ids.
+export const QUERY_PROJECTION_SQLITE_VERSION = 13;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

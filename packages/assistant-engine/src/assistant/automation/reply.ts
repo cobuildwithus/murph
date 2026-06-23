@@ -98,6 +98,10 @@ const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
 const ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE =
   'ASSISTANT_AUTO_REPLY_DELIVERY_FAILED'
+const ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE =
+  'ASSISTANT_PROVIDER_EMPTY_RESPONSE'
+const ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON =
+  'assistant provider completed without a reply'
 const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
   'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
@@ -122,6 +126,7 @@ export interface AssistantAutoReplyGroupContext {
 
 interface AssistantAutoReplyReplyDecision {
   deliveryTarget: string | null
+  deliveryMessageReactionsAvailable: boolean | null
   deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
@@ -465,6 +470,12 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       executionContext: input.executionContext,
     }),
     deliveryTarget: decision.deliveryTarget,
+    ...(decision.deliveryMessageReactionsAvailable === null
+      ? {}
+      : {
+          deliveryMessageReactionsAvailable:
+            decision.deliveryMessageReactionsAvailable,
+        }),
     deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
     executionContext: input.executionContext,
     providerHeartbeatMs: input.providerHeartbeatMs,
@@ -1074,6 +1085,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   return {
     deliveryTarget,
+    deliveryMessageReactionsAvailable:
+      readAutoReplyDeliveryMessageReactionsAvailable({
+        context: input.group,
+      }),
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
       inputs: promptInputs,
       context: input.group,
@@ -1241,6 +1256,7 @@ async function executeAssistantAutoReply(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey: string | null
   deliveryTarget: string | null
+  deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
   providerHeartbeatMs?: number | null
@@ -1298,6 +1314,13 @@ async function executeAssistantAutoReply(input: {
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      ...(input.deliveryMessageReactionsAvailable === undefined
+        || input.deliveryMessageReactionsAvailable === null
+        ? {}
+        : {
+            deliveryMessageReactionsAvailable:
+              input.deliveryMessageReactionsAvailable,
+          }),
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
@@ -1497,10 +1520,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       )
     }
 
-    const shownFinalGroup = await loadAssistantAutoReplyPromptInputs({
-      group: nextContext,
-    })
-
     const captureAcceptedInputs = buildAutoReplyAcceptedTurnInputItems({
       inputSummaries: lateInputSummaries,
       inputCandidates: lateCaptureCandidates,
@@ -1512,15 +1531,28 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...captureAcceptedInputs,
       ...capturelessAcceptedInputs,
     ]
-    const acceptedInputReplyToMessageId =
-      readLatestAssistantInputReplyTargetMessageId({
+    const acceptedInputReplyTargetCandidate =
+      readLatestAssistantInputReplyTargetCandidate({
         candidates: lateInputs.inputs,
         expectedChannel: context.firstItem.summary.source,
       })
-    const acceptedInputDeliveryTarget = readLatestAssistantInputDeliveryTarget({
-      candidates: lateInputs.inputs,
-      expectedChannel: context.firstItem.summary.source,
-    })
+    const acceptedInputReplyToMessageId =
+      readAssistantInputCandidateReplyTargetMessageId(
+        acceptedInputReplyTargetCandidate,
+      )
+    const acceptedInputDeliveryTarget = readAssistantInputReplyTargetDeliveryTarget(
+      acceptedInputReplyTargetCandidate?.event.replyTarget ?? null,
+    )
+    const acceptedInputMessageReactionsAvailable =
+      readAssistantInputCandidateMessageReactionsAvailable({
+        candidate: acceptedInputReplyTargetCandidate,
+        expectedChannel: context.firstItem.summary.source,
+      })
+    const acceptedInputDeliveryTargetForIdempotency =
+      acceptedInputDeliveryTarget ?? readLatestAssistantInputDeliveryTarget({
+        candidates: lateInputs.inputs,
+        expectedChannel: context.firstItem.summary.source,
+      })
     const lateItems = [
       ...nextContext.items,
       ...lateCapturelessCandidates.map(
@@ -1571,18 +1603,21 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       acceptedInputs,
       deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
         context: finalContext,
-        deliveryTarget: acceptedInputDeliveryTarget ?? input.deliveryTarget,
+        deliveryTarget: acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
         executionContext: input.executionContext,
       }),
       ...(acceptedInputDeliveryTarget !== null
         ? { deliveryTarget: acceptedInputDeliveryTarget }
         : {}),
-      deliveryReplyToMessageId:
-        acceptedInputReplyToMessageId ??
-        readAutoReplyDeliveryReplyToMessageId({
-          inputs: shownFinalGroup,
-          context: nextContext,
-        }),
+      ...(acceptedInputMessageReactionsAvailable === null
+        ? {}
+        : {
+            deliveryMessageReactionsAvailable:
+              acceptedInputMessageReactionsAvailable,
+          }),
+      ...(acceptedInputReplyToMessageId !== undefined
+        ? { deliveryReplyToMessageId: acceptedInputReplyToMessageId }
+        : {}),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
         basePrompt: preparedInput.prompt,
@@ -1918,6 +1953,15 @@ function admitCapturelessAssistantInputs(input: {
       ? { deliveryReplyToMessageId }
       : {}),
     ...(deliveryTarget !== null ? { deliveryTarget } : {}),
+    ...(() => {
+      const deliveryMessageReactionsAvailable =
+        readAutoReplyDeliveryMessageReactionsAvailable({
+          context: nextContext,
+        })
+      return deliveryMessageReactionsAvailable === null
+        ? {}
+        : { deliveryMessageReactionsAvailable }
+    })(),
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -2222,6 +2266,48 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
   return null
 }
 
+function readAutoReplyDeliveryMessageReactionsAvailable(input: {
+  context: AssistantAutoReplyGroupContext
+}): boolean | null {
+  const candidates = autoReplyInputCandidatesFromContext(input.context)
+  const candidate = readLatestAssistantInputReplyTargetCandidate({
+    candidates,
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+  return readAssistantInputCandidateMessageReactionsAvailable({
+    candidate,
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+}
+
+function readAssistantInputCandidateMessageReactionsAvailable(input: {
+  candidate: AssistantInputCandidate | null
+  expectedChannel: string | null
+}): boolean | null {
+  const expectedChannel = normalizeNullableString(input.expectedChannel)
+  if (expectedChannel !== 'linq') {
+    return null
+  }
+
+  const candidate = input.candidate
+  const replyTarget = candidate?.event.replyTarget ?? null
+  if (
+    !candidate ||
+    normalizeNullableString(replyTarget?.channel) !== 'linq' ||
+    readAssistantInputCandidateChannel(candidate) !== 'linq'
+  ) {
+    return false
+  }
+
+  const messageId = readProviderRouteScalar(replyTarget?.messageId)
+  if (!messageId) {
+    return false
+  }
+
+  const metadata = candidate.event.sourceMetadata
+  return metadata?.kind === 'linq' && metadata.reactionEligible === true
+}
+
 function readPromptInputReplyTargetMessageId(input: {
   expectedChannel: string | null
   input: AssistantAutoReplyPromptInput | null
@@ -2316,6 +2402,13 @@ function readLatestAssistantInputReplyTarget(input: {
   candidates: readonly AssistantInputCandidate[]
   expectedChannel: string | null
 }): AssistantInputCandidate['event']['replyTarget'] | null {
+  return readLatestAssistantInputReplyTargetCandidate(input)?.event.replyTarget ?? null
+}
+
+function readLatestAssistantInputReplyTargetCandidate(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): AssistantInputCandidate | null {
   const expectedChannel = normalizeNullableString(input.expectedChannel)
   for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
     const candidate = input.candidates[index]
@@ -2334,7 +2427,7 @@ function readLatestAssistantInputReplyTarget(input: {
         readProviderRouteScalar(replyTarget.messageId)
       )
     ) {
-      return replyTarget
+      return candidate
     }
   }
 
@@ -2345,8 +2438,15 @@ function readLatestAssistantInputReplyTargetMessageId(input: {
   candidates: readonly AssistantInputCandidate[]
   expectedChannel: string | null
 }): string | undefined {
-  const replyTarget = readLatestAssistantInputReplyTarget(input)
-  return readProviderRouteScalar(replyTarget?.messageId) ?? undefined
+  return readAssistantInputCandidateReplyTargetMessageId(
+    readLatestAssistantInputReplyTargetCandidate(input),
+  )
+}
+
+function readAssistantInputCandidateReplyTargetMessageId(
+  candidate: AssistantInputCandidate | null,
+): string | undefined {
+  return readProviderRouteScalar(candidate?.event.replyTarget?.messageId) ?? undefined
 }
 
 function readProviderRouteScalar(value: string | null | undefined): string | null {
@@ -2557,6 +2657,14 @@ function classifyAssistantAutoReplyFailure(input: {
     }
   }
 
+  if (isAssistantProviderEmptyResponseFailure(input.error)) {
+    return createSkippedGroupOutcome({
+      inputCount: input.inputCount,
+      reason: ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON,
+      terminalSuppression: true,
+    })
+  }
+
   if (isAssistantProviderCapacityError(input.error)) {
     return createFailedGroupOutcome({
       advanceCursor: false,
@@ -2587,6 +2695,10 @@ function classifyAssistantAutoReplyFailure(input: {
 
 function shouldAssistantAutoReplyHoldCursorOnFailure(error: unknown): boolean {
   return isAssistantAutoReplyRepairableConfigError(error)
+}
+
+function isAssistantProviderEmptyResponseFailure(error: unknown): boolean {
+  return readAssistantAutoReplyErrorCode(error) === ASSISTANT_PROVIDER_EMPTY_RESPONSE_CODE
 }
 
 function createAdvancingSkipDecision(

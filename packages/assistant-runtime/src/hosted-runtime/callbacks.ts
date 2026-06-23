@@ -62,6 +62,7 @@ import {
 import {
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
+  setHostedProviderLinqMessageReaction,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
@@ -616,9 +617,10 @@ function compareHostedAssistantDeliveryOperationOrder(
 function readHostedAssistantDeliveryOperationPriority(
   intent: AssistantOutboxIntent,
 ): number {
-  // Reactions are idempotent; send them before same-boundary replies because
-  // non-idempotent replies can pause later work while awaiting confirmation.
-  return intent.operation?.kind === "message-reaction" ? 0 : 1;
+  if (intent.operation?.kind !== "message-reaction") {
+    return 1;
+  }
+  return intent.deliveryTransportIdempotent ? 0 : 2;
 }
 
 function compareHostedAssistantDeliveryCandidateCreatedAt(
@@ -763,6 +765,7 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
   return effect.payload.transportIdempotent
+    || isHostedAssistantReactionOnlyEffect(effect)
     || hasHostedAssistantVoiceMemoMedia(effect.payload)
     || isHostedSignupWelcomeDeliveryPayload(effect.payload);
 }
@@ -774,13 +777,19 @@ function hasHostedAssistantVoiceMemoMedia(
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   wake?: HostedRuntimeEvent | null;
 }): AssistantHostedProgressDeliveryDependencies {
+  const telegramEnv = buildHostedTelegramChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const linqEnv = buildHostedLinqChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
@@ -790,6 +799,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
 
   return {
     ...(input.signal ? { signal: input.signal } : {}),
+    sendTelegram: createHostedAssistantTelegramSendDependency({
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+      telegramEnv,
+    }),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
       linqDeliveryContext,
@@ -802,6 +816,57 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
+    ...(input.effectsPort
+      ? {
+          sendEmail: createHostedAssistantEmailSendDependency({
+            effectsPort: input.effectsPort,
+          }),
+        }
+      : {}),
+  };
+}
+
+function createHostedAssistantTelegramSendDependency(input: {
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+  telegramEnv: NodeJS.ProcessEnv;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendTelegram"]> {
+  return async (request) => {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.telegramEnv,
+      fetchImplementation: input.providerFetch,
+      ...(request.signal ?? input.signal
+        ? { signal: request.signal ?? input.signal ?? undefined }
+        : {}),
+    }, "Hosted assistant Telegram progress delivery");
+    return await sendTelegramMessage({
+      idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+    }, dependencies);
+  };
+}
+
+function createHostedAssistantEmailSendDependency(input: {
+  effectsPort: Pick<HostedRuntimeEffectsPort, "sendEmail">;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendEmail"]> {
+  return async (request) => {
+    if (request.targetKind === "participant") {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+        "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
+      );
+    }
+
+    return await input.effectsPort.sendEmail({
+      idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      subject: request.subject ?? null,
+      target: request.target,
+      targetKind: request.targetKind,
+    });
   };
 }
 
@@ -913,17 +978,12 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
       );
       blockedForegroundDeliveryKeys.add(boundaryKey);
-      const successorResetAt = await resolveHostedAssistantSuccessorResetAt({
-        effect: assistantDeliveryEffect,
-        vaultRoot: input.vaultRoot,
-      });
       await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
           ),
-        minimumNextAttemptAt: successorResetAt,
         preparedDispatchByIntentId,
         vaultRoot: input.vaultRoot,
       });
@@ -943,14 +1003,34 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
     && input.outcome.retryable === true;
 }
 
+function isHostedLinqTransportFailure(error: unknown): boolean {
+  return error instanceof VaultCliError
+    && error.code === "LINQ_API_REQUEST_FAILED"
+    && error.context?.failureStage === "transport";
+}
+
+function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: true,
+    });
+  }
+
+  return Object.assign(new Error("Hosted provider delivery may have succeeded."), {
+    deliveryMayHaveSucceeded: true,
+  });
+}
+
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
-  return effect.payload.channel === "telegram"
+  return (
+    effect.payload.channel === "linq"
+      || effect.payload.channel === "telegram"
+  )
     && effect.payload.message.length === 0
     && effect.payload.media.length === 0
-    && effect.payload.replyToMessageId !== null
-    && effect.payload.transportIdempotent === true;
+    && effect.payload.replyToMessageId !== null;
 }
 
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {
@@ -988,26 +1068,6 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
       vault: input.vaultRoot,
     });
   }
-}
-
-async function resolveHostedAssistantSuccessorResetAt(input: {
-  effect: HostedAssistantDeliveryEffect;
-  vaultRoot: string;
-}): Promise<Date> {
-  const now = new Date();
-  const mirrorState = await readAssistantOutboxIntentMirrorState({
-    intentId: input.effect.effectId,
-    now,
-    sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
-    vault: input.vaultRoot,
-  });
-  const nextAttemptAt = mirrorState.intent?.nextAttemptAt;
-  const nextAttemptAtMs = typeof nextAttemptAt === "string"
-    ? Date.parse(nextAttemptAt)
-    : Number.NaN;
-  return Number.isFinite(nextAttemptAtMs)
-    ? new Date(Math.max(nextAttemptAtMs, now.getTime()))
-    : now;
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {
@@ -1147,6 +1207,39 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
+        setLinqMessageReaction: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          let reactionProviderDispatchEntered = false;
+          const result = await setHostedProviderLinqMessageReaction({
+            reaction: request.reaction,
+            targetMessageId: request.targetMessageId,
+          }, {
+            env: input.linqEnv,
+            fetchImplementation: input.providerFetch,
+            onProviderDispatchEntered: () => {
+              providerDispatchEntered = true;
+              reactionProviderDispatchEntered = true;
+            },
+            ...(input.signal ? { signal: input.signal } : {}),
+          }).catch((error: unknown) => {
+            if (
+              reactionProviderDispatchEntered &&
+              isHostedLinqTransportFailure(error)
+            ) {
+              throw markHostedDeliveryMayHaveSucceeded(error);
+            }
+            throw error;
+          });
+          try {
+            await assertHostedDeliveryLiveNow(input);
+          } catch (error) {
+            throw markHostedDeliveryMayHaveSucceeded(error);
+          }
+          return {
+            ...result,
+            target: request.target,
+          };
+        },
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           const dependencies = requireHostedProviderFetchDependencies({

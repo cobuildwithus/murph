@@ -12,6 +12,7 @@ import {
   createHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
@@ -1305,6 +1306,17 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
+  }
+  if (snapshotRef.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
     bucket: input.bucket,

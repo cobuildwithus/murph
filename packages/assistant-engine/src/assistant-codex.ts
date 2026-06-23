@@ -111,6 +111,9 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from './assistant/execution-context.js'
 import type {
+  AssistantHostedToolContext,
+} from './assistant/hosted-tool-context.js'
+import type {
   AssistantNoReplyDisposition,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
@@ -129,6 +132,7 @@ import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
   AssistantProgressDeliverySource,
+  AssistantTurnProductFeedbackRecorder,
 } from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
@@ -349,6 +353,15 @@ function resolveCodexAppServerProgressDelivery(
   return input.progressDelivery ?? null
 }
 
+function resolveCodexAppServerHostedToolContext(
+  input: Pick<
+    CodexAppServerTurnInput,
+    'hostedToolContext'
+  >,
+): AssistantHostedToolContext | null {
+  return input.hostedToolContext ?? null
+}
+
 async function waitForCodexProgressDrain(
   pending: readonly Promise<unknown>[],
 ): Promise<boolean> {
@@ -400,6 +413,7 @@ export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   approvalPolicy?: string
   configOverrides?: readonly string[]
   codexCommand?: string
@@ -422,6 +436,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -433,6 +448,7 @@ export interface CodexAppServerTurnInput {
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
@@ -2722,6 +2738,26 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      (dynamicToolRequest.kind === 'finish-without-reply' ||
+        dynamicToolRequest.kind === 'invalid-finish-without-reply-arguments')
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply unavailable after computer_pause_for_user; send a normal final response with the handoff URL or next step for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
@@ -2797,15 +2833,18 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+      connectedAppsAvailable: input.connectedAppsAvailable === true,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      hostedToolContext: resolveCodexAppServerHostedToolContext(input),
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+      productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       progressDelivery:
         dynamicToolRequest.kind === 'send-progress-update'
           ? dynamicToolProgressDelivery
-          : resolveCodexAppServerProgressDelivery(input),
+          : null,
       publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
@@ -3687,6 +3726,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
+      | 'invalid-product-feedback-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
@@ -3697,6 +3737,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
+    request.kind === 'invalid-product-feedback-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }
@@ -3707,6 +3748,7 @@ function isSerializedDynamicToolRequest(
   return request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
 }
 

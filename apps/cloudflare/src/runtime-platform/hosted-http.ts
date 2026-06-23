@@ -7,6 +7,7 @@ import {
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import { readHostedRuntimeResponseBodyChunks } from "./hosted-response-body.ts";
 import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export async function fetchHostedResponse(input: {
@@ -68,6 +69,7 @@ export async function fetchHostedJson(input: {
   allowNotFound?: boolean;
   body?: unknown;
   description: string;
+  exposeResponseBodyInError?: boolean;
   fetchImpl: typeof fetch;
   headers?: Headers;
   redactedLogPath?: string;
@@ -102,9 +104,15 @@ export async function fetchHostedJson(input: {
   }
 
   if (!response.ok) {
-    const detail = (await response.text()).trim();
+    const detail = (await readHostedResponseText({
+      description: input.description,
+      response,
+      signal: input.signal ?? null,
+      timeoutMs: input.timeoutMs,
+    })).trim();
+    const exposeResponseBodyInError = input.exposeResponseBodyInError !== false;
     const error = new Error(
-      detail.length > 0
+      exposeResponseBodyInError && detail.length > 0
         ? `${input.description} failed with HTTP ${response.status}. ${detail}`
         : `${input.description} failed with HTTP ${response.status}.`,
     ) as Error & {
@@ -141,7 +149,12 @@ export async function fetchHostedJson(input: {
     throw error;
   }
 
-  const text = await response.text();
+  const text = await readHostedResponseText({
+    description: input.description,
+    response,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
+  });
   if (!text.trim()) {
     return null;
   }
@@ -151,6 +164,30 @@ export async function fetchHostedJson(input: {
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+}
+
+async function readHostedResponseText(input: {
+  description: string;
+  response: Response;
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+}): Promise<string> {
+  if (!input.response.body) {
+    return "";
+  }
+
+  const decoder = new TextDecoder();
+  let text = "";
+  for await (const chunk of readHostedRuntimeResponseBodyChunks({
+    body: input.response.body,
+    description: input.description,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
+  })) {
+    text += decoder.decode(chunk, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
 }
 
 export async function fetchHostedProviderEffectJson(input: {

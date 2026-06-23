@@ -211,13 +211,15 @@ export async function deliverAssistantReaction(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  if (normalizeNullableString(deliveryFields.channel)?.toLowerCase() !== 'telegram') {
+  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
+  const channelAdapter = getAssistantChannelAdapter(channel)
+  if (!channelAdapter?.setMessageReaction) {
     return {
       kind: 'failed',
       error: normalizeAssistantDeliveryError(
         new VaultCliError(
           'ASSISTANT_REACTION_CHANNEL_UNSUPPORTED',
-          'Assistant reactions are only supported for Telegram delivery.',
+          'Assistant reactions are not supported for this delivery channel.',
         ),
       ),
       intentId: null,
@@ -231,7 +233,21 @@ export async function deliverAssistantReaction(input: {
       error: normalizeAssistantDeliveryError(
         new VaultCliError(
           'ASSISTANT_REACTION_TARGET_REQUIRED',
-          'Assistant reaction delivery requires a current inbound Telegram message id.',
+          'Assistant reaction delivery requires a current inbound message id.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
+  if (!supportsAssistantCurrentAudienceMessageReaction(input)) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_TARGET_UNAVAILABLE',
+          'Assistant reactions are not available for the current inbound message.',
         ),
       ),
       intentId: null,
@@ -256,7 +272,6 @@ export async function deliverAssistantReaction(input: {
     ...deliveryFields,
     dedupeToken: reactionDedupeToken,
     deliveryIdempotencyKey: reactionDedupeToken,
-    deliveryTransportIdempotent: true,
     dispatchMode: input.input.deliveryDispatchMode,
     reaction: input.reaction,
     targetMessageId: deliveryFields.replyToMessageId,
@@ -415,15 +430,19 @@ export async function deliverAssistantProgressUpdate(input: {
     ordinal: input.ordinal,
     turnId: input.turnId,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
 
   await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
-    ...deliveryFields,
+    ...messageDeliveryFields,
     deliveryIdempotencyKey,
     media: [],
     message: input.text,
-    replyToMessageId: deliveryFields.replyToMessageId,
-    subject: deliveryFields.subject,
+    replyToMessageId: messageDeliveryFields.replyToMessageId,
+    subject: messageDeliveryFields.subject,
     turnId: input.turnId,
     vault: input.input.vault,
     signal: input.signal,
@@ -549,21 +568,57 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): boolean {
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields(input)
+  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase() ?? null
   if (
-    normalizeNullableString(deliveryFields.channel)?.toLowerCase() !==
-      'telegram' ||
+    !getAssistantChannelAdapter(channel)?.setMessageReaction ||
     normalizeNullableString(deliveryFields.replyToMessageId) === null
   ) {
     return false
   }
 
+  if (
+    channel === 'linq' &&
+    input.input.deliveryMessageReactionsAvailable !== true
+  ) {
+    return false
+  }
+
   const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
-  if (!explicitTarget) {
+  if (channel !== 'telegram' || !explicitTarget) {
     return true
   }
 
   const target = parseTelegramThreadTarget(explicitTarget)
   return !target?.businessConnectionId
+}
+
+function resolveAssistantCurrentAudienceTextDeliveryFields(input: {
+  deliveryFields: AssistantCurrentAudienceDeliveryFields
+  input: AssistantMessageInput
+}): AssistantCurrentAudienceDeliveryFields {
+  if (
+    !shouldSuppressAssistantNativeTextReplyToMessageId({
+      channel: input.deliveryFields.channel,
+      turnTrigger: input.input.turnTrigger ?? null,
+    })
+  ) {
+    return input.deliveryFields
+  }
+
+  return {
+    ...input.deliveryFields,
+    replyToMessageId: null,
+  }
+}
+
+function shouldSuppressAssistantNativeTextReplyToMessageId(input: {
+  channel: string | null
+  turnTrigger: AssistantMessageInput['turnTrigger'] | null
+}): boolean {
+  return (
+    normalizeNullableString(input.channel)?.toLowerCase() === 'telegram' &&
+    input.turnTrigger === 'automation-auto-reply'
+  )
 }
 
 function resolveAssistantHintedBindingDelivery(input: {
@@ -669,8 +724,12 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const messageDeliveryFields = resolveAssistantCurrentAudienceTextDeliveryFields({
+    deliveryFields,
+    input: input.input,
+  })
   const outcome = await state.outbox.deliverMessage({
-    ...deliveryFields,
+    ...messageDeliveryFields,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

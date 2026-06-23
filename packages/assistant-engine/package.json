@@ -51,6 +51,10 @@
       "types": "./dist/assistant-runtime.d.ts",
       "default": "./dist/assistant-runtime.js"
     },
+    "./assistant-runtime-residue": {
+      "types": "./dist/assistant-runtime-residue.d.ts",
+      "default": "./dist/assistant-runtime-residue.js"
+    },
     "./assistant-skill-assets": {
       "types": "./dist/assistant-skill-assets.d.ts",
       "default": "./dist/assistant-skill-assets.js"

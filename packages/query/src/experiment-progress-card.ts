@@ -12,12 +12,14 @@ import type {
   ExperimentAdherenceCalendarResult,
   ExperimentAdherenceCellStatus,
 } from "./experiment-adherence.ts";
+import { resolveExperimentAdherenceRollupTarget } from "./experiment-adherence.ts";
 import {
   collectExperimentAdherenceCalendar,
   summarizeExperimentProgress,
   type ExperimentMetricResult,
   type ExperimentProgressSummary,
 } from "./experiments.ts";
+import type { MetricPoint } from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 
 /**
@@ -39,6 +41,7 @@ export interface ExperimentProgressCardConfounderInput {
 export interface BuildExperimentProgressCardOptions {
   asOf?: string;
   confounders?: readonly ExperimentProgressCardConfounderInput[];
+  metricPoints?: readonly MetricPoint[];
 }
 
 export interface ExperimentProgressCardBuildResult {
@@ -54,8 +57,14 @@ export function buildExperimentProgressCard(
   options: BuildExperimentProgressCardOptions = {},
 ): ExperimentProgressCardBuildResult {
   const warnings: string[] = [];
-  const progress = summarizeExperimentProgress(vault, slug, { asOf: options.asOf });
-  const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: options.asOf });
+  const progress = summarizeExperimentProgress(vault, slug, {
+    asOf: options.asOf,
+    metricPoints: options.metricPoints,
+  });
+  const calendar = collectExperimentAdherenceCalendar(vault, slug, {
+    asOf: options.asOf,
+    metricPoints: options.metricPoints,
+  });
   const windows = progress.windows;
   const runStart = windows.baselineStart ?? windows.interventionStart;
   if (!runStart) {
@@ -118,7 +127,16 @@ function buildCardWeeks(input: {
   windows: ExperimentProgressSummary["windows"];
 }): Array<{ start: string; cells: string }> {
   const statusesByDate = new Map<string, ExperimentAdherenceCellStatus[]>();
+  const targets = input.calendar?.targets ?? [];
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
+  if (hasAmbiguousTargets) {
+    input.warnings.push("calendar omitted because multiple adherence targets define no single rollup");
+  }
   for (const cell of input.calendar?.cells ?? []) {
+    if (hasAmbiguousTargets || (rollupTarget && cell.targetId !== rollupTarget.targetId)) {
+      continue;
+    }
     const statuses = statusesByDate.get(cell.localDate) ?? [];
     statuses.push(cell.status);
     statusesByDate.set(cell.localDate, statuses);

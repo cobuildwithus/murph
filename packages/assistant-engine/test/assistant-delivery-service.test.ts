@@ -4,6 +4,7 @@ import { createAssistantModelTarget } from '@murphai/operator-config/assistant-b
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
+  deliverAssistantReaction,
   resolveAssistantCurrentAudienceDeliveryFields,
 } from '../src/assistant/delivery-service.ts'
 import {
@@ -391,6 +392,43 @@ test('typing indicators use the current audience route', async () => {
     })
   })
   await indicator?.stop()
+})
+
+test('Linq reactions fail closed when the current message is not reaction-capable', async () => {
+  const session = createAssistantSession()
+  const result = await deliverAssistantReaction({
+    deliveryContextOrdinal: 1,
+    input: {
+      channel: 'linq',
+      deliverResponse: true,
+      deliveryMessageReactionsAvailable: false,
+      deliveryReplyToMessageId: 'linq-sms-message',
+      deliveryTarget: 'linq-chat',
+      prompt: 'React to this.',
+      threadId: 'linq-chat',
+      vault: '/vaults/test',
+    },
+    reaction: 'heart',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        channel: 'linq',
+        explicitTarget: 'linq-chat',
+        replyToMessageId: 'linq-sms-message',
+        threadId: 'linq-chat',
+        threadIsDirect: true,
+      },
+    }),
+    turnId: 'turn-linq-reaction-ineligible',
+  })
+
+  expect(result).toMatchObject({
+    kind: 'failed',
+    intentId: null,
+    error: {
+      code: 'ASSISTANT_REACTION_TARGET_UNAVAILABLE',
+    },
+  })
 })
 
 function createAssistantSession(input?: {

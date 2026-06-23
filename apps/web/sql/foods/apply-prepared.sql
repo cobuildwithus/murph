@@ -27,6 +27,40 @@ CREATE TEMP TABLE foods_prepared (
 CREATE INDEX foods_prepared_batch_idx
   ON foods_prepared (data_origin, data_origin_id);
 
+UPDATE foods_prepared
+SET serving_grams = NULL
+WHERE serving_grams IS NOT NULL
+  AND NOT (serving_grams > 0 AND serving_grams <= 2000);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM foods_prepared
+    WHERE data_origin IN ('usda_branded', 'usda_foundation', 'usda_sr_legacy', 'usda_fndds')
+      AND serving_grams IS NOT NULL
+      AND label->>'servingGramsContractVersion' IS DISTINCT FROM 'fdc_strict_serving_grams_v1'
+  ) THEN
+    RAISE EXCEPTION 'prepared FDC serving_grams require fdc_strict_serving_grams_v1; regenerate the prepared export';
+  END IF;
+END $$;
+
+\set reviewed_serving_grams_entity_type food
+\ir ../product-tests/load-reviewed-serving-grams-overlay.sql
+\unset reviewed_serving_grams_entity_type
+
+-- Validate reviewed rows before writes, then put exact reviewed values into
+-- staging so the batched upserts keep their bounded commit behavior.
+UPDATE foods_prepared
+SET serving_grams = reviewed.serving_grams
+FROM serving_grams_reviewed_overlay_import reviewed
+WHERE reviewed.entity_type = 'food'
+  AND foods_prepared.id = reviewed.label_id
+  AND foods_prepared.serving_grams IS DISTINCT FROM reviewed.serving_grams;
+
+DROP TABLE serving_grams_reviewed_overlay_import;
+DROP TABLE serving_grams_reviewed_overlay_options;
+
 ANALYZE foods_prepared;
 
 -- Generic origins first (small), then branded in four modulo batches to keep

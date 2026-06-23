@@ -50,7 +50,7 @@ export function ExperimentBrowseCard({
   const isInteractive = resolvedHref !== null;
   const cardContent = (
     <>
-      <div className="relative h-40 w-full overflow-hidden rounded-xl outline-1 -outline-offset-1 outline-black/5">
+      <div className="relative h-40 w-full overflow-hidden rounded-xl outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10">
         <Image
           src={image}
           alt=""
@@ -81,7 +81,7 @@ export function ExperimentBrowseCard({
               </Badge>
             ) : null}
             {typeof matchPercent === "number" ? (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[11px] tabular-nums text-muted-foreground">
                 {matchPercent}%
               </span>
             ) : null}
@@ -94,7 +94,7 @@ export function ExperimentBrowseCard({
           {metadata ?? (typeof durationDays === "number" ? `${durationDays} days` : "Protocol")}
         </span>
         {description ? (
-          <span className="line-clamp-2 text-xs text-muted-foreground/80">
+          <span className="line-clamp-2 text-xs text-pretty text-muted-foreground/80">
             {description}
           </span>
         ) : null}

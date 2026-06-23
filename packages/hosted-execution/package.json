@@ -38,6 +38,10 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./connected-apps": {
+      "types": "./dist/connected-apps.d.ts",
+      "default": "./dist/connected-apps.js"
+    },
     "./computer-use": {
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"

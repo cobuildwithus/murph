@@ -7,6 +7,7 @@ import type {
 import type {
   ComputerKernelClient,
 } from "../src/lib/computer-use/kernel-client";
+import { computerUseError } from "../src/lib/computer-use/errors";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
   ComputerHandoffRecord,
@@ -22,7 +23,7 @@ vi.mock("node:dns/promises", () => ({
 vi.stubEnv("HOSTED_COMPUTER_PROFILE_NAMESPACE", "test");
 
 describe("ComputerUseService", () => {
-  it("stores a durable awaiting-user pause and composes the handoff message", async () => {
+  it("stores a durable awaiting-user pause and returns the hosted handoff URL", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
@@ -38,7 +39,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -53,16 +53,14 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Can you log in here?\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
-      awaitingMessage: "Can you log in here?",
+      awaitingMessage: null,
       awaitingReason: "login_needed",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
       suggestedReply: "done",
     });
-    expect(store.run.awaitingMessage).not.toContain("/computer/handoff/");
     expect(store.handoff).toMatchObject({
       expiresAt: new Date("2026-06-17T12:20:00.000Z"),
       id: "hch_handoff123",
@@ -91,7 +89,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please confirm and book this appointment in the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -106,11 +103,8 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(
-      `Please confirm and book this appointment in the browser.\n\n${result.handoffUrl}`,
-    );
     expect(store.run).toMatchObject({
-      awaitingMessage: "Please confirm and book this appointment in the browser.",
+      awaitingMessage: null,
       awaitingReason: "final_confirmation",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
@@ -153,7 +147,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -162,7 +155,6 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
       awaitingMessage: "Old login request.",
       awaitingReason: "login_needed",
@@ -215,13 +207,14 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
     });
 
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "expired",
     });
@@ -272,7 +265,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in?",
       pauseDeliveryContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
@@ -286,7 +278,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I book this appointment?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.run).toMatchObject({
       awaitingMessage: "Should I book this appointment?",
       awaitingReason: "final_confirmation",
@@ -337,7 +331,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please reopen the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -347,7 +340,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I submit this booking?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "completed",
     });
@@ -395,7 +390,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       pauseDeliveryContext: {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
@@ -427,7 +421,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: null,
       memberId: "member_123",
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -460,7 +453,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -491,7 +483,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -541,7 +532,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -1298,9 +1288,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1342,9 +1329,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail", "ok"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1404,9 +1388,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail", "ok"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1466,9 +1447,6 @@ describe("ComputerUseService", () => {
       crypto: createFakeCrypto({
         decryptedRunSecret: null,
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1512,7 +1490,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "staging.alpha",
       },
       kernel,
@@ -1582,7 +1559,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
       },
       kernel,
@@ -1659,9 +1635,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1707,9 +1680,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1749,9 +1719,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1789,9 +1756,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -1829,9 +1793,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       navigationDnsLookup: async () => [
         { address: "93.184.216.34" },
@@ -1853,34 +1814,6 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightCalls).toBe(0);
   });
 
-  it("fails closed before browser creation when live-view origins are not configured", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const store = new FakeComputerUseStore({
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:00:00.000Z"),
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
-        status: "completed",
-      }),
-    });
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.startRun({
-      memberId: "member_123",
-      resumeRunId: null,
-      startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
-    });
-    expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.deletedSessionIds).toEqual([]);
-  });
-
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -1895,7 +1828,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
       },
       kernel,
@@ -1947,7 +1879,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
       },
       kernel,
@@ -1991,7 +1922,6 @@ describe("ComputerUseService", () => {
 
     await new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod/foo",
       },
       kernel: createFakeKernel(),
@@ -2004,7 +1934,6 @@ describe("ComputerUseService", () => {
     });
     await new ComputerUseService({
       env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod foo",
       },
       kernel: createFakeKernel(),
@@ -2033,11 +1962,11 @@ describe("ComputerUseService", () => {
         status: "completed",
       }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      liveViewUrlForBrowser: (browserCount) =>
+        `https://kernel.example.test/live/${browserCount}`,
+    });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2069,9 +1998,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2129,9 +2055,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2167,9 +2090,6 @@ describe("ComputerUseService", () => {
       deleteBrowserResults: ["fail"],
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -2217,7 +2137,6 @@ describe("ComputerUseService", () => {
     await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Should I place this order?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -2267,6 +2186,64 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
+      status: "running",
+    });
+  });
+
+  it("adds action context to Kernel browser evaluation failures", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        lastTitle: "Checkout",
+        lastUrl: "https://shop.example.test/checkout",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResultForCall() {
+        throw computerUseError({
+          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          details: {
+            kernelError:
+              "locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+            kernelStderr: "page context closed",
+          },
+          httpStatus: 502,
+          message:
+            "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+          retryable: true,
+        });
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: true, name: "Place your order", role: "button" },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 20000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_EVAL_FAILED",
+      details: {
+        browserAction: "click",
+        kernelError:
+          "locator.click: Timeout 20000ms exceeded while waiting for getByRole('button', { name: 'Place your order' })",
+        kernelStderr: "page context closed",
+        locator: "role=button, name=Place your order, exact=true",
+        timeoutMs: 20000,
+      },
+      message: "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+      retryable: true,
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Checkout",
+      lastUrl: "https://shop.example.test/checkout",
       status: "running",
     });
   });
@@ -2732,9 +2709,6 @@ describe("ComputerUseService", () => {
       crypto: createFakeCrypto({
         decryptedRunSecret: "https://kernel.example.test/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2765,11 +2739,8 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
-        decryptedRunSecret: "https://kernel.example.test/live/1",
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2916,11 +2887,8 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
-        decryptedRunSecret: "https://kernel.example.test/live/1",
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
       }),
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel: createFakeKernel(),
       now: () => now,
       store,
@@ -2933,7 +2901,7 @@ describe("ComputerUseService", () => {
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       kind: "open",
-      liveViewUrl: "https://kernel.example.test/live/1",
+      liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
       purpose: "login",
       suggestedReply: "done",
     });
@@ -3022,9 +2990,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3355,9 +3320,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3429,9 +3391,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3474,9 +3433,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3523,9 +3479,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3569,9 +3522,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3614,9 +3564,6 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3733,11 +3680,10 @@ describe("ComputerUseService", () => {
         url: "https://shop.example.test/account",
         visibleText: "Account",
       },
+      liveViewUrlForBrowser: (browserCount) =>
+        `https://kernel.example.test/live/${browserCount}`,
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://allowed.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3782,9 +3728,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -3827,9 +3770,6 @@ describe("ComputerUseService", () => {
       },
     });
     const service = new ComputerUseService({
-      env: {
-        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-      },
       kernel,
       now: () => now,
       store,
@@ -5969,6 +5909,7 @@ function createFakeKernel(input: {
   ) => unknown;
   executeResults?: unknown[];
   executeResult?: unknown;
+  liveViewUrlForBrowser?: (browserCount: number) => string;
   onExecutePlaywright?: (
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
@@ -6002,7 +5943,8 @@ function createFakeKernel(input: {
       browserCount += 1;
       this.createdSessionIds.push(`kernel-session-${browserCount}`);
       return {
-        liveViewUrl: `https://kernel.example.test/live/${browserCount}`,
+        liveViewUrl: input.liveViewUrlForBrowser?.(browserCount)
+          ?? `https://proxy.test-browser.onkernel.com:8443/live/${browserCount}`,
         sessionId: `kernel-session-${browserCount}`,
       };
     },

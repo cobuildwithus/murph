@@ -18,11 +18,11 @@ export function PageHeader({
           {eyebrow}
         </span>
       ) : eyebrow ?? null}
-      <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-balance text-foreground">
         {title}
       </h1>
       {description ? (
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+        <p className="mt-1 max-w-2xl text-sm text-pretty text-muted-foreground">
           {description}
         </p>
       ) : null}

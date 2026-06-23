@@ -17,6 +17,7 @@ import {
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
@@ -85,6 +87,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
     sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
+    setLinqMessageReaction: mocks.setLinqMessageReaction,
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
@@ -316,6 +319,36 @@ describe("hosted runtime callbacks", () => {
       preparedDispatches: [],
     });
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("pre-claims non-idempotent Linq reaction effects before provider dispatch", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation.preparedDispatches).toEqual([
+      expect.objectContaining({
+        intentId: "intent_123",
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      }),
+    ]);
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
   });
 
   it("pre-claims non-idempotent voice memo delivery effects before provider dispatch", async () => {
@@ -587,6 +620,67 @@ describe("hosted runtime callbacks", () => {
           turnId: "turn_1",
         },
       }),
+    ]);
+  });
+
+  it("collects non-idempotent Linq reactions after same-boundary replies", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reaction",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reaction",
+        media: [],
+        message: "",
+        operation: {
+          kind: "message-reaction",
+          reaction: "heart",
+          targetMessageId: "linq_message_1",
+        },
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reply",
+        deliveryIdempotencyKey: "assistant-segment:turn_1:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reply",
+        media: [],
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_reaction", "intent_reply"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_reply",
+      "intent_reaction",
+    ]);
+    expect(sideEffects.map((effect) => effect.payload.transportIdempotent)).toEqual([
+      false,
+      false,
     ]);
   });
 
@@ -2989,17 +3083,127 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
-  it("does not block the same-turn reply after a retryable reaction-only failure", async () => {
-    const retryAt = "2099-04-08T00:05:00.000Z";
+  it.each([
+    { channel: "linq", transportIdempotent: false },
+    { channel: "telegram", transportIdempotent: true },
+  ] as const)(
+    "does not block the same-turn reply after a retryable $channel reaction-only failure",
+    async ({ channel, transportIdempotent }) => {
+      const retryAt = "2099-04-08T00:05:00.000Z";
+      const reactionEffect = buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_reaction",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_reaction",
+        payload: createPayload({
+          channel,
+          idempotencyKey: "assistant-outbox:intent_reaction",
+          message: "",
+          replyToMessageId: "message-one",
+          transportIdempotent,
+        }),
+      });
+      const messageEffect = buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_message",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_message",
+        payload: createPayload({
+          channel,
+          idempotencyKey: "assistant-outbox:intent_message",
+          message: "hello from hosted",
+          replyToMessageId: "message-one",
+        }),
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) => {
+        if (intentId === "intent_reaction") {
+          return createMirrorState({
+            delivery: null,
+            deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+            deliveryTransportIdempotent: true,
+            intentId: "intent_reaction",
+            lastError: {
+              code: "TELEGRAM_TEMPORARY_FAILURE",
+              message: "temporary provider failure",
+            },
+            nextAttemptAt: retryAt,
+            status: "retryable",
+          });
+        }
+        return createMirrorState({
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_message",
+          deliveryTransportIdempotent: false,
+          intentId: "intent_message",
+          lastError: null,
+          status: "pending",
+        });
+      });
+      mocks.dispatchAssistantOutboxIntent
+        .mockResolvedValueOnce(
+          createDispatchResult(
+            {
+              intentId: "intent_reaction",
+              lastError: {
+                code: "TELEGRAM_TEMPORARY_FAILURE",
+                message: "temporary provider failure",
+              },
+              status: "retryable",
+            },
+            {
+              code: "TELEGRAM_TEMPORARY_FAILURE",
+              diagnosticContext: {
+                code: "TELEGRAM_TEMPORARY_FAILURE",
+                description: "Too Many Requests: retry later",
+                errorCode: 429,
+                operation: "Telegram Bot API setMessageReaction",
+                retryable: true,
+                status: 429,
+                target: "telegram:chat:123456789",
+              },
+              message: "temporary provider failure",
+            },
+          ),
+        )
+        .mockResolvedValueOnce(
+          createDispatchResult({
+            delivery: createDelivery({
+              idempotencyKey: "assistant-outbox:intent_message",
+            }),
+            intentId: "intent_message",
+            status: "sent",
+          }),
+        );
+
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [reactionEffect, messageEffect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+
+      expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
+        "intent_reaction",
+        "intent_message",
+      ]);
+      expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+      expect(outcomes[1]?.deliveryStatus).toBe("sent");
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not block the same-turn reply after an ambiguous non-idempotent Linq reaction", async () => {
     const reactionEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_reaction",
       deliveryPhase: "foreground_current_turn",
       effectId: "intent_reaction",
       payload: createPayload({
+        channel: "linq",
         idempotencyKey: "assistant-outbox:intent_reaction",
         message: "",
-        replyToMessageId: "message-one",
-        transportIdempotent: true,
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
       }),
     });
     const messageEffect = buildHostedAssistantDeliveryEffect({
@@ -3007,70 +3211,38 @@ describe("hosted runtime callbacks", () => {
       deliveryPhase: "foreground_current_turn",
       effectId: "intent_message",
       payload: createPayload({
+        channel: "linq",
         idempotencyKey: "assistant-outbox:intent_message",
-        message: "hello from hosted",
-        replyToMessageId: "message-one",
+        message: "fallback reply",
+        replyToMessageId: "linq_message_1",
       }),
     });
-    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) => {
-      if (intentId === "intent_reaction") {
-        return createMirrorState({
-          delivery: null,
-          deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
-          deliveryTransportIdempotent: true,
-          intentId: "intent_reaction",
-          lastError: {
-            code: "TELEGRAM_TEMPORARY_FAILURE",
-            message: "temporary provider failure",
-          },
-          nextAttemptAt: retryAt,
-          status: "retryable",
-        });
-      }
-      return createMirrorState({
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
         delivery: null,
-        deliveryIdempotencyKey: "assistant-outbox:intent_message",
+        deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
         deliveryTransportIdempotent: false,
-        intentId: "intent_message",
+        intentId: "intent_reaction",
         lastError: null,
         status: "pending",
-      });
-    });
-    mocks.dispatchAssistantOutboxIntent
-      .mockResolvedValueOnce(
-        createDispatchResult(
-          {
-            intentId: "intent_reaction",
-            lastError: {
-              code: "TELEGRAM_TEMPORARY_FAILURE",
-              message: "temporary provider failure",
-            },
-            status: "retryable",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          intentId: "intent_reaction",
+          lastError: {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
           },
-          {
-            code: "TELEGRAM_TEMPORARY_FAILURE",
-            diagnosticContext: {
-              code: "TELEGRAM_TEMPORARY_FAILURE",
-              description: "Too Many Requests: retry later",
-              errorCode: 429,
-              operation: "Telegram Bot API setMessageReaction",
-              retryable: true,
-              status: 429,
-              target: "telegram:chat:123456789",
-            },
-            message: "temporary provider failure",
-          },
-        ),
-      )
-      .mockResolvedValueOnce(
-        createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey: "assistant-outbox:intent_message",
-          }),
-          intentId: "intent_message",
-          status: "sent",
-        }),
-      );
+          status: "abandoned",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          message: "Ambiguous Linq reaction delivery.",
+        },
+      ),
+    );
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       allowPreparedSending: true,
@@ -3085,7 +3257,7 @@ describe("hosted runtime callbacks", () => {
       "intent_reaction",
       "intent_message",
     ]);
-    expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+    expect(outcomes[0]?.deliveryStatus).toBe("failed_ambiguous");
     expect(outcomes[1]?.deliveryStatus).toBe("sent");
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
@@ -3779,6 +3951,218 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("routes persisted Linq reaction intents without payload operations", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    expect(effect.payload).not.toHaveProperty("operation");
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_123",
+        targetMessageId: "linq_message_1",
+      });
+
+      return createDispatchResult({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "thread",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(mocks.setLinqMessageReaction).toHaveBeenCalledWith({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    let capturedError: unknown = null;
+    mocks.setLinqMessageReaction.mockRejectedValueOnce(
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq request POST /messages/linq_message_1/reactions failed before a response was returned.",
+        {
+          failureStage: "transport",
+          operation: "set_message_reaction",
+          provider: "linq",
+          retryable: false,
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.setLinqMessageReaction({
+          reaction: "heart",
+          target: "linq_chat_123",
+          targetMessageId: "linq_message_1",
+        });
+      } catch (error) {
+        capturedError = error;
+        return createDispatchResult(
+          {
+            intentId: "intent_123",
+            lastError: {
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Ambiguous Linq reaction delivery.",
+            },
+            status: "abandoned",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
+          },
+        );
+      }
+
+      throw new Error("expected Linq reaction transport failure");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(capturedError).toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("marks post-success Linq reaction liveness aborts as possibly committed", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    let capturedError: unknown = null;
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("aborted after Linq reaction response"));
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.setLinqMessageReaction({
+          reaction: "heart",
+          target: "linq_chat_123",
+          targetMessageId: "linq_message_1",
+        });
+      } catch (error) {
+        capturedError = error;
+        return createDispatchResult(
+          {
+            intentId: "intent_123",
+            lastError: {
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Ambiguous Linq reaction delivery.",
+            },
+            status: "abandoned",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous Linq reaction delivery.",
+          },
+        );
+      }
+
+      throw new Error("expected post-success Linq reaction liveness failure");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: true,
+      message: "aborted after Linq reaction response",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
         retryable: false,
       }),
     ]);

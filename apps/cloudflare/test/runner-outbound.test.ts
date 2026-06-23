@@ -46,6 +46,8 @@ import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -57,6 +59,7 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -179,6 +182,17 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted execution usage recording",
     path: "/api/internal/hosted-execution/usage/record",
+  },
+  {
+    body: {
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["native-message-formatting"],
+      },
+    },
+    name: "hosted product feedback recording",
+    path: HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   },
   {
     body: {
@@ -306,7 +320,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       suggestedReply: "yes",
     },
@@ -807,7 +820,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${path}`, {
         body: JSON.stringify({
-          message: "Should I book this appointment?",
           reason: "final_confirmation",
           suggestedReply: "yes",
         }),
@@ -3163,8 +3175,8 @@ describe("handleRunnerOutboundRequest", () => {
     }));
     expect(body).not.toHaveProperty("putUrl");
     expect(body.limits).toEqual({
-      maxSinglePartEncryptedBytes: 4 * 1024 * 1024 * 1024,
-      warnEncryptedBytes: 128 * 1024 * 1024,
+      maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
     });
     expect(body.encryption).toEqual(expect.objectContaining({
       aad: expect.objectContaining({
@@ -3271,6 +3283,41 @@ describe("handleRunnerOutboundRequest", () => {
     expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(presignBody.expiresAt).toEqual(expect.stringMatching(/^20/u));
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+  });
+
+  it("rejects direct-R2 workspace snapshot PUT presigns at the single-part limit before session lookup", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const snapshotId = "snapshot_presign_oversized";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        encryptedObjectSha256: "a".repeat(64),
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot exceeds the single-part size limit.",
+    });
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("presigns direct-R2 workspace snapshot PUT URLs with hosted-local dev MinIO env", async () => {
@@ -6177,6 +6224,56 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized plain workspace snapshot refs before checkpoint publication", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_plain_oversized";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      totalPlainBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 128 }),
+        async (key) => ({ key, size: 128 }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot exceeds the total plain size limit.",
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects workspace snapshot completion when R2 HEAD omits object size", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_missing_size";
@@ -7096,6 +7193,7 @@ function createWorkspaceSnapshotV2Ref(input: {
   encryptedObjectSha256: string;
   objectKey: string;
   snapshotId: string;
+  totalPlainBytes?: number;
   userId: string;
 }): HostedWorkspaceSnapshotV2Ref {
   return {
@@ -7106,7 +7204,7 @@ function createWorkspaceSnapshotV2Ref(input: {
       fileCount: 1,
       format: "tar",
       plaintextArchiveSha256: "c".repeat(64),
-      totalPlainBytes: input.encryptedByteSize,
+      totalPlainBytes: input.totalPlainBytes ?? input.encryptedByteSize,
     },
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: {

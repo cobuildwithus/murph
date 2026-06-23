@@ -4,16 +4,21 @@ import {
   readSignedComputerStartRunRequest,
   withJsonError,
 } from "@/src/lib/computer-use/http";
+import { withHostedComputerToolFailureRuntimeLog } from "@/src/lib/computer-use/runtime-log";
 
 export const POST = withJsonError(async (request: Request) => {
   const { body, memberId } = await readSignedComputerStartRunRequest(request);
   const service = createComputerUseService();
 
-  return jsonOk(await service.startRun({
+  return jsonOk(await withHostedComputerToolFailureRuntimeLog({
     memberId,
-    resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,
-    resumeDeliveryContext: body.resumeDeliveryContext,
-    resumeRunId: body.resumeRunId,
-    startUrl: body.startUrl,
+    operation: "start-run",
+    run: () => service.startRun({
+      memberId,
+      resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,
+      resumeDeliveryContext: body.resumeDeliveryContext,
+      resumeRunId: body.resumeRunId,
+      startUrl: body.startUrl,
+    }),
   }));
 });

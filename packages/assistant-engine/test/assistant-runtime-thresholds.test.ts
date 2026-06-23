@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -207,6 +207,52 @@ describe('assistant runtime thresholds', () => {
         notes: ['already fresh'],
       },
     })
+  })
+
+  it('runs overdue maybe-maintenance once across concurrent foreground callers', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-thresholds-concurrent-maintenance-',
+    )
+    await writeFile(
+      paths.resourceBudgetPath,
+      JSON.stringify({
+        schema: 'murph.assistant-runtime-budget.v1',
+        updatedAt: '2026-03-01T00:00:00.000Z',
+        caches: [],
+        maintenance: {
+          lastRunAt: '2026-03-01T00:00:00.000Z',
+          notes: [],
+          staleLocksCleared: 0,
+          staleQuarantinePruned: 0,
+        },
+      }),
+      'utf8',
+    )
+
+    const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
+    const now = new Date('2026-03-01T00:10:00.000Z')
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        runtimeBudgets.maybeRunAssistantRuntimeMaintenance({
+          now,
+          vault: vaultRoot,
+        }),
+      ),
+    )
+
+    expect(results.map((result) => result.maintenance.lastRunAt)).toEqual(
+      Array.from({ length: 20 }, () => '2026-03-01T00:10:00.000Z'),
+    )
+    const eventLines = (await readFile(paths.runtimeEventsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+    const maintenanceEvents = eventLines
+      .map((line) => JSON.parse(line) as { kind?: unknown })
+      .filter((event) => event.kind === 'runtime.maintenance')
+
+    expect(maintenanceEvents).toHaveLength(1)
   })
 
   it('reruns overdue maintenance with the current clock and records the singular cache-prune note', async () => {
@@ -736,9 +782,11 @@ function createMockAssistantPaths(seed: string) {
   const root = path.join('/tmp', seed)
   return {
     assistantStateRoot: root,
+    diagnosticEventsPath: path.join(root, 'diagnostics', 'events.jsonl'),
     outboxQuarantineDirectory: path.join(root, 'outbox-quarantine'),
     quarantineDirectory: path.join(root, 'quarantine'),
     resourceBudgetPath: path.join(root, 'resource-budget.json'),
+    runtimeEventsPath: path.join(root, 'journals', 'runtime-events.jsonl'),
   }
 }
 

@@ -3,10 +3,11 @@ import {
   upsertAutomation,
   type AutomationRecord,
 } from '@murphai/core'
-import type {
-  AutomationContinuityPolicy,
-  AutomationRoute,
-  AutomationSchedule,
+import {
+  MURPH_PRODUCT_ORIGIN,
+  type AutomationContinuityPolicy,
+  type AutomationRoute,
+  type AutomationSchedule,
 } from '@murphai/contracts'
 import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -60,6 +61,8 @@ export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
+export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
+  'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
 
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
@@ -224,6 +227,42 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '  - one thing not to overinterpret',
       '- Keep the message practical, calm, and non-alarmist.',
       '- Append one dated section to `weekly-health-research-scout`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    slug: 'weekly-product-updates',
+    title: 'This week in Murph',
+    summary: 'A personalized weekly look at what is new in Murph.',
+    schedule: {
+      kind: 'cron',
+      expression: '30 11 * * 4',
+    },
+    continuityPolicy: 'fresh',
+    tags: [
+      'murph-managed:weekly-product-updates',
+    ],
+    instructions: [
+      'Each Thursday at 11:30 AM local time, compose one concise personalized in-chat update about what is new in Murph.',
+      '',
+      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=20&improvementLimit=5.`,
+      '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
+      '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
+      '',
+      'Choose 3-7 items that are most likely to matter to this user. Rank using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
+      '- Do not inspect raw health values solely to personalize product news.',
+      '- Prefer relevance, practical benefit, editorial priority, and novelty. Do not fill space with weak matches.',
+      '- Use the canonical title, summary, URL, and tryIt fields from the feed.',
+      '',
+      'Create the visual digest deterministically:',
+      '- Take the selected item ids in message order and join them with `~`.',
+      '- Replace `{ids}` in `links.digestCardTemplate` with that joined value.',
+      '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
+      '',
+      'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
+      'Close by inviting the user to reply with one update they want to try.',
+      '',
+      'On a later user turn, call `murph.submit_product_feedback` only after the user explicitly expresses interest in one or more shipped changelog items. Never infer or submit feedback silently, and do not submit new feature requests.',
     ].join('\n'),
   },
 ] satisfies readonly MurphManagedAutomationSeed[]

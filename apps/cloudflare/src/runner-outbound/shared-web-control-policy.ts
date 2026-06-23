@@ -1,4 +1,7 @@
 import {
+  HOSTED_CONNECTED_APPS_PATH,
+} from "@murphai/hosted-execution/connected-apps";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -16,6 +19,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_CONSUME_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+  HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -38,6 +42,7 @@ export type HostedRunnerWebControlOperation =
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
   | "computer_use"
+  | "connected_apps"
   | "device_sync_connect_link"
   | "device_sync_dirty_ack"
   | "device_sync_pending_dirty_state"
@@ -49,6 +54,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_payload_fetch"
   | "runtime_latency_trace"
   | "runtime_log_write"
+  | "product_feedback_recording"
   | "usage_recording"
   | "vault_share_deliver"
   | "workspace_checkpoint"
@@ -61,6 +67,7 @@ export interface HostedRunnerWebControlPolicy {
 }
 
 const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebControlOperation>([
+  [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
@@ -73,6 +80,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
+  [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

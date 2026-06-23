@@ -3,6 +3,8 @@
 ## Implementation Bias
 
 - Prefer simple, composable primitives over complex abstractions. Add a new abstraction only when it removes real duplication, clarifies ownership, or makes an invariant easier to enforce.
+- Treat improving agent capability as a design input. If a behavior can be handled by clear prompt/tool guidance and existing primitives, prefer that over bespoke orchestration code; do not preserve today's model limitations as permanent architecture.
+- Add code around agents only for hard guarantees: security, privacy, state integrity, idempotency, latency/retry bounds, protocol compatibility, deterministic runtime behavior, or failures proven by tests or production evidence that prompt/tool guidance cannot reliably cover.
 - Do not introduce broad managers, speculative frameworks, or compatibility layers when a named primitive, package-owned seam, or direct function can express the behavior clearly.
 - Keep production/source code free of branches, exports, routes, helpers, fixtures, and flags that exist only for tests or harnesses. Test-only needs belong in test files, fixtures, support modules, or test-specific composition outside the production source surface.
 - If a test needs a new source seam, make it a real production seam with clear runtime ownership and product/debug value. Do not widen package exports, public APIs, runtime env branches, or internal object methods only to make a harness easier to drive.
@@ -11,6 +13,12 @@
 ## Latency And Scan Bounds
 
 - Do not add unbounded linear-or-worse scans over any growing collection, including repo files, vault records, runtime state, database rows, object-store keys, mailbox items, transcripts, logs, API result sets, or in-memory accumulators. Any path that can run during user-visible work, recurring jobs, deploy checks, or normal local commands must use a bounded window, limit, cursor, index, manifest, precomputed projection, exact key lookup, or explicit pagination. Intentional full scans are allowed only for bounded fixture data, one-shot migrations, offline/admin repair tools, or diagnostics with a documented size cap and operator-visible cost.
+
+## Hosted Workspace File Cardinality
+
+- Hosted workspace restore/checkpoint treats file count as a latency, memory, and privacy budget. A routine feature must not create an unbounded number of small files under the restored workspace just because each file is small.
+- Before adding a new workspace write family, classify the state, choose a compact storage shape, define snapshot inclusion or exclusion, and document retention or compaction. Prefer existing shards, ledgers, manifests, SQLite stores, or owner documents over per-event file trees.
+- Detailed rule: `docs/contracts/06-hosted-workspace-file-count.md`.
 
 ## Canonical Storage
 
@@ -45,7 +53,7 @@
 
 ## User-Facing Message Sends
 
-- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, and the first welcome. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, and billing cancellation feedback email. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
 
 ## Hosted Foreground Priority
 

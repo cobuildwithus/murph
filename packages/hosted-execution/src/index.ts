@@ -20,6 +20,7 @@ export {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
@@ -38,6 +39,7 @@ export {
 export * from "./contracts.ts";
 export * from "./browser-vault.ts";
 export * from "./cli-runtime-bridge.ts";
+export * from "./connected-apps.ts";
 export * from "./computer-use.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";

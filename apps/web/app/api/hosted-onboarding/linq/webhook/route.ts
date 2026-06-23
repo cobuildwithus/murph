@@ -12,13 +12,6 @@ import {
 
 const HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
-export async function GET() {
-  return jsonOk({
-    ok: true,
-    provider: "linq",
-  });
-}
-
 export const POST = withJsonError(async (request: Request) => {
   const signature = request.headers.get("x-webhook-signature");
   const timestamp = request.headers.get("x-webhook-timestamp");

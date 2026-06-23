@@ -606,7 +606,7 @@ const assistantMessageChannelDeliverySchema = z.object({
 const assistantMessageReactionChannelDeliverySchema = z
   .object({
     kind: z.literal('message-reaction'),
-    channel: z.literal('telegram'),
+    channel: z.enum(['linq', 'telegram']),
     idempotencyKey: z.string().min(1).nullable().default(null),
     reaction: assistantMessageReactionSchema,
     sentAt: isoTimestampSchema,

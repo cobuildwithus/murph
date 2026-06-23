@@ -72,6 +72,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- bounded hosted product-feedback rows for explicit interest in published changelog items
 - Kernel-backed hosted computer runs and handoff checkpoints
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -126,6 +127,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
+- `HostedProductFeedback` owns assistant-captured feature interest in published
+  changelog items without storing model-authored free text
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -206,13 +209,15 @@ Required when hosted computer-use is enabled:
 - `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
   boundary. Keep production stable; previews should use a deployment/branch
   namespace or disable the persistent computer-use profile.
-- `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
-  list of allowed Kernel live-view origins for handoff iframes
 
 The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
 computer-use through signed `web-control.worker` callbacks; neither Cloudflare
 nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
 URLs.
+Kernel live-view iframe and WebSocket origins are code-owned from Kernel's
+documented CSP sources (`https://*.onkernel.com:8443` and
+`wss://*.onkernel.com:8443`) rather than operator-managed environment
+configuration.
 
 ## Product label databases
 
@@ -655,7 +660,7 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/privy/complete`
 - `POST /api/hosted-onboarding/billing/checkout`
 - `GET /api/hosted-onboarding/billing/success`
-- `GET|POST /api/hosted-onboarding/linq/webhook`
+- `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 
 The onboarding lane is intentionally thin:

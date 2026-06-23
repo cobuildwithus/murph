@@ -110,6 +110,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey?: string | null
+  deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliverySubject?: string | null

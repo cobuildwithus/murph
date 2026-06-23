@@ -651,6 +651,19 @@ function createLocalCaptureAssistantInputSourceMetadata(
   vault: string,
   capture: NonNullable<InboxRunEvent['capture']>,
 ): UpsertAssistantInputEventInput['sourceMetadata'] {
+  if (capture.source === 'linq') {
+    const raw = asRecord(capture.raw)
+    if (raw?.schema !== 'murph.linq-capture.v1') {
+      return null
+    }
+    return {
+      kind: 'linq',
+      partCount: readLocalLinqCapturePartCount(raw),
+      reactionEligible: raw.reaction_eligible === true,
+      service: normalizeLocalAssistantInputToken(raw.service, 'linq-service'),
+    }
+  }
+
   if (capture.source !== 'telegram') {
     return null
   }
@@ -677,6 +690,22 @@ function createLocalCaptureAssistantInputSourceMetadata(
     mediaGroupId,
     replyContext,
   }
+}
+
+function readLocalLinqCapturePartCount(raw: Record<string, unknown>): number {
+  const counts = [
+    raw.text_part_count,
+    raw.link_part_count,
+    raw.media_part_count,
+    raw.voice_memo_part_count,
+  ]
+  let total = 0
+  for (const count of counts) {
+    if (typeof count === 'number' && Number.isSafeInteger(count) && count > 0) {
+      total += count
+    }
+  }
+  return Math.min(total, 64)
 }
 
 function normalizeLocalAssistantInputReplyTargetIdentifier(
@@ -824,6 +853,14 @@ export async function runAssistantAutomationPass(
     fault: 'automation',
     message: 'Injected assistant automation failure.',
   })
+  await maybeRunAssistantRuntimeMaintenance({
+    vault: input.vault,
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'runtime maintenance',
+    })
+  })
   await recordAssistantDiagnosticEvent({
     vault: input.vault,
     component: 'automation',
@@ -832,14 +869,6 @@ export async function runAssistantAutomationPass(
     counterDeltas: {
       automationScans: 1,
     },
-  })
-  await maybeRunAssistantRuntimeMaintenance({
-    vault: input.vault,
-  }).catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'runtime maintenance',
-    })
   })
 
   const outboxResult = input.drainOutbox ?? true

@@ -25,6 +25,7 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -76,6 +77,9 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeProductFeedbackRecordRequest,
+  type HostedRuntimeProductFeedbackRecordResponse,
+  type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
@@ -595,6 +599,97 @@ export function parseHostedRuntimeUsageRecordResponse(
   };
 }
 
+export function parseHostedRuntimeProductFeedbackRecordRequest(
+  value: unknown,
+): HostedRuntimeProductFeedbackRecordRequest {
+  const record = requireObject(value, "Hosted runtime product feedback request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["feedback"]),
+    "Hosted runtime product feedback request",
+  );
+  const feedback = requireObject(
+    record.feedback,
+    "Hosted runtime product feedback request feedback",
+  );
+  assertAllowedObjectKeys(
+    feedback,
+    new Set(["idempotencyKey", "kind", "relatedChangelogItemIds"]),
+    "Hosted runtime product feedback request feedback",
+  );
+  const idempotencyKey = requireString(
+    feedback.idempotencyKey,
+    "Hosted runtime product feedback idempotencyKey",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(idempotencyKey)) {
+    throw new TypeError(
+      "Hosted runtime product feedback idempotencyKey must be a SHA-256 hex digest.",
+    );
+  }
+  const kind = parseHostedProductFeedbackKind(feedback.kind);
+  const relatedChangelogItemIds = requireArray(
+    feedback.relatedChangelogItemIds,
+    "Hosted runtime product feedback relatedChangelogItemIds",
+  ).map((entry) => {
+    const id = requireString(
+      entry,
+      "Hosted runtime product feedback related changelog item id",
+    );
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) || id.length > 120) {
+      throw new TypeError(
+        "Hosted runtime product feedback related changelog item ids must be lowercase slugs.",
+      );
+    }
+    return id;
+  });
+  if (
+    relatedChangelogItemIds.length === 0 ||
+    relatedChangelogItemIds.length > 7 ||
+    new Set(relatedChangelogItemIds).size !== relatedChangelogItemIds.length
+  ) {
+    throw new TypeError(
+      "Hosted runtime product feedback must reference one to seven unique changelog items.",
+    );
+  }
+
+  return {
+    feedback: {
+      idempotencyKey,
+      kind,
+      relatedChangelogItemIds,
+    },
+  };
+}
+
+export function parseHostedRuntimeProductFeedbackRecordResponse(
+  value: unknown,
+): HostedRuntimeProductFeedbackRecordResponse {
+  const record = requireObject(value, "Hosted runtime product feedback response");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["feedbackId", "recorded"]),
+    "Hosted runtime product feedback response",
+  );
+  return {
+    feedbackId: requireString(
+      record.feedbackId,
+      "Hosted runtime product feedback response feedbackId",
+    ),
+    recorded: requireBoolean(
+      record.recorded,
+      "Hosted runtime product feedback response recorded",
+    ),
+  };
+}
+
+function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKind {
+  const kind = requireString(value, "Hosted runtime product feedback kind");
+  if (!HOSTED_PRODUCT_FEEDBACK_KINDS.includes(kind as HostedProductFeedbackKind)) {
+    throw new TypeError("Hosted runtime product feedback kind is not supported.");
+  }
+  return kind as HostedProductFeedbackKind;
+}
+
 export function parseHostedRuntimeIssueExportRequest(
   value: unknown,
 ): HostedRuntimeIssueExportRequest {
@@ -832,6 +927,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "presignGetMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "objectFetchMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "decryptMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "archiveExtractMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "durableRootReplaceMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "cleanupMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),

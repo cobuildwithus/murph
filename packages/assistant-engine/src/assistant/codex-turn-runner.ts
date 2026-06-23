@@ -59,10 +59,17 @@ import type {
 import type {
   AssistantActiveTurnLiveProviderSteering,
 } from './turn-input.js'
-import type {
-  AssistantProgressDelivery,
+import {
+  createAssistantProductFeedbackRecorder,
+  type AssistantProgressDelivery,
 } from './turn-progress.js'
-import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
+import type {
+  AssistantHostedToolContext,
+} from './hosted-tool-context.js'
+import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantCodexContinuation,
+} from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
@@ -148,6 +155,7 @@ export type AssistantCodexTurnRecoveryOutcome =
     }
 
 export async function executeCodexTurnWithRecovery(input: {
+  acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
@@ -171,6 +179,7 @@ export async function executeCodexTurnWithRecovery(input: {
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnRecoveryOutcome> {
@@ -430,6 +439,8 @@ async function executeAssistantCodexAttempt(input: {
         session: attemptPlan.session,
         sharedPlan: executionPlan.sharedPlan,
       }),
+      connectedAppsAvailable:
+        executionPlan.executionContext?.hosted?.connectedAppsAvailable ?? false,
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:
@@ -447,12 +458,18 @@ async function executeAssistantCodexAttempt(input: {
       },
       provider: attemptPlan.route.provider,
       providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
+      productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+        acceptedInputItems: executionPlan.acceptedInputItems ?? [],
+        productFeedbackRecorder:
+          executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
+      }),
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
       publicInternetFetch:
         executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
       voiceMemoDeliveryChannel,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+      hostedToolContext: executionPlan.hostedToolContext ?? null,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
       developerInstructions: attemptPlan.routePlan.developerInstructions,

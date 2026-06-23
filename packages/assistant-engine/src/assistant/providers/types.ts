@@ -21,7 +21,13 @@ import type {
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
-import type { AssistantProgressDelivery } from '../turn-progress.js'
+import type {
+  AssistantProgressDelivery,
+  AssistantTurnProductFeedbackRecorder,
+} from '../turn-progress.js'
+import type {
+  AssistantHostedToolContext,
+} from '../hosted-tool-context.js'
 import type {
   AssistantHostedGeneratedImageUploader,
 } from '../execution-context.js'
@@ -83,6 +89,7 @@ export interface AssistantProviderTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
   codexHome?: string | null
@@ -106,6 +113,7 @@ export interface AssistantProviderTurnInput {
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
   prompt?: string | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
   publicInternetFetch?: typeof fetch | null
@@ -119,6 +127,7 @@ export interface AssistantProviderTurnInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
@@ -151,6 +160,7 @@ export interface AssistantProviderTurnExecutionInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  connectedAppsAvailable?: boolean | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
@@ -165,6 +175,7 @@ export interface AssistantProviderTurnExecutionInput {
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerConfig: AssistantProviderConfig
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
@@ -178,6 +189,7 @@ export interface AssistantProviderTurnExecutionInput {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  hostedToolContext?: AssistantHostedToolContext | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

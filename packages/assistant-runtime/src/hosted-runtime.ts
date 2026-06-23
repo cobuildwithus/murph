@@ -738,15 +738,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "workspace.restore",
       status: "start",
     });
-    const restored = await raceHostedRuntimeCancellation(
-      restoreHostedWorkspaceRuntimeJobWorkspace({
-        logContext: runtimeLogContext,
-        platform: guardedRuntime.platform,
-        vaultRoot: options.vaultRoot,
-        workspace: workspaceRead.workspace,
-      }),
-      runtimeAbortController.signal,
-    );
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      logContext: runtimeLogContext,
+      platform: guardedRuntime.platform,
+      signal: runtimeAbortController.signal,
+      vaultRoot: options.vaultRoot,
+      workspace: workspaceRead.workspace,
+    });
+    assertRuntimeNotAborted();
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone

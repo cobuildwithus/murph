@@ -323,7 +323,7 @@ export function ConnectSourcesGrid({
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
             Sources
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs tabular-nums text-muted-foreground">
             {filteredSources.length} of {displaySources.length} sources
           </p>
         </div>

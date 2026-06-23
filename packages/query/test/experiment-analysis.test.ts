@@ -9,6 +9,7 @@ import {
   buildExperimentProgressCard,
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
+  type MetricPoint,
 } from "../src/index.ts";
 import {
   buildExperimentProgressCardPath,
@@ -263,6 +264,78 @@ function makeMetricSample(input: {
       value: input.value,
     },
   });
+}
+
+function makeProjectedGlucosePoint(input: {
+  contributingRecordIds: string[];
+  date: string;
+  sourceRecordId: string;
+  value: number;
+}): MetricPoint {
+  return makeProjectedMetricPoint({
+    biomarkerKey: "biomarker:blood-glucose",
+    contributingRecordIds: input.contributingRecordIds,
+    date: input.date,
+    metricKey: "glucose",
+    sourceKind: "wearable-summary",
+    sourceLabel: "Wearable summary",
+    sourceRecordId: input.sourceRecordId,
+    unit: "mg/dL",
+    value: input.value,
+  });
+}
+
+function makeProjectedMetricPoint(input: {
+  biomarkerKey: string;
+  canonicalUnit?: string | null;
+  canonicalValue?: number | null;
+  contributingRecordIds?: string[];
+  date: string;
+  metricKey: string;
+  sourceKind: MetricPoint["source"]["kind"];
+  sourceLabel: string;
+  sourceRecordId: string;
+  unit: string;
+  value: number;
+}): MetricPoint {
+  return {
+    schemaVersion: "murph.metric-point.v1",
+    biomarkerKey: input.biomarkerKey,
+    canonicalUnit: input.canonicalUnit === undefined ? input.unit : input.canonicalUnit,
+    canonicalValue: input.canonicalValue === undefined ? input.value : input.canonicalValue,
+    comparator: null,
+    confidence: "medium",
+    context: {
+      contributingRecordIds: input.contributingRecordIds ?? [input.sourceRecordId],
+      syntheticRecordId: input.sourceRecordId,
+    },
+    effectiveDate: input.date,
+    grain: "day",
+    id: `metric-point:${input.sourceRecordId}`,
+    metricKey: input.metricKey,
+    observedAt: `${input.date}T12:00:00.000Z`,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: "whoop",
+      rawRefs: [],
+      sourceLabel: input.sourceLabel,
+    },
+    recordedAt: `${input.date}T12:00:00.000Z`,
+    reportedAt: null,
+    source: {
+      family: "derived",
+      kind: input.sourceKind,
+      path: `derived/${input.sourceKind}`,
+      recordId: input.sourceRecordId,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: input.unit,
+    value: input.value,
+  };
 }
 
 function makeSession(input: {
@@ -619,6 +692,309 @@ test("experiment analysis uses lab measurement anchors separately from run basel
   assert.equal(outcome.metricResults[0]?.baselineMean, 140);
   assert.equal(outcome.metricResults[0]?.interventionMean, 120);
   assert.equal(outcome.metricResults[0]?.deltaAbs, -20);
+
+  const historicalProgress = summarizeExperimentProgress(vault, "psyllium-ldl", {
+    asOf: "2026-06-01",
+  });
+  assert.equal(historicalProgress.signals[0]?.baselineMean, 140);
+  assert.equal(historicalProgress.signals[0]?.interventionMean, null);
+  assert.equal(historicalProgress.signals[0]?.deltaAbs, null);
+
+  const historicalOutcome = analyzeExperimentOutcome(vault, "psyllium-ldl", {
+    asOf: "2026-06-01",
+  });
+  assert.equal(historicalOutcome.metricResults[0]?.baselineMean, 140);
+  assert.equal(historicalOutcome.metricResults[0]?.interventionMean, null);
+  assert.equal(historicalOutcome.metricResults[0]?.deltaAbs, null);
+});
+
+test("experiment analysis matches anchors against contributing metric records", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGP",
+    slug: "glucose-summary-anchors",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-glucose",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_baseline_selected",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-01",
+        },
+        {
+          role: "followup",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_followup_selected",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-02",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-contributing-anchors",
+    metadata: null,
+    entities: [experiment],
+  });
+  const metricPoints: MetricPoint[] = [
+    makeProjectedGlucosePoint({
+      date: "2026-06-01",
+      sourceRecordId: "wearable-summary:blood-glucose:2026-06-01",
+      contributingRecordIds: [
+        "sample_glucose_baseline_other",
+        "sample_glucose_baseline_selected",
+      ],
+      value: 100,
+    }),
+    makeProjectedGlucosePoint({
+      date: "2026-06-02",
+      sourceRecordId: "wearable-summary:blood-glucose:2026-06-02",
+      contributingRecordIds: [
+        "sample_glucose_followup_other",
+        "sample_glucose_followup_selected",
+      ],
+      value: 96,
+    }),
+  ];
+
+  const outcome = analyzeExperimentOutcome(vault, "glucose-summary-anchors", {
+    asOf: "2026-06-02",
+    metricPoints,
+  });
+
+  assert.equal(outcome.metricResults[0]?.baselineMean, 100);
+  assert.equal(outcome.metricResults[0]?.interventionMean, 96);
+  assert.equal(outcome.metricResults[0]?.deltaAbs, -4);
+});
+
+test("experiment analysis skips uncanonicalized anchored metric fallback values", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGW",
+    slug: "glucose-uncanonicalized-anchors",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-glucose",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_canonical_baseline",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-01",
+        },
+        {
+          role: "followup",
+          kind: "wearable_summary",
+          recordId: "sample_glucose_raw_followup",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-02",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-uncanonicalized-anchors",
+    metadata: null,
+    entities: [experiment],
+  });
+
+  const outcome = analyzeExperimentOutcome(vault, "glucose-uncanonicalized-anchors", {
+    asOf: "2026-06-02",
+    metricPoints: [
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        contributingRecordIds: ["sample_glucose_canonical_baseline"],
+        date: "2026-06-01",
+        metricKey: "glucose",
+        sourceKind: "wearable-summary",
+        sourceLabel: "Wearable summary",
+        sourceRecordId: "summary_glucose_canonical_baseline",
+        unit: "mg/dL",
+        value: 100,
+      }),
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        canonicalUnit: null,
+        canonicalValue: null,
+        contributingRecordIds: ["sample_glucose_raw_followup"],
+        date: "2026-06-02",
+        metricKey: "glucose",
+        sourceKind: "wearable-summary",
+        sourceLabel: "Wearable summary",
+        sourceRecordId: "summary_glucose_raw_followup",
+        unit: "g/L",
+        value: 0.9,
+      }),
+    ],
+  });
+
+  assert.equal(outcome.metricResults[0]?.baselineMean, 100);
+  assert.equal(outcome.metricResults[0]?.interventionMean, null);
+  assert.equal(outcome.metricResults[0]?.deltaAbs, null);
+});
+
+test("metric adherence uses the selected same-day metric point", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGS",
+    slug: "hrv-adherence-selection",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+      adherenceTargets: [
+        {
+          targetId: "hrv-threshold",
+          label: "HRV threshold",
+          phase: "intervention",
+          calendar: {
+            kind: "daily",
+            timeZone: "UTC",
+          },
+          evidence: {
+            kind: "metricThreshold",
+            metricKey: "hrv-rmssd",
+            op: ">=",
+            value: 50,
+            missing: "unknown",
+          },
+          rollup: {
+            targetCompletions: 1,
+            minimumUsefulCompletions: 1,
+          },
+        },
+      ],
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:hrv-rmssd",
+      desiredDirection: "increase",
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-adherence-selected-metric",
+    metadata: null,
+    entities: [experiment],
+  });
+  const metricPoints: MetricPoint[] = [
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:hrv-rmssd",
+      date: "2026-06-02",
+      metricKey: "hrv-rmssd",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Recovery summary",
+      sourceRecordId: "recovery_hrv_2026_06_02",
+      unit: "ms",
+      value: 40,
+    }),
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:hrv-rmssd",
+      date: "2026-06-02",
+      metricKey: "hrv-rmssd",
+      sourceKind: "sleep-summary",
+      sourceLabel: "Sleep summary",
+      sourceRecordId: "sleep_hrv_2026_06_02",
+      unit: "ms",
+      value: 55,
+    }),
+  ];
+
+  const progress = summarizeExperimentProgress(vault, "hrv-adherence-selection", {
+    asOf: "2026-06-02",
+    metricPoints,
+  });
+
+  assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.expectedSessionsByNow, 1);
+  assert.equal(progress.adherence.status, "not_started");
+});
+
+test("metric adherence exact-matches metrics that share a biomarker", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGD",
+    slug: "lowest-spo2-adherence",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+      adherenceTargets: [
+        {
+          targetId: "lowest-spo2-threshold",
+          label: "Lowest SpO2 threshold",
+          phase: "intervention",
+          calendar: {
+            kind: "daily",
+            timeZone: "UTC",
+          },
+          evidence: {
+            kind: "metricThreshold",
+            metricKey: "lowest-spo2",
+            op: ">=",
+            value: 90,
+            missing: "unknown",
+          },
+          rollup: {
+            targetCompletions: 1,
+            minimumUsefulCompletions: 1,
+          },
+        },
+      ],
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-oxygen-spo2",
+      desiredDirection: "increase",
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-adherence-exact-metric",
+    metadata: null,
+    entities: [experiment],
+  });
+  const metricPoints: MetricPoint[] = [
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:blood-oxygen-spo2",
+      date: "2026-06-02",
+      metricKey: "spo2",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Oxygen summary",
+      sourceRecordId: "spo2_2026_06_02",
+      unit: "%",
+      value: 96,
+    }),
+    makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:blood-oxygen-spo2",
+      date: "2026-06-02",
+      metricKey: "lowest-spo2",
+      sourceKind: "sleep-summary",
+      sourceLabel: "Sleep oxygen summary",
+      sourceRecordId: "lowest_spo2_2026_06_02",
+      unit: "%",
+      value: 85,
+    }),
+  ];
+
+  const progress = summarizeExperimentProgress(vault, "lowest-spo2-adherence", {
+    asOf: "2026-06-02",
+    metricPoints,
+  });
+
+  assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.expectedSessionsByNow, 1);
+  assert.equal(progress.adherence.status, "not_started");
 });
 
 test("incomplete point measurement plans do not mix lab anchors with run windows", () => {

@@ -113,7 +113,7 @@ export function TrendChart({ data, className }: TrendChartProps) {
             type="button"
             onClick={() => setShowHistory((v) => !v)}
             className={cn(
-              "absolute left-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md border border-secondary/25 bg-[rgba(255,252,246,0.9)] transition-opacity duration-500 ease-in-out",
+              "absolute left-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md border border-secondary/25 bg-[rgba(255,252,246,0.9)] transition-opacity duration-150 ease-out",
               showHistory
                 ? "opacity-100"
                 : "opacity-0 group-hover/chart:opacity-70 hover:!opacity-100",

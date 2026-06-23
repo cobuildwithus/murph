@@ -30,6 +30,8 @@ function XIcon() {
 
 const footerLinks = {
   murph: [
+    { label: "Changelog", href: "/changelog", external: false },
+    { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
     {
       label: "GitHub",
@@ -61,7 +63,7 @@ export function SiteFooter() {
               <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-[#736a58]">
                 Murph
               </span>
-              <nav className="flex flex-col gap-2.5" aria-label="Product links">
+              <nav className="flex flex-col gap-2" aria-label="Product links">
                 {footerLinks.murph.map((link) => (
                   <a
                     key={link.href}
@@ -69,7 +71,7 @@ export function SiteFooter() {
                     {...(link.external
                       ? { target: "_blank", rel: "noreferrer" }
                       : {})}
-                    className="text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex w-fit py-1 text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -81,12 +83,12 @@ export function SiteFooter() {
               <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-[#736a58]">
                 Legal
               </span>
-              <nav className="flex flex-col gap-2.5" aria-label="Legal links">
+              <nav className="flex flex-col gap-2" aria-label="Legal links">
                 {footerLinks.legal.map((link) => (
                   <a
                     key={link.href}
                     href={link.href}
-                    className="text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex w-fit py-1 text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -117,7 +119,7 @@ export function SiteFooter() {
               href="https://x.com/withmurphai"
               target="_blank"
               rel="noreferrer"
-              className="text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
               aria-label="Murph on X"
             >
               <XIcon />
@@ -126,7 +128,7 @@ export function SiteFooter() {
               href="https://github.com/cobuildwithus/murph"
               target="_blank"
               rel="noreferrer"
-              className="text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center text-[#2d3436]/70 transition-colors hover:text-[#2d3436]"
               aria-label="Murph on GitHub"
             >
               <GitHubIcon />

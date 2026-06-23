@@ -63,7 +63,7 @@ export function BiomarkerBrowseCard({
 
       <div className="flex flex-1 items-center justify-center border-t border-border/60 pt-3">
         {privateValue ? (
-          <span className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+          <span className="font-serif text-2xl font-semibold tracking-tight tabular-nums text-foreground">
             {privateValue.valueLabel}{privateValue.unit ? ` ${displayUnit(privateValue.unit)}` : ""}
           </span>
         ) : privateValueSyncing ? (

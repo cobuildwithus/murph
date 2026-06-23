@@ -9,7 +9,7 @@ import {
   writeTextFileAtomic,
 } from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
-import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.ts";
+import { ensureDirectory, pathExists } from "../fs.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
 import {
   isJsonlRelativePath,
@@ -19,6 +19,7 @@ import {
   normalizeRelativeVaultPathForComparison,
   normalizeVaultRoot,
   resolveVaultPath,
+  resolveVaultPathOnDisk,
   type VaultPathComparisonOptions,
 } from "../path-safety.ts";
 import { toIsoTimestamp } from "../time.ts";
@@ -39,6 +40,8 @@ import type { DateInput } from "../types.ts";
 
 export const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
+export const TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT = 100;
+export const TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
@@ -292,6 +295,35 @@ export interface RecoverableStoredWriteOperation {
   createdAt: string;
   updatedAt: string;
   actions: StoredWriteAction[];
+}
+
+export interface PruneTerminalWriteOperationRecordsInput {
+  checkpointedAfter: DateInput | null | undefined;
+  now?: DateInput;
+  retainedOperationCount?: number;
+  retentionMs?: number;
+  vaultRoot: string;
+}
+
+export interface PruneTerminalWriteOperationRecordsResult {
+  invalidCount: number;
+  prunedByteCount: number;
+  prunedCount: number;
+  prunedFileCount: number;
+  retainedErroredTerminalCount: number;
+  retainedNewestTerminalCount: number;
+  retainedProtectedCount: number;
+  retainedRecentTerminalCount: number;
+  retainedStageDirectoryCount: number;
+  retainedUncheckpointedTerminalCount: number;
+  scannedCount: number;
+}
+
+interface PrunableTerminalWriteOperationRecord {
+  metadataRelativePath: string;
+  operationId: string;
+  stageRoot: string;
+  updatedAtMs: number;
 }
 
 function isStoredWriteOperationStatus(value: unknown): value is WriteOperationStatus {
@@ -813,11 +845,207 @@ export function isTerminalWriteOperationStatus(status: string): boolean {
 }
 
 export async function listWriteOperationMetadataPaths(vaultRoot: string): Promise<string[]> {
-  const operationFiles = await walkVaultFiles(vaultRoot, WRITE_OPERATION_DIRECTORY, {
-    extension: ".json",
-  });
+  const operationDirectory = await resolveVaultPathOnDisk(vaultRoot, WRITE_OPERATION_DIRECTORY);
+  if (!(await pathExists(operationDirectory.absolutePath))) {
+    return [];
+  }
 
-  return operationFiles.filter((relativePath) => path.posix.dirname(relativePath) === WRITE_OPERATION_DIRECTORY);
+  const stats = await fs.lstat(operationDirectory.absolutePath);
+  if (!stats.isDirectory()) {
+    return [];
+  }
+
+  const entries = await fs.readdir(operationDirectory.absolutePath, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.posix.join(WRITE_OPERATION_DIRECTORY, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export async function pruneTerminalWriteOperationRecords(
+  input: PruneTerminalWriteOperationRecordsInput,
+): Promise<PruneTerminalWriteOperationRecordsResult> {
+  const checkpointedAfterMs = parsePruneBoundaryMs(input.checkpointedAfter);
+  const nowMs = parsePruneBoundaryMs(input.now ?? new Date());
+  const retainedOperationCount = normalizeTerminalWriteOperationRetainedCount(
+    input.retainedOperationCount,
+  );
+  const retentionMs = normalizeTerminalWriteOperationRetentionMs(input.retentionMs);
+  const result: PruneTerminalWriteOperationRecordsResult = {
+    invalidCount: 0,
+    prunedByteCount: 0,
+    prunedCount: 0,
+    prunedFileCount: 0,
+    retainedErroredTerminalCount: 0,
+    retainedNewestTerminalCount: 0,
+    retainedProtectedCount: 0,
+    retainedRecentTerminalCount: 0,
+    retainedStageDirectoryCount: 0,
+    retainedUncheckpointedTerminalCount: 0,
+    scannedCount: 0,
+  };
+
+  if (checkpointedAfterMs === null || nowMs === null) {
+    return result;
+  }
+
+  const candidates: PrunableTerminalWriteOperationRecord[] = [];
+  const cutoffMs = nowMs - retentionMs;
+  for (const relativePath of await listWriteOperationMetadataPaths(input.vaultRoot)) {
+    result.scannedCount += 1;
+    const operationId = operationIdFromMetadataPath(relativePath);
+    if (!operationId) {
+      result.invalidCount += 1;
+      continue;
+    }
+
+    const operation = await readStrictPrunableWriteOperation(input.vaultRoot, relativePath);
+    if (!operation || operation.operationId !== operationId) {
+      result.invalidCount += 1;
+      continue;
+    }
+
+    if (operation.status !== "committed") {
+      result.retainedProtectedCount += 1;
+      continue;
+    }
+
+    if (operation.error) {
+      result.retainedErroredTerminalCount += 1;
+      continue;
+    }
+
+    const updatedAtMs = parsePruneBoundaryMs(operation.updatedAt);
+    if (updatedAtMs === null) {
+      result.invalidCount += 1;
+      continue;
+    }
+
+    if (updatedAtMs >= checkpointedAfterMs) {
+      result.retainedUncheckpointedTerminalCount += 1;
+      continue;
+    }
+
+    await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
+    const stageRoot = (await resolveVaultPathOnDisk(
+      input.vaultRoot,
+      path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
+    )).absolutePath;
+    if (await pathExists(stageRoot)) {
+      result.retainedStageDirectoryCount += 1;
+      continue;
+    }
+
+    candidates.push({
+      metadataRelativePath: relativePath,
+      operationId,
+      stageRoot,
+      updatedAtMs,
+    });
+  }
+
+  candidates.sort((left, right) =>
+    right.updatedAtMs - left.updatedAtMs ||
+    left.operationId.localeCompare(right.operationId),
+  );
+
+  for (const [index, candidate] of candidates.entries()) {
+    if (index < retainedOperationCount) {
+      result.retainedNewestTerminalCount += 1;
+      continue;
+    }
+
+    if (candidate.updatedAtMs > cutoffMs) {
+      result.retainedRecentTerminalCount += 1;
+      continue;
+    }
+
+    if (await pathExists(candidate.stageRoot)) {
+      result.retainedStageDirectoryCount += 1;
+      continue;
+    }
+
+    const metadataPath = (await resolveVaultPathOnDisk(
+      input.vaultRoot,
+      candidate.metadataRelativePath,
+    )).absolutePath;
+    const measured = await measureExistingFile(metadataPath);
+    await safeUnlink(metadataPath);
+    result.prunedCount += 1;
+    result.prunedFileCount += measured.fileCount;
+    result.prunedByteCount += measured.byteCount;
+  }
+
+  return result;
+}
+
+async function readStrictPrunableWriteOperation(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<StoredWriteOperation | null> {
+  try {
+    return await readStoredWriteOperation(vaultRoot, relativePath);
+  } catch (error) {
+    if (
+      (error instanceof VaultError && error.code === "OPERATION_INVALID") ||
+      error instanceof SyntaxError ||
+      (isErrnoException(error) && error.code === "ENOENT")
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function normalizeTerminalWriteOperationRetainedCount(value: number | undefined): number {
+  if (typeof value !== "number") {
+    return TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT;
+  }
+  return Number.isSafeInteger(value) && value >= 0
+    ? value
+    : TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT;
+}
+
+function normalizeTerminalWriteOperationRetentionMs(value: number | undefined): number {
+  if (typeof value !== "number") {
+    return TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS;
+  }
+  return Number.isSafeInteger(value) && value >= 0
+    ? value
+    : TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS;
+}
+
+function parsePruneBoundaryMs(value: DateInput | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function operationIdFromMetadataPath(relativePath: string): string | null {
+  const basename = path.posix.basename(relativePath);
+  if (!basename.endsWith(".json")) {
+    return null;
+  }
+  const operationId = basename.slice(0, -".json".length);
+  return /^op_[A-Za-z0-9_-]+$/u.test(operationId) ? operationId : null;
+}
+
+async function measureExistingFile(
+  absolutePath: string,
+): Promise<{ byteCount: number; fileCount: number }> {
+  try {
+    const stats = await fs.lstat(absolutePath);
+    return stats.isFile()
+      ? { byteCount: stats.size, fileCount: 1 }
+      : { byteCount: 0, fileCount: 0 };
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return { byteCount: 0, fileCount: 0 };
+    }
+    throw error;
+  }
 }
 
 function parseStoredAction(value: unknown): StoredWriteAction | null {

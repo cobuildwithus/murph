@@ -348,11 +348,26 @@ model HostedMember {
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
+  connectedAppsSession           HostedConnectedAppsSession?
+  connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  productFeedback                HostedProductFeedback[]
 
   @@index([billingStatus])
   @@map("hosted_member")
+}
+
+model HostedProductFeedback {
+  id                          String       @id
+  memberId                    String       @map("member_id")
+  kind                        String
+  relatedChangelogItemIdsJson Json         @map("related_changelog_item_ids_json")
+  createdAt                   DateTime     @default(now()) @map("created_at")
+  member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+  @@map("hosted_product_feedback")
 }
 
 model HostedWebSession {
@@ -374,6 +389,36 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedConnectedAppsSession {
+  memberId        String       @id @map("member_id")
+  remoteSessionId String       @unique @map("remote_session_id")
+  policyRevision  Int          @map("policy_revision")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  member          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_connected_apps_session")
+}
+
+model HostedConnectedAppConnectIntent {
+  claimHash          String       @id @map("claim_hash")
+  memberId           String       @map("member_id")
+  toolkit            String
+  alias              String?
+  connectedAccountId String?      @map("connected_account_id")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  expiresAt          DateTime     @map("expires_at")
+  startedAt          DateTime?    @map("started_at")
+  completedAt        DateTime?    @map("completed_at")
+  member             HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([memberId, expiresAt])
+  @@index([startedAt])
+  @@index([completedAt])
+  @@map("hosted_connected_app_connect_intent")
 }
 
 model HostedComputerRun {
@@ -717,6 +762,7 @@ model HostedStripeEvent {
   nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
   claimExpiresAt   DateTime?               @map("claim_expires_at")
   processedAt      DateTime?               @map("processed_at")
+  subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
   lastErrorCode    String?                 @map("last_error_code")
   lastErrorMessage String?                 @map("last_error_message")
   createdAt        DateTime                @default(now()) @map("created_at")

@@ -19,10 +19,7 @@ import {
   type ComputerRunSecretField,
 } from "./crypto";
 import { createComputerHandoffToken, createComputerId, sha256Hex, shortHash } from "./ids";
-import {
-  isAllowedComputerLiveViewUrl,
-  readConfiguredComputerLiveViewOrigins,
-} from "./live-view-origin";
+import { isAllowedComputerLiveViewUrl } from "./live-view-origin";
 import {
   KernelComputerClient,
   type ComputerKernelClient,
@@ -50,6 +47,13 @@ type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: str
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
+type ComputerActLocator = NonNullable<
+  HostedComputerActRequest extends infer TAction
+    ? TAction extends { locator?: infer TLocator }
+      ? TLocator
+      : never
+    : never
+>;
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -72,7 +76,6 @@ export interface ComputerObserveResult {
 export interface ComputerPauseForUserResult {
   awaitingReason: HostedComputerAwaitingReason;
   handoffUrl: string | null;
-  message: string;
   runId: string;
   status: "awaiting_user";
   suggestedReply: string | null;
@@ -200,7 +203,6 @@ export class ComputerUseService {
     }
 
     const kernel = this.requireKernel();
-    this.requireConfiguredLiveViewOrigins();
     const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
     });
@@ -392,11 +394,16 @@ export class ComputerUseService {
       input,
       readComputerActExecutionTimeoutMs(input, actionKernelTimeoutMs),
     );
-    const result = await kernel.executePlaywright({
-      code: buildComputerActCode(actionForExecution),
-      sessionId,
-      timeoutMs: actionKernelTimeoutMs,
-    });
+    let result: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
+    try {
+      result = await kernel.executePlaywright({
+        code: buildComputerActCode(actionForExecution),
+        sessionId,
+        timeoutMs: actionKernelTimeoutMs,
+      });
+    } catch (error) {
+      throw addComputerActFailureContext(error, actionForExecution);
+    }
     const state = readRequiredBrowserActionStateResult(result.result);
     await this.store.updateRunBrowserState({
       expectedKernelSessionId: run.kernelSessionId,
@@ -416,7 +423,6 @@ export class ComputerUseService {
   async pauseForUser(input: {
     handoffPurpose: HostedComputerHandoffPurpose | null;
     memberId: string;
-    message: string;
     pauseDeliveryContext?: HostedComputerDeliveryContext | null;
     reason: HostedComputerAwaitingReason;
     runId: string;
@@ -429,7 +435,6 @@ export class ComputerUseService {
     input: {
       handoffPurpose: HostedComputerHandoffPurpose | null;
       memberId: string;
-      message: string;
       pauseDeliveryContext?: HostedComputerDeliveryContext | null;
       reason: HostedComputerAwaitingReason;
       runId: string;
@@ -462,7 +467,6 @@ export class ComputerUseService {
       return {
         awaitingReason: run.awaitingReason ?? input.reason,
         handoffUrl: null,
-        message: run.awaitingMessage ?? input.message,
         runId: run.id,
         status: "awaiting_user",
         suggestedReply: run.suggestedReply,
@@ -487,13 +491,10 @@ export class ComputerUseService {
           suggestedReply: input.suggestedReply,
         }, store)
       : null;
-    const message = handoff
-      ? `${input.message}\n\n${handoff.handoffUrl}`
-      : input.message;
     let paused: ComputerRunRecord;
     try {
       paused = await store.markRunAwaitingUser({
-        awaitingMessage: input.message,
+        awaitingMessage: null,
         awaitingReason: input.reason,
         checkpointContext: normalizeComputerCheckpointContext(
           input.pauseDeliveryContext ?? null,
@@ -520,7 +521,6 @@ export class ComputerUseService {
     return {
       awaitingReason: paused.awaitingReason ?? input.reason,
       handoffUrl: handoff?.handoffUrl ?? null,
-      message,
       runId: run.id,
       status: "awaiting_user",
       suggestedReply: input.suggestedReply,
@@ -929,7 +929,6 @@ export class ComputerUseService {
   }): Promise<ComputerPauseForUserResult | null> {
     if (
       !input.run.pendingHandoffId ||
-      !input.run.awaitingMessage ||
       !input.run.awaitingReason
     ) {
       return null;
@@ -1008,7 +1007,6 @@ export class ComputerUseService {
       return {
         awaitingReason: refreshed.awaitingReason ?? input.run.awaitingReason,
         handoffUrl: handoff.handoffUrl,
-        message: `${refreshed.awaitingMessage ?? input.run.awaitingMessage}\n\n${handoff.handoffUrl}`,
         runId: input.run.id,
         status: "awaiting_user",
         suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,
@@ -1201,7 +1199,6 @@ export class ComputerUseService {
         runId: run.id,
       });
     }
-    this.requireConfiguredLiveViewOrigins();
     const browserName = buildKernelBrowserName({ runId: run.id });
     if (!run.kernelSessionId && !await this.deleteBrowserBestEffort(browserName)) {
       throw browserCleanupFailedError();
@@ -1867,28 +1864,15 @@ export class ComputerUseService {
     return this.kernel;
   }
 
-  private requireConfiguredLiveViewOrigins(): void {
-    if (readConfiguredComputerLiveViewOrigins(this.env).length > 0) {
-      return;
-    }
-
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
-      httpStatus: 503,
-      message: "Computer live-view origins are not configured.",
-      retryable: true,
-    });
-  }
-
   private assertAllowedLiveViewUrl(url: string): void {
-    if (isAllowedComputerLiveViewUrl({ env: this.env, url })) {
+    if (isAllowedComputerLiveViewUrl({ url })) {
       return;
     }
 
     throw computerUseError({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
       httpStatus: 502,
-      message: "Kernel live-view URL is not allowed by hosted computer-use configuration.",
+      message: "Kernel live-view URL is not allowed.",
       retryable: true,
     });
   }
@@ -2023,6 +2007,108 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
     ...buildComputerActActionCode(input),
     buildComputerActionStateReturnCode(),
   ].join("\n");
+}
+
+function addComputerActFailureContext(
+  error: unknown,
+  action: HostedComputerActRequest,
+): unknown {
+  const domainError = readComputerUseDomainError(error);
+  if (
+    !domainError ||
+    domainError.code !== "HOSTED_COMPUTER_EVAL_FAILED"
+  ) {
+    return error;
+  }
+
+  return computerUseError({
+    code: domainError.code,
+    details: {
+      ...domainError.details,
+      browserAction: action.action,
+      ...readComputerActTimeoutDetail(action),
+      ...readComputerActLocatorDetail(action),
+    },
+    httpStatus: domainError.httpStatus,
+    message: domainError.message,
+    retryable: domainError.retryable,
+  });
+}
+
+function readComputerUseDomainError(error: unknown): {
+  code: string;
+  details: Record<string, unknown>;
+  httpStatus: number;
+  message: string;
+  retryable: boolean;
+} | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const record = error as Record<string, unknown>;
+  if (
+    typeof record.code !== "string" ||
+    typeof record.httpStatus !== "number" ||
+    typeof record.message !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    code: record.code,
+    details: readComputerUseErrorDetails(record.details),
+    httpStatus: record.httpStatus,
+    message: record.message,
+    retryable: record.retryable === true,
+  };
+}
+
+function readComputerUseErrorDetails(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function readComputerActTimeoutDetail(
+  action: HostedComputerActRequest,
+): Record<string, number> {
+  if (action.action === "wait") {
+    return { waitMs: action.ms };
+  }
+
+  return { timeoutMs: action.timeoutMs };
+}
+
+function readComputerActLocatorDetail(
+  action: HostedComputerActRequest,
+): Record<string, string> {
+  if (!("locator" in action) || !action.locator) {
+    return {};
+  }
+
+  return {
+    locator: describeComputerActLocator(action.locator),
+  };
+}
+
+function describeComputerActLocator(locator: ComputerActLocator): string {
+  switch (locator.by) {
+    case "role":
+      return [
+        `role=${locator.role}`,
+        ...(locator.name ? [`name=${locator.name}`] : []),
+        `exact=${locator.exact}`,
+      ].join(", ");
+    case "label":
+    case "placeholder":
+    case "text":
+    case "altText":
+    case "title":
+      return `${locator.by}=${locator.text}, exact=${locator.exact}`;
+    case "testId":
+      return `testId=${locator.testId}`;
+  }
 }
 
 async function requireNonSensitiveComputerInputTarget(input: {

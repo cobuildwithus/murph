@@ -1152,6 +1152,102 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("extracts redacted JSONL stdout diagnostics when live model turn smoke exits nonzero", async () => {
+    const smokeHomeParent = await mkdtemp(path.join(
+      path.sep,
+      "var",
+      "tmp",
+      "murph-codex-smoke-home-",
+    ));
+    const previousHostedHome = process.env.HOSTED_HOME;
+    const stdinChunks: string[] = [];
+    process.env.HOSTED_HOME = smokeHomeParent;
+    mocks.spawn.mockImplementationOnce(() => {
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const process = new EventEmitter();
+      const spawnedProcess = Object.assign(process, {
+        kill: vi.fn(() => true),
+        stderr,
+        stdin: {
+          end: vi.fn((chunk?: string | Uint8Array) => {
+            if (typeof chunk === "string") {
+              stdinChunks.push(chunk);
+            } else if (chunk instanceof Uint8Array) {
+              stdinChunks.push(Buffer.from(chunk).toString("utf8"));
+            }
+            queueMicrotask(() => {
+              stdout.emit("data", "plain text should be ignored\n");
+              stdout.emit("data", `${JSON.stringify({
+                error: {
+                  message:
+                    `unsupported hosted search api_key=<VALUE> sk-proj-${"a".repeat(24)} échoué`,
+                },
+                type: "error",
+              })}\n`);
+              stdout.emit("data", `${JSON.stringify({
+                message:
+                  `fallback message id_token=<VALUE> eyJ${"b".repeat(12)}.${"c".repeat(12)}.${"d".repeat(12)}`,
+                type: "error",
+              })}\n`);
+              stderr.emit("data", "short stderr clue\n");
+              spawnedProcess.emit("close", 1, null);
+            });
+          }),
+        },
+        stdout,
+      });
+      return spawnedProcess;
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await sendHostedContainerJsonRequest({
+        body: "",
+        path: "/internal/deploy-live-model-turn-smoke",
+        port: address.port,
+      });
+
+      expect(response.status).toBe(500);
+      expect(response.json).toMatchObject({
+        error: "Hosted live model turn smoke failed.",
+        ok: false,
+      });
+      const smokeErrorMessage = (response.json as { smokeErrorMessage?: unknown }).smokeErrorMessage;
+      expect(typeof smokeErrorMessage).toBe("string");
+      expect(smokeErrorMessage).toContain("stdoutExcerpt");
+      expect(smokeErrorMessage).toContain("unsupported hosted search");
+      expect(smokeErrorMessage).toContain("fallback message");
+      expect(smokeErrorMessage).toContain("api_key=<REDACTED>");
+      expect(smokeErrorMessage).toContain("id_token=<REDACTED>");
+      expect(smokeErrorMessage).toContain("short stderr clue");
+      expect(smokeErrorMessage).not.toContain("<VALUE>");
+      expect(smokeErrorMessage).not.toContain("sk-proj-");
+      expect(smokeErrorMessage).not.toContain("eyJ");
+      expect(smokeErrorMessage).not.toContain("échoué");
+      expect(smokeErrorMessage).not.toContain("plain text should be ignored");
+      expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
+      expect(stdinChunks).toEqual([DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT]);
+    } finally {
+      if (previousHostedHome === undefined) {
+        delete process.env.HOSTED_HOME;
+      } else {
+        process.env.HOSTED_HOME = previousHostedHome;
+      }
+      await rm(smokeHomeParent, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("keeps deploy-smoke Codex home outside the system temporary directory", () => {
     const hostedHome = path.join(path.sep, "home", "runner", ".murph");
     const runnerHome = path.join(path.sep, "home", "runner");
@@ -1177,7 +1273,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => {
       throw new Error(
-        `Hosted live model turn smoke codex exec exited with 1. stderrExcerpt="quota éxhausted ${"x".repeat(600)}"`,
+        `Hosted live model turn smoke codex exec exited with 1. stdoutExcerpt="unsupported tool ${"y".repeat(600)}" stderrExcerpt="quota éxhausted ${"x".repeat(600)}"`,
       );
     });
     const server = await startHostedContainerEntrypoint({
@@ -1207,6 +1303,7 @@ describe("startHostedContainerEntrypoint", () => {
     const smokeErrorMessage = (response.json as { smokeErrorMessage?: unknown }).smokeErrorMessage;
     expect(typeof smokeErrorMessage).toBe("string");
     expect(smokeErrorMessage).toContain("codex exec exited with 1");
+    expect(smokeErrorMessage).toContain("stdoutExcerpt");
     expect(smokeErrorMessage).not.toContain("é");
     expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
   });

@@ -1,18 +1,20 @@
 import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { normalizeNullableString, parseCommaSeparatedList, parseInteger } from "../primitives";
+import { parseCommaSeparatedList } from "../primitives";
 import {
   claimHostedMemberSignupNotificationEmailAttempt,
   readHostedMemberCoreState,
   readHostedMemberEmailAuthorization,
 } from "./hosted-member-store";
+import {
+  HostedResendPlainTextEmailError,
+  readHostedResendPlainTextEmailConfig,
+  sendHostedResendPlainTextEmail,
+  type HostedResendPlainTextEmailConfig,
+} from "./resend-plain-text-email";
 
-const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
 const HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT = "New Murph signup";
-const HOSTED_SIGNUP_NOTIFICATION_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
-const HOSTED_SIGNUP_NOTIFICATION_EMAIL_MIN_TIMEOUT_MS = 1_000;
-const HOSTED_SIGNUP_NOTIFICATION_EMAIL_MAX_TIMEOUT_MS = 30_000;
 
 type HostedSignupNotificationEmailEnv = Readonly<Record<string, string | undefined>>;
 
@@ -30,17 +32,8 @@ export type HostedSignupNotificationEmailResult =
       status: "sent";
     };
 
-export class HostedSignupNotificationEmailError extends Error {
-  code: string;
-  providerStatus: number | null;
-
-  constructor(message: string, input: { code: string; providerStatus?: number | null }) {
-    super(message);
-    this.name = "HostedSignupNotificationEmailError";
-    this.code = input.code;
-    this.providerStatus = input.providerStatus ?? null;
-  }
-}
+export const HostedSignupNotificationEmailError = HostedResendPlainTextEmailError;
+export type HostedSignupNotificationEmailError = HostedResendPlainTextEmailError;
 
 export async function sendHostedSignupNotificationEmailForMemberBestEffort(input: {
   env?: HostedSignupNotificationEmailEnv;
@@ -126,71 +119,47 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     };
   }
 
-  const response = await (input.fetchImpl ?? fetch)(RESEND_EMAILS_ENDPOINT, {
-    body: JSON.stringify({
-      from: config.from,
-      subject: HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT,
-      text: buildHostedSignupNotificationEmailText({
-        billingStatus: member.billingStatus,
-        customerEmail,
-        memberId: input.memberId,
-        sourceEventId: input.sourceEventId,
-        sourceEventType: input.sourceEventType,
-      }),
-      to: config.recipients,
+  const result = await sendHostedResendPlainTextEmail({
+    config: config.resend,
+    fetchImpl: input.fetchImpl,
+    idempotencyKey: buildHostedSignupNotificationEmailIdempotencyKey(input.memberId),
+    subject: HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT,
+    text: buildHostedSignupNotificationEmailText({
+      billingStatus: member.billingStatus,
+      customerEmail,
+      memberId: input.memberId,
+      sourceEventId: input.sourceEventId,
+      sourceEventType: input.sourceEventType,
     }),
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": buildHostedSignupNotificationEmailIdempotencyKey(input.memberId),
-    },
-    method: "POST",
-    signal: AbortSignal.timeout(config.timeoutMs),
+    to: config.recipients,
   });
 
-  if (!response.ok) {
-    throw new HostedSignupNotificationEmailError(
-      "Hosted signup notification email send failed.",
-      {
-        code: "RESEND_SEND_FAILED",
-        providerStatus: response.status,
-      },
-    );
-  }
-
-  const payload = await readResendJsonPayload(response);
-
   return {
-    providerMessageId: readResendMessageId(payload),
+    providerMessageId: result.providerMessageId,
     status: "sent",
   };
 }
 
 type HostedSignupNotificationEmailConfig = {
-  apiKey: string;
-  from: string;
   recipients: string[];
-  timeoutMs: number;
+  resend: HostedResendPlainTextEmailConfig;
 };
 
 function readHostedSignupNotificationEmailConfig(
   source: HostedSignupNotificationEmailEnv,
 ): HostedSignupNotificationEmailConfig | null {
-  const apiKey = normalizeNullableString(source.RESEND_API_KEY);
-  const from = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FROM);
+  const resend = readHostedResendPlainTextEmailConfig(source);
   const recipients = readHostedSignupNotificationEmailRecipients(
     source.HOSTED_SIGNUP_NOTIFICATION_EMAILS,
   );
 
-  if (!apiKey || !from || recipients.length === 0) {
+  if (!resend || recipients.length === 0) {
     return null;
   }
 
   return {
-    apiKey,
-    from,
     recipients,
-    timeoutMs: readHostedSignupNotificationEmailTimeoutMs(source),
+    resend,
   };
 }
 
@@ -210,21 +179,6 @@ function readHostedSignupNotificationEmailRecipients(value: string | undefined):
   }
 
   return recipients;
-}
-
-function readHostedSignupNotificationEmailTimeoutMs(
-  source: HostedSignupNotificationEmailEnv,
-): number {
-  const configured = parseInteger(source.HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS);
-
-  if (!configured) {
-    return HOSTED_SIGNUP_NOTIFICATION_EMAIL_DEFAULT_TIMEOUT_MS;
-  }
-
-  return Math.min(
-    Math.max(configured, HOSTED_SIGNUP_NOTIFICATION_EMAIL_MIN_TIMEOUT_MS),
-    HOSTED_SIGNUP_NOTIFICATION_EMAIL_MAX_TIMEOUT_MS,
-  );
 }
 
 function buildHostedSignupNotificationEmailText(input: {
@@ -247,21 +201,4 @@ function buildHostedSignupNotificationEmailText(input: {
 
 function buildHostedSignupNotificationEmailIdempotencyKey(memberId: string): string {
   return `hosted-signup-notification/${memberId}`.slice(0, 256);
-}
-
-async function readResendJsonPayload(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function readResendMessageId(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const id = "id" in value ? value.id : null;
-  return typeof id === "string" && id ? id : null;
 }

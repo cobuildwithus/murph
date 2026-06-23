@@ -106,7 +106,11 @@ function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
     allowFinishWithoutReply: input.allowFinishWithoutReply,
     allowMessageReactions: input.allowMessageReactions,
     computerToolsAvailable:
-      input.progressDelivery?.hostedComputerToolsAvailable === true,
+      input.hostedToolContext?.computerToolsAvailable === true,
+    progressUpdatesAvailable: input.progressDelivery != null,
+    connectedAppsAvailable: input.connectedAppsAvailable === true,
+    productFeedbackAvailable:
+      typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
   })
 }
 

@@ -1,6 +1,11 @@
+import { createHash } from 'node:crypto'
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+  HostedRuntimeProductFeedbackRecordResponse,
+} from '@murphai/hosted-execution/runtime-control'
 import {
   deliverAssistantProgressUpdate,
 } from './delivery-service.js'
@@ -12,23 +17,29 @@ import {
   warnAssistantBestEffortFailure,
 } from './shared.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantAcceptedTurnInputSource,
+} from './active-turn-input-journal.js'
+import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
+import type {
+  AssistantHostedProductFeedbackRecorder,
+} from './execution-context.js'
 
 export interface AssistantProgressDelivery {
   close?(): void
-  currentHostedDeliveryContext?(): {
-    conversationId: string | null
-    recipientKey: string | null
-  } | null
-  currentHostedMailboxItemIds?(): readonly string[]
-  readonly hostedComputerToolsAvailable?: boolean
-  readonly requiredUserMessageDeliveryAvailable?: boolean
   send(
     text: string,
     options?: AssistantProgressDeliverySendOptions,
   ): Promise<AssistantProgressDeliveryResult>
+}
+
+export interface AssistantTurnProductFeedbackRecorder {
+  recordProductFeedback(
+    feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>,
+  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
 }
 
 export type AssistantProgressDeliverySource = 'model' | 'system'
@@ -62,17 +73,54 @@ export function shouldCreateAssistantProgressDelivery(
   } | null,
 ): boolean {
   return input.deliverResponse === true &&
-    input.turnTrigger !== 'automation-auto-reply' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
+}
+
+export function createAssistantProductFeedbackRecorder(input: {
+  acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
+  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
+}): AssistantTurnProductFeedbackRecorder | null {
+  const productFeedbackRecorder = input.productFeedbackRecorder ?? null
+  const acceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
+    input.acceptedInputItems ?? [],
+  )
+  if (!productFeedbackRecorder || acceptedInputIds.length === 0) {
+    return null
+  }
+
+  return {
+    async recordProductFeedback(feedback) {
+      const normalized = normalizeAssistantProductFeedback(feedback)
+      return await productFeedbackRecorder.recordProductFeedback({
+        ...normalized,
+        idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
+          acceptedInputIds,
+          feedback: normalized,
+        }),
+      })
+    },
+  }
+}
+
+export function isAssistantProductFeedbackAcceptedInputEligible(
+  source: AssistantAcceptedTurnInputSource,
+): boolean {
+  return source === 'assistant-input'
+}
+
+export function resolveAssistantProductFeedbackAcceptedInputIds(
+  acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[],
+): readonly string[] {
+  return acceptedInputItems
+    .filter((item) => isAssistantProductFeedbackAcceptedInputEligible(item.source))
+    .map((item) => item.id)
 }
 
 export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
-  hostedComputerToolsAvailable?: boolean
   messageInput: AssistantMessageInput
-  requiredUserMessageDeliveryAvailable?: boolean
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -84,29 +132,6 @@ export function createAssistantProgressDelivery(input: {
   let deliveryOrdinal = 0
 
   return {
-    currentHostedDeliveryContext: () => {
-      const deliveryContext = input.getDeliveryContext?.() ?? {
-        messageInput: input.messageInput,
-        session: input.session,
-      }
-      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
-      const conversationId = context?.conversationId ?? null
-      const recipientKey = context?.recipientKey ?? null
-      return conversationId || recipientKey
-        ? { conversationId, recipientKey }
-        : null
-    },
-    currentHostedMailboxItemIds: () => {
-      const deliveryContext = input.getDeliveryContext?.() ?? {
-        messageInput: input.messageInput,
-        session: input.session,
-      }
-      return deliveryContext.messageInput.hostedDeliveryIdempotency
-        ?.inboundMailboxItemIds ?? []
-    },
-    hostedComputerToolsAvailable: input.hostedComputerToolsAvailable === true,
-    requiredUserMessageDeliveryAvailable:
-      input.requiredUserMessageDeliveryAvailable ?? true,
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
       const source = options?.source ?? 'model'
       const required = options?.required === true
@@ -172,6 +197,28 @@ export function createAssistantProgressDelivery(input: {
     close() {
       abortController.abort()
     },
+  }
+}
+
+export function buildAssistantProductFeedbackIdempotencyKey(input: {
+  acceptedInputIds: readonly string[]
+  feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+}): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      acceptedInputIds: [...input.acceptedInputIds],
+      kind: input.feedback.kind,
+      relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
+    }))
+    .digest('hex')
+}
+
+function normalizeAssistantProductFeedback(
+  feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>,
+): Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'> {
+  return {
+    kind: feedback.kind,
+    relatedChangelogItemIds: [...new Set(feedback.relatedChangelogItemIds)],
   }
 }
 
