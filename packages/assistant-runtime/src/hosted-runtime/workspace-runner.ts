@@ -171,6 +171,7 @@ export interface HostedWorkspaceRunnerPlatform
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
+  deviceSyncWorkspaceWakeHandled?: boolean;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
@@ -189,6 +190,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
+  deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; gates the durable conversation
   // consumed-watermark ack (only a clean pass with zero failed replies and no

@@ -1072,6 +1072,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
+    let deviceSyncWorkspaceWakeHandledUntilCheckpoint = false;
     const stageDeviceSyncDirtyAcks = (
       records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
     ): void => {
@@ -1093,6 +1094,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const clearStagedDeviceSyncDirtyAcks = (): void => {
       stagedDeviceSyncDirtyAcks = [];
       suppressDirtyPendingFetchUntilCheckpoint = false;
+      deviceSyncWorkspaceWakeHandledUntilCheckpoint = false;
     };
     let browserVaultReplicaRefreshRequested = false;
     const recordBrowserVaultReplicaRefreshIntent = (
@@ -1145,6 +1147,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   });
                   return await (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
                     ...phaseInput,
+                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
                     restored,
                     runtime: foregroundRuntime,
@@ -1173,6 +1176,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
+        deviceSyncWorkspaceWakeHandledUntilCheckpoint ||=
+          passResult.assistantPhaseResult?.deviceSyncMaintenanceRan === true;
         recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
