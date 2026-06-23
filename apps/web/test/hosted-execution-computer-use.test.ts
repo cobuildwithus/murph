@@ -4185,12 +4185,16 @@ describe("ComputerUseService", () => {
     const executePlaywright = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
+    const osControl = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
     const kernel: ComputerKernelClient = {
       createBrowser,
       deleteBrowserByIdOrName,
       deleteProfile,
       ensureProfile,
       executePlaywright,
+      osControl,
     };
     const service = new ComputerUseService({
       env: {
@@ -5680,6 +5684,7 @@ function createFakeKernel(input: {
         },
       };
     },
+    async osControl() {},
   };
 }
 

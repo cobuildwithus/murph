@@ -927,6 +927,9 @@ function redactHostedExecutionText(value: string): string {
     .replace(HOSTED_EXECUTION_LOCAL_FILE_URL_PATTERN, "<REDACTED_PATH>")
     .replace(HOSTED_EXECUTION_LOCAL_POSIX_PATH_PATTERN, "$1<REDACTED_PATH>")
     .replace(HOSTED_EXECUTION_LOCAL_WINDOWS_PATH_PATTERN, "<REDACTED_PATH>")
+    .replace(/\b(href|src|action)=("[^"]*"|'[^']*'|[^\s>]+)/giu, (_match, key: string) =>
+      `${key}=<REDACTED_URL>`)
+    .replace(/\bhttps?:\/\/[^\s)"'<>]+/giu, "<REDACTED_URL>")
     .replace(HOSTED_EXECUTION_WORKFLOW_ID_PATTERN, "hosted-user-runtime:<redacted-id>")
     .replace(HOSTED_EXECUTION_DIRECT_ID_PATTERN, "$1_<redacted-id>")
     .replace(

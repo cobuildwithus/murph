@@ -320,6 +320,18 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      action: "clickMouse",
+      x: 120,
+      y: 240,
+    },
+    name: "hosted computer os control",
+    path: buildHostedComputerRunOperationPath({
+      operation: "os-control",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
       reason: "final_confirmation",
       suggestedReply: "yes",
     },

@@ -254,6 +254,9 @@ describe('assistant execution prompt contract', () => {
       '`context.request` for secret transfer, `context.unroute()` to bypass routing, new browser contexts for policy bypass, or Node/network APIs to exfiltrate data',
     )
     expect(prompt).toContain(
+      'Use `murph.computer_os_control` only as a fallback when `murph.computer_act` cannot operate the page surface.',
+    )
+    expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
     )
     expect(prompt).toContain('exact final terms or explicit bounds')
@@ -267,7 +270,7 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed',
     )
     expect(prompt).toContain(
-      'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response to summarize the pause and include the returned `handoffUrl` when direct browser takeover is needed.',
+      'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response when the user still needs context or a handoff URL, and finish without reply when no additional user-visible message is useful.',
     )
     expect(prompt).toContain(
       'call `murph.computer_start_run` normally',

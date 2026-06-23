@@ -1,4 +1,7 @@
 import Kernel, { ConflictError, NotFoundError } from "@onkernel/sdk";
+import type {
+  HostedComputerOsControlRequest,
+} from "@murphai/hosted-execution/computer-use";
 
 import { computerUseError } from "./errors";
 
@@ -28,6 +31,10 @@ export interface ComputerKernelClient {
     sessionId: string;
     timeoutMs: number;
   }): Promise<KernelPlaywrightResult>;
+  osControl(input: {
+    action: HostedComputerOsControlRequest;
+    sessionId: string;
+  }): Promise<void>;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -115,6 +122,78 @@ export class KernelComputerClient implements ComputerKernelClient {
     };
   }
 
+  async osControl(input: {
+    action: HostedComputerOsControlRequest;
+    sessionId: string;
+  }): Promise<void> {
+    const { action, sessionId } = input;
+    try {
+      switch (action.action) {
+        case "clickMouse":
+          await this.kernel.browsers.computer.clickMouse(sessionId, {
+            button: action.button,
+            click_type: action.clickType,
+            ...kernelHoldKeys(action.holdKeys),
+            num_clicks: action.numClicks,
+            x: action.x,
+            y: action.y,
+          });
+          return;
+        case "moveMouse":
+          await this.kernel.browsers.computer.moveMouse(sessionId, {
+            ...kernelDurationMs(action.durationMs),
+            ...kernelHoldKeys(action.holdKeys),
+            smooth: action.smooth,
+            x: action.x,
+            y: action.y,
+          });
+          return;
+        case "typeText":
+          await this.kernel.browsers.computer.typeText(sessionId, {
+            text: action.text,
+          });
+          return;
+        case "pressKey":
+          await this.kernel.browsers.computer.pressKey(sessionId, {
+            ...kernelDuration(action.durationMs),
+            keys: [...action.keys],
+          });
+          return;
+        case "scroll":
+          await this.kernel.browsers.computer.scroll(sessionId, {
+            delta_x: action.deltaX,
+            delta_y: action.deltaY,
+            ...kernelHoldKeys(action.holdKeys),
+            x: action.x,
+            y: action.y,
+          });
+          return;
+        case "dragMouse":
+          await this.kernel.browsers.computer.dragMouse(sessionId, {
+            button: action.button,
+            ...kernelDelay(action.delayMs),
+            ...kernelDurationMs(action.durationMs),
+            ...kernelHoldKeys(action.holdKeys),
+            path: action.path.map(([x, y]) => [x, y]),
+            smooth: action.smooth,
+            step_delay_ms: action.stepDelayMs,
+            steps_per_segment: action.stepsPerSegment,
+          });
+          return;
+      }
+    } catch {
+      throw computerUseError({
+        code: "HOSTED_COMPUTER_OS_CONTROL_FAILED",
+        details: {
+          computerOsControl: action.action,
+        },
+        httpStatus: 502,
+        message: "Computer OS control failed.",
+        retryable: true,
+      });
+    }
+  }
+
   async deleteBrowserByIdOrName(idOrName: string): Promise<void> {
     try {
       await this.kernel.browsers.deleteByID(idOrName);
@@ -136,6 +215,24 @@ export class KernelComputerClient implements ComputerKernelClient {
       throw error;
     }
   }
+}
+
+function kernelHoldKeys(
+  holdKeys: readonly string[],
+): { hold_keys?: string[] } {
+  return holdKeys.length > 0 ? { hold_keys: [...holdKeys] } : {};
+}
+
+function kernelDurationMs(durationMs: number): { duration_ms?: number } {
+  return durationMs > 0 ? { duration_ms: durationMs } : {};
+}
+
+function kernelDuration(durationMs: number): { duration?: number } {
+  return durationMs > 0 ? { duration: durationMs } : {};
+}
+
+function kernelDelay(delayMs: number): { delay?: number } {
+  return delayMs > 0 ? { delay: delayMs } : {};
 }
 
 function buildKernelPlaywrightFailureDetails(response: {

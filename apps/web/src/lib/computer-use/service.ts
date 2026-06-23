@@ -9,6 +9,7 @@ import {
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
+  type HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -42,6 +43,7 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
+const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
@@ -64,6 +66,13 @@ export interface ComputerObserveResult {
   title: string | null;
   url: string | null;
   visibleText: string;
+}
+
+export interface ComputerOsControlResult {
+  action: HostedComputerOsControlRequest["action"];
+  ok: true;
+  runId: string;
+  status: "running";
 }
 
 export interface ComputerPauseForUserResult {
@@ -390,6 +399,35 @@ export class ComputerUseService {
       result: state.result,
       title: state.title,
       url: state.url,
+    };
+  }
+
+  async osControl(input: HostedComputerOsControlRequest & {
+    memberId: string;
+    runId: string;
+  }): Promise<ComputerOsControlResult> {
+    const { memberId, runId, ...action } = input;
+    await this.store.requireMemberComputerUseAvailable({
+      memberId,
+    });
+    const run = await this.requireRunnableRun({ memberId, runId });
+    const kernel = this.requireKernel();
+    const sessionId = requireKernelSessionId(run);
+    await requireNonSensitiveComputerOsTextTarget({
+      action,
+      kernel,
+      sessionId,
+    });
+    await kernel.osControl({
+      action,
+      sessionId,
+    });
+
+    return {
+      action: action.action,
+      ok: true,
+      runId: run.id,
+      status: "running",
     };
   }
 
@@ -2055,6 +2093,101 @@ function readComputerUseErrorDetails(value: unknown): Record<string, unknown> {
     : {};
 }
 
+async function requireNonSensitiveComputerOsTextTarget(input: {
+  action: HostedComputerOsControlRequest;
+  kernel: ComputerKernelClient;
+  sessionId: string;
+}): Promise<void> {
+  if (input.action.action !== "typeText") {
+    return;
+  }
+
+  const result = await input.kernel.executePlaywright({
+    code: buildComputerActiveElementSensitiveInputProbeCode(),
+    sessionId: input.sessionId,
+    timeoutMs: COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS,
+  });
+  const preflight = readComputerSensitiveInputPreflightResult(result.result);
+  if (!preflight.sensitive) {
+    return;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    httpStatus: 400,
+    message: "Computer input targets a sensitive field. Pause for user handoff instead.",
+  });
+}
+
+function buildComputerActiveElementSensitiveInputProbeCode(): string {
+  return `
+const target = page.locator(':focus');
+await target.waitFor({ state: 'attached', timeout: 1000 }).catch(() => {});
+const targetIsInspectable = await target.count().then((count) => count === 1).catch(() => false);
+if (!targetIsInspectable) return { sensitive: true, reason: "focused_target_uninspectable" };
+const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();
+const type = await attr("type");
+const inputMode = await attr("inputmode");
+const maxLengthRaw = await attr("maxlength");
+const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;
+const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);
+const tagName = String(await target.evaluate((element) => element.tagName).catch(() => "") || "").toLowerCase();
+const isContentEditable = await target.evaluate((element) => element instanceof HTMLElement && element.isContentEditable).catch(() => false);
+const editableInputTypes = new Set(["", "text", "search", "email", "tel", "url", "number", "date", "datetime-local", "month", "password", "time", "week"]);
+const isEditableTextTarget =
+  tagName === "textarea" ||
+  isContentEditable === true ||
+  (tagName === "input" && editableInputTypes.has(type));
+if (!isEditableTextTarget) return { sensitive: true, reason: "focused_target_not_editable" };
+if (type === "password") return { sensitive: true, reason: "password_type" };
+if (autocompleteTokens.some((token) =>
+  token === "current-password" ||
+  token === "new-password" ||
+  token === "one-time-code" ||
+  token.startsWith("cc-")
+)) {
+  return { sensitive: true, reason: "sensitive_autocomplete" };
+}
+const hints = [
+  type,
+  inputMode,
+  await attr("name"),
+  await attr("id"),
+  await attr("aria-label"),
+  await attr("aria-description"),
+  await attr("aria-describedby"),
+  await attr("aria-labelledby"),
+  await attr("placeholder"),
+  await attr("title"),
+  await attr("data-testid"),
+  await attr("data-test"),
+  await attr("data-qa"),
+].join(" ");
+const sensitivePatterns = [
+  /\\b(?:password|passcode|passphrase)\\b/u,
+  /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
+  /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b|\\b(?:verification|authentication|security)(?:code|passcode|token)\\b/u,
+  /\\b(?:cvc|cvv|cvn|cid)\\b/u,
+  /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
+  /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
+  /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
+  /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
+];
+if (sensitivePatterns.some((pattern) => pattern.test(hints))) return { sensitive: true, reason: "sensitive_hint" };
+const shortCodeField =
+  /\\bcode\\b/u.test(hints) &&
+  (
+    inputMode === "numeric" ||
+    inputMode === "decimal" ||
+    inputMode === "tel" ||
+    type === "number" ||
+    type === "tel" ||
+    (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
+  );
+return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
+`.trim();
+}
+
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
   if (value === null || value === undefined) {
     return null;
@@ -2252,6 +2385,28 @@ function readRequiredBrowserActionStateResult(value: unknown): {
     title: state.title,
     url: state.url,
   };
+}
+
+function readComputerSensitiveInputPreflightResult(value: unknown): {
+  sensitive: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidSensitiveInputPreflightResultError();
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.sensitive !== "boolean") {
+    throw invalidSensitiveInputPreflightResultError();
+  }
+  return { sensitive: record.sensitive === true };
+}
+
+function invalidSensitiveInputPreflightResultError(): Error {
+  return computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_PREFLIGHT_INVALID",
+    httpStatus: 502,
+    message: "Computer sensitive-input preflight returned an invalid result.",
+    retryable: true,
+  });
 }
 
 function readVisibleText(value: unknown): string {

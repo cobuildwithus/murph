@@ -29,6 +29,7 @@ describe("murph computer dynamic tools", () => {
       "computer_start_run",
       "computer_observe",
       "computer_act",
+      "computer_os_control",
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
@@ -94,6 +95,7 @@ describe("murph computer dynamic tools", () => {
       "computer_start_run",
       "computer_observe",
       "computer_act",
+      "computer_os_control",
       "computer_pause_for_user",
       "computer_finish_run",
     ]);

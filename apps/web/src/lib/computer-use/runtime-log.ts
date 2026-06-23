@@ -1,5 +1,6 @@
 import type {
   HostedComputerActRequest,
+  HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -17,14 +18,18 @@ type HostedComputerToolOperation =
   | "act"
   | "finish"
   | "observe"
+  | "os-control"
   | "pause-for-user"
   | "start-run";
+type HostedComputerToolAction =
+  | HostedComputerActRequest
+  | HostedComputerOsControlRequest;
 
 const HOSTED_COMPUTER_TOOL_FAILURE_EVENT_CODE = "assistant.computer_tool_failed";
 const HOSTED_COMPUTER_UNEXPECTED_FAILURE_CODE = "HOSTED_COMPUTER_UNEXPECTED_FAILURE";
 
 export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
-  action?: HostedComputerActRequest | null;
+  action?: HostedComputerToolAction | null;
   memberId: string;
   operation: HostedComputerToolOperation;
   run: () => Promise<Result>;
@@ -43,7 +48,7 @@ export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
 }
 
 async function recordHostedComputerToolFailureBestEffort(input: {
-  action: HostedComputerActRequest | null;
+  action: HostedComputerToolAction | null;
   error: unknown;
   memberId: string;
   operation: HostedComputerToolOperation;
@@ -73,7 +78,7 @@ async function recordHostedComputerToolFailureBestEffort(input: {
 }
 
 function buildHostedComputerToolFailureRedactedJson(input: {
-  action: HostedComputerActRequest | null;
+  action: HostedComputerToolAction | null;
   error: unknown;
   errorCode: string;
   operation: HostedComputerToolOperation;
@@ -84,10 +89,17 @@ function buildHostedComputerToolFailureRedactedJson(input: {
 
   return {
     computerOperationKind: input.operation,
-    ...(action ? { playwrightCodeHash: shortHash(action.code) } : {}),
-    ...readHostedComputerToolTiming(action),
+    ...readHostedComputerToolActionDetail({
+      action,
+      operation: input.operation,
+    }),
+    ...readHostedComputerToolTiming({
+      action,
+      operation: input.operation,
+    }),
     ...(domainError ? { httpStatus: domainError.httpStatus } : {}),
     ...(domainError ? { retryable: domainError.retryable } : {}),
+    ...readHostedComputerToolFailureCategory(details, domainError?.message ?? null),
     kernelErrorPresent: details.kernelErrorPresent === true,
     kernelStderrPresent: details.kernelStderrPresent === true,
     kernelStdoutPresent: details.kernelStdoutPresent === true,
@@ -126,13 +138,70 @@ function readSafeComputerErrorDetail(
     : null;
 }
 
-function readHostedComputerToolTiming(
-  action: HostedComputerActRequest | null,
-): HostedRuntimeRedactedJson {
-  if (!action) {
+function readHostedComputerToolActionDetail(input: {
+  action: HostedComputerToolAction | null;
+  operation: HostedComputerToolOperation;
+}): HostedRuntimeRedactedJson {
+  if (!input.action) {
     return {};
   }
-  return { timeoutMs: action.timeoutMs };
+  if (input.operation === "os-control" && "action" in input.action) {
+    return { computerOsControlKind: input.action.action };
+  }
+  if ("code" in input.action) {
+    return { playwrightCodeHash: shortHash(input.action.code) };
+  }
+  return {};
+}
+
+function readHostedComputerToolTiming(input: {
+  action: HostedComputerToolAction | null;
+  operation: HostedComputerToolOperation;
+}): HostedRuntimeRedactedJson {
+  if (!input.action) {
+    return {};
+  }
+  if (input.operation === "os-control") {
+    return {};
+  }
+  if ("timeoutMs" in input.action) {
+    return { timeoutMs: input.action.timeoutMs };
+  }
+  return {};
+}
+
+function readHostedComputerToolFailureCategory(
+  details: Record<string, unknown>,
+  message: string | null,
+): HostedRuntimeRedactedJson {
+  const text = [
+    message,
+    details.kernelError,
+    details.kernelStderr,
+    details.kernelStdout,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n")
+    .toLowerCase();
+  if (text.length === 0) {
+    return {};
+  }
+
+  if (text.includes("strict mode violation")) {
+    return { computerFailureCategory: "strict_mode_violation" };
+  }
+  if (text.includes("timeout")) {
+    return { computerFailureCategory: "timeout" };
+  }
+  if (
+    text.includes("target closed")
+    || text.includes("page context closed")
+    || text.includes("browser context closed")
+  ) {
+    return { computerFailureCategory: "browser_closed" };
+  }
+
+  return {};
 }
 
 function readHostedComputerToolErrorCode(error: unknown): string {
