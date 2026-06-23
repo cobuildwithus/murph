@@ -476,6 +476,7 @@ describe("hosted execution coverage gaps", () => {
       "assistant.notification.requested",
       "device-sync.wake",
       "runtime.manual-requested",
+      "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",

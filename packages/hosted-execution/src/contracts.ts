@@ -25,6 +25,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
+  "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
   "runtime.device-sync-recovery-requested",
   "runtime.mailbox-lag-observed",

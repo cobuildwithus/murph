@@ -9,11 +9,11 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
-        kind: "runtime.browser-vault-refresh-requested",
+        kind: "runtime.maintenance-requested",
         userId: "user-1",
       }),
     ).toEqual({
-      kind: "runtime.browser-vault-refresh-requested",
+      kind: "runtime.maintenance-requested",
       userId: "user-1",
     });
   });
@@ -327,13 +327,13 @@ describe("parseHostedExecutionWake", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "evt_runtime_control",
-        kind: "runtime.manual-requested",
+        kind: "runtime.maintenance-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
       eventId: "evt_runtime_control",
-      kind: "runtime.manual-requested",
+      kind: "runtime.maintenance-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
     });

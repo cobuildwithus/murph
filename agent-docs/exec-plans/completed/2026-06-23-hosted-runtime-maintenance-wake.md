@@ -225,7 +225,7 @@ the package/app scoped verification required by `agent-docs/operations/verificat
 
 ## State
 
-Active.
+Ready to archive after commit.
 
 ## Done
 
@@ -235,10 +235,51 @@ Active.
   at `b73e2381b`.
 - Stress-tested the primitive against deployment skew, duplicate clicks,
   checkpoint delay, user-message races, failed migrations, and rollback.
+- Implemented `"runtime.maintenance-requested"` through hosted-execution
+  contracts/parsers and assistant-runtime no-op runtime-control receipt routing.
+- Added `signalHostedRuntimeMaintenanceRuntime`, with deterministic per-minute
+  mailbox dedupe over user id and hosted workspace version.
+- Added hosted ops access helpers backed by hosted app session auth,
+  `HOSTED_OPS_MEMBER_IDS`, and same-origin mutation checks.
+- Added `/ops/runtime-maintenance` and `/api/ops/runtime-maintenance` for
+  bounded manual wakes of active checkpointed workspaces.
+- Documented the maintenance wake operator gate in the hosted runtime protocol
+  reference and updated the docs index.
+- Fixed review findings:
+  - pagination now returns the last emitted row as the next cursor;
+  - batch wakes use the visible page cursor;
+  - batch wakes stop after the first per-workspace failure;
+  - per-workspace failure messages are generic in JSON responses;
+  - the page shows pending state, refreshes after wakes, and wraps result
+    details.
+- Added regression tests for contract enumeration, parser acceptance, mailbox
+  routing, no-assistant continuation, web signaling/dedupe, AI-usage gate
+  exclusion, ops access fail-closed behavior, explicit user wakes, batch caps,
+  pagination, and first-failure stop.
+- Verification passed:
+  - focused hosted-execution tests for contract/parser/builder guards;
+  - focused assistant-runtime mailbox routing and workspace assistant phase
+    tests;
+  - focused hosted-web signaling, usage-gate, and runtime-maintenance ops tests;
+  - `pnpm typecheck`;
+  - `pnpm --dir apps/web lint`;
+  - `pnpm --dir apps/web verify`;
+  - `git diff --check`.
+- `pnpm test:diff ...` was also run and passed the package fanout until
+  `apps/cloudflare verify`; it failed in untouched
+  `apps/cloudflare/test/runner-bundle-process.test.ts` because the local
+  Corepack shim resolved pnpm under `/tmp/home/.cache/node/corepack/...` where
+  this machine has no `pnpm.cjs`. This does not touch the current diff.
+- Review passes completed:
+  - security/privacy review;
+  - coverage review;
+  - frontend review;
+  - deep runtime correctness review.
 
 ## Next
 
-- Implement the primitive exactly as scoped above.
-- Run the verification plan.
 - Deploy Cloudflare first, then web, then run the maintenance wake batches during
   the agreed window.
+Status: completed
+Updated: 2026-06-23
+Completed: 2026-06-23

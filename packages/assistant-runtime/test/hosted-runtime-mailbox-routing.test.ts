@@ -54,6 +54,11 @@ describe("hosted mailbox routing", () => {
       },
       {
         action: "apply-runtime-control-request",
+        kind: "runtime.maintenance-requested",
+        lane: "system",
+      },
+      {
+        action: "apply-runtime-control-request",
         kind: "runtime.browser-vault-refresh-requested",
         lane: "system",
       },
@@ -96,6 +101,7 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.manual-requested"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.maintenance-requested"), "system");
   });
 
   test("quarantines lane and sequence inconsistencies before progress can advance", () => {

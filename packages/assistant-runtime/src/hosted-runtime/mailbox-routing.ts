@@ -65,6 +65,7 @@ const ACTION_BY_KIND = {
   "runtime.browser-vault-refresh-requested": "apply-runtime-control-request",
   "runtime.device-sync-recovery-requested": "apply-runtime-control-request",
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
+  "runtime.maintenance-requested": "apply-runtime-control-request",
   "runtime.manual-requested": "apply-runtime-control-request",
   "vault-share.delivery": "import-vault-share-delivery",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;

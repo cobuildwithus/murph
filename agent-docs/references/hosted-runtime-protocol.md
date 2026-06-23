@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-05
+Last verified: 2026-06-23
 
 ## Decision
 
@@ -290,6 +290,34 @@ dirty webhook freshness is persisted dirty state plus one clean-to-dirty
 periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
+
+### Hosted Runtime Maintenance Wake
+
+`runtime.maintenance-requested` is the explicit operator wake for one-time
+hosted runtime maintenance such as a vault format rollout. Web appends the
+runtime-control mailbox row and signals the normal hosted runtime workflow; the
+assistant runtime treats the row as a no-op control receipt, then runs the same
+restore, local runtime maintenance, idle checkpoint, and workspace-version CAS
+path as any other hosted invocation. The maintenance wake must not carry
+provider payloads, decrypted mailbox content, or migration-specific data.
+
+The production operator surface is the hosted app-session gated
+`/ops/runtime-maintenance` page and its same-origin
+`/api/ops/runtime-maintenance` route. Access is allowlisted by hosted member id
+through `HOSTED_OPS_MEMBER_IDS`; a missing or invalid allowlist fails closed.
+The page is intentionally small: it pages active checkpointed hosted workspaces,
+can wake one explicit workspace, and caps batch wakes to a tiny window that
+stops on the first signal failure. It is not a scheduler, queue, or generic
+admin job framework.
+
+For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
+runtime parser must understand the new mailbox kind before web emits it. After
+deploy, set `HOSTED_OPS_MEMBER_IDS`, open `/ops/runtime-maintenance`, wake a
+single canary workspace, verify the runtime checkpoint/version advances, then
+run small batches until no targeted legacy snapshots remain. Any missed
+workspace may still hit the runtime's format gate on its next wake, so the
+operator rollout gate is zero known v1 hosted snapshots before returning to
+normal traffic.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
