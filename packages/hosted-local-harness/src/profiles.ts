@@ -36,6 +36,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     description:
       "Internal profile used by hosted-local worktree commands.",
     envDefaults: {
+      MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       MURPH_DEV_TEMPORAL: "managed",
       NEXT_DIST_DIR_MODE: "smoke",
     },

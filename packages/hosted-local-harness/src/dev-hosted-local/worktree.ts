@@ -274,6 +274,7 @@ export function formatHostedLocalWorktreeEnv(
       config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG,
     ],
     ["MURPH_DEV_LINQ_WEBHOOK_TUNNEL", config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL],
+    ["MURPH_DEV_SKIP_STRIPE_LISTEN", config.env.MURPH_DEV_SKIP_STRIPE_LISTEN],
     [
       "MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER",
       config.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER,
@@ -466,6 +467,7 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_DEV_MINIO_DATA_DIR: input.paths.minioDataDir,
     MURPH_DEV_MINIO_PORT: String(input.ports.minio),
     MURPH_DEV_REUSE_EXISTING_WORKER: "0",
+    MURPH_DEV_SKIP_STRIPE_LISTEN: input.baseEnv.MURPH_DEV_SKIP_STRIPE_LISTEN ?? "1",
     MURPH_DEV_TEMPORAL: "managed",
     MURPH_DEV_TEMPORAL_HOST: "127.0.0.1",
     MURPH_DEV_TEMPORAL_PORT: String(input.ports.temporal),

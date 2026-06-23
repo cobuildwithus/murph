@@ -151,18 +151,31 @@ describe("hosted-local MinIO sidecar", () => {
 
     expect(server?.process).toBe(child);
     expect(server?.containerName).toMatch(/^murph-hosted-local-r2-/u);
+    const expectedControlHost = process.platform === "linux" ? "172.17.0.1" : "127.0.0.1";
+    const expectedEndpointHost = process.platform === "linux"
+      ? "172.17.0.1"
+      : "host.docker.internal";
     expect(server?.env).toEqual(expect.objectContaining({
       HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
-      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
-      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
+      HOSTED_R2_PRESIGN_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedEndpointHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
       MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_PROFILE");
-    expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
+    if (process.platform === "linux") {
+      expect(server?.env).toHaveProperty(
+        "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST",
+        "172.17.0.1",
+      );
+    } else {
+      expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
+    }
     expect(childProcessMocks.spawn).toHaveBeenCalledWith(
       "docker",
       expect.arrayContaining(["rm", "-f"]),
@@ -192,7 +205,7 @@ describe("hosted-local MinIO sidecar", () => {
     }));
     expect(runtimeMocks.waitForHealthyHttpEndpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        host: "127.0.0.1",
+        host: expectedControlHost,
         label: "minio",
       }),
     );

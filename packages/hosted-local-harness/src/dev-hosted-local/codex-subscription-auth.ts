@@ -45,7 +45,9 @@ export function shouldSeedHostedLocalCodexSubscriptionAuth(input: {
   profileName: string | undefined;
 }): boolean {
   return input.nodeEnv?.trim() !== "test"
-    && resolveHostedLocalProfile(input.profileName).mode !== "test";
+    && resolveHostedLocalProfile(input.profileName, {
+      allowInternalWorktreeProfile: true,
+    }).mode !== "test";
 }
 
 export function resolveHostedLocalCodexHome(

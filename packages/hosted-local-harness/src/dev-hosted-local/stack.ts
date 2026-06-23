@@ -64,6 +64,7 @@ import {
   assertHostedWebPortAvailable,
   cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
+  cleanupHostedRunnerImages,
   collectDockerDevDiagnostics,
   redactHostedLocalDiagnosticText,
   resolveHostedLocalWorkerPortMode,
@@ -932,6 +933,13 @@ export async function startHostedLocalDevStack(input: {
             cwd: repoRoot,
             env: workerProcessEnv ?? workerRuntimeEnv,
             ignoreErrors: true,
+            scope: "current-build",
+          });
+          await cleanupHostedRunnerImages({
+            cwd: repoRoot,
+            env: workerProcessEnv ?? workerRuntimeEnv,
+            ignoreErrors: true,
+            scope: "current-build",
           });
         }
         if (minioServer !== null) {
@@ -1079,6 +1087,13 @@ export async function startHostedLocalDevStack(input: {
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
         ignoreErrors: true,
+        scope: "current-build",
+      }).catch(() => {});
+      await cleanupHostedRunnerImages({
+        cwd: repoRoot,
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        ignoreErrors: true,
+        scope: "current-build",
       }).catch(() => {});
     }
     if (minioServer !== null) {
@@ -2491,9 +2506,6 @@ export function terminateKnownHostedLocalProcessResidue(input: {
         `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
         "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
       ]),
-    ...(!input.owned.healthCommons
-      ? []
-      : ["pnpm health-commons:generate:watch"]),
     ...(!input.owned.linqTunnel
       ? []
       : [

@@ -739,7 +739,9 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "all-builds",
     }));
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
+    }));
     expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
       expect.objectContaining({
         persistDir: "/tmp/murph-dev-env-test/wrangler-state",
@@ -1144,7 +1146,9 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "current-build",
     }));
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
+    }));
     expect(maybeStartHostedLocalMinio).toHaveBeenCalledWith(expect.objectContaining({
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",
@@ -1212,7 +1216,9 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "current-build",
     }));
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "current-build",
+    }));
   });
 
   it("falls back to host Docker CLI plugins when inherited Docker config is already isolated", async () => {
@@ -1702,7 +1708,6 @@ describe("hosted local dev stack", () => {
         ["-SIGKILL", "-f", "workerd.*127\\.0\\.0\\.1:8787"],
         ["-SIGKILL", "-f", "apps/web/scripts/dev-local\\.ts.*--port 3000"],
         ["-SIGKILL", "-f", "next/dist/telemetry/detached-flush\\.js dev .*apps/web"],
-        ["-SIGKILL", "-f", "pnpm health-commons:generate:watch"],
         [
           "-SIGKILL",
           "-f",
@@ -2976,9 +2981,15 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
+        scope: "current-build",
       }),
     );
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ignoreErrors: true,
+        scope: "current-build",
+      }),
+    );
   });
 
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {

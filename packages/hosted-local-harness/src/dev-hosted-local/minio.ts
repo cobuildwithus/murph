@@ -526,12 +526,18 @@ async function resolveHostedLocalMinioPublishTarget(
     normalized === "host.docker.internal"
     || normalized === "host.containers.internal"
   ) {
+    if (process.platform === "linux") {
+      const dockerBridgeGateway = await resolveDockerBridgeGatewayHost(env);
+      return {
+        controlHost: dockerBridgeGateway,
+        dockerBridgeHost: dockerBridgeGateway,
+        publishHost: dockerBridgeGateway,
+      };
+    }
     return {
       controlHost: "127.0.0.1",
       dockerBridgeHost: null,
-      publishHost: process.platform === "linux"
-        ? await resolveDockerBridgeGatewayHost(env)
-        : "0.0.0.0",
+      publishHost: "0.0.0.0",
     };
   }
 

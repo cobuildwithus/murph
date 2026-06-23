@@ -162,6 +162,7 @@ describe("hosted-local worktree config", () => {
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_MINIO_PORT: "9101",
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
+      MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_TEMPORAL_PORT: "7301",
       MURPH_DEV_WEB_PORT: "3101",
@@ -174,9 +175,22 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
     expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
+    expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
     expect(rendered).not.toContain("MURPH_DEV_TEMP_DIR");
     expect(rendered).not.toContain(config.databaseUrl);
+  });
+
+  it("allows an explicit worktree Stripe listener opt-in", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "0",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("0");
   });
 
   it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {

@@ -269,7 +269,7 @@ describe("hosted-local harness", () => {
 
     expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("worktree");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
-    expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBeUndefined();
+    expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBeUndefined();
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
