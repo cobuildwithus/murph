@@ -24,6 +24,9 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
+import {
+  HOSTED_RUNTIME_CODEX_AUTH_PATH,
+} from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -3505,6 +3508,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_CODEX_AUTH_PATH)) {
+        return new Response(JSON.stringify({
+          applied: true,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith("/api/internal/hosted-execution/issues/record")) {
         return new Response(JSON.stringify({
           issueIds: ["issue_123"],
@@ -3561,6 +3572,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.workspacePort).toBeDefined();
     expect(platform.logPort).toBeDefined();
     expect(platform.latencyTracePort).toBeDefined();
+    expect(platform.codexAuthPort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
@@ -3599,6 +3611,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         type: "assistant_input_staged",
       },
     });
+    await platform.codexAuthPort!.update({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "connected",
+    });
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
     await platform.productFeedbackPort!.recordProductFeedback({
@@ -3611,7 +3627,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(fetchMock).toHaveBeenCalledTimes(9);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3620,6 +3636,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-workspace",
       "http://web-control.worker/api/internal/hosted-runtime/log",
       "http://web-control.worker/api/internal/hosted-runtime/latency",
+      "http://web-control.worker/api/internal/hosted-runtime/codex-auth",
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",

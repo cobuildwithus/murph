@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -10,6 +10,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  parseHostedLocalCodexSubscriptionHostAuth,
   parseHostedLocalCodexSubscriptionSeedAuth,
 } from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 import {
@@ -124,18 +125,42 @@ export async function prepareHostedCodexRuntimeEnvironment(
     normalizeHostedCodexEnvString(
       input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     ) !== null;
-  const chatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
-  const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
+  const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
+  const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
+  const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
+  const seededChatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
 
-  if (!apiKeyValue) {
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await chmod(codexHome, 0o700);
+  let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
+  if (chatGptAuthKind === "invalid") {
+    await rm(codexAuthPath, { force: true });
+    chatGptAuthKind = null;
+  }
+  if (seededChatGptAuthJson !== null && chatGptAuthKind !== "managed") {
+    await writeFile(codexAuthPath, seededChatGptAuthJson, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(codexAuthPath, 0o600);
+    chatGptAuthKind = "seeded";
+  }
+  if (seededChatGptAuthJson === null && chatGptAuthKind === "seeded") {
+    await rm(codexAuthPath, { force: true });
+    chatGptAuthKind = null;
+  }
+  const chatGptAuth = chatGptAuthKind !== null;
+  const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
+  if (!chatGptAuth && !apiKeyValue) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_REQUIRED",
       `Hosted assistant provider ${providerConfig.id} requires ${providerConfig.envKey} in the isolated runtime environment.`,
     );
   }
 
-  const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
-  const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
   runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
   const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
@@ -154,32 +179,14 @@ export async function prepareHostedCodexRuntimeEnvironment(
     HOSTED_ASSISTANT_SANDBOX:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_SANDBOX)
       ?? DEFAULT_HOSTED_CODEX_SANDBOX,
-    [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: chatGptAuthJson !== null
+    [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: chatGptAuth
       ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
       : providerConfig.id,
   });
-
-  await mkdir(codexHome, {
-    mode: 0o700,
-    recursive: true,
-  });
-  await chmod(codexHome, 0o700);
-  const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  if (chatGptAuthJson !== null) {
-    await writeFile(codexAuthPath, chatGptAuthJson, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await chmod(codexAuthPath, 0o600);
-  } else {
-    // Remove any stale dev subscription auth left in a persistent operator
-    // home by a previous wake; never exists outside local dev.
-    await rm(codexAuthPath, { force: true });
-  }
   await writeFile(
     codexConfigPath,
     buildHostedCodexConfigToml({
-      chatGptAuth: chatGptAuthJson !== null,
+      chatGptAuth,
       writeProviderRetryDefaults: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
@@ -197,6 +204,47 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexHome,
     runtimeEnv,
   };
+}
+
+type HostedCodexAuthKind = "invalid" | "managed" | "seeded";
+
+async function readHostedCodexAuthKind(
+  codexAuthPath: string,
+): Promise<HostedCodexAuthKind | null> {
+  let raw: string;
+  try {
+    raw = await readFile(codexAuthPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "invalid";
+  }
+
+  try {
+    const authMode = typeof parsed === "object" && parsed !== null
+      ? Reflect.get(parsed, "auth_mode")
+      : null;
+    if (authMode === "chatgpt") {
+      parseHostedLocalCodexSubscriptionHostAuth(parsed);
+      return "managed";
+    }
+    if (authMode === "chatgptAuthTokens") {
+      parseHostedLocalCodexSubscriptionSeedAuth(parsed);
+      return "seeded";
+    }
+  } catch {
+    // Normalize every credential-shape failure to one non-secret error.
+  }
+
+  return "invalid";
 }
 
 // Local-dev-only ChatGPT-subscription auth for hosted Codex. The harness seeds
@@ -446,6 +494,7 @@ export function buildHostedCodexConfigToml(input: {
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
+    ...(input.chatGptAuth ? ['cli_auth_credentials_store = "file"'] : []),
     `model_provider = ${tomlString(modelProviderId)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,

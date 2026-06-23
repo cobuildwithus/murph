@@ -1691,6 +1691,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       item: expect.objectContaining({
         itemId: "system_mailbox_item_processed",
       }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -4599,6 +4600,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: manualRuntimeItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -4633,6 +4635,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: browserVaultRefreshItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -4841,7 +4844,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an immediate assistant wake when the pending input index has work after system mailbox work", async () => {
+  it("runs system mailbox work after pending assistant input gets a backoff wake", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -4863,12 +4866,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(result.nextWakeAt).toBe("2026-04-27T00:10:30.000Z");
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
     }));
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
       now: expect.any(Function),
       vaultRoot: "/tmp/murph-vault",
@@ -4972,6 +4974,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       item: expect.objectContaining({
         routeAction: "dispatch-assistant-notification",
       }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });

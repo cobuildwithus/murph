@@ -23,6 +23,7 @@ import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
+import { executeHostedCodexAuthWake } from "./events/codex-auth.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
   HostedMailboxExecutionMetrics,
@@ -227,6 +228,14 @@ async function executeHostedSystemWake(input: {
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+      });
+    case "runtime.codex-auth-requested":
+      return await executeHostedCodexAuthWake({
+        operatorHomeRoot: input.operatorHomeRoot,
+        platform: input.runtime.platform,
+        runtimeEnv: input.runtimeEnv,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
       });
     case "vault-share.delivery":
       // Vault-share deliveries are landed deterministically at mailbox import

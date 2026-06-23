@@ -16,7 +16,9 @@ import type {
   HostedExecutionMemberChannelsUpdatedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
-  HostedExecutionRuntimeControlWakeKind,
+  HostedExecutionPlainRuntimeControlWakeKind,
+  HostedExecutionCodexAuthRequestedWake,
+  HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
   HostedExecutionVaultShareDeliveryWake,
   HostedExecutionTelegramConversationMessagePayload,
@@ -403,13 +405,30 @@ export function buildHostedExecutionRuntimeTimerWake(input: {
 
 export function buildHostedExecutionRuntimeControlWake(input: {
   eventId: string;
-  kind: HostedExecutionRuntimeControlWakeKind;
+  kind: HostedExecutionPlainRuntimeControlWakeKind;
   occurredAt: string;
   userId: string;
 }): HostedExecutionRuntimeControlWake {
   return {
     eventId: input.eventId,
     kind: input.kind,
+    occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionCodexAuthRequestedWake(input: {
+  action: HostedCodexAuthAction;
+  attemptId: string;
+  eventId: string;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionCodexAuthRequestedWake {
+  return {
+    action: input.action,
+    attemptId: input.attemptId,
+    eventId: input.eventId,
+    kind: "runtime.codex-auth-requested",
     occurredAt: input.occurredAt,
     userId: input.userId,
   };

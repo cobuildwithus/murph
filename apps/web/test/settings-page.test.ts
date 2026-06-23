@@ -32,7 +32,17 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
-  prisma: {},
+  HostedChatGptSettings: vi.fn((props: { initialConnection: unknown }) =>
+    React.createElement(
+      "div",
+      null,
+      `Hosted ChatGPT settings ${JSON.stringify(props.initialConnection)}`,
+    )),
+  prisma: {
+    hostedCodexAuthConnection: {
+      findUnique: vi.fn(async () => null),
+    },
+  },
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -99,6 +109,10 @@ vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
 
 vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
   HostedDataPrivacySettings: mocks.HostedDataPrivacySettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-chatgpt-settings", () => ({
+  HostedChatGptSettings: mocks.HostedChatGptSettings,
 }));
 
 beforeEach(() => {

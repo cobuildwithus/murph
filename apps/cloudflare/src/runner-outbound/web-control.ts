@@ -135,6 +135,8 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isConnectedAppsRequest = policy.operation === "connected_apps"
     && input.request.method === "POST";
+  const isCodexAuthUpdateRequest = policy.operation === "codex_auth_update"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -145,6 +147,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isVaultShareDeliverRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
+    || isCodexAuthUpdateRequest
   ) {
     try {
       writeAuthority = await (

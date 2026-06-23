@@ -517,7 +517,8 @@ diagnostics snapshots, status snapshots, runtime budgets, pending issue records,
 and the diagnostics snapshot's recent warning/error text remain portable; event
 logs are bounded local observability only and are rewritten by runtime
 maintenance. Codex provider continuity is the exact active rollout JSONL
-referenced by live assistant session resume state, not the whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
+referenced by live assistant session resume state, plus a validated managed
+ChatGPT `auth.json` when present, not the whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
 by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
 root. For legacy refs, restore clears local roots and legacy cache markers, then
 applies the base bundle when present and either the working delta or legacy hot
@@ -603,14 +604,15 @@ appropriate for wrong-user authority, invalid auth, undecryptable mailbox
 payloads, mismatched supplied sidecar refs, and lease/CAS conflicts.
 
 Hosted snapshots preserve only active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl`
-files referenced by live assistant resume state. They do not write a Codex
-continuity manifest, and they do not preserve Codex logs, SQLite metadata,
-prompt history, cache/temp, auth/credential/key/cert material, unreferenced
-sessions, or archived sessions. Restore sanitizes assistant session native
+files referenced by live assistant resume state plus a validated managed
+ChatGPT `auth.json`. They do not write a Codex continuity manifest, and they
+do not preserve Codex logs, SQLite metadata, prompt history, cache/temp,
+arbitrary auth/credential/key/cert material, unreferenced sessions, or archived
+sessions. Restore sanitizes assistant session native
 resume state by clearing Codex resume metadata when the referenced rollout file
 is absent, does not match the saved Codex thread id, or is not a regular file
 under `.codex-hosted`; it then prunes restored `.codex-hosted` contents back to
-the surviving session-referenced rollout files.
+the surviving session-referenced rollout files plus validated managed auth.
 Checkpoint diagnostics for Codex continuity may expose only thread counts, byte
 totals, missing/invalid counters, and keyed hashed rollout-relative names when
 the hosted log fingerprint secret is configured; raw Codex home paths,

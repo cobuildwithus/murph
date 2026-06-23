@@ -1762,6 +1762,7 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
 async function runSystemMailboxMaintenancePhase(input: {
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
+  ignorePendingAssistantInput?: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   suppressPendingAssistantInputWake?: boolean;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
@@ -1769,6 +1770,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   continueAssistantLane: boolean;
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
+  pendingAssistantInputWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   if (
@@ -1779,6 +1781,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint: null,
+      pendingAssistantInputWakeAt: null,
       result: null,
     };
   }
@@ -1786,6 +1789,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   const phaseInput = input.input;
   const initialProviderCleanupCheckpoint =
     await readHostedProviderCleanupCheckpoint(phaseInput.restored.vaultRoot);
+  const pendingAssistantInputWakeAt = input.ignorePendingAssistantInput === true
+    ? null
+    : await resolvePendingAssistantInputWakeAt(phaseInput);
   let assistantCronWakeState: HostedAssistantCronWakeState | null = null;
   const readAssistantCronWakeState = async (): Promise<HostedAssistantCronWakeState> => {
     if (assistantCronWakeState) {
@@ -1804,9 +1810,19 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: null,
       };
     }
+  }
+  if (pendingAssistantInputWakeAt) {
+    return {
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: null,
+    };
   }
 
   const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -1851,6 +1867,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: null,
       };
     }
@@ -1860,6 +1877,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: dirtyAssistantCronWakeState.dueNow,
         deviceSyncMaintenanceRan: true,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1881,6 +1899,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
         result: withHostedAssistantCronWakeCandidate({
           assistantCronWake: resolveHostedAssistantCronWakeCandidate({
             phaseInput,
@@ -1895,6 +1914,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
       result: null,
     };
   }
@@ -2012,6 +2032,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldYieldAfterSystemMailboxPreparation
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
+    pendingAssistantInputWakeAt,
     result: {
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
@@ -2146,6 +2167,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   if ("item" in input.systemMailboxPreparation) {
     const statusCallback = await recordHostedSystemMailboxItemAfterCheckpoint({
       item: input.systemMailboxPreparation.item,
+      operatorHomeRoot: input.input.restored.operatorHomeRoot,
       runtime: input.input.runtime,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -2804,6 +2826,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     if (preparation.status === "recording") {
       const record = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: preparation.item,
+        operatorHomeRoot: input.input.restored.operatorHomeRoot,
         runtime: input.input.runtime,
         vaultRoot: input.input.restored.vaultRoot,
       });

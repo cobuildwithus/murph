@@ -39,6 +39,9 @@ import {
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
+const HOSTED_CODEX_AUTH_RELATIVE_PATH =
+  `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${HOSTED_CODEX_AUTH_FILE_NAME}`;
 const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
 export const HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH =
   "hosted-portable-workspace-manifest.json";
@@ -387,6 +390,12 @@ async function snapshotHostedPortableWorkspaceBundle(
   const codexContinuityArtifactPaths = createHostedCodexContinuitySnapshotArtifactPathSet(
     hostedCodexContinuity,
   );
+  const codexSnapshotExplicitFiles = operatorHomeRoot
+    ? await createHostedCodexSnapshotExplicitFiles({
+        collection: hostedCodexContinuity,
+        operatorHomeRoot,
+      })
+    : [];
   const vaultBundle = await snapshotHostedBundleRoots({
     assertSnapshotLive: input.assertSnapshotLive,
     externalizeFile: async (artifact) => {
@@ -444,9 +453,7 @@ async function snapshotHostedPortableWorkspaceBundle(
       ...(input.operatorHomeRoot
         ? [
             {
-              explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(
-                hostedCodexContinuity,
-              ),
+              explicitFiles: codexSnapshotExplicitFiles,
               optional: true,
               root: operatorHomeRoot!,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
@@ -692,12 +699,16 @@ async function collectHostedPortableWorkspaceDeltaFiles(input: {
   });
 
   if (input.operatorHomeRoot) {
+    const codexSnapshotExplicitFiles = await createHostedCodexSnapshotExplicitFiles({
+      collection: input.codexContinuity,
+      operatorHomeRoot: input.operatorHomeRoot,
+    });
     await collectHostedPortableWorkspaceDeltaRoot({
       artifactRefProvider: input.artifactRefProvider,
       artifactSink: input.artifactSink,
       archiveFiles,
       codexContinuityArtifactPaths,
-      explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(input.codexContinuity),
+      explicitFiles: codexSnapshotExplicitFiles,
       files,
       includedPaths,
       optional: true,
@@ -1349,6 +1360,12 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   const codexContinuityArtifactPaths = createHostedCodexContinuitySnapshotArtifactPathSet(
     hostedCodexContinuity,
   );
+  const codexSnapshotExplicitFiles = operatorHomeRoot
+    ? await createHostedCodexSnapshotExplicitFiles({
+        collection: hostedCodexContinuity,
+        operatorHomeRoot,
+      })
+    : [];
 
   await input.assertSnapshotLive?.();
   const bundle = await snapshotHostedBundleRoots({
@@ -1388,9 +1405,7 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
       ...(operatorHomeRoot
         ? [
             {
-              explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(
-                hostedCodexContinuity,
-              ),
+              explicitFiles: codexSnapshotExplicitFiles,
               optional: true,
               root: operatorHomeRoot,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
@@ -1427,6 +1442,11 @@ export async function clearHostedAssistantRuntimeHotState(input: {
   const vaultRoot = path.resolve(input.vaultRoot);
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const retainedCodexHomeRelativePaths = operatorHomeRoot
+    ? await createHostedCodexHomeAuthRetainedRelativePaths({
+        operatorHomeRoot,
+      })
+    : new Set<string>();
 
   await Promise.all([
     ...HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.map((relativePath) =>
@@ -1437,9 +1457,9 @@ export async function clearHostedAssistantRuntimeHotState(input: {
     ),
     ...(operatorHomeRoot
       ? [
-          rm(path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH), {
-            force: true,
-            recursive: true,
+          pruneHostedCodexHomeRoot({
+            operatorHomeRoot,
+            retainedRelativePaths: retainedCodexHomeRelativePaths,
           }),
         ]
       : []),
@@ -1507,6 +1527,9 @@ export async function pruneHostedCodexHomeToSessionReferencedRollouts(input: {
   const retainedRelativePaths = new Set(
     collection.entries.map((entry) => entry.codexRolloutRelativePath),
   );
+  if (await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)) {
+    retainedRelativePaths.add(HOSTED_CODEX_AUTH_FILE_NAME);
+  }
   await pruneHostedCodexHomeRoot({
     operatorHomeRoot: input.operatorHomeRoot,
     retainedRelativePaths,
@@ -1922,6 +1945,9 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
       )) {
         explicitOperatorHomeFiles.add(relativePath);
       }
+    }
+    if (await hasHostedCodexManagedAuthJson(operatorHomeRoot)) {
+      explicitOperatorHomeFiles.add(HOSTED_CODEX_AUTH_RELATIVE_PATH);
     }
 
   } else {
@@ -2654,7 +2680,19 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
 
-  return normalizedRelativePath === ".murph";
+  return normalizedRelativePath === ".murph"
+    || normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH;
+}
+
+async function createHostedCodexSnapshotExplicitFiles(input: {
+  collection: HostedCodexContinuityCollection;
+  operatorHomeRoot: string;
+}): Promise<string[]> {
+  const files = createHostedCodexContinuitySnapshotExplicitFiles(input.collection);
+  if (await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)) {
+    files.push(HOSTED_CODEX_AUTH_RELATIVE_PATH);
+  }
+  return [...new Set(files)].sort((left, right) => left.localeCompare(right));
 }
 
 function createHostedCodexContinuitySnapshotExplicitFiles(
@@ -2663,6 +2701,86 @@ function createHostedCodexContinuitySnapshotExplicitFiles(
   return [...new Set(collection.entries.map((entry) =>
     `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`
   ))].sort((left, right) => left.localeCompare(right));
+}
+
+async function createHostedCodexHomeAuthRetainedRelativePaths(input: {
+  operatorHomeRoot: string;
+}): Promise<Set<string>> {
+  return await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)
+    ? new Set([HOSTED_CODEX_AUTH_FILE_NAME])
+    : new Set();
+}
+
+async function hasHostedCodexManagedAuthJson(operatorHomeRoot: string): Promise<boolean> {
+  let raw: string;
+  try {
+    raw = await readFile(
+      path.join(operatorHomeRoot, HOSTED_CODEX_AUTH_RELATIVE_PATH),
+      "utf8",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+  return isHostedCodexManagedAuthJson(raw);
+}
+
+function isHostedCodexManagedAuthJson(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isPlainRecord(parsed) || parsed.auth_mode !== "chatgpt") {
+    return false;
+  }
+  if (
+    parsed.OPENAI_API_KEY !== undefined
+    && parsed.OPENAI_API_KEY !== null
+  ) {
+    return false;
+  }
+  if (!isRfc3339UtcTimestamp(parsed.last_refresh)) {
+    return false;
+  }
+  if (!isPlainRecord(parsed.tokens)) {
+    return false;
+  }
+  return isNonEmptyString(parsed.tokens.access_token)
+    && isNonEmptyString(parsed.tokens.account_id)
+    && isJsonJwtString(parsed.tokens.id_token)
+    && isNonEmptyString(parsed.tokens.refresh_token);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isRfc3339UtcTimestamp(value: unknown): value is string {
+  return isNonEmptyString(value)
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+function isJsonJwtString(value: unknown): value is string {
+  if (!isNonEmptyString(value)) {
+    return false;
+  }
+  const segments = value.split(".");
+  if (segments.length !== 3 || segments.some((segment) => segment.length === 0)) {
+    return false;
+  }
+  try {
+    const payload: unknown = JSON.parse(
+      Buffer.from(segments[1], "base64url").toString("utf8"),
+    );
+    return isPlainRecord(payload);
+  } catch {
+    return false;
+  }
 }
 
 function createHostedCodexContinuitySnapshotArtifactPathSet(

@@ -713,6 +713,22 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export type HostedCodexAuthUpdate =
+  | {
+      attemptId: string;
+      phase: "device_code";
+      userCode: string;
+      verificationUrl: string;
+    }
+  | {
+      attemptId: string;
+      phase: "connected" | "disconnected" | "failed";
+    };
+
+export interface HostedCodexAuthUpdateResponse {
+  applied: boolean;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }
