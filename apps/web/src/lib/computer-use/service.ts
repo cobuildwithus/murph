@@ -189,6 +189,16 @@ export class ComputerUseService {
           return await this.startRunWithStore(input, store);
         }
       }
+      if (activeRun.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
+        return await this.resumeAwaitingRunById({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          runId: activeRun.id,
+          store,
+        });
+      }
       return runHandle(activeRun, true);
     }
 

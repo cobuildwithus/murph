@@ -62,32 +62,6 @@ export function normalizeAssistantNoReplyDeliveryContextOrdinals(
   return [...ordinals].sort((left, right) => left - right)
 }
 
-function normalizePendingComputerResumeRunId(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function resolveAssistantPendingComputerResume(input: {
-  providerResult: ExecutedAssistantProviderTurnResult
-  session: AssistantSession
-}): AssistantSession['pendingComputerResume'] {
-  const pendingRunId = normalizePendingComputerResumeRunId(
-    input.providerResult.pendingComputerResumeRunId,
-  )
-  if (pendingRunId) {
-    return { runId: pendingRunId }
-  }
-  if (input.providerResult.computerResumeConsumed === true) {
-    return null
-  }
-  return input.session.pendingComputerResume ?? null
-}
-
 export async function persistAssistantNoReplyTranscriptMarkers(input: {
   deliveryContextOrdinals: readonly number[] | null | undefined
   sessionId: string
@@ -331,10 +305,6 @@ export async function persistAssistantTurnAndSession(input: {
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
     sessionResumeState: readAssistantCodexResume(input.session),
   })
-  const pendingComputerResume = resolveAssistantPendingComputerResume({
-    providerResult: input.providerResult,
-    session: input.session,
-  })
 
   const savedSession = await state.sessions.save({
     ...input.session,
@@ -346,7 +316,6 @@ export async function persistAssistantTurnAndSession(input: {
     resumeState: nextResumeState,
     updatedAt,
     lastTurnAt: updatedAt,
-    pendingComputerResume,
     turnCount: input.session.turnCount + 1,
   })
 

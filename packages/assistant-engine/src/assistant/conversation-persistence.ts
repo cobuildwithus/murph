@@ -50,6 +50,5 @@ export function serializeAssistantConversationForPersistence(
     updatedAt: session.updatedAt,
     lastTurnAt: session.lastTurnAt,
     turnCount: session.turnCount,
-    pendingComputerResume: session.pendingComputerResume ?? null,
   })
 }

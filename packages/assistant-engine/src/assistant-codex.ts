@@ -514,10 +514,8 @@ export interface CodexAppServerTurnResult {
   finalMessage: string
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   codexThreadHistoryUnsafe: boolean
-  computerResumeConsumed: boolean
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
-  pendingComputerResumeRunId: string | null
   reactions: readonly {
     deliveryContextOrdinal: number
     reaction: MurphDynamicToolReactionPatch['reaction']
@@ -1953,8 +1951,6 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
-  let computerResumeConsumed = false
-  let pendingComputerResumeRunId: string | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2866,17 +2862,6 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.computerRunPausedForUser) {
         computerToolsLockedAfterUserPause = true
-        pendingComputerResumeRunId =
-          normalizeNullableString(result.computerPausedRunId ?? null)
-          ?? (
-            dynamicToolRequest.kind === 'computer-pause-for-user'
-              ? dynamicToolRequest.args.runId
-              : null
-          )
-      }
-      if (result.computerResumeConsumed) {
-        computerResumeConsumed = true
-        pendingComputerResumeRunId = null
       }
       if (result.responseMediaPatch) {
         try {
@@ -3658,11 +3643,9 @@ async function runCodexAppServerTurnOnProcess(
     acceptedNoReplyDeliveryContextOrdinals:
       listNoReplyFinalActionPatchOrdinals(),
     codexThreadHistoryUnsafe,
-    computerResumeConsumed,
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
-    pendingComputerResumeRunId,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,

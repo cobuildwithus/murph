@@ -478,7 +478,6 @@ function createAssistantSession(input?: {
     provider: 'codex-cli',
     providerOptions,
     resumeState: null,
-    pendingComputerResume: null,
     schema: 'murph.assistant-conversation.v2',
     sessionId: 'session-delivery-service-test',
     target,

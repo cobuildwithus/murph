@@ -252,6 +252,12 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
       },
+      resumeRunId: {
+        anyOf: [{ type: 'string' }, { type: 'null' }],
+        default: null,
+        description:
+          'Set this to a paused computer run id from a prior computer_pause_for_user result only when the current user message is intended to continue that paused run. Do not invent or guess ids.',
+      },
     },
   },
 } as const
@@ -468,6 +474,7 @@ const submitProductFeedbackArgumentsSchema = z
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
+  'resumeRunId',
   'startUrl',
 ] as const
 
@@ -480,6 +487,7 @@ const computerNavigationUrlSchema = z
 
 const computerStartRunArgumentsSchema = z
   .object({
+    resumeRunId: computerRunIdSchema.nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
@@ -611,8 +619,6 @@ type HostedComputerToolPayloadSanitizer =
   | 'start'
 
 export interface MurphDynamicToolExecutionResult {
-  computerResumeConsumed?: boolean
-  computerPausedRunId?: string | null
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -961,14 +967,6 @@ function currentHostedMailboxItemId(
   return null
 }
 
-function currentHostedComputerResumeRunId(
-  hostedToolContext: AssistantHostedToolContext | null,
-): string | null {
-  return normalizeNullableString(
-    hostedToolContext?.currentHostedComputerResumeRunId() ?? null,
-  )
-}
-
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -1255,16 +1253,10 @@ async function executeHostedComputerPauseForUserTool(input: {
     return toolTextResult(false, apiResult.errorText)
   }
 
-  const pausePayload = readSanitizedComputerPausePayload(apiResult.payload)
   return toolTextResult(
     true,
-    safeToolPayloadText(pausePayload),
-    {
-      computerPausedRunId: typeof pausePayload.runId === 'string'
-        ? pausePayload.runId
-        : null,
-      computerRunPausedForUser: true,
-    },
+    safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
+    { computerRunPausedForUser: true },
   )
 }
 
@@ -1274,36 +1266,24 @@ async function executeHostedComputerStartRunTool(input: {
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
-  const body = buildHostedComputerStartRunBody({
-    args: input.args,
-    hostedToolContext: input.hostedToolContext,
-  })
-  const apiResult = await callHostedComputerApi({
+  return await executeHostedComputerApiTool({
     abortSignal: input.abortSignal,
-    body,
+    body: buildHostedComputerStartRunBody({
+      args: input.args,
+      hostedToolContext: input.hostedToolContext,
+    }),
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
+    sanitizer: 'start',
     unknownOutcomeOnTransportError: true,
   })
-  if (!apiResult.ok) {
-    return toolTextResult(false, apiResult.errorText)
-  }
-  const payload = sanitizeHostedComputerPayload('start', apiResult.payload)
-  const result = toolTextResult(true, safeToolPayloadText(payload))
-  return typeof body.resumeRunId === 'string' && payload.status === 'running'
-    ? {
-        ...result,
-        computerResumeConsumed: true,
-      }
-    : result
 }
 
 function buildHostedComputerStartRunBody(input: {
   args: ComputerStartRunToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
-  const { startUrl } = input.args
-  const resumeRunId = currentHostedComputerResumeRunId(input.hostedToolContext)
+  const { resumeRunId, startUrl } = input.args
   const resumeAfterMailboxItemId = resumeRunId
     ? currentHostedMailboxItemId(input.hostedToolContext)
     : null
@@ -1663,10 +1643,7 @@ function safeToolPayloadText(payload: unknown): string {
 function toolTextResult(
   success: boolean,
   text: string,
-  extra?: Pick<
-    MurphDynamicToolExecutionResult,
-    'computerPausedRunId' | 'computerResumeConsumed' | 'computerRunPausedForUser'
-  >,
+  extra?: Pick<MurphDynamicToolExecutionResult, 'computerRunPausedForUser'>,
 ): MurphDynamicToolExecutionResult {
   return {
     ...extra,

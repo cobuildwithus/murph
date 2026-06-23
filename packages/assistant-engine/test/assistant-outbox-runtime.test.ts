@@ -3673,7 +3673,6 @@ function createAssistantSession(input?: {
       sandbox: 'danger-full-access',
     }),
     resumeState: null,
-    pendingComputerResume: null,
     schema: 'murph.assistant-conversation.v2',
     sessionId: input?.sessionId ?? 'session-test',
     target,

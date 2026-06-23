@@ -680,7 +680,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
-  it("does not infer resume target from active awaiting run and mailbox proof", async () => {
+  it("resumes the active awaiting run from server-owned mailbox proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "final_confirmation",
@@ -711,13 +711,13 @@ describe("ComputerUseService", () => {
       startUrl: null,
     })).resolves.toMatchObject({
       runId: "hcr_run123",
-      status: "awaiting_user",
+      status: "running",
     });
     expect(store.run).toMatchObject({
-      awaitingReason: "final_confirmation",
-      status: "awaiting_user",
+      awaitingReason: null,
+      status: "running",
     });
-    expect(store.lastResumeAwaitingReason).toBe(null);
+    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
   it("resumes an explicit run without deleting an unrelated stale sibling", async () => {

@@ -44,7 +44,6 @@ export type AssistantActiveTurnInputAdmissionResult =
       deliveryTarget?: string | null
       hostedDeliveryIdempotency?: {
         assistantTurnOrdinal: number | string
-        computerResumeRunId?: string | null
         conversationId?: string | null
         inboundMailboxItemIds?: readonly string[] | null
         recipientKey?: string | null

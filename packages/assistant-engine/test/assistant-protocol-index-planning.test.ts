@@ -1684,7 +1684,6 @@ function createRoute(): CodexThreadIdentity {
 function createHostedToolContext(): AssistantHostedToolContext {
   return {
     computerToolsAvailable: true,
-    currentHostedComputerResumeRunId: () => null,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     requiredUserMessageDeliveryAvailable: true,
@@ -1727,7 +1726,6 @@ function createSession(input?: {
     codexTarget: target,
     conversationId: 'session-test',
     resumeState: input?.resumeState ?? null,
-    pendingComputerResume: null,
     schema: 'murph.assistant-conversation.v2',
     sessionId: 'session-test',
     target,

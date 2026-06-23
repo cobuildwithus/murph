@@ -325,7 +325,6 @@ function createSession(): AssistantSession {
       }),
     ),
     resumeState: null,
-    pendingComputerResume: null,
     schema: 'murph.assistant-conversation.v2',
     sessionId: 'session-progress',
     target,

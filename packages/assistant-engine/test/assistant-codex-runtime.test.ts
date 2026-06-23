@@ -123,7 +123,6 @@ function createHostedToolContext(input: {
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: input.computerToolsAvailable ?? true,
-    currentHostedComputerResumeRunId: () => null,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     requiredUserMessageDeliveryAvailable: true,

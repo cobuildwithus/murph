@@ -456,13 +456,11 @@ export async function executeCodexAssistantTurnAttempt(
       acceptedNoReplyDeliveryContextOrdinals:
         result.acceptedNoReplyDeliveryContextOrdinals,
       codexThreadId: result.sessionId,
-      computerResumeConsumed: result.computerResumeConsumed,
       ...(result.finalAction
         ? {
             finalAction: result.finalAction,
           }
         : {}),
-      pendingComputerResumeRunId: result.pendingComputerResumeRunId,
       response: result.finalMessage,
       reactions: result.reactions,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
