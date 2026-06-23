@@ -5068,6 +5068,101 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("backs off pending assistant input when deferred maintenance has no work", async () => {
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: false,
+    }));
+  });
+
+  it("runs a second assistant pass after deferred manual runtime-control work", async () => {
+    const callOrder: string[] = [];
+    const manualRuntimeItem = {
+      ...createSystemMailboxItem(),
+      itemId: "system_mailbox_item_deferred_runtime_manual",
+      mailboxDedupeKey: "dedupe_system_mailbox_item_deferred_runtime_manual",
+      routeAction: "apply-runtime-control-request" as const,
+      wake: {
+        eventId: "evt_deferred_runtime_manual_requested",
+        kind: "runtime.manual-requested" as const,
+        occurredAt: "2026-04-27T00:10:01.000Z",
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
+    mocks.runHostedAssistantAutomationLane
+      .mockImplementationOnce(async () => {
+        callOrder.push("assistant-1");
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          nextWakeAt: "2026-04-27T00:10:30.000Z",
+          redactedLogEntries: [],
+        };
+      })
+      .mockImplementationOnce(async () => {
+        callOrder.push("assistant-2");
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: false,
+          nextWakeAt: "2026-04-27T00:45:00.000Z",
+          redactedLogEntries: [],
+        };
+      });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      callOrder.push("system-mailbox");
+      return {
+        item: manualRuntimeItem,
+        itemId: manualRuntimeItem.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "runtime-control",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["assistant-1", "system-mailbox", "assistant-2"]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: manualRuntimeItem,
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("uses a full bootstrap checkpoint reason for member activation work", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),

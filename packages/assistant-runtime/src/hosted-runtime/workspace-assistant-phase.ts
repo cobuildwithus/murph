@@ -310,20 +310,20 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     };
-    const assistantMetrics = await runAutomationLane();
-    const currentTurnDeliveryIntentIds =
+    let assistantMetrics = await runAutomationLane();
+    let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
-    const foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
+    let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
       assistantMetrics,
       currentTurnDeliveryIntentIds,
       hasFreshConversationInput,
       input,
     });
-    const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    let assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       input,
       nextWakeAt: assistantMetrics.nextWakeAt,
     });
-    const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
+    let assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
       assistantNextWakeAt,
     });
     const deferredPendingSystemMailboxMaintenance =
@@ -344,6 +344,24 @@ export async function runHostedWorkspaceAssistantPhase(
       );
       deviceSyncMaintenanceRan = deviceSyncMaintenanceRan
         || deferredPendingSystemMailboxMaintenance.deviceSyncMaintenanceRan;
+    }
+    if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
+      assistantMetrics = await runAutomationLane();
+      currentTurnDeliveryIntentIds =
+        assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
+      foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
+        assistantMetrics,
+        currentTurnDeliveryIntentIds,
+        hasFreshConversationInput,
+        input,
+      });
+      assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+        input,
+        nextWakeAt: assistantMetrics.nextWakeAt,
+      });
+      assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
+        assistantNextWakeAt,
+      });
     }
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       deviceSyncMaintenanceRan,
@@ -1680,7 +1698,7 @@ async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input:
   }
 
   const pendingAssistantInputWakeAt = resolveDeferredPendingAssistantInputWakeAt(input);
-  return await runSystemMailboxMaintenancePhase({
+  const maintenance = await runSystemMailboxMaintenancePhase({
     executionContext: input.executionContext,
     hasFreshConversationInput: input.hasFreshConversationInput,
     input: input.input,
@@ -1688,6 +1706,43 @@ async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input:
     pendingAssistantInputWakeAt,
     wake: input.wake,
   });
+  return withDeferredPendingAssistantInputWake({
+    maintenance,
+    pendingAssistantInputWakeAt,
+  });
+}
+
+function withDeferredPendingAssistantInputWake(input: {
+  maintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+  pendingAssistantInputWakeAt: string | null;
+}): Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>> {
+  const pendingWakeResult = buildDeferredPendingAssistantInputWakeResult({
+    pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
+  });
+  if (!pendingWakeResult) {
+    return input.maintenance;
+  }
+
+  return {
+    ...input.maintenance,
+    result: mergeHostedAssistantPhaseResults(
+      input.maintenance.result,
+      pendingWakeResult,
+    ),
+  };
+}
+
+function buildDeferredPendingAssistantInputWakeResult(input: {
+  pendingAssistantInputWakeAt: string | null;
+}): HostedWorkspaceRunnerAssistantPhaseResult | null {
+  if (!input.pendingAssistantInputWakeAt) {
+    return null;
+  }
+
+  return {
+    nextWakeAt: input.pendingAssistantInputWakeAt,
+    progressed: false,
+  };
 }
 
 function shouldRunBackgroundMaintenanceAfterDeferredPendingAssistantInput(input: {
