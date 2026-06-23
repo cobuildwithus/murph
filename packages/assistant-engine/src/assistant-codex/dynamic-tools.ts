@@ -1618,12 +1618,32 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
     readHostedComputerApiErrorDetailLine('codeHash', record.codeHash),
     readHostedComputerApiErrorDetailLine('computerOsControl', record.computerOsControl),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightError', record.kernelError),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightStderr', record.kernelStderr),
     readHostedComputerApiErrorDetailLine('kernelErrorPresent', record.kernelErrorPresent),
     readHostedComputerApiErrorDetailLine('kernelStderrPresent', record.kernelStderrPresent),
     readHostedComputerApiErrorDetailLine('kernelStdoutPresent', record.kernelStdoutPresent),
   ].filter((line): line is string => line !== null)
 
   return lines.length > 0 ? lines.join('\n') : null
+}
+
+function readHostedComputerApiErrorDiagnosticBlock(
+  label: string,
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const text = value.trim()
+  if (!text) {
+    return null
+  }
+
+  return text.includes('\n')
+    ? `${label}:\n${text}`
+    : `${label}: ${text}`
 }
 
 function readHostedComputerApiErrorDetailLine(

@@ -2167,6 +2167,7 @@ describe("ComputerUseService", () => {
         throw computerUseError({
           code: "HOSTED_COMPUTER_EVAL_FAILED",
           details: {
+            kernelError: "Error: strict mode violation: button matched multiple elements",
             kernelErrorPresent: true,
             kernelStderrPresent: true,
             kernelStdoutPresent: false,
@@ -2192,6 +2193,7 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
         codeHash: expect.any(String),
+        kernelError: "Error: strict mode violation: button matched multiple elements",
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,

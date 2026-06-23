@@ -626,16 +626,21 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
-  it("includes metadata-only browser execution details in unknown-outcome action failures", async () => {
+  it("includes redacted browser execution details in unknown-outcome action failures", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         error: {
           code: "HOSTED_COMPUTER_EVAL_FAILED",
           details: {
             codeHash: "abc123",
+            kernelError: [
+              "Error: strict mode violation: getByRole('button', { name: 'Place your order' }) resolved to 2 elements",
+              "    at locator.click (<REDACTED_PATH>:10:5)",
+            ].join("\n"),
             kernelErrorPresent: true,
             kernelStderrPresent: true,
             kernelStdoutPresent: false,
+            unlistedDetail: "should-not-be-shown",
             timeoutMs: 20000,
           },
           message: "Computer browser evaluation failed.",
@@ -666,11 +671,15 @@ describe("murph computer dynamic tools", () => {
         "backend details:",
         "codeHash: abc123",
         "timeoutMs: 20000",
+        "playwrightError:",
+        "Error: strict mode violation: getByRole('button', { name: 'Place your order' }) resolved to 2 elements",
+        "    at locator.click (<REDACTED_PATH>:10:5)",
         "kernelErrorPresent: true",
         "kernelStderrPresent: true",
         "kernelStdoutPresent: false",
       ].join("\n"),
     );
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("should-not-be-shown");
   });
 
   it("parses the generic pause-for-user checkpoint tool", () => {

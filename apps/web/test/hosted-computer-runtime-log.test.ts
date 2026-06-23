@@ -28,6 +28,7 @@ describe("hosted computer runtime logs", () => {
     const error = computerUseError({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
+        kernelError: "Error: strict mode violation: button matched multiple elements",
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,
@@ -58,6 +59,7 @@ describe("hosted computer runtime logs", () => {
       level: "warn",
       phase: "error",
       redacted: {
+        computerFailureCategory: "strict_mode_violation",
         computerOperationKind: "act",
         httpStatus: 502,
         kernelErrorPresent: true,
@@ -75,7 +77,7 @@ describe("hosted computer runtime logs", () => {
       "Place your order",
     );
     expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
-      "page context closed",
+      "strict mode violation",
     );
   });
 

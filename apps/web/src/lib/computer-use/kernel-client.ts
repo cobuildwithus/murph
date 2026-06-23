@@ -6,6 +6,7 @@ import type {
 import { computerUseError } from "./errors";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
+const KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH = 4_000;
 
 export interface KernelBrowserHandle {
   liveViewUrl: string;
@@ -112,7 +113,7 @@ export class KernelComputerClient implements ComputerKernelClient {
         code: "HOSTED_COMPUTER_EVAL_FAILED",
         details,
         httpStatus: 502,
-        message: buildKernelPlaywrightFailureMessage(details),
+        message: buildKernelPlaywrightFailureMessage(),
         retryable: true,
       });
     }
@@ -240,10 +241,15 @@ function buildKernelPlaywrightFailureDetails(response: {
   stderr?: unknown;
   stdout?: unknown;
 }): Record<string, unknown> {
+  const kernelError = readKernelPlaywrightFailureText(response.error);
+  const kernelStderr = readKernelPlaywrightFailureText(response.stderr);
+
   return {
     ...readKernelPlaywrightFailurePresenceField("kernelErrorPresent", response.error),
     ...readKernelPlaywrightFailurePresenceField("kernelStderrPresent", response.stderr),
     ...readKernelPlaywrightFailurePresenceField("kernelStdoutPresent", response.stdout),
+    ...(kernelError ? { kernelError } : {}),
+    ...(kernelStderr && kernelStderr !== kernelError ? { kernelStderr } : {}),
   };
 }
 
@@ -251,12 +257,130 @@ function readKernelPlaywrightFailurePresenceField(
   key: "kernelErrorPresent" | "kernelStderrPresent" | "kernelStdoutPresent",
   value: unknown,
 ): Record<string, boolean> {
-  return typeof value === "string" && value.trim().length > 0
+  return isKernelPlaywrightFailureValuePresent(value)
     ? { [key]: true }
     : {};
 }
 
-function buildKernelPlaywrightFailureMessage(_details: Record<string, unknown>): string {
+function isKernelPlaywrightFailureValuePresent(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return Object.entries(value).some(([key, entry]) =>
+    isKernelPlaywrightDiagnosticObjectKey(key) &&
+    typeof entry === "string" &&
+    entry.trim().length > 0
+  );
+}
+
+function isKernelPlaywrightDiagnosticObjectKey(
+  key: string,
+): key is "error" | "message" | "name" | "stack" {
+  return key === "error" || key === "message" || key === "name" || key === "stack";
+}
+
+function readKernelPlaywrightFailureText(value: unknown): string | null {
+  if (typeof value === "string") {
+    return sanitizeKernelPlaywrightDiagnosticText(value);
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const entries = Object.entries(value);
+  const fragments = [
+    readKernelPlaywrightObjectDiagnosticFragment(entries, "name"),
+    readKernelPlaywrightObjectDiagnosticFragment(entries, "message"),
+    readKernelPlaywrightObjectDiagnosticFragment(entries, "stack"),
+    readKernelPlaywrightObjectDiagnosticFragment(entries, "error"),
+  ].filter((fragment): fragment is string => fragment !== null);
+
+  if (fragments.length === 0) {
+    return null;
+  }
+
+  return sanitizeKernelPlaywrightDiagnosticText(dedupeKernelPlaywrightDiagnosticFragments(fragments));
+}
+
+function readKernelPlaywrightObjectDiagnosticFragment(
+  entries: readonly (readonly [string, unknown])[],
+  key: "error" | "message" | "name" | "stack",
+): string | null {
+  return readKernelPlaywrightDiagnosticFragment(
+    entries.find(([entryKey]) => entryKey === key)?.[1],
+  );
+}
+
+function readKernelPlaywrightDiagnosticFragment(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function dedupeKernelPlaywrightDiagnosticFragments(fragments: readonly string[]): string {
+  const lines: string[] = [];
+  for (const fragment of fragments) {
+    const trimmed = fragment.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (lines.some((line) => line === trimmed || line.includes(trimmed))) {
+      continue;
+    }
+    lines.push(trimmed);
+  }
+  return lines.join("\n");
+}
+
+function sanitizeKernelPlaywrightDiagnosticText(value: string): string | null {
+  const redacted = redactKernelPlaywrightDiagnosticText(value)
+    .replace(/\r\n?/gu, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/gu, " ").trimEnd())
+    .join("\n")
+    .replace(/\n{4,}/gu, "\n\n\n")
+    .trim();
+
+  if (!redacted) {
+    return null;
+  }
+
+  if (redacted.length <= KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH) {
+    return redacted;
+  }
+
+  return `${redacted.slice(0, KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH - 3).trimEnd()}...`;
+}
+
+function redactKernelPlaywrightDiagnosticText(value: string): string {
+  return value
+    .replace(/\bfile:\/\/[^\s)"']+/giu, "<REDACTED_PATH>")
+    .replace(/(^|[\s("'])\/(?:Users|home|root|tmp|var|private|mnt|app)\/[^\s)"']+/gu, "$1<REDACTED_PATH>")
+    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(/\b(href|src|action)=("[^"]*"|'[^']*'|[^\s>]+)/giu, (_match, key: string) =>
+      `${key}=<REDACTED_URL>`)
+    .replace(/\bhttps?:\/\/[^\s)"'<>]+/giu, "<REDACTED_URL>")
+    .replace(
+      /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
+      (_match, key: string) => `${key}=Bearer [redacted]`,
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, "Bearer [redacted]")
+    .replace(
+      /\b(authorization)\b\s*[:=]\s*(?!Bearer\b)(?:"[^"]+"|'[^']+'|\S+)/giu,
+      (_match, key: string) => `${key}=[redacted]`,
+    )
+    .replace(
+      /\b((?:[A-Z][A-Z0-9_]*_)?(?:token|secret|password|passcode|api[_-]?key|cookie|set-cookie))\b\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
+      "$1=[redacted]",
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, "[redacted-token]")
+    .replace(/(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu, "[redacted-phone]")
+    .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, "[redacted-email]");
+}
+
+function buildKernelPlaywrightFailureMessage(): string {
   return "Computer browser evaluation failed.";
 }
 
