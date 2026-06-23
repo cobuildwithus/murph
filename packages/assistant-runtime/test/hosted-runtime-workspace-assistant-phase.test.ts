@@ -1132,6 +1132,55 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("reselects a durable device-sync continuation after an earlier outbox wake is serviced", async () => {
+    const outboxWakeAt = "2026-04-27T00:00:05.000Z";
+    const deviceSyncContinuationAt = "2026-04-27T00:00:30.000Z";
+    const resolvedDeviceSync = {
+      providerConfigs: {
+        whoop: {
+          clientId: "synthetic-whoop-client",
+          clientSecret: "synthetic-whoop-secret",
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "synthetic-device-sync-secret",
+    } as const;
+
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(outboxWakeAt);
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce(deviceSyncContinuationAt);
+
+    const firstPass = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync,
+    }));
+
+    expect(firstPass).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: outboxWakeAt,
+      progressed: true,
+    }));
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(null);
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce(deviceSyncContinuationAt);
+
+    const restartedAtOutboxWake = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => outboxWakeAt,
+      resolvedDeviceSync,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: outboxWakeAt,
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(restartedAtOutboxWake).toEqual(expect.objectContaining({
+      nextWakeAt: deviceSyncContinuationAt,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+    expect(mocks.resolveHostedDeviceSyncNextWakeAt).toHaveBeenCalledTimes(2);
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
   it("preserves dirty assistant context snapshots and requests an immediate wake after preemption", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
     const vaultRoot = path.join(parentRoot, "vault");

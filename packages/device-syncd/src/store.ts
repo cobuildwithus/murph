@@ -43,6 +43,10 @@ import {
   releaseDeviceSyncJobIfOwned,
 } from "./store/jobs.ts";
 import {
+  readNextDeviceSyncMaintenanceWakeAt,
+  setDeviceSyncDenseRawRetentionWakeAt,
+} from "./store/maintenance-wakes.ts";
+import {
   consumeOAuthState,
   createOAuthState,
   deleteExpiredOAuthStates,
@@ -326,6 +330,14 @@ export class SqliteDeviceSyncStore {
 
   readNextJobWakeAt(): string | null {
     return readNextDeviceSyncJobWakeAt(this.database);
+  }
+
+  readNextMaintenanceWakeAt(): string | null {
+    return readNextDeviceSyncMaintenanceWakeAt(this.database);
+  }
+
+  setDenseRawRetentionWakeAt(nextWakeAt: string | null, now: string): void {
+    setDeviceSyncDenseRawRetentionWakeAt(this.database, nextWakeAt, now);
   }
 
   claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {

@@ -1036,11 +1036,13 @@ export async function runHostedDeviceSyncPass(
       state: syncState,
     });
 
+    const denseRawRetentionWakeAt = denseRawRetention.hasMore
+      ? resolveHostedDeviceSyncYieldRetryAt()
+      : null;
+    service.setDenseRawRetentionWakeAt(denseRawRetentionWakeAt);
+
     return {
-      nextWakeAt: earliestHostedMaintenanceWakeAt(
-        service.getNextWakeAt(),
-        denseRawRetention.hasMore ? resolveHostedDeviceSyncYieldRetryAt() : null,
-      ),
+      nextWakeAt: service.getNextWakeAt(),
       postCheckpointRecord,
       processedJobs,
       skipped: false,
