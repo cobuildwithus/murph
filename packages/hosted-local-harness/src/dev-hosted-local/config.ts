@@ -110,7 +110,6 @@ function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
     env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live"
-    || profile === "worktree"
   ) {
     return "managed";
   }

@@ -14,6 +14,7 @@ import {
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
+  HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -57,7 +58,8 @@ export async function resolveCloudflareLocalEnv(input: {
   overrides?: Record<string, string | undefined>;
 }): Promise<Record<string, string>> {
   const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
-  const useRemoteHostedCryptoKeys = isTruthy(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
+  const useRemoteHostedCryptoKeys =
+    isHostedLocalTruthyEnvValue(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
   const originalContents = await readHostedLocalDevVarsText(cloudflareDevVarsPath);
   const existing = originalContents === null ? {} : parseEnvText(originalContents);
   if (!useRemoteHostedCryptoKeys) {
@@ -233,7 +235,8 @@ export function mergeCloudflareLocalEnv(input: {
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
-  const useRemoteHostedCryptoKeys = isTruthy(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
+  const useRemoteHostedCryptoKeys =
+    isHostedLocalTruthyEnvValue(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
   const hostedLocalKeySource = useRemoteHostedCryptoKeys
     ? resolvedExisting
     : resolveExistingHostedLocalKeySource(input.existing);
@@ -545,8 +548,9 @@ function stripHostedLocalGeneratedStateEnv(env: Record<string, string | undefine
   }
 }
 
-function isTruthy(value: string | undefined): boolean {
-  return value === "1" || value?.toLowerCase() === "true";
+export function isHostedLocalTruthyEnvValue(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized !== undefined && ["1", "true", "yes", "on"].includes(normalized);
 }
 
 function isHostedLocalE2eEnvironment(
@@ -568,7 +572,7 @@ function isHostedLocalDevProfile(
 function isHostedLocalWorktreeEnvironment(
   env: Readonly<Record<string, string | undefined>>,
 ): boolean {
-  return normalizeOptionalString(env.MURPH_HOSTED_LOCAL_PROFILE) === "worktree";
+  return normalizeOptionalString(env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]) !== null;
 }
 
 function buildCallbackSigningPublicKeyringJson(input: {
@@ -1103,7 +1107,7 @@ function requiresIsolatedWranglerLocalDevWorkerName(
   return source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live"
-    || profile === "worktree";
+    || isHostedLocalWorktreeEnvironment(source);
 }
 
 export function buildHostedRunnerLocalBuildId(value: string | undefined): string {

@@ -8,13 +8,18 @@ import process from "node:process";
 import {
   DEFAULT_DATABASE_URL,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+  HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   repoRoot,
 } from "./constants.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import { parsePrivateEcP256Jwk } from "./crypto.ts";
-import { buildHostedRunnerLocalBuildId, parseEnvText } from "./environment.ts";
+import {
+  buildHostedRunnerLocalBuildId,
+  isHostedLocalTruthyEnvValue,
+  parseEnvText,
+} from "./environment.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
 export interface HostedLocalWorktreeConfig {
@@ -24,7 +29,7 @@ export interface HostedLocalWorktreeConfig {
   env: NodeJS.ProcessEnv;
   paths: HostedLocalWorktreePaths;
   ports: HostedLocalWorktreePorts;
-  profileName: "worktree";
+  profileName: "dev";
   slug: string;
   urls: {
     webBaseUrl: string;
@@ -62,7 +67,7 @@ export interface HostedLocalWorktreeLock {
   release(): Promise<void>;
 }
 
-const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
+const HOSTED_LOCAL_WORKTREE_PROFILE = "dev";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
 const HOSTED_LOCAL_WORKTREE_LOCK_ROOT = "murph-hosted-local-worktree-locks";
@@ -95,6 +100,7 @@ export function buildHostedLocalWorktreeConfig(input: {
   ports: HostedLocalWorktreePorts;
   slug: string;
 }): HostedLocalWorktreeConfig {
+  assertHostedLocalWorktreeLocalCryptoMode(input.env);
   const slug = normalizeHostedLocalWorktreeSlug(input.slug);
   const databaseName = buildHostedLocalWorktreeDatabaseName(slug);
   const databaseUrl = buildHostedLocalWorktreeDatabaseUrl(databaseName, input.env);
@@ -141,6 +147,7 @@ export function buildHostedLocalWorktreeConfig(input: {
 export async function ensureHostedLocalWorktreeDatabase(
   config: HostedLocalWorktreeConfig,
 ): Promise<HostedLocalWorktreeDatabaseState> {
+  assertHostedLocalWorktreeLocalCryptoMode(config.env);
   if (config.env[HOSTED_LOCAL_WORKTREE_DB_CREATE_SKIP_ENV]?.trim() === "1") {
     await assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(config);
     return { created: false };
@@ -249,6 +256,7 @@ export function formatHostedLocalWorktreeEnv(
 ): string {
   const entries = [
     ["MURPH_HOSTED_LOCAL_PROFILE", config.profileName],
+    [HOSTED_LOCAL_WORKTREE_SCOPE_ENV, config.env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]],
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV, config.buildId],
     [HOSTED_LOCAL_WORKTREE_DATABASE_URL_ENV, "[redacted]"],
     [
@@ -311,9 +319,7 @@ export function resolveHostedLocalWorktreeDevConfig(input: {
 export async function removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(
   config: HostedLocalWorktreeConfig,
 ): Promise<HostedLocalWorktreeDatabaseCleanupResult> {
-  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
-    return { missingCryptoState: false, removed: false };
-  }
+  assertHostedLocalWorktreeLocalCryptoMode(config.env);
   if (!await isHostedLocalWorktreeCryptoStateMissing(config)) {
     return { missingCryptoState: false, removed: false };
   }
@@ -335,9 +341,7 @@ export async function removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissi
 async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
   config: HostedLocalWorktreeConfig,
 ): Promise<void> {
-  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
-    return;
-  }
+  assertHostedLocalWorktreeLocalCryptoMode(config.env);
 
   try {
     const contents = await readHostedLocalWorktreeCryptoStateText(config);
@@ -440,9 +444,19 @@ function assertJsonRecordEnv(value: string, name: string): void {
   }
 }
 
-function isTruthyEnvValue(value: string | undefined): boolean {
-  return value !== undefined
-    && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+function assertHostedLocalWorktreeLocalCryptoMode(
+  env: Readonly<Record<string, string | undefined>>,
+): void {
+  if (!isHostedLocalTruthyEnvValue(env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `${USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV}=1 is not supported by hosted-local worktree commands.`,
+      "Worktree databases are paired with local generated crypto state; use the normal dev profile for remote hosted crypto keys.",
+    ].join(" "),
+  );
 }
 
 function buildHostedLocalWorktreeEnv(input: {
@@ -456,9 +470,13 @@ function buildHostedLocalWorktreeEnv(input: {
   return {
     ...input.baseEnv,
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: input.buildId,
+    [HOSTED_LOCAL_WORKTREE_SCOPE_ENV]: input.slug,
+    [USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]: undefined,
+    MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: undefined,
     MURPH_HOSTED_LOCAL_PROFILE: HOSTED_LOCAL_WORKTREE_PROFILE,
     MURPH_DEV_CF_PERSIST_DIR: input.paths.wranglerPersistDir,
     MURPH_DEV_DATABASE_URL: input.databaseUrl,
+    MURPH_DEV_FORCE_RESET_TEMPORAL: "0",
     MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH: input.paths.cryptoStatePath,
     ...buildHostedLocalWorktreeLinqEnv({
       baseEnv: input.baseEnv,

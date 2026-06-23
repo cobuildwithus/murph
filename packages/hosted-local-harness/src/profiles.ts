@@ -1,7 +1,6 @@
 export type HostedLocalProfileName =
   | "dev"
   | "worker-only"
-  | "worktree"
   | "e2e:stub"
   | "e2e:live";
 
@@ -10,7 +9,6 @@ export type HostedLocalProfileMode = "dev" | "test" | "debug";
 export interface HostedLocalProfile {
   description: string;
   envDefaults: NodeJS.ProcessEnv;
-  internal?: boolean;
   mode: HostedLocalProfileMode;
   name: HostedLocalProfileName;
 }
@@ -31,18 +29,6 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     },
     mode: "debug",
     name: "worker-only",
-  },
-  worktree: {
-    description:
-      "Internal profile used by hosted-local worktree commands.",
-    envDefaults: {
-      MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
-      MURPH_DEV_TEMPORAL: "managed",
-      NEXT_DIST_DIR_MODE: "smoke",
-    },
-    internal: true,
-    mode: "dev",
-    name: "worktree",
   },
   "e2e:stub": {
     description:
@@ -82,18 +68,12 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
   },
 };
 
-export function listHostedLocalProfiles(input: {
-  includeInternal?: boolean;
-} = {}): HostedLocalProfile[] {
-  return Object.values(hostedLocalProfiles)
-    .filter((profile) => input.includeInternal || !profile.internal);
+export function listHostedLocalProfiles(): HostedLocalProfile[] {
+  return Object.values(hostedLocalProfiles);
 }
 
 export function resolveHostedLocalProfile(
   rawName: string | null | undefined,
-  input: {
-    allowInternalWorktreeProfile?: boolean;
-  } = {},
 ): HostedLocalProfile {
   const name = (rawName?.trim() || "dev") as HostedLocalProfileName;
   const profile = hostedLocalProfiles[name];
@@ -107,25 +87,14 @@ export function resolveHostedLocalProfile(
       ].join("\n"),
     );
   }
-  if (profile.internal && !(name === "worktree" && input.allowInternalWorktreeProfile)) {
-    throw new Error(
-      [
-        "The hosted-local worktree profile is internal.",
-        "Use `hosted-local worktree up <slug>` so the worktree database, crypto state, ports, Wrangler state, and MinIO state are derived together.",
-      ].join("\n"),
-    );
-  }
   return profile;
 }
 
 export function applyHostedLocalProfile(input: {
-  allowInternalWorktreeProfile?: boolean;
   env: NodeJS.ProcessEnv;
   profileName?: string | null;
 }): { env: NodeJS.ProcessEnv; profile: HostedLocalProfile } {
-  const profile = resolveHostedLocalProfile(input.profileName, {
-    allowInternalWorktreeProfile: input.allowInternalWorktreeProfile,
-  });
+  const profile = resolveHostedLocalProfile(input.profileName);
   const env: NodeJS.ProcessEnv = {
     ...profile.envDefaults,
     ...input.env,

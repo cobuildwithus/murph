@@ -43,10 +43,6 @@ describe("shouldSeedHostedLocalCodexSubscriptionAuth", () => {
       nodeEnv: "development",
       profileName: "worker-only",
     })).toBe(true);
-    expect(shouldSeedHostedLocalCodexSubscriptionAuth({
-      nodeEnv: "development",
-      profileName: "worktree",
-    })).toBe(true);
   });
 
   it("never seeds NODE_ENV=test or test-mode profiles", () => {

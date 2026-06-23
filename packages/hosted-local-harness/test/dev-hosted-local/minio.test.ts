@@ -155,8 +155,13 @@ describe("hosted-local MinIO sidecar", () => {
     const expectedEndpointHost = process.platform === "linux"
       ? "172.17.0.1"
       : "host.docker.internal";
+    const dockerEnv = runtimeMocks.spawnChildProcess.mock.calls[0]?.[3] as Record<string, string>;
+    expect(dockerEnv.MINIO_ROOT_USER).toMatch(/^murph-local-[a-f0-9]{24}$/u);
+    expect(dockerEnv.MINIO_ROOT_PASSWORD).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(dockerEnv.MINIO_ROOT_USER).not.toBe("hosted-local-r2-access-key");
+    expect(dockerEnv.MINIO_ROOT_PASSWORD).not.toBe("hosted-local-r2-secret-key");
     expect(server?.env).toEqual(expect.objectContaining({
-      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: dockerEnv.MINIO_ROOT_USER,
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
@@ -164,7 +169,7 @@ describe("hosted-local MinIO sidecar", () => {
         expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
       HOSTED_R2_PRESIGN_ENDPOINT:
         expect.stringMatching(new RegExp(`^http://${expectedEndpointHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
-      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: dockerEnv.MINIO_ROOT_PASSWORD,
       MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_PROFILE");
@@ -184,7 +189,7 @@ describe("hosted-local MinIO sidecar", () => {
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
     const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
-    const expectedPublishHost = process.platform === "linux" ? "172.17.0.1" : "0.0.0.0";
+    const expectedPublishHost = process.platform === "linux" ? "172.17.0.1" : "127.0.0.1";
     expect(publishArg).toEqual(
       expect.stringMatching(new RegExp(`^${expectedPublishHost.replace(/\./gu, "\\.")}:\\d+:9000$`, "u")),
     );
@@ -310,14 +315,17 @@ describe("hosted-local MinIO sidecar", () => {
     });
 
     expect(server?.process).toBe(child);
+    const dockerEnv = runtimeMocks.spawnChildProcess.mock.calls[0]?.[3] as Record<string, string>;
+    expect(dockerEnv.MINIO_ROOT_USER).toMatch(/^murph-local-[a-f0-9]{24}$/u);
+    expect(dockerEnv.MINIO_ROOT_PASSWORD).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(server?.env).toEqual(expect.objectContaining({
-      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: dockerEnv.MINIO_ROOT_USER,
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
       HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
-      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: dockerEnv.MINIO_ROOT_PASSWORD,
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
@@ -326,8 +334,8 @@ describe("hosted-local MinIO sidecar", () => {
       "docker",
       expect.arrayContaining(["run"]),
       expect.objectContaining({
-        MINIO_ROOT_PASSWORD: "hosted-local-r2-secret-key",
-        MINIO_ROOT_USER: "hosted-local-r2-access-key",
+        MINIO_ROOT_PASSWORD: dockerEnv.MINIO_ROOT_PASSWORD,
+        MINIO_ROOT_USER: dockerEnv.MINIO_ROOT_USER,
       }),
       expect.any(Object),
     );
@@ -368,7 +376,7 @@ describe("hosted-local MinIO sidecar", () => {
     );
   });
 
-  it("starts MinIO for the worktree profile with worktree-local data", async () => {
+  it("starts MinIO for worktree-scoped dev env with worktree-local data", async () => {
     const child = {
       child: new EventEmitter(),
       name: "minio",
@@ -385,14 +393,15 @@ describe("hosted-local MinIO sidecar", () => {
       containerHost: "host.docker.internal",
       env: {
         MURPH_DEV_MINIO_DATA_DIR: ".tmp/hosted-local-worktrees/feature-a/minio-r2",
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
       tempDir: ".tmp/hosted-local-minio-test",
     });
 
     expect(server?.process).toBe(child);
     expect(server?.env).toEqual(expect.objectContaining({
-      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];

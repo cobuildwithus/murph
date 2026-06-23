@@ -18,6 +18,7 @@ import {
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
+  HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
@@ -37,6 +38,7 @@ import {
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
   includesWranglerLocalDevAiBinding,
+  isHostedLocalTruthyEnvValue,
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   readOptionalSimpleEnvFile,
@@ -1449,12 +1451,12 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
-function isHostedLocalWorktreeProfile(env: NodeJS.ProcessEnv): boolean {
-  return env.MURPH_HOSTED_LOCAL_PROFILE?.trim() === "worktree";
+function hasHostedLocalWorktreeScope(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]?.trim());
 }
 
 function usesHostedLocalIsolatedRunnerScope(env: NodeJS.ProcessEnv): boolean {
-  return requiresHostedLocalE2eIsolation(env) || isHostedLocalWorktreeProfile(env);
+  return requiresHostedLocalE2eIsolation(env) || hasHostedLocalWorktreeScope(env);
 }
 
 function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
@@ -1548,12 +1550,12 @@ async function writePrivateTextFileAtomically(
 }
 
 function assertHostedLocalWorktreeRuntimePreconditions(env: NodeJS.ProcessEnv): void {
-  if (!isHostedLocalWorktreeProfile(env)) {
+  if (!hasHostedLocalWorktreeScope(env)) {
     return;
   }
   if (isHostedLocalWorkerReuseEnabled(env)) {
     throw new Error(
-      "MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled for the hosted-local worktree profile.",
+      "MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled for hosted-local worktree scopes.",
     );
   }
 }
@@ -1914,8 +1916,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {
-  const value = env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]?.trim().toLowerCase();
-  return value === "1" || value === "true";
+  return isHostedLocalTruthyEnvValue(env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
 }
 
 function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undefined>>(

@@ -408,7 +408,6 @@ function isHostedLocalProviderFetchHostAliasSource(
   return source?.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "dev"
     || profile === "worker-only"
-    || profile === "worktree"
     || profile === "e2e:stub"
     || profile === "e2e:live";
 }

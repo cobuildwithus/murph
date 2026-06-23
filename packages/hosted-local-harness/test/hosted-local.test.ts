@@ -256,22 +256,11 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("auto");
   });
 
-  test("keeps the worktree profile interactive while forcing managed Temporal", () => {
+  test("keeps worktree off the public hosted-local profile list", () => {
     expect(listHostedLocalProfiles().map((profile) => profile.name)).not.toContain("worktree");
     expect(() => resolveHostedLocalProfile("worktree")).toThrow(
-      "hosted-local worktree profile is internal",
+      "Unsupported hosted-local profile",
     );
-    const result = applyHostedLocalProfile({
-      allowInternalWorktreeProfile: true,
-      env: {},
-      profileName: "worktree",
-    });
-
-    expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("worktree");
-    expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
-    expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
-    expect(result.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBeUndefined();
-    expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
 
   test("keeps E2E profile defaults away from live tunnels and listeners", () => {

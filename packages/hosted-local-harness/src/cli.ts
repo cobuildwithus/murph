@@ -99,11 +99,9 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
         probePorts: false,
         slug,
       });
-      await runDoctor(["--profile", "worktree", ...rest], {
+      await runDoctor(["--profile", config.profileName, ...rest], {
         ...io,
         env: config.env,
-      }, {
-        allowInternalWorktreeProfile: true,
       });
       return;
     }
@@ -114,14 +112,17 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
       });
       const lock = await acquireHostedLocalWorktreeLock(config);
       let databaseState: { created: boolean } | null = null;
+      let stackBecameReady = false;
       let primaryError: unknown = null;
       try {
         databaseState = await ensureHostedLocalWorktreeDatabase(config);
-        await runUp(["--profile", "worktree"], {
+        await runUp(["--profile", config.profileName], {
           ...io,
           env: config.env,
         }, {
-          allowInternalWorktreeProfile: true,
+          onReady: () => {
+            stackBecameReady = true;
+          },
         });
       } catch (error) {
         primaryError = error;
@@ -129,7 +130,7 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
       } finally {
         let finalizationError: unknown = null;
         try {
-          if (databaseState?.created) {
+          if (databaseState?.created && !stackBecameReady) {
             const cleanup =
               await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
             if (cleanup.missingCryptoState && !cleanup.removed) {
@@ -167,7 +168,7 @@ async function runUp(
   args: readonly string[],
   io: HostedLocalCliIo,
   options: {
-    allowInternalWorktreeProfile?: boolean;
+    onReady?: () => void | Promise<void>;
   } = {},
 ): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
@@ -178,7 +179,6 @@ async function runUp(
   const { startHostedLocalDevStack } = await import("./dev-hosted-local/stack.ts");
 
   const profiled = applyHostedLocalProfile({
-    allowInternalWorktreeProfile: options.allowInternalWorktreeProfile,
     env: io.env ?? process.env,
     profileName: parsed.profileName,
   });
@@ -334,6 +334,7 @@ async function runUp(
       webBaseUrl: stack.webBaseUrl,
       workerBaseUrl: stack.workerBaseUrl,
     });
+    await options.onReady?.();
     if (terminationSignal) {
       await awaitTerminationCleanup();
       return;
@@ -472,9 +473,6 @@ async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promis
 async function runDoctor(
   args: readonly string[],
   io: HostedLocalCliIo,
-  options: {
-    allowInternalWorktreeProfile?: boolean;
-  } = {},
 ): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
   const json = parsed.args.includes("--json");
@@ -486,7 +484,6 @@ async function runDoctor(
     "./dev-hosted-local/config.ts"
   );
   const profiled = applyHostedLocalProfile({
-    allowInternalWorktreeProfile: options.allowInternalWorktreeProfile,
     env: io.env ?? process.env,
     profileName: parsed.profileName,
   });

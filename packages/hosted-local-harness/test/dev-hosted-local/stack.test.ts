@@ -368,6 +368,10 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
       !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
         && source.MURPH_DEV_SKIP_WORKERS_AI !== "1",
   ),
+  isHostedLocalTruthyEnvValue: vi.fn((value: string | undefined) => {
+    const normalized = value?.trim().toLowerCase();
+    return normalized !== undefined && ["1", "true", "yes", "on"].includes(normalized);
+  }),
   usesWranglerLocalDevTestRoutes: vi.fn(
     (source: Readonly<Record<string, string | undefined>>) =>
       source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1",
@@ -1037,7 +1041,7 @@ describe("hosted local dev stack", () => {
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
-  it("rejects worktree profile startup when asked to reuse an existing worker", async () => {
+  it("rejects worktree-scoped startup when asked to reuse an existing worker", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
@@ -1052,8 +1056,9 @@ describe("hosted local dev stack", () => {
     await expect(startHostedLocalDevStack({
       env: {
         ...process.env,
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
         MURPH_DEV_REUSE_EXISTING_WORKER: "1",
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
     })).rejects.toThrow(/MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled/u);
 
@@ -1155,7 +1160,7 @@ describe("hosted local dev stack", () => {
     }));
   });
 
-  it("isolates worktree profile runner cleanup and generated crypto state without E2E-only skips", async () => {
+  it("isolates worktree runner cleanup and generated crypto state without E2E-only skips", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
@@ -1177,7 +1182,8 @@ describe("hosted local dev stack", () => {
           ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
         MURPH_DEV_WEB_PORT: "3101",
         MURPH_DEV_WORKER_PORT: "8801",
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "feature-a",

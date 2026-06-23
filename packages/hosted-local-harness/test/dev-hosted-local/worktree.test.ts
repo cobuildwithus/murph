@@ -151,7 +151,8 @@ describe("hosted-local worktree config", () => {
       wranglerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
     });
     expect(config.env).toMatchObject({
-      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
       MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
       MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
@@ -172,6 +173,8 @@ describe("hosted-local worktree config", () => {
     });
 
     const rendered = formatHostedLocalWorktreeEnv(config);
+    expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
+    expect(rendered).toContain("export MURPH_DEV_WORKTREE_SCOPE='feature-a'");
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
     expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
@@ -191,6 +194,43 @@ describe("hosted-local worktree config", () => {
     });
 
     expect(config.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("0");
+  });
+
+  it("rejects remote hosted crypto mode for worktree commands", () => {
+    for (const value of ["1", "yes"]) {
+      expect(() =>
+        buildHostedLocalWorktreeConfig({
+          env: {
+            MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: value,
+          },
+          ports,
+          slug: "feature-a",
+        })
+      ).toThrow("is not supported by hosted-local worktree commands");
+    }
+  });
+
+  it("strips inherited E2E isolation and disables broad Temporal reset", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBeUndefined();
+    expect(config.env.MURPH_DEV_FORCE_RESET_TEMPORAL).toBe("0");
+
+    const devConfig = resolveHostedLocalWorktreeDevConfig({
+      env: {
+        MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      slug: "feature-a",
+    });
+    expect(devConfig.forceResetLocalTemporal).toBe(false);
   });
 
   it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {
@@ -636,7 +676,7 @@ describe("hosted-local worktree config", () => {
     expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
-  it("resolves the stack config used by the worktree profile", () => {
+  it("resolves the stack config used by worktree commands", () => {
     const config = resolveHostedLocalWorktreeDevConfig({
       env: {},
       slug: "feature-a",

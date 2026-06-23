@@ -248,7 +248,7 @@ describe("hosted-local run CLI", () => {
     expect(runDoctorCommand).toHaveBeenCalledWith("pnpm", ["--version"]);
     expect(runDoctorCommand).toHaveBeenCalledWith("docker", ["info"]);
     expect(runDoctorCommand).toHaveBeenCalledWith("createdb", ["--version"]);
-    expect(output.text()).toContain('"name": "worktree"');
+    expect(output.text()).toContain('"name": "dev"');
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
@@ -272,8 +272,9 @@ describe("hosted-local run CLI", () => {
     );
     expect(startHostedLocalDevStack).toHaveBeenCalledWith(expect.objectContaining({
       env: expect.objectContaining({
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
         MURPH_DEV_WEB_PORT: "3101",
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }),
     }));
     expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
@@ -356,8 +357,7 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("cloudflare exited with code 1");
 
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
-      .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing).not.toHaveBeenCalled();
     expect(releaseHostedLocalWorktreeLock).toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
   });
@@ -376,12 +376,12 @@ describe("hosted-local run CLI", () => {
     expect(releaseHostedLocalWorktreeLock).not.toHaveBeenCalled();
   });
 
-  test("rejects the internal worktree profile through the generic up command", async () => {
+  test("rejects the removed worktree profile through the generic up command", async () => {
     await expect(
       runHostedLocalCli(["up", "--profile", "worktree"], {
         env: {},
       }),
-    ).rejects.toThrow("hosted-local worktree profile is internal");
+    ).rejects.toThrow("Unsupported hosted-local profile");
 
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
@@ -618,8 +618,9 @@ function createHostedLocalWorktreeConfig() {
     databaseName: "murph_dev_feature_a",
     databaseUrl: "postgresql://postgres@127.0.0.1:5432/murph_dev_feature_a",
     env: {
+      MURPH_DEV_WORKTREE_SCOPE: "feature-a",
       MURPH_DEV_WEB_PORT: "3101",
-      MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
     },
     paths: {},
     ports: {
@@ -628,7 +629,7 @@ function createHostedLocalWorktreeConfig() {
       web: 3101,
       worker: 8801,
     },
-    profileName: "worktree",
+    profileName: "dev",
     slug: "feature-a",
     urls: {
       webBaseUrl: "http://127.0.0.1:3101",

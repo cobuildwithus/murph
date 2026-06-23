@@ -338,7 +338,8 @@ describe("cleanupHostedRunnerContainers", () => {
     await expect(cleanupHostedRunnerContainers({
       cwd: "/tmp",
       env: {
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
       },
       timeoutMs: 200,
