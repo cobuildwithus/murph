@@ -295,6 +295,18 @@ describe('assistant execution prompt contract', () => {
       'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response when the user still needs context or a handoff URL, and finish without reply when no additional user-visible message is useful.',
     )
     expect(prompt).toContain(
+      'first navigate the browser to the exact form, page, or modal the user must complete',
+    )
+    expect(prompt).toContain(
+      'The returned `handoffUrl` is bound to a single pause/checkpoint.',
+    )
+    expect(prompt).toContain(
+      'call `murph.computer_pause_for_user` again with the appropriate `handoffPurpose` and include the NEW `handoffUrl` in the reply. Do not tell the user to reopen an earlier link.',
+    )
+    expect(prompt).toContain(
+      'lead the new handoff with a one-line reassurance that this should be a one-time setup',
+    )
+    expect(prompt).toContain(
       'say the handoff link is secure or private, tell the user not to send passwords or card details in chat',
     )
     expect(prompt).toContain(
