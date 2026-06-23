@@ -91,6 +91,7 @@ const replyMocks = vi.hoisted(() => ({
   getAssistantChannelAdapter: vi.fn(),
   isAssistantProviderConnectionLostError: vi.fn(),
   isAssistantProviderStalledError: vi.fn(),
+  listAssistantOutboxIntents: vi.fn(),
   listAssistantTranscriptEntries: vi.fn(),
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
@@ -189,6 +190,7 @@ vi.mock('../src/assistant/fault-injection.ts', () => ({
 
 vi.mock('../src/assistant/outbox.ts', () => ({
   drainAssistantOutboxLocal: runLoopMocks.drainAssistantOutbox,
+  listAssistantOutboxIntents: replyMocks.listAssistantOutboxIntents,
 }))
 
 vi.mock('../src/assistant/outbox/summary.ts', () => ({
@@ -332,6 +334,45 @@ function createCaptureDetail(
     attachments: [],
     ...overrides,
   }).capture
+}
+
+function createSentOutboxIntent(input: {
+  actorId?: string | null
+  channel?: string
+  identityId?: string | null
+  intentId?: string
+  message: string
+  providerThreadId?: string | null
+  sentAt: string
+  sessionId?: string
+  target?: string
+  threadId?: string | null
+}) {
+  const channel = input.channel ?? 'telegram'
+  const target = input.target ?? 'thread-1'
+  const providerThreadId = input.providerThreadId ?? target
+  return {
+    actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
+    channel,
+    delivery: {
+      channel,
+      idempotencyKey: null,
+      kind: 'message',
+      messageLength: input.message.length,
+      providerMessageId: null,
+      providerThreadId,
+      sentAt: input.sentAt,
+      target,
+      targetKind: 'thread',
+    },
+    identityId: input.identityId ?? null,
+    intentId: input.intentId ?? 'intent-1',
+    message: input.message,
+    operation: null,
+    sessionId: input.sessionId ?? 'session-1',
+    status: 'sent',
+    threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+  }
 }
 
 function createListResult(
@@ -1053,6 +1094,7 @@ beforeEach(() => {
   replyMocks.getAssistantChannelAdapter.mockReset().mockReturnValue(null)
   replyMocks.isAssistantProviderConnectionLostError.mockReset().mockReturnValue(false)
   replyMocks.isAssistantProviderStalledError.mockReset().mockReturnValue(false)
+  replyMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
   replyMocks.listAssistantTranscriptEntries.mockReset().mockResolvedValue([])
   replyMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
   replyMocks.normalizeNullableString
@@ -5609,19 +5651,11 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('skips recent self-authored assistant echoes', async () => {
-    replyMocks.resolveAssistantSession.mockResolvedValue({
-      session: {
-        sessionId: 'session-1',
-        lastTurnAt: '2026-04-08T00:00:00.000Z',
-        updatedAt: '2026-04-08T00:00:00.000Z',
-        createdAt: '2026-04-08T00:00:00.000Z',
-      },
-    })
-    replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
-      {
-        kind: 'assistant',
-        text: 'same text',
-      },
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        message: 'same text',
+        sentAt: '2026-04-08T00:00:00.000Z',
+      }),
     ])
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(

@@ -126,6 +126,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
+  turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   // Per-turn provider processing tier; never part of session/route identity.

@@ -569,6 +569,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
+  const turnContextPrompt = normalizeNullableString(
+    [
+      normalizeNullableString(
+        threadStartPromptResult.layers.dynamicTurnContextPrompt,
+      ),
+      normalizeNullableString(input.input.turnContext),
+    ].filter((section): section is string => section !== null).join('\n\n'),
+  )
   const buildFreshThreadFallbackPlan = async () => {
     const fallbackConversationHistoryMessages =
       await resolveCommittedTranscriptHistoryMessages()
@@ -582,9 +590,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       sessionContext: {
         binding: input.session.binding,
       },
-      turnContextPrompt: normalizeNullableString(
-        threadStartPromptResult.layers.dynamicTurnContextPrompt,
-      ),
+      turnContextPrompt,
     }
   }
   const resume = resumeCodexThreadId !== null
@@ -599,9 +605,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resumeCodexThreadId === null
       ? threadStartDeveloperInstructions
       : null
-  const turnContextPrompt = normalizeNullableString(
-    systemPromptResult.layers.dynamicTurnContextPrompt,
-  )
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,

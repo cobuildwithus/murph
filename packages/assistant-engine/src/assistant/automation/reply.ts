@@ -1,4 +1,7 @@
 import type { InboxServices } from '@murphai/inbox-services'
+import type {
+  AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
@@ -6,7 +9,10 @@ import { conversationRefFromAssistantInputConversation } from '../conversation-r
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
-import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import {
+  listAssistantOutboxIntents,
+  type AssistantOutboxDispatchMode,
+} from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
@@ -40,10 +46,7 @@ import {
   compareAssistantInputCursors,
   type AssistantInputConversationRef,
 } from '../input-store.js'
-import {
-  listAssistantTranscriptEntries,
-  resolveAssistantSession,
-} from '../store.js'
+import { resolveAssistantSession } from '../store.js'
 import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
@@ -97,6 +100,7 @@ import {
 import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
 const ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE =
@@ -135,6 +139,7 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryInput: AssistantAutoReplyPrimaryInput
   prompt: string
+  turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
@@ -411,6 +416,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       executionContext: input.executionContext,
     }),
     requestId: input.requestId,
+    sessionMaxAgeMs: input.sessionMaxAgeMs,
     signal: input.signal,
     vault: input.vault,
   })
@@ -529,6 +535,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     source: context.firstItem.summary.source,
     turnEnvironment: input.turnEnvironment ?? null,
+    turnContext: decision.turnContext,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
@@ -944,6 +951,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   receiptReader?: AssistantAutoReplyReceiptReader
   receiptFallbackEnabled: boolean
   requestId: string | null
+  sessionMaxAgeMs: number | null
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
@@ -1064,19 +1072,24 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
 
+  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
+  const recentConversationDelivery =
+    await resolveAssistantAutoReplyRecentConversationDelivery({
+      deliveryTarget:
+        deliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group),
+      input: primaryReplyInput,
+      maxSessionAgeMs: input.sessionMaxAgeMs,
+      vault: input.vault,
+    })
   if (
     input.group.firstItem.summary.actorIsSelf &&
-    (await isRecentSelfAuthoredAssistantEcho({
-      vault: input.vault,
-      input: primaryReplyInput,
-    }))
+    recentConversationDelivery.matchesInputText
   ) {
     return createAdvancingSkipDecision(
       'capture matches a recent assistant delivery',
     )
   }
 
-  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
@@ -1102,6 +1115,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
+    turnContext: buildAssistantAutoReplyCrossSessionTurnContext(
+      recentConversationDelivery.latestCrossSessionMessage,
+    ),
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -1323,6 +1339,7 @@ async function executeAssistantAutoReply(input: {
   replyInputId: string
   source: string
   turnEnvironment?: AssistantTurnEnvironment | null
+  turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -1352,6 +1369,9 @@ async function executeAssistantAutoReply(input: {
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
+      ...(input.turnContext === null
+        ? {}
+        : { turnContext: input.turnContext }),
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
@@ -2382,6 +2402,12 @@ function readAutoReplyDeliveryTarget(
   return readAssistantInputReplyTargetDeliveryTarget(replyTarget)
 }
 
+function readAutoReplyConversationDeliveryTarget(
+  context: AssistantAutoReplyGroupContext,
+): string | null {
+  return readProviderRouteScalar(context.firstItem.summary.conversation.threadId)
+}
+
 function shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(
   context: AssistantAutoReplyGroupContext,
 ): boolean {
@@ -3046,74 +3072,175 @@ function createDeferredSkipDecision(
   }
 }
 
-async function isRecentSelfAuthoredAssistantEcho(input: {
+interface AssistantAutoReplyRecentConversationDelivery {
+  latestCrossSessionMessage: string | null
+  matchesInputText: boolean
+}
+
+async function resolveAssistantAutoReplyRecentConversationDelivery(input: {
+  deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
+  maxSessionAgeMs: number | null
   vault: string
-}): Promise<boolean> {
-  const inputText = normalizeNullableString(input.input.text)
-  if (!inputText) {
-    return false
+}): Promise<AssistantAutoReplyRecentConversationDelivery> {
+  const channel = normalizeNullableString(input.input.source)
+  const deliveryTarget = normalizeNullableString(input.deliveryTarget)
+  const inputTime = Date.parse(input.input.occurredAt)
+  if (!channel || !deliveryTarget || !Number.isFinite(inputTime)) {
+    return {
+      latestCrossSessionMessage: null,
+      matchesInputText: false,
+    }
   }
 
-  let resolved: Awaited<ReturnType<typeof resolveAssistantSession>>
+  const intents = await listAssistantOutboxIntents(input.vault)
+  const matchingDeliveries = intents
+    .flatMap((intent) => {
+      if (intent.status !== 'sent' || intent.operation !== null) {
+        return []
+      }
+
+      const delivery = intent.delivery
+      if (
+        !delivery ||
+        delivery.kind === 'message-reaction' ||
+        normalizeNullableString(delivery.channel) !== channel ||
+        !assistantAutoReplyOutboxIntentMatchesConversation({
+          conversation: input.input.conversation,
+          intent,
+        }) ||
+        ![delivery.target, delivery.providerThreadId].some(
+          (candidate) => normalizeNullableString(candidate) === deliveryTarget,
+        )
+      ) {
+        return []
+      }
+
+      const message = normalizeNullableString(intent.message)
+      const sentAtMs = Date.parse(delivery.sentAt)
+      if (!message || !Number.isFinite(sentAtMs) || sentAtMs > inputTime) {
+        return []
+      }
+
+      return [{
+        intentId: intent.intentId,
+        message,
+        sentAtMs,
+        sessionId: intent.sessionId,
+      }]
+    })
+    .sort((left, right) =>
+      left.sentAtMs === right.sentAtMs
+        ? left.intentId.localeCompare(right.intentId)
+        : left.sentAtMs - right.sentAtMs,
+    )
+  if (matchingDeliveries.length === 0) {
+    return {
+      latestCrossSessionMessage: null,
+      matchesInputText: false,
+    }
+  }
+
+  const session = await resolveAssistantAutoReplyExistingSession({
+    input: input.input,
+    maxSessionAgeMs: input.maxSessionAgeMs,
+    vault: input.vault,
+  })
+  const lastTurnAtMs = session?.lastTurnAt
+    ? Date.parse(session.lastTurnAt)
+    : Number.NaN
+  const latestCrossSessionMessage = matchingDeliveries
+    .filter((delivery) =>
+      (session === null || delivery.sessionId !== session.sessionId) &&
+      (!Number.isFinite(lastTurnAtMs) || delivery.sentAtMs > lastTurnAtMs),
+    )
+    .at(-1)?.message ?? null
+  const inputText = normalizeNullableString(input.input.text)
+  const matchesInputText =
+    inputText !== null &&
+    matchingDeliveries.some((delivery) =>
+      inputTime - delivery.sentAtMs <= SELF_AUTHORED_ECHO_WINDOW_MS &&
+      normalizeComparableText(delivery.message) ===
+        normalizeComparableText(inputText),
+    )
+
+  return {
+    latestCrossSessionMessage,
+    matchesInputText,
+  }
+}
+
+async function resolveAssistantAutoReplyExistingSession(input: {
+  input: AssistantAutoReplyPrimaryInput
+  maxSessionAgeMs: number | null
+  vault: string
+}): Promise<AssistantSession | null> {
   try {
-    resolved = await resolveAssistantSession({
+    return (await resolveAssistantSession({
       vault: input.vault,
       createIfMissing: false,
       conversation: conversationRefFromAssistantInputConversation(
         input.input.conversation,
       ),
-    })
+      maxSessionAgeMs: input.maxSessionAgeMs,
+    })).session
   } catch (error) {
-    const code =
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      typeof (error as { code?: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : null
-    if (code === 'ASSISTANT_SESSION_NOT_FOUND') {
-      return false
+    if (readAssistantAutoReplyErrorCode(error) === 'ASSISTANT_SESSION_NOT_FOUND') {
+      return null
     }
     throw error
   }
+}
 
-  const referenceTimestamp =
-    normalizeNullableString(resolved.session.lastTurnAt) ??
-    normalizeNullableString(resolved.session.updatedAt) ??
-    normalizeNullableString(resolved.session.createdAt)
-  if (!referenceTimestamp) {
-    return false
-  }
-
-  const referenceTime = Date.parse(referenceTimestamp)
-  const inputTime = Date.parse(input.input.occurredAt)
-  if (!Number.isFinite(referenceTime) || !Number.isFinite(inputTime)) {
-    return false
-  }
-
-  if (
-    inputTime < referenceTime ||
-    inputTime - referenceTime > SELF_AUTHORED_ECHO_WINDOW_MS
-  ) {
-    return false
-  }
-
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
-    resolved.session.sessionId,
+function assistantAutoReplyOutboxIntentMatchesConversation(input: {
+  conversation: AssistantInputConversationRef
+  intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
+}): boolean {
+  const conversation = conversationRefFromAssistantInputConversation(
+    input.conversation,
   )
-  const lastAssistantEntry = [...transcript]
-    .reverse()
-    .find((entry) => entry.kind === 'assistant')
-  if (!lastAssistantEntry) {
-    return false
+  return assistantAutoReplyRouteValueMatches({
+    actual: input.intent.identityId,
+    expected: conversation.identityId,
+  }) &&
+    assistantAutoReplyRouteValueMatches({
+      actual: input.intent.actorId,
+      expected: conversation.participantId,
+    }) &&
+    assistantAutoReplyRouteValueMatches({
+      actual: input.intent.threadId,
+      expected: conversation.threadId,
+    })
+}
+
+function assistantAutoReplyRouteValueMatches(input: {
+  actual: string | null | undefined
+  expected: string | null | undefined
+}): boolean {
+  const expected = normalizeNullableString(input.expected)
+  if (expected === null) {
+    return true
   }
 
-  return (
-    normalizeComparableText(lastAssistantEntry.text) ===
-    normalizeComparableText(inputText)
-  )
+  return normalizeNullableString(input.actual) === expected
+}
+
+function buildAssistantAutoReplyCrossSessionTurnContext(
+  message: string | null,
+): string | null {
+  const normalized = normalizeNullableString(message)
+  if (!normalized) {
+    return null
+  }
+
+  return [
+    'Conversation context:',
+    'The assistant previously sent this message in the same conversation from another assistant run:',
+    '',
+    normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
+    '',
+    'Use it only to interpret the current user message.',
+  ].join('\n')
 }
 
 function normalizeComparableText(text: string): string {
