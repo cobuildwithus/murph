@@ -9,6 +9,7 @@ import {
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
+  type HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -42,6 +43,7 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
+const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
@@ -71,6 +73,13 @@ export interface ComputerObserveResult {
   title: string | null;
   url: string | null;
   visibleText: string;
+}
+
+export interface ComputerOsControlResult {
+  action: HostedComputerOsControlRequest["action"];
+  ok: true;
+  runId: string;
+  status: "running";
 }
 
 export interface ComputerPauseForUserResult {
@@ -417,6 +426,35 @@ export class ComputerUseService {
     return {
       title: state.title,
       url: state.url,
+    };
+  }
+
+  async osControl(input: HostedComputerOsControlRequest & {
+    memberId: string;
+    runId: string;
+  }): Promise<ComputerOsControlResult> {
+    const { memberId, runId, ...action } = input;
+    await this.store.requireMemberComputerUseAvailable({
+      memberId,
+    });
+    const run = await this.requireRunnableRun({ memberId, runId });
+    const kernel = this.requireKernel();
+    const sessionId = requireKernelSessionId(run);
+    await requireNonSensitiveComputerOsTextTarget({
+      action,
+      kernel,
+      sessionId,
+    });
+    await kernel.osControl({
+      action,
+      sessionId,
+    });
+
+    return {
+      action: action.action,
+      ok: true,
+      runId: run.id,
+      status: "running",
     };
   }
 
@@ -2111,6 +2149,32 @@ function describeComputerActLocator(locator: ComputerActLocator): string {
   }
 }
 
+async function requireNonSensitiveComputerOsTextTarget(input: {
+  action: HostedComputerOsControlRequest;
+  kernel: ComputerKernelClient;
+  sessionId: string;
+}): Promise<void> {
+  if (input.action.action !== "typeText") {
+    return;
+  }
+
+  const result = await input.kernel.executePlaywright({
+    code: buildComputerActiveElementSensitiveInputProbeCode(),
+    sessionId: input.sessionId,
+    timeoutMs: COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS,
+  });
+  const preflight = readComputerSensitiveInputPreflightResult(result.result);
+  if (!preflight.sensitive) {
+    return;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    httpStatus: 400,
+    message: "Computer input targets a sensitive field. Pause for user handoff instead.",
+  });
+}
+
 async function requireNonSensitiveComputerInputTarget(input: {
   action: HostedComputerActRequest;
   deadline: ComputerActDeadline;
@@ -2334,17 +2398,60 @@ function buildComputerSensitiveInputProbeCode(
   locator: HostedComputerActLocator,
   timeoutMs: number,
 ): string {
-  const locatorHints = readComputerLocatorSensitiveHints(locator);
+  return buildComputerSensitiveInputProbeCodeForTarget({
+    ignoreWaitFailure: false,
+    locatorHints: readComputerLocatorSensitiveHints(locator),
+    requireInspectableEditable: false,
+    targetExpression: buildComputerLocatorExpression(locator),
+    waitTimeoutMs: timeoutMs,
+  });
+}
+
+function buildComputerActiveElementSensitiveInputProbeCode(): string {
+  return buildComputerSensitiveInputProbeCodeForTarget({
+    ignoreWaitFailure: true,
+    locatorHints: [],
+    requireInspectableEditable: true,
+    targetExpression: "page.locator(':focus')",
+    waitTimeoutMs: 1_000,
+  });
+}
+
+function buildComputerSensitiveInputProbeCodeForTarget(input: {
+  ignoreWaitFailure: boolean;
+  locatorHints: readonly string[];
+  requireInspectableEditable: boolean;
+  targetExpression: string;
+  waitTimeoutMs: number;
+}): string {
   return [
-    `const target = ${buildComputerLocatorExpression(locator)};`,
-    `await target.waitFor({ state: 'attached', timeout: ${timeoutMs} });`,
-    `const locatorHints = ${JSON.stringify(locatorHints)}.map((value) => String(value || "").toLowerCase());`,
+    `const target = ${input.targetExpression};`,
+    input.ignoreWaitFailure
+      ? [
+          `await target.waitFor({ state: 'attached', timeout: ${input.waitTimeoutMs} }).catch(() => {});`,
+          "const targetIsInspectable = await target.count().then((count) => count === 1).catch(() => false);",
+          "if (!targetIsInspectable) return { sensitive: true, reason: \"focused_target_uninspectable\" };",
+        ].join("\n")
+      : `await target.waitFor({ state: 'attached', timeout: ${input.waitTimeoutMs} });`,
+    `const locatorHints = ${JSON.stringify(input.locatorHints)}.map((value) => String(value || "").toLowerCase());`,
     `const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();`,
     `const type = await attr("type");`,
     `const inputMode = await attr("inputmode");`,
     `const maxLengthRaw = await attr("maxlength");`,
     `const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;`,
     `const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);`,
+    input.requireInspectableEditable
+      ? `const tagName = String(await target.evaluate((element) => element.tagName).catch(() => "") || "").toLowerCase();
+  const isContentEditable = await target.evaluate((element) => element instanceof HTMLElement && element.isContentEditable).catch(() => false);
+  const editableInputTypes = new Set(["", "text", "search", "email", "tel", "url", "number", "date", "datetime-local", "month", "password", "time", "week"]);
+  const isEditableTextTarget =
+    tagName === "textarea" ||
+    isContentEditable === true ||
+    (tagName === "input" && editableInputTypes.has(type));
+  if (!isEditableTextTarget) {
+    return { sensitive: true, reason: "focused_target_not_editable" };
+  }`
+      : "",
     `if (type === "password") return { sensitive: true, reason: "password_type" };
   const lower = (value) => String(value || "").toLowerCase();
   if (autocompleteTokens.some((token) =>

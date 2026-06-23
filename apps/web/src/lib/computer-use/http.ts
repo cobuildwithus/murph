@@ -2,11 +2,13 @@ import {
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
   parseHostedComputerObserveRequest,
+  parseHostedComputerOsControlRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
   type HostedComputerActRequest,
   type HostedComputerFinishRunRequest,
   type HostedComputerObserveRequest,
+  type HostedComputerOsControlRequest,
   type HostedComputerPauseForUserRequest,
   type HostedComputerStartRunRequest,
 } from "@murphai/hosted-execution/computer-use";
@@ -40,6 +42,12 @@ export async function readSignedComputerActRequest(
   request: Request,
 ): Promise<{ body: HostedComputerActRequest; memberId: string }> {
   return readSignedComputerJson(request, parseHostedComputerActRequest);
+}
+
+export async function readSignedComputerOsControlRequest(
+  request: Request,
+): Promise<{ body: HostedComputerOsControlRequest; memberId: string }> {
+  return readSignedComputerJson(request, parseHostedComputerOsControlRequest);
 }
 
 export async function readSignedComputerPauseForUserRequest(

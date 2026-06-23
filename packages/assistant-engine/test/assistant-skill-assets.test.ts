@@ -105,7 +105,9 @@ describe('assistant skill assets', () => {
     expect(computerUseSkill.triggerHint).toContain(
       'ordering contacts, supplements, OTC products, health equipment, groceries, or meals',
     )
-    expect(raw).toContain('computer_act` is the only browser action primitive')
+    expect(raw).toContain('computer_act` is the default browser action primitive')
+    expect(raw).toContain('computer_os_control` is a fallback')
+    expect(raw).toContain('passwords, payment details, one-time codes')
     expect(raw).toContain('runs one bounded browser action against the current page')
     expect(raw).toContain('Pass one action per call')
     expect(raw).toContain('role/name, label, placeholder, text')

@@ -2,10 +2,12 @@ import { z } from "zod";
 
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
-  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
+  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|os-control|pause-for-user|finish)$/u;
 
 export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
 export const HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH = 2_000;
+export const HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH = 500;
+export const HOSTED_COMPUTER_OS_CONTROL_COORDINATE_MAX = 10_000;
 
 export const HOSTED_COMPUTER_RUN_STATUSES = [
   "running",
@@ -95,6 +97,47 @@ export const HOSTED_COMPUTER_PRESS_KEYS = [
 ] as const;
 export type HostedComputerPressKey =
   (typeof HOSTED_COMPUTER_PRESS_KEYS)[number];
+
+export const HOSTED_COMPUTER_OS_CONTROL_ACTIONS = [
+  "clickMouse",
+  "moveMouse",
+  "typeText",
+  "pressKey",
+  "scroll",
+  "dragMouse",
+] as const;
+export type HostedComputerOsControlAction =
+  (typeof HOSTED_COMPUTER_OS_CONTROL_ACTIONS)[number];
+
+export const HOSTED_COMPUTER_OS_CONTROL_HOLD_KEYS = [
+  "Alt",
+  "Ctrl",
+  "Shift",
+  "Super",
+] as const;
+export type HostedComputerOsControlHoldKey =
+  (typeof HOSTED_COMPUTER_OS_CONTROL_HOLD_KEYS)[number];
+
+export const HOSTED_COMPUTER_OS_CONTROL_KEYS = [
+  "Return",
+  "Tab",
+  "Shift+Tab",
+  "Escape",
+  "Up",
+  "Down",
+  "Left",
+  "Right",
+  "BackSpace",
+  "Delete",
+  "Home",
+  "End",
+  "Page_Up",
+  "Page_Down",
+  "space",
+  "Ctrl+a",
+] as const;
+export type HostedComputerOsControlKey =
+  (typeof HOSTED_COMPUTER_OS_CONTROL_KEYS)[number];
 
 export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
   "completed",
@@ -413,6 +456,99 @@ export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
     .strict(),
 ]);
 
+const hostedComputerOsControlCoordinateSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(HOSTED_COMPUTER_OS_CONTROL_COORDINATE_MAX);
+
+const hostedComputerOsControlHoldKeysSchema = z
+  .array(z.enum(HOSTED_COMPUTER_OS_CONTROL_HOLD_KEYS))
+  .max(HOSTED_COMPUTER_OS_CONTROL_HOLD_KEYS.length)
+  .default([]);
+
+const hostedComputerOsControlMouseButtonSchema = z
+  .enum(["left", "middle", "right"])
+  .default("left");
+
+const hostedComputerOsControlDurationSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(5_000);
+
+const hostedComputerOsControlDelaySchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(1_000);
+
+const hostedComputerOsControlPointSchema = z.tuple([
+  hostedComputerOsControlCoordinateSchema,
+  hostedComputerOsControlCoordinateSchema,
+]);
+
+export const hostedComputerOsControlRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("clickMouse"),
+      button: hostedComputerOsControlMouseButtonSchema,
+      clickType: z.enum(["down", "up", "click"]).default("click"),
+      holdKeys: hostedComputerOsControlHoldKeysSchema,
+      numClicks: z.number().int().min(1).max(3).default(1),
+      x: hostedComputerOsControlCoordinateSchema,
+      y: hostedComputerOsControlCoordinateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("moveMouse"),
+      durationMs: hostedComputerOsControlDurationSchema.default(0),
+      holdKeys: hostedComputerOsControlHoldKeysSchema,
+      smooth: z.boolean().default(true),
+      x: hostedComputerOsControlCoordinateSchema,
+      y: hostedComputerOsControlCoordinateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("typeText"),
+      delayMs: hostedComputerOsControlDelaySchema.default(0),
+      text: z.string().min(1).max(HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("pressKey"),
+      durationMs: hostedComputerOsControlDurationSchema.default(0),
+      keys: z.array(z.enum(HOSTED_COMPUTER_OS_CONTROL_KEYS)).min(1).max(3),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("scroll"),
+      deltaX: z.number().int().min(-5_000).max(5_000).default(0),
+      deltaY: z.number().int().min(-5_000).max(5_000).default(800),
+      holdKeys: hostedComputerOsControlHoldKeysSchema,
+      x: hostedComputerOsControlCoordinateSchema,
+      y: hostedComputerOsControlCoordinateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("dragMouse"),
+      button: hostedComputerOsControlMouseButtonSchema,
+      delayMs: hostedComputerOsControlDelaySchema.default(0),
+      durationMs: z.number().int().min(0).max(10_000).default(0),
+      holdKeys: hostedComputerOsControlHoldKeysSchema,
+      path: z.array(hostedComputerOsControlPointSchema).min(2).max(10),
+      smooth: z.boolean().default(true),
+      stepDelayMs: z.number().int().min(0).max(250).default(50),
+      stepsPerSegment: z.number().int().min(1).max(50).default(10),
+    })
+    .strict(),
+]);
+
 export const hostedComputerPauseForUserRequestSchema = z
   .object({
     handoffPurpose: z.enum(HOSTED_COMPUTER_HANDOFF_PURPOSES).nullable().default(null),
@@ -438,6 +574,8 @@ export type HostedComputerObserveRequest =
   z.infer<typeof hostedComputerObserveRequestSchema>;
 export type HostedComputerActRequest =
   z.infer<typeof hostedComputerActRequestSchema>;
+export type HostedComputerOsControlRequest =
+  z.infer<typeof hostedComputerOsControlRequestSchema>;
 export type HostedComputerDeliveryContext =
   z.infer<typeof hostedComputerDeliveryContextSchema>;
 export type HostedComputerPauseForUserRequest =
@@ -448,6 +586,7 @@ export type HostedComputerFinishRunRequest =
 export type HostedComputerRunOperation =
   | "observe"
   | "act"
+  | "os-control"
   | "pause-for-user"
   | "finish";
 
@@ -520,6 +659,16 @@ export function parseHostedComputerActRequest(value: unknown): HostedComputerAct
   );
 }
 
+export function parseHostedComputerOsControlRequest(
+  value: unknown,
+): HostedComputerOsControlRequest {
+  return parseHostedComputerRequest(
+    hostedComputerOsControlRequestSchema,
+    value,
+    "Hosted computer OS control request",
+  );
+}
+
 export function parseHostedComputerPauseForUserRequest(
   value: unknown,
 ): HostedComputerPauseForUserRequest {
@@ -546,6 +695,7 @@ function readHostedComputerRunOperation(
   switch (value) {
     case "observe":
     case "act":
+    case "os-control":
     case "pause-for-user":
     case "finish":
       return value;

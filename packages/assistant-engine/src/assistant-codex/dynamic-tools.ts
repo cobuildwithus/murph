@@ -9,11 +9,13 @@ import {
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
   hostedComputerDeliveryContextSchema,
+  hostedComputerOsControlRequestSchema,
   hostedComputerPauseForUserRequestSchema,
   isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
+  type HostedComputerOsControlRequest,
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
@@ -247,10 +249,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      resumeRunId: {
-        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
-        default: null,
-      },
       startUrl: {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
@@ -263,7 +261,7 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   namespace: 'murph',
   name: 'computer_observe',
   description:
-    'Read the current browser state for a computer run, including URL, title, and visible page text. Use before acting on a resumed run.',
+    'Read the current browser state for a computer run, including URL, title, and visible page text. Use before acting on a started or reused run.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -277,6 +275,7 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
 type JsonSchemaObject = Record<string, unknown>
 
 const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
+const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -286,6 +285,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function buildComputerActInputSchema(): JsonSchemaObject {
   const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
+  const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
+
+  return {
+    oneOf: actionSchemas.map(addRunIdToActionSchema),
+    type: 'object',
+  }
+}
+
+function buildComputerOsControlInputSchema(): JsonSchemaObject {
+  const generated = z.toJSONSchema(hostedComputerOsControlRequestSchema, { io: 'input' }) as JsonSchemaObject
   const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
 
   return {
@@ -317,6 +326,14 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   description:
     'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
+} as const
+
+export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
+  namespace: 'murph',
+  name: 'computer_os_control',
+  description:
+    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. Use computer_observe before and after when page state is needed.',
+  inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
@@ -382,6 +399,7 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
   MURPH_COMPUTER_START_RUN_TOOL,
   MURPH_COMPUTER_OBSERVE_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
 ] as const
@@ -545,6 +563,43 @@ const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
   }
 })
 
+const computerOsControlArgumentsSchema = z.unknown().transform((value, ctx) => {
+  const withRunId = z
+    .object({
+      runId: computerRunIdSchema,
+    })
+    .passthrough()
+    .safeParse(value)
+  if (!withRunId.success) {
+    for (const issue of withRunId.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  const { runId, ...body } = withRunId.data
+  const parsedBody = hostedComputerOsControlRequestSchema.safeParse(body)
+  if (!parsedBody.success) {
+    for (const issue of parsedBody.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  return {
+    ...parsedBody.data,
+    runId,
+  }
+})
+
 const computerPauseForUserArgumentsSchema = z.unknown().transform((value, ctx) => {
   const withRunId = z
     .object({
@@ -626,6 +681,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'act'
   | 'finish'
   | 'observe'
+  | 'os-control'
   | 'start'
 
 export interface MurphDynamicToolExecutionResult {
@@ -668,6 +724,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'computer-act'
       args: HostedComputerActRequest & { runId: string }
+    }
+  | {
+      kind: 'computer-os-control'
+      args: HostedComputerOsControlRequest & { runId: string }
     }
   | {
       kind: 'computer-pause-for-user'
@@ -904,6 +964,37 @@ export function readMurphDynamicToolRequest(
         ? { kind: 'computer-act', args: parsed.args }
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
+    case MURPH_COMPUTER_OS_CONTROL_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerOsControlArgumentsSchema,
+        schemaName: 'murph.computer_os_control.input',
+        schemaRootKeys: [
+          'runId',
+          'action',
+          'x',
+          'y',
+          'button',
+          'clickType',
+          'holdKeys',
+          'numClicks',
+          'durationMs',
+          'smooth',
+          'text',
+          'delayMs',
+          'keys',
+          'deltaX',
+          'deltaY',
+          'path',
+          'stepDelayMs',
+          'stepsPerSegment',
+        ],
+        toolName: 'murph.computer_os_control',
+      })
+      return parsed.ok
+        ? { kind: 'computer-os-control', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
     case MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name: {
       const parsed = parseComputerArguments({
         argumentsValue: request.arguments,
@@ -942,6 +1033,7 @@ export function isComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
     case 'invalid-computer-arguments':
@@ -958,6 +1050,7 @@ function isExecutableComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
       return true
@@ -970,13 +1063,6 @@ function canExecuteComputerDynamicTools(
   hostedToolContext: AssistantHostedToolContext | null,
 ): boolean {
   return hostedToolContext?.computerToolsAvailable === true
-}
-
-function currentHostedMailboxItemId(
-  hostedToolContext: AssistantHostedToolContext | null,
-): string | null {
-  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
-  return itemIds[itemIds.length - 1] ?? null
 }
 
 function currentHostedDeliveryContext(
@@ -1129,7 +1215,6 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
       })
     }
     case 'computer-observe':
@@ -1155,6 +1240,20 @@ export async function executeMurphDynamicToolRequest(input: {
           runId,
         }),
         sanitizer: 'act',
+        unknownOutcomeOnTransportError: true,
+      })
+    }
+    case 'computer-os-control': {
+      const { runId, ...body } = input.request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'os-control',
+          runId,
+        }),
+        sanitizer: 'os-control',
         unknownOutcomeOnTransportError: true,
       })
     }
@@ -1282,14 +1381,10 @@ async function executeHostedComputerStartRunTool(input: {
   abortSignal: AbortSignal | null
   args: ComputerStartRunToolArgs
   fetchImpl: typeof fetch
-  hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
   return await executeHostedComputerApiTool({
     abortSignal: input.abortSignal,
-    body: buildHostedComputerStartRunBody({
-      args: input.args,
-      hostedToolContext: input.hostedToolContext,
-    }),
+    body: buildHostedComputerStartRunBody(input.args),
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
     sanitizer: 'start',
@@ -1297,20 +1392,13 @@ async function executeHostedComputerStartRunTool(input: {
   })
 }
 
-function buildHostedComputerStartRunBody(input: {
-  args: ComputerStartRunToolArgs
-  hostedToolContext: AssistantHostedToolContext | null
-}): Record<string, unknown> {
-  const { resumeRunId, startUrl } = input.args
+function buildHostedComputerStartRunBody(input: ComputerStartRunToolArgs): Record<string, unknown> {
+  const { startUrl } = input
   return {
     goal: 'Hosted computer task.',
-    resumeAfterMailboxItemId: resumeRunId
-      ? currentHostedMailboxItemId(input.hostedToolContext)
-      : null,
-    resumeDeliveryContext: resumeRunId
-      ? currentHostedDeliveryContext(input.hostedToolContext)
-      : null,
-    resumeRunId,
+    resumeAfterMailboxItemId: null,
+    resumeDeliveryContext: null,
+    resumeRunId: null,
     startUrl,
   }
 }
@@ -1503,6 +1591,7 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
 
   const lines = [
     readHostedComputerApiErrorDetailLine('browserAction', record.browserAction),
+    readHostedComputerApiErrorDetailLine('computerOsControl', record.computerOsControl),
     readHostedComputerApiErrorDetailLine('locator', record.locator),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
     readHostedComputerApiErrorDetailLine('waitMs', record.waitMs),
@@ -1549,6 +1638,7 @@ function isUnknownComputerOutcomeError(input: {
 
   return input.code === 'HOSTED_COMPUTER_EVAL_FAILED'
     || input.code === 'HOSTED_COMPUTER_ACTION_STATE_INVALID'
+    || input.code === 'HOSTED_COMPUTER_OS_CONTROL_FAILED'
 }
 
 function readSanitizedComputerPausePayload(payload: unknown): Record<string, unknown> {
@@ -1611,6 +1701,13 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'title'),
         ...readStringOrNullField(record, 'url'),
+      }
+    case 'os-control':
+      return {
+        ...readStringField(record, 'action'),
+        ...readBooleanField(record, 'ok'),
+        ...readStringField(record, 'runId'),
+        ...readStringField(record, 'status'),
       }
     case 'finish':
       return {

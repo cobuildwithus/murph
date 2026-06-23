@@ -145,19 +145,23 @@ first.
 
 ## Tools
 
-1. `murph.computer_start_run` starts or resumes a run in the member's
+1. `murph.computer_start_run` starts or reuses a run in the member's
    persistent browser profile. `startUrl` is only a first-page convenience.
+   Inspect the returned status before acting; an `awaiting_user` run is still
+   paused.
 2. `murph.computer_observe` reads the current URL, title, and visible text. Use
-   it after starting, resuming, or any action where page state is needed.
+   it after starting, reusing, or any action where page state is needed.
 3. `murph.computer_act` runs one bounded browser action against the current page.
-4. `murph.computer_pause_for_user` creates a durable pause for confirmation,
+4. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
+   action when `computer_act` cannot operate the page surface.
+5. `murph.computer_pause_for_user` creates a durable pause for confirmation,
    missing information, or secure user takeover.
-5. `murph.computer_finish_run` closes the run when the task is complete, failed,
+6. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
 ## Act primitive
 
-`computer_act` is the only browser action primitive. Pass one action per call:
+`computer_act` is the default browser action primitive. Pass one action per call:
 
 ```json
 {
@@ -186,6 +190,13 @@ page. For example:
   "value": "user@example.com"
 }
 ```
+
+Use `computer_os_control` only when a locator or Playwright-backed action cannot
+operate the page surface, such as a canvas, native picker, or focus trap. It can
+click, move, drag, scroll, type text, or press keys at the OS level. Do not use
+it for passwords, payment details, one-time codes, raw tokens, or other sensitive
+private input; pause for handoff instead. Observe before and after OS-control
+actions when page state matters.
 
 The service runs the action with server-owned Playwright code, then returns the
 current URL and title. Available actions: `goto`, `click`, `fill`, `type`,
@@ -247,7 +258,7 @@ Common action shapes:
 
 ## Browser control loop
 
-1. Start or resume the run.
+1. Start or reuse the run.
 2. Observe before acting. Identify the current domain, page purpose, login state,
    selected account, cart or appointment state, and the next safe action.
 3. Take one bounded action.
@@ -407,12 +418,13 @@ clinical decision.
 Pause only when Murph is actually blocked: expired login, CAPTCHA, missing
 payment or identity details, a choice the user has not authorized, sensitive
 entry that needs private takeover, or a page that needs direct user takeover.
-When pausing, use `computer_pause_for_user`; after the user replies, resume the
-same run through `computer_start_run` with `resumeRunId`, then observe before
-acting.
+When pausing, use `computer_pause_for_user`; after the user replies, call
+`computer_start_run` again and inspect the returned status before acting. If the
+run is still `awaiting_user`, do not assume the pause resumed.
 The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
-reply when direct takeover is needed.
+reply when direct takeover is needed, or finish without reply when no additional
+user-visible message is useful.
 
 When blocked by login, payment setup, or other private credential/financial
 entry, explain that this should be a one-time private handoff. Tell the user to

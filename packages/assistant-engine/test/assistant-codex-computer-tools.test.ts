@@ -6,6 +6,7 @@ import {
 import {
   executeMurphDynamicToolRequest,
   MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_DYNAMIC_TOOLS,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
@@ -28,6 +29,7 @@ describe("murph computer dynamic tools", () => {
       "computer_start_run",
       "computer_observe",
       "computer_act",
+      "computer_os_control",
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
@@ -41,7 +43,11 @@ describe("murph computer dynamic tools", () => {
     const actTool = computerTools.find((tool) =>
       tool.name === "computer_act"
     );
+    const osControlTool = computerTools.find((tool) =>
+      tool.name === "computer_os_control"
+    );
     const actToolSchema = JSON.stringify(actTool?.inputSchema);
+    const osControlToolSchema = JSON.stringify(osControlTool?.inputSchema);
     expect(actToolSchema).toContain("\"action\"");
     expect(actToolSchema).not.toContain("steps");
     expect(actToolSchema).not.toContain("\"code\"");
@@ -54,6 +60,22 @@ describe("murph computer dynamic tools", () => {
       `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
     );
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
+    expect(osControlToolSchema).toContain("\"clickMouse\"");
+    expect(osControlToolSchema).toContain("\"pressKey\"");
+    expect(osControlToolSchema).toContain("\"typeText\"");
+    expect(osControlToolSchema).not.toContain("holdKeys\":{\"default\":[],\"items\":{\"type\":\"string\",\"enum\":[\"Alt\",\"Ctrl\",\"Shift\",\"Super\"]},\"type\":\"array\",\"maxItems\":4},\"keys\"");
+    expect(osControlToolSchema).not.toContain("\"code\"");
+    expect(osControlToolSchema).not.toContain("captureScreenshot");
+    expect(osControlToolSchema).not.toContain("Clipboard");
+    expect(osControlToolSchema).not.toContain("Ctrl+c");
+    expect(osControlToolSchema).not.toContain("Ctrl+v");
+    expect(osControlToolSchema).not.toContain("Ctrl+x");
+    expect(osControlToolSchema).not.toContain("Ctrl+t");
+    expect(osControlToolSchema).not.toContain("Ctrl+w");
+    expect(osControlToolSchema).not.toContain("Ctrl+Shift+Tab");
+    expect(MURPH_COMPUTER_OS_CONTROL_TOOL.inputSchema).toBe(
+      osControlTool?.inputSchema,
+    );
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     const startTool = computerTools.find((tool) =>
       tool.name === "computer_start_run"
@@ -68,6 +90,7 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
+    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("resumeRunId");
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
@@ -90,6 +113,7 @@ describe("murph computer dynamic tools", () => {
       "computer_start_run",
       "computer_observe",
       "computer_act",
+      "computer_os_control",
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
@@ -189,19 +213,16 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("adds current hosted mailbox proof only for explicit resume requests", async () => {
+  it("does not forward legacy model resume ids or hidden resume proof", async () => {
     const fetchImpl = vi.fn(async (
       _url: string | URL | Request,
       init?: RequestInit,
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        resumeAfterMailboxItemId: "hmi_user_reply",
-        resumeDeliveryContext: {
-          conversationId: "conversation-123",
-          recipientKey: "recipient-123",
-        },
-        resumeRunId: "hcr_run123",
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: null,
+        resumeRunId: null,
         startUrl: null,
       });
 
@@ -288,8 +309,8 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        resumeAfterMailboxItemId: "hmi_user_reply",
-        resumeRunId: "hcr_run123",
+        resumeAfterMailboxItemId: null,
+        resumeRunId: null,
       }),
     ]);
     expect(bodies[0]).not.toHaveProperty("profileKey");
@@ -458,6 +479,130 @@ describe("murph computer dynamic tools", () => {
     });
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
+  });
+
+  it("runs an OS-control fallback action without echoing typed text", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe(
+        "http://web-control.worker/api/internal/computer/runs/run_123/os-control",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        action: "typeText",
+        delayMs: 0,
+        text: "canary-sensitive-input",
+      });
+
+      return jsonResponse({
+        action: "typeText",
+        ok: true,
+        runId: "run_123",
+        status: "running",
+        text: "canary-sensitive-input",
+      });
+    });
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        action: "typeText",
+        runId: "run_123",
+        text: "canary-sensitive-input",
+      },
+      tool: "computer_os_control",
+    }));
+
+    if (!request || request.kind !== "computer-os-control") {
+      throw new Error("Expected computer_os_control request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
+      action: "typeText",
+      ok: true,
+      runId: "run_123",
+      status: "running",
+    });
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain(
+      "canary-sensitive-input",
+    );
+  });
+
+  it("rejects decomposed OS-control browser-management shortcuts", () => {
+    for (const argumentsValue of [
+      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Tab"], runId: "run_123" },
+      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Shift+Tab"], runId: "run_123" },
+      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Page_Up"], runId: "run_123" },
+      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Page_Down"], runId: "run_123" },
+      {
+        action: "pressKey",
+        holdKeys: ["Ctrl", "Shift"],
+        keys: ["Tab"],
+        runId: "run_123",
+      },
+    ]) {
+      const request = readMurphDynamicToolRequest(dynamicToolCall({
+        argumentsValue,
+        tool: "computer_os_control",
+      }));
+
+      if (!request) {
+        throw new Error("Expected a parsed dynamic tool request.");
+      }
+      expect(request.kind).toBe("invalid-computer-arguments");
+    }
+  });
+
+  it("treats server-side OS-control failures as unknown outcome", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        error: {
+          code: "HOSTED_COMPUTER_OS_CONTROL_FAILED",
+          details: {
+            computerOsControl: "typeText",
+          },
+          message: "Computer OS control failed.",
+        },
+      }, 502)
+    );
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          action: "typeText",
+          delayMs: 0,
+          runId: "run_123",
+          text: "canary-sensitive-input",
+        },
+        kind: "computer-os-control",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toBe(
+      [
+        "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step; backend error: HOSTED_COMPUTER_OS_CONTROL_FAILED: Computer OS control failed.",
+        "backend details:",
+        "computerOsControl: typeText",
+      ].join("\n"),
+    );
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain(
+      "canary-sensitive-input",
+    );
   });
 
   it("sends finish-run compatibility fields only to the finish endpoint", async () => {

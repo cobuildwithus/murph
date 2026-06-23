@@ -681,6 +681,46 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
+  it("leaves a paused active run paused when a plain start has fresh proof but no explicit resume id", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: null,
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "awaiting_user",
+    });
+    expect(store.run).toMatchObject({
+      awaitingReason: "final_confirmation",
+      status: "awaiting_user",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
   it("resumes an explicit run without deleting an unrelated stale sibling", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const appointmentsRun = createRunRecord({
@@ -838,6 +878,36 @@ describe("ComputerUseService", () => {
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    });
+    expect(store.run).toMatchObject({
+      status: "awaiting_user",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("leaves a paused active run paused when a plain start has no fresh proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeRunId: null,
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "awaiting_user",
     });
     expect(store.run).toMatchObject({
       status: "awaiting_user",
@@ -2274,6 +2344,164 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       status: "running",
     });
+  });
+
+  it("runs OS-level fallback actions through Kernel computer controls", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.osControl({
+      action: "clickMouse",
+      button: "left",
+      clickType: "click",
+      holdKeys: [],
+      memberId: "member_123",
+      numClicks: 1,
+      runId: "hcr_run123",
+      x: 120,
+      y: 240,
+    })).resolves.toEqual({
+      action: "clickMouse",
+      ok: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+
+    expect(kernel.osControlInputs).toEqual([
+      {
+        action: {
+          action: "clickMouse",
+          button: "left",
+          clickType: "click",
+          holdKeys: [],
+          numClicks: 1,
+          x: 120,
+          y: 240,
+        },
+        sessionId: "kernel-session-1",
+      },
+    ]);
+    expect(kernel.executePlaywrightCalls).toBe(0);
+  });
+
+  it("preflights OS-level text typing against the focused element", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        sensitive: false,
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.osControl({
+      action: "typeText",
+      delayMs: 0,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      text: "safe fixture text",
+    })).resolves.toEqual({
+      action: "typeText",
+      ok: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("page.locator(':focus')");
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "focused_target_uninspectable",
+    );
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "focused_target_not_editable",
+    );
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("safe fixture text");
+    expect(kernel.osControlInputs).toEqual([
+      {
+        action: {
+          action: "typeText",
+          delayMs: 0,
+          text: "safe fixture text",
+        },
+        sessionId: "kernel-session-1",
+      },
+    ]);
+  });
+
+  it("requires handoff before OS-level text typing into sensitive focused fields", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        sensitive: true,
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.osControl({
+      action: "typeText",
+      delayMs: 0,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      text: "canary-sensitive-input",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain(
+      "canary-sensitive-input",
+    );
+    expect(kernel.osControlCalls).toBe(0);
+  });
+
+  it("requires handoff when OS-level text typing cannot inspect a focused page text target", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        sensitive: true,
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.osControl({
+      action: "typeText",
+      delayMs: 0,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      text: "canary-uninspectable-target-text",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    });
+
+    const preflightCode = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(preflightCode).toContain("focused_target_uninspectable");
+    expect(preflightCode).toContain("focused_target_not_editable");
+    expect(preflightCode).not.toContain("canary-uninspectable-target-text");
+    expect(kernel.osControlCalls).toBe(0);
   });
 
   it("generates server-owned Playwright from a browser action without raw user source", async () => {
@@ -4481,12 +4709,16 @@ describe("ComputerUseService", () => {
     const executePlaywright = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
+    const osControl = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
     const kernel: ComputerKernelClient = {
       createBrowser,
       deleteBrowserByIdOrName,
       deleteProfile,
       ensureProfile,
       executePlaywright,
+      osControl,
     };
     const service = new ComputerUseService({
       env: {
@@ -4508,6 +4740,7 @@ describe("ComputerUseService", () => {
     expect(deleteProfile).not.toHaveBeenCalled();
     expect(ensureProfile).not.toHaveBeenCalled();
     expect(executePlaywright).not.toHaveBeenCalled();
+    expect(osControl).not.toHaveBeenCalled();
   });
 });
 
@@ -5914,6 +6147,10 @@ function createFakeKernel(input: {
     input: Parameters<ComputerKernelClient["executePlaywright"]>[0],
     callIndex: number,
   ) => void;
+  onOsControl?: (
+    input: Parameters<ComputerKernelClient["osControl"]>[0],
+    callIndex: number,
+  ) => void;
   onDeleteBrowserByIdOrName?: (sessionId: string) => void;
 } = {}): ComputerKernelClient & {
   createdBrowserInputs: Parameters<ComputerKernelClient["createBrowser"]>[0][];
@@ -5922,6 +6159,8 @@ function createFakeKernel(input: {
   deletedSessionIds: string[];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
+  osControlCalls: number;
+  osControlInputs: Parameters<ComputerKernelClient["osControl"]>[0][];
 } {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
@@ -5934,6 +6173,8 @@ function createFakeKernel(input: {
     deletedSessionIds: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
+    osControlCalls: 0,
+    osControlInputs: [],
     async createBrowser(browserInput) {
       this.createdBrowserInputs.push(browserInput);
       const result = createBrowserResults.shift() ?? "ok";
@@ -5960,6 +6201,12 @@ function createFakeKernel(input: {
       this.deletedProfileNames.push(name);
     },
     async ensureProfile() {},
+    async osControl(osControlInput) {
+      const callIndex = this.osControlCalls;
+      this.osControlCalls += 1;
+      this.osControlInputs.push(osControlInput);
+      input.onOsControl?.(osControlInput, callIndex);
+    },
     async executePlaywright(executeInput) {
       const callIndex = this.executePlaywrightCalls;
       this.executePlaywrightCalls += 1;
