@@ -15,6 +15,10 @@ import {
   assistantAutomationInputSummaryFromCandidate,
 } from '../src/assistant/automation/input-summary.ts'
 import {
+  readAssistantAutoReplyCrossSessionContextCursor,
+  writeAssistantAutoReplyCrossSessionContextCursor,
+} from '../src/assistant/automation/cross-session-context-cursor.ts'
+import {
   createAssistantAutoReplyGroupContext,
   processAssistantAutoReplyGroup,
 } from '../src/assistant/automation/reply.ts'
@@ -67,6 +71,8 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
   status: 'not_attempted',
   updatedAt: null,
 } satisfies AssistantInputCandidate['event']['attachmentEvidence']
+const AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY =
+  'autoReplyCrossSessionContextIntentId'
 
 beforeEach(() => {
   replyEventPathMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
@@ -330,7 +336,58 @@ describe('assistant auto-reply event-first path', () => {
       '',
       'Use it only to interpret the current user message.',
     ].join('\n'))
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-cross-session',
+    }))
+    await expect(readAssistantAutoReplyCrossSessionContextCursor({
+      channel: 'email',
+      deliveryTarget: 'thread-1',
+      vault,
+    })).resolves.toEqual({
+      intentId: 'intent-cross-session',
+      sentAtMs: Date.parse('2026-04-08T00:05:00.000Z'),
+    })
     expect(sendInput.prompt).toContain('What do I do for this reset?')
+  })
+
+  it('injects cross-session context across provider and local clock skew', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-skewed-context',
+        message: 'skewed local send context',
+        sentAt: '2026-04-08T00:10:01.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'What was that reminder?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('skewed local send context')
   })
 
   it('uses the conversation thread only as legacy outbox-history fallback', async () => {
@@ -544,8 +601,15 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('serialized target context')
   })
 
-  it('does not repeat cross-session context after the chat session advances', async () => {
+  it('does not repeat cross-session context after the route cursor records it', async () => {
     const vault = await createTempVault()
+    await writeAssistantAutoReplyCrossSessionContextCursor({
+      channel: 'email',
+      deliveryTarget: 'thread-1',
+      intentId: 'intent-already-seen',
+      sentAtMs: Date.parse('2026-04-08T00:05:00.000Z'),
+      vault,
+    })
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -554,6 +618,12 @@ describe('assistant auto-reply event-first path', () => {
       },
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-older-stale',
+        message: 'older stale reminder',
+        sentAt: '2026-04-08T00:04:00.000Z',
+        sessionId: 'session-automation',
+      }),
       createOutboxMessage({
         intentId: 'intent-already-seen',
         message: 'already seen reminder',
@@ -581,6 +651,121 @@ describe('assistant auto-reply event-first path', () => {
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput).not.toHaveProperty('turnContext')
+  })
+
+  it('uses cursor context suppression in hosted queue-only mode without terminal receipt fallback', async () => {
+    const vault = await createTempVault()
+    await writeAssistantAutoReplyCrossSessionContextCursor({
+      channel: 'email',
+      deliveryTarget: 'thread-1',
+      intentId: 'intent-queue-context',
+      sentAtMs: Date.parse('2026-04-08T00:05:00.000Z'),
+      vault,
+    })
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-queue-context',
+        message: 'queue-only reminder',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'Follow-up',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput).not.toHaveProperty('turnContext')
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+  })
+
+  it('keeps cross-session context after session advance when only a failed receipt mentions it', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      {
+        completedAt: null,
+        deliveryIntentId: null,
+        sessionId: 'session-chat',
+        status: 'failed',
+        timeline: [
+          {
+            kind: 'turn.started',
+            metadata: {
+              [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+                'intent-still-needed',
+            },
+          },
+        ],
+        updatedAt: '2026-04-08T00:06:00.000Z',
+      },
+    ])
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-still-needed',
+        message: 'still-needed reminder',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'Follow-up',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('still-needed reminder')
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-still-needed',
+    }))
   })
 
   it('suppresses a self-authored echo using recent assistant transcript despite timestamp skew', async () => {

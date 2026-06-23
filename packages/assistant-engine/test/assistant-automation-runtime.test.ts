@@ -2305,6 +2305,14 @@ describe('assistant auto-reply runtime', () => {
     if (!context) {
       throw new Error('expected reply context')
     }
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        deliveryIntentId: 'intent-already-handled',
+        inputIds: context.inputIds,
+        primaryInputId: context.firstInputId,
+        status: 'completed',
+      }),
+    ])
 
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
@@ -5817,6 +5825,15 @@ describe('assistant auto-reply runtime', () => {
     })
     replyMocks.listAssistantOutboxIntents.mockResolvedValue([
       createSentOutboxIntent({
+        channel: 'linq',
+        intentId: 'intent-old-provider-id',
+        message: 'older provider-id message',
+        providerMessageId: 'linq-old-message-id',
+        sentAt: '2026-04-08T00:01:00.000Z',
+        sessionId: 'session-old',
+      }),
+      createSentOutboxIntent({
+        channel: 'linq',
         message: 'same text',
         sentAt: '2026-04-08T00:02:01.000Z',
         sessionId: 'session-automation',
@@ -5827,7 +5844,9 @@ describe('assistant auto-reply runtime', () => {
         createShowResult(
           createCaptureDetail({
             actorIsSelf: true,
+            externalId: 'linq:linq-new-message-id',
             occurredAt: '2026-04-08T00:02:00.000Z',
+            source: 'linq',
             text: 'same text',
           }),
         ),
@@ -5840,7 +5859,9 @@ describe('assistant auto-reply runtime', () => {
       createReplyGroupItem(
         createCaptureSummary({
           actorIsSelf: true,
+          externalId: 'linq:linq-new-message-id',
           occurredAt: '2026-04-08T00:02:00.000Z',
+          source: 'linq',
           text: 'same text',
         }),
       ),
@@ -5853,7 +5874,7 @@ describe('assistant auto-reply runtime', () => {
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: true,
       context,
-      enabledChannels: ['telegram'],
+      enabledChannels: ['linq'],
       inboxServices,
       requestId: null,
       sessionMaxAgeMs: null,
@@ -5884,7 +5905,7 @@ describe('assistant auto-reply runtime', () => {
         actorId: null,
         channel: 'linq',
         identityId: null,
-        message: 'scheduled prompt',
+        message: 'provider-id matched assistant delivery',
         providerMessageId: 'linq-assistant-message-1',
         providerThreadId: 'raw-linq-chat-1',
         sentAt: '2026-04-08T00:02:01.000Z',
