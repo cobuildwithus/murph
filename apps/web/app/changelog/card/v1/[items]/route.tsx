@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import {
   parseChangelogCardItemSegment,
@@ -14,6 +15,8 @@ import {
 } from "../../../../font-files";
 
 export const dynamic = "force-dynamic";
+
+const LOGO_PATH = path.join(process.cwd(), "apps/web/public/logo-dark.svg");
 
 const SIZE = { width: 1200, height: 630 };
 const COLOR = {
@@ -41,13 +44,15 @@ export async function GET(
     return new Response("Not found.", { status: 404 });
   }
 
-  const [fraunces400, fraunces600, dmSans400] = await Promise.all([
+  const [fraunces400, fraunces600, dmSans400, logoBuffer] = await Promise.all([
     readFile(fraunces400FontPath).then(toArrayBuffer),
     readFile(fraunces600FontPath).then(toArrayBuffer),
     readFile(dmSans400FontPath).then(toArrayBuffer),
+    readFile(LOGO_PATH),
   ]);
+  const logoDataUri = `data:image/svg+xml;base64,${logoBuffer.toString("base64")}`;
 
-  const image = new ImageResponse(<DigestCard items={items} />, {
+  const image = new ImageResponse(<DigestCard items={items} logoDataUri={logoDataUri} />, {
     ...SIZE,
     fonts: [
       { name: "Fraunces", data: fraunces400, weight: 400 },
@@ -60,8 +65,10 @@ export async function GET(
 
 function DigestCard({
   items,
+  logoDataUri,
 }: {
   items: readonly PublishedChangelogItem[];
+  logoDataUri: string;
 }) {
   const [hero, ...rest] = items;
   if (!hero) {
@@ -102,9 +109,15 @@ function DigestCard({
             textTransform: "uppercase",
           }}
         >
-          Issue · {formatCardDate(publishedOn)}
+          {formatCardDate(publishedOn)}
         </div>
-        <MurphWordmark />
+        <img
+          src={logoDataUri}
+          alt="Murph"
+          width={108}
+          height={24}
+          style={{ display: "flex" }}
+        />
       </div>
 
       <div
@@ -313,41 +326,6 @@ function buildBreakdown(items: readonly PublishedChangelogItem[]): string {
   return parts.join(" · ");
 }
 
-function MurphWordmark() {
-  return (
-    <div style={{ alignItems: "center", display: "flex", gap: 10 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {[0, 1, 2].map((row) => (
-          <div key={row} style={{ display: "flex", gap: 3 }}>
-            {[0, 1, 2].map((column) => (
-              <span
-                key={column}
-                style={{
-                  backgroundColor: row === 1 && column === 1 ? COLOR.feature : "#C4A882",
-                  borderRadius: 999,
-                  display: "flex",
-                  height: 4,
-                  width: 4,
-                }}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-      <span
-        style={{
-          color: COLOR.foreground,
-          display: "flex",
-          fontFamily: "Fraunces",
-          fontSize: 25,
-          fontWeight: 600,
-        }}
-      >
-        murph
-      </span>
-    </div>
-  );
-}
 
 function formatDigestTitle(title: string, maxChars: number): string {
   // Fraunces 600 ships without the U+002B "+" glyph and the renderer falls back
