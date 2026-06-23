@@ -47,7 +47,12 @@ export async function readSignedComputerActRequest(
 export async function readSignedComputerOsControlRequest(
   request: Request,
 ): Promise<{ body: HostedComputerOsControlRequest; memberId: string }> {
-  return readSignedComputerJson(request, parseHostedComputerOsControlRequest);
+  return readSignedComputerJson(
+    request,
+    (payload) => parseHostedComputerOsControlRequest(
+      stripLegacyTypeTextDelay(payload),
+    ),
+  );
 }
 
 export async function readSignedComputerPauseForUserRequest(
@@ -111,4 +116,18 @@ function parseComputerRequestBody<TBody>(
       message: "Computer request body is invalid.",
     });
   }
+}
+
+function stripLegacyTypeTextDelay(payload: unknown): unknown {
+  if (!isJsonObject(payload) || payload.action !== "typeText" || !("delayMs" in payload)) {
+    return payload;
+  }
+
+  const rest = { ...payload };
+  delete rest.delayMs;
+  return rest;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

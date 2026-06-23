@@ -513,7 +513,6 @@ export const hostedComputerOsControlRequestSchema = z.discriminatedUnion("action
   z
     .object({
       action: z.literal("typeText"),
-      delayMs: hostedComputerOsControlDelaySchema.default(0),
       text: z.string().min(1).max(HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH),
     })
     .strict(),

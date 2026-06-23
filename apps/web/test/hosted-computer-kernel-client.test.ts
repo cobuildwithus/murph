@@ -80,7 +80,6 @@ describe("KernelComputerClient", () => {
     await client.osControl({
       action: {
         action: "typeText",
-        delayMs: 30,
         text: "safe fixture text",
       },
       sessionId,
@@ -135,7 +134,6 @@ describe("KernelComputerClient", () => {
       y: 40,
     });
     expect(kernelSdkMocks.computer.typeText).toHaveBeenCalledWith(sessionId, {
-      delay: 30,
       text: "safe fixture text",
     });
     expect(kernelSdkMocks.computer.pressKey).toHaveBeenCalledWith(sessionId, {
@@ -170,7 +168,6 @@ describe("KernelComputerClient", () => {
     await expect(client.osControl({
       action: {
         action: "typeText",
-        delayMs: 0,
         text: "canary-sensitive-input",
       },
       sessionId: "kernel-session-1",

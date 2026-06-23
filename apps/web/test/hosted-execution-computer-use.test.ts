@@ -2408,7 +2408,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.osControl({
       action: "typeText",
-      delayMs: 0,
       memberId: "member_123",
       runId: "hcr_run123",
       text: "safe fixture text",
@@ -2432,7 +2431,6 @@ describe("ComputerUseService", () => {
       {
         action: {
           action: "typeText",
-          delayMs: 0,
           text: "safe fixture text",
         },
         sessionId: "kernel-session-1",
@@ -2457,7 +2455,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.osControl({
       action: "typeText",
-      delayMs: 0,
       memberId: "member_123",
       runId: "hcr_run123",
       text: "canary-sensitive-input",
@@ -2489,7 +2486,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.osControl({
       action: "typeText",
-      delayMs: 0,
       memberId: "member_123",
       runId: "hcr_run123",
       text: "canary-uninspectable-target-text",

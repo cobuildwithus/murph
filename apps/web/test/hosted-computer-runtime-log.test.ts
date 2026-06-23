@@ -167,7 +167,6 @@ describe("hosted computer runtime logs", () => {
     await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
       action: {
         action: "typeText",
-        delayMs: 0,
         text: "canary-sensitive-input",
       },
       memberId: "member_123",

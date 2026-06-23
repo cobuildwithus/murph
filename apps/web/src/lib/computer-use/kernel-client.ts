@@ -152,7 +152,6 @@ export class KernelComputerClient implements ComputerKernelClient {
           return;
         case "typeText":
           await this.kernel.browsers.computer.typeText(sessionId, {
-            ...kernelDelay(action.delayMs),
             text: action.text,
           });
           return;

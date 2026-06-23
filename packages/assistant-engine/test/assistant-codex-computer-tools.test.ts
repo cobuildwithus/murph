@@ -491,7 +491,6 @@ describe("murph computer dynamic tools", () => {
       );
       expect(JSON.parse(String(init?.body))).toEqual({
         action: "typeText",
-        delayMs: 0,
         text: "canary-sensitive-input",
       });
 
@@ -562,6 +561,23 @@ describe("murph computer dynamic tools", () => {
     }
   });
 
+  it("rejects model-controlled typing delay for OS-control typeText", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        action: "typeText",
+        delayMs: 0,
+        runId: "run_123",
+        text: "canary-sensitive-input",
+      },
+      tool: "computer_os_control",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
+  });
+
   it("treats server-side OS-control failures as unknown outcome", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
@@ -584,7 +600,6 @@ describe("murph computer dynamic tools", () => {
       request: {
         args: {
           action: "typeText",
-          delayMs: 0,
           runId: "run_123",
           text: "canary-sensitive-input",
         },

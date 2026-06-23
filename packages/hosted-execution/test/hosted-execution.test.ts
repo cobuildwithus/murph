@@ -874,6 +874,11 @@ describe("hosted execution coverage gaps", () => {
     }
     expect(() => parseHostedComputerOsControlRequest({
       action: "typeText",
+      delayMs: 0,
+      text: "safe fixture text",
+    })).toThrow(/Hosted computer OS control request is invalid/u);
+    expect(() => parseHostedComputerOsControlRequest({
+      action: "typeText",
       text: "x".repeat(HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH + 1),
     })).toThrow(/Hosted computer OS control request is invalid/u);
     expect(() => parseHostedComputerOsControlRequest({

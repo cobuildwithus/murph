@@ -44,7 +44,6 @@ describe("hosted computer os-control route", () => {
   it("runs signed OS-control requests through the member-scoped service and runtime-log wrapper", async () => {
     const body = {
       action: "typeText",
-      delayMs: 0,
       text: "canary-sensitive-input",
     };
     const result = {
