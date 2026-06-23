@@ -1282,8 +1282,17 @@ describe("HostedUserRunner execution coordination", () => {
         kind: "accepted" as const,
       }),
     );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: "attempt_runtime_active",
+      leaseGeneration: "2",
+      userId: TEST_USER_ID,
+    }));
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
+      readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -1347,6 +1356,99 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
+  it("accepts active retention-only rechecks without waking the running retention pass", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: "attempt_runtime_active",
+      leaseGeneration: "2",
+      userId: TEST_USER_ID,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-retention-recheck",
+      processingMode: "inbox_media_retention",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
+  it("preempts active retention-only work when default processing arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-default-preempts-retention",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: {
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
+        processingMode: "inbox_media_retention",
+        userId: TEST_USER_ID,
+      },
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
@@ -2383,6 +2485,7 @@ function createRunnerHarness(input: {
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
@@ -2438,6 +2541,9 @@ function createRunnerHarness(input: {
       service: "runner",
       status: 200,
     }),
+    ...(input.readActiveRuntimeUserFence
+      ? { readActiveRuntimeUserFence: input.readActiveRuntimeUserFence }
+      : {}),
   };
   const namespace: HostedExecutionContainerNamespaceLike = {
     getByName() {
@@ -2809,6 +2915,7 @@ function writeRuntimeFenceForTest(
   input: {
     attemptId?: string;
     generation?: number;
+    processingMode?: "default" | "inbox_media_retention";
     startedAt?: string;
     workspaceVersion?: string;
   } = {},
@@ -2830,7 +2937,7 @@ function writeRuntimeFenceForTest(
     attemptId,
     generation,
     "runtime",
-    "nudge",
+    input.processingMode ?? "nudge",
     input.startedAt ?? FIXED_NOW,
     input.workspaceVersion ?? "7",
   );

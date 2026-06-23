@@ -354,6 +354,35 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     );
   });
 
+  it("runs due inbox media retention before waiting on blocked AI-capable work", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "ai_usage_denied",
+        retryAt: null,
+      },
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
+  });
+
   it("records reconciliation read failures and uses retry waits for failures marked non-retryable", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(async () => {

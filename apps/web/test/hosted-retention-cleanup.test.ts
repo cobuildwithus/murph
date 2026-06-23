@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_MAILBOX_RETENTION_MS,
   HOSTED_RUN_LOG_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
@@ -14,6 +15,13 @@ describe("hosted retention cleanup", () => {
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
+    const hostedWorkspaceFindMany = vi.fn().mockResolvedValue([
+      { userId: "member_due_1" },
+      { userId: "member_due_2" },
+    ]);
+    const signalRuntimeRecheck = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = {
       $executeRaw: executeRaw,
       hostedComputerRun: {
@@ -25,14 +33,20 @@ describe("hosted retention cleanup", () => {
       hostedWebSession: {
         deleteMany: hostedWebSessionDeleteMany,
       },
+      hostedWorkspace: {
+        findMany: hostedWorkspaceFindMany,
+      },
     };
 
     await expect(runHostedRetentionCleanup({
       now,
       prisma: prisma as never,
+      signalRuntimeRecheck,
     })).resolves.toEqual({
       expiredComputerRunsCleanedUp: 0,
       expiredMailboxItemsDeleted: 7,
+      inboxMediaRetentionRuntimeSignalFailures: 1,
+      inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 8,
       staleWebSessionsDeleted: 9,
     });
@@ -70,6 +84,28 @@ describe("hosted retention cleanup", () => {
           },
         ],
       },
+    });
+    expect(hostedWorkspaceFindMany).toHaveBeenCalledWith({
+      orderBy: [
+        { inboxMediaRetentionWakeAt: "asc" },
+        { userId: "asc" },
+      ],
+      select: {
+        userId: true,
+      },
+      take: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+      where: {
+        inboxMediaRetentionWakeAt: {
+          lte: now,
+        },
+      },
+    });
+    expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
+    expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
+      userId: "member_due_1",
+    });
+    expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(2, {
+      userId: "member_due_2",
     });
     expect(hostedComputerRunFindMany).toHaveBeenCalledWith({
       orderBy: {

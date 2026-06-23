@@ -2109,7 +2109,11 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     assertRuntimeNotAborted: input.assertRuntimeNotAborted,
     checkpointRequestBuilder: input.checkpointRequestBuilder,
     expectedUserId: input.expectedUserId,
-    inboxMediaRetentionWakeAt: idleMaintenance.nextWakeAt ?? null,
+    inboxMediaRetentionWakeAt: selectHostedRetentionOnlyCheckpointWake({
+      idleMaintenance,
+      previousInboxMediaRetentionWakeAt:
+        input.workspace.inboxMediaRetentionWakeAt ?? null,
+    }),
     issueExportPort: input.issueExportPort ?? null,
     nextWakeAt: input.workspace.nextWakeAt ?? null,
     nextWakeReason: input.workspace.nextWakeReason ?? null,
@@ -3100,6 +3104,23 @@ function selectHostedIdleCheckpointWake(input: {
     nextWakeAt: input.projectedWakeAt,
     nextWakeReason: input.projectedWakeReason,
   };
+}
+
+function selectHostedRetentionOnlyCheckpointWake(input: {
+  idleMaintenance: HostedIdleMaintenanceOutcome;
+  previousInboxMediaRetentionWakeAt: string | null;
+}): string | null {
+  if (input.idleMaintenance.nextWakeAt) {
+    return input.idleMaintenance.nextWakeAt;
+  }
+
+  const preservePreviousRetentionWake =
+    "reason" in input.idleMaintenance
+    && input.idleMaintenance.reason === "pending_work";
+
+  return preservePreviousRetentionWake
+    ? input.previousInboxMediaRetentionWakeAt
+    : null;
 }
 
 function readHostedWorkspaceDurableCheckpointEffectWake(

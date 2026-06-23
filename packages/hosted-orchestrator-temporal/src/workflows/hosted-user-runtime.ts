@@ -346,7 +346,15 @@ export function createHostedUserRuntimeWorkflowMachine(
       lastMailboxSignalVersionRead = mailboxSignalVersion;
       recordReconciliationFactsSummary(state, facts);
 
+      const inboxMediaRetentionWakeAt = facts.workspace?.inboxMediaRetentionWakeAt ?? null;
       if (facts.blocked !== null) {
+        if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
+          await executeRuntimeProcessing({
+            clearMailboxPointerOnAccepted: false,
+            processingMode: "inbox_media_retention",
+          });
+          continue;
+        }
         if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
           await continueAsNewWithCurrentState();
         }
@@ -360,7 +368,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      const inboxMediaRetentionWakeAt = facts.workspace?.inboxMediaRetentionWakeAt ?? null;
       const mailboxBeforeRetention =
         runtime.mailboxBeforeInboxMediaRetentionEnabled();
       if (mailboxBeforeRetention && hasAnyMailboxLag(facts)) {

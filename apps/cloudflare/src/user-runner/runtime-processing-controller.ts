@@ -181,11 +181,48 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     if (activeFence.processingMode !== requestedProcessingMode) {
+      if (
+        activeFence.processingMode === "inbox_media_retention"
+        && requestedProcessingMode === "default"
+      ) {
+        await ensureActiveRuntimeProcessing({
+          activeRuntime: {
+            attemptId: activeFence.attemptId,
+            leaseGeneration: String(activeFence.generation),
+            processingMode: activeFence.processingMode,
+            userId: record.userId,
+          },
+          commandBudget: input.commandBudget,
+          env: this.input.env,
+          runnerContainerName: activeFence.runnerContainerName,
+          runnerContainerNamespace: this.input.runnerContainerNamespace,
+          runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
+        });
+      }
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_busy",
         userId: input.input.userId,
       });
+    }
+
+    if (activeFence.processingMode === "inbox_media_retention") {
+      const activeRuntimePresent =
+        await this.readActiveRuntimeFenceWithoutWake({
+          activeFence,
+          commandBudget: input.commandBudget,
+          record,
+        });
+      if (activeRuntimePresent !== false) {
+        await this.syncRunnerAlarm(record);
+        return {
+          action: "already_running",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt:
+            this.computeRuntimeProcessingOwnerRecheckAt(),
+          runtimeAttemptId: activeFence.attemptId,
+        };
+      }
     }
 
     const containerResult = await ensureActiveRuntimeProcessing({
@@ -286,6 +323,55 @@ export class RuntimeProcessingController {
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
     });
+  }
+
+  private async readActiveRuntimeFenceWithoutWake(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    commandBudget: RuntimeProcessingCommandBudget;
+    record: RunnerStateRecord;
+  }): Promise<boolean | null> {
+    if (!this.input.runnerContainerNamespace) {
+      return null;
+    }
+
+    const runnerContainerName =
+      input.activeFence.runnerContainerName
+      ?? resolveHostedExecutionRunnerContainerName({
+        source: this.input.runnerRuntimeEnvSource,
+        userId: input.record.userId,
+      });
+    if (!runnerContainerName) {
+      return null;
+    }
+
+    const container = this.input.runnerContainerNamespace.getByName(
+      runnerContainerName,
+    );
+    if (!container.readActiveRuntimeUserFence) {
+      return null;
+    }
+
+    try {
+      const activeRuntime = await runRuntimeProcessingCommandStep({
+        budget: input.commandBudget,
+        operation: async () => await container.readActiveRuntimeUserFence!(),
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+      return activeRuntime.active
+        && activeRuntime.attemptId === input.activeFence.attemptId
+        && activeRuntime.leaseGeneration === String(input.activeFence.generation)
+        && activeRuntime.userId === input.record.userId;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted runner active retention liveness check failed.",
+        phase: "scheduled",
+        userId: input.record.userId,
+      });
+      return null;
+    }
   }
 
   private async startRuntimeProcessing(input: {

@@ -82,17 +82,23 @@ export async function readHostedRuntimeReconciliationFacts(
 ): Promise<HostedRuntimeReconciliationFacts> {
   const prisma = getPrisma();
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
-  const member = await readHostedMemberCoreState({
-    memberId: input.userId,
-    prisma,
-  });
+  const [member, workspace] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: input.userId,
+      prisma,
+    }),
+    readHostedWorkspace({ prisma, userId: input.userId }),
+  ]);
+  const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
   if (!member || !hasHostedMemberActiveAccess(member)) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",
-      retryAt: null,
-      workspace: null,
+      retryAt: projectedWorkspace
+        ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
+        : null,
+      workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
       facts,
@@ -103,8 +109,7 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const [workspace, maxSeqByLane, consumedSeqByLane] = await Promise.all([
-    readHostedWorkspace({ prisma, userId: input.userId }),
+  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
     readHostedMailboxConsumedSeqByLane({
       lanes: ["conversation"],
@@ -121,7 +126,6 @@ export async function readHostedRuntimeReconciliationFacts(
       redactedStatusJson: redactedStatus,
     })
   );
-  const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
@@ -262,10 +266,6 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
     mailboxLag: input.mailboxLag,
   })) {
     return true;
-  }
-
-  if (isHostedRuntimeInboxMediaRetentionWakeDue(input.workspace, input.now)) {
-    return false;
   }
 
   if (hasHostedMailboxLag(input.mailboxLag, "system")) {
@@ -749,13 +749,6 @@ function isHostedRuntimeModelCapableWorkspaceWakeReason(
 function isHostedRuntimeWakeDue(value: string | null, now: Date): boolean {
   const timestamp = readHostedRuntimeReconciliationTimestamp(value);
   return timestamp !== null && timestamp <= now.getTime();
-}
-
-function isHostedRuntimeInboxMediaRetentionWakeDue(
-  workspace: HostedRuntimeReconciliationFactsWorkspace,
-  now: Date,
-): boolean {
-  return isHostedRuntimeWakeDue(workspace.inboxMediaRetentionWakeAt, now);
 }
 
 function readHostedRuntimeFutureTimestamp(value: string | null, now: Date): string | null {

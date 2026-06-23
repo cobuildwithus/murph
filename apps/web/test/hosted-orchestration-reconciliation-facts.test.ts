@@ -277,8 +277,8 @@ describe("hosted orchestration reconciliation facts", () => {
   it("does not AI-gate a due inbox media retention wake", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       inboxMediaRetentionWakeAt: FIXED_NOW,
-      nextWakeAt: FIXED_NOW,
-      nextWakeReason: "assistant_due",
+      nextWakeAt: null,
+      nextWakeReason: null,
       redactedStatusJson: {
         conversationImportedSeq: "2",
         systemImportedSeq: "0",
@@ -305,8 +305,8 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
     expect(facts.workspace).toMatchObject({
       inboxMediaRetentionWakeAt: FIXED_NOW,
-      nextWakeAt: FIXED_NOW,
-      nextWakeReason: "assistant_due",
+      nextWakeAt: null,
+      nextWakeReason: null,
     });
     expect(facts.mailboxLag).toEqual([
       {
@@ -325,6 +325,79 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("AI-gates pending system work even when inbox media retention is due", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "0",
+      },
+      {
+        lane: "system",
+        maxSeq: "1",
+      },
+    ]);
+    mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate
+      .mockResolvedValue(true);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildDeniedUsageGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(facts.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+  });
+
+  it("preserves inactive workspace retention clocks for retention-only workflow dispatch", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "user_not_active",
+      retryAt: null,
+    });
+    expect(facts.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      version: "4",
+    });
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("AI-gates fresh conversation work before a due inbox media retention wake", async () => {
@@ -854,7 +927,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("blocks inactive members without reading workspace facts", async () => {
+  it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",
     }));
@@ -871,9 +944,14 @@ describe("hosted orchestration reconciliation facts", () => {
         retryAt: null,
       },
       mailboxLag: [],
-      workspace: null,
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "4",
+      },
     });
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 });
 

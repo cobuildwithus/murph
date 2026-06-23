@@ -72,5 +72,11 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(retentionWakeMigrationSql).toContain(
       'ADD COLUMN "inbox_media_retention_wake_at" TIMESTAMP(3)',
     );
+    expect(retentionWakeMigrationSql).toContain(
+      'UPDATE "hosted_workspace"',
+    );
+    expect(retentionWakeMigrationSql).toContain(
+      'SET "inbox_media_retention_wake_at" = CURRENT_TIMESTAMP',
+    );
   });
 });
