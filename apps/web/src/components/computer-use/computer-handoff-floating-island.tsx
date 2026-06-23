@@ -21,6 +21,21 @@ interface DragState {
   height: number;
 }
 
+function readStoredOffset(persistKey: string | null): Offset | null {
+  if (!persistKey) return null;
+  try {
+    const raw = window.localStorage.getItem(persistKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Offset>;
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // ignore corrupted storage
+  }
+  return null;
+}
+
 export function ComputerHandoffFloatingIsland({
   handle,
   children,
@@ -36,17 +51,11 @@ export function ComputerHandoffFloatingIsland({
   const [grabbing, setGrabbing] = useState(false);
 
   useEffect(() => {
-    if (!persistKey) return;
-    try {
-      const raw = window.localStorage.getItem(persistKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<Offset>;
-      if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-        setOffset({ x: parsed.x, y: parsed.y });
-      }
-    } catch {
-      // ignore corrupted storage
-    }
+    const frame = window.requestAnimationFrame(() => {
+      const storedOffset = readStoredOffset(persistKey);
+      if (storedOffset) setOffset(storedOffset);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [persistKey]);
 
   const reclampToViewport = useCallback(() => {
@@ -70,9 +79,12 @@ export function ComputerHandoffFloatingIsland({
   }, []);
 
   useEffect(() => {
-    reclampToViewport();
+    const frame = window.requestAnimationFrame(reclampToViewport);
     window.addEventListener("resize", reclampToViewport);
-    return () => window.removeEventListener("resize", reclampToViewport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", reclampToViewport);
+    };
   }, [reclampToViewport]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
