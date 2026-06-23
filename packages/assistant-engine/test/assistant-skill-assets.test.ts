@@ -361,7 +361,7 @@ describe('assistant skill assets', () => {
       'Name and optional age/gender. After the welcome, ask exactly this setup question by itself',
     )
     expect(raw).toContain(
-      'what age and gender should I use for health context? You can skip either.',
+      'how old are you and what\'s your gender?',
     )
     expect(raw).toContain(
       'If they already gave their name, skip this even if they skipped age/gender; never re-ask solely for optional demographics.',
@@ -844,7 +844,8 @@ describe('assistant skill assets', () => {
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
     expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(4)
     const removedFixedScripts = [
-      'One high-level setup detail first: what age and gender should I use for context? You can skip either.',
+      'One high-level setup detail first: what age and gender should I use for context?',
+      'how old are you, and what gender should I use for health context?',
       'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
       'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',

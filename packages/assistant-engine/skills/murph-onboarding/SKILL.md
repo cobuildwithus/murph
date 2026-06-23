@@ -83,7 +83,7 @@ Do not append capability paragraphs or intake questions. If it is already visibl
 2. Name and optional age/gender. After the welcome, ask exactly this setup question by itself:
 
 ```text
-What's your name? And if you're comfortable sharing, what age and gender should I use for health context? You can skip either.
+What's your name? And if you're comfortable sharing, how old are you and what's your gender?
 ```
 
 If they already gave their name, skip this even if they skipped age/gender; never re-ask solely for optional demographics. If their answer gives only a name, that is enough to continue. If they decline or skip the name, continue without pressing and treat it as a skipped setup fact. Do not press for skipped demographic details, birth date, birth month/year, sex assigned at birth, or gender wording beyond the user's plain answer.
