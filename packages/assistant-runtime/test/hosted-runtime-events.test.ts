@@ -1338,8 +1338,8 @@ describe("executeHostedMailboxEvent", () => {
       tags: [
         "assistant",
         "scheduled",
-        "onboarding",
         "murph-managed",
+        "onboarding",
         "murph-managed:onboarding-followup",
       ],
       title: "Finish Murph onboarding follow-up",
