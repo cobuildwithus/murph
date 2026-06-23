@@ -6509,6 +6509,41 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
+    const withoutMailboxProofInput: AssistantInputCandidate = {
+      ...hostedInput,
+      event: {
+        ...hostedInput.event,
+        hostedMailboxItemId: null,
+      },
+    }
+    const withoutMailboxProofContext = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(withoutMailboxProofInput),
+    ])
+    if (!withoutMailboxProofContext) {
+      throw new Error('expected reply context without mailbox proof')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: withoutMailboxProofContext,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_replay',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    const withoutProofSend = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    const withoutProofKey = withoutProofSend?.deliveryIdempotencyKey
+    expect(withoutProofKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(withoutProofSend?.hostedDeliveryIdempotency).toBeNull()
+
+    replyMocks.sendAssistantMessage.mockClear()
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
@@ -6526,6 +6561,8 @@ describe('assistant auto-reply runtime', () => {
     })
     const firstSend = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
     const firstKey = firstSend?.deliveryIdempotencyKey
+
+    expect(firstKey).toBe(withoutProofKey)
 
     replyMocks.sendAssistantMessage.mockClear()
     await reply.processAssistantAutoReplyGroup({

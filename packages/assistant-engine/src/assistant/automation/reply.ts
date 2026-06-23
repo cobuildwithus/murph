@@ -1259,8 +1259,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
       assistantTurnOrdinal,
       channel,
       conversationId,
-      inboundMailboxItemIds: hostedDeliveryIdempotency?.inboundMailboxItemIds ??
-        deliveryKeyMailboxItemIds,
+      inboundMailboxItemIds: deliveryKeyMailboxItemIds,
       recipientKey,
       userId,
     }),
