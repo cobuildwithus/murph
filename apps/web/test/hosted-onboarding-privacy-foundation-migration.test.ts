@@ -378,7 +378,6 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_ai_usage_token_pricing_basis",
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
-      "2026062100_hosted_ai_usage_period_counter_backfill",
       "2026062100_hosted_computer_single_member_profile",
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
