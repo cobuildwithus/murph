@@ -33,6 +33,7 @@ import {
   isHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceReadResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
@@ -40,6 +41,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
 import {
@@ -1450,6 +1452,34 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
+  let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
+  try {
+    preCheckpointReplacedSnapshotRef = await readCurrentHostedWorkspaceSnapshotRef({
+      environment: input.environment,
+      fetchImpl: fetch,
+      userId: input.userId,
+    });
+  } catch {
+    return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+  }
+  if (
+    preCheckpointReplacedSnapshotRef
+    && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
+    && !session.replacedSnapshotRef
+  ) {
+    try {
+      await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
+        env: input.env,
+        replacedSnapshotRef: preCheckpointReplacedSnapshotRef,
+        session,
+        userId: input.userId,
+      });
+      session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
+    } catch {
+      return jsonError("Hosted workspace replaced snapshot cleanup state is unavailable.", 503);
+    }
+  }
+
   const retireAfterAmbiguousCheckpoint = async () => {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
@@ -1531,7 +1561,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   });
   if (!replacedSnapshotCleanupSucceeded) {
     const replacedSnapshotRef = checkpoint.replacedSnapshotRef ?? null;
-    if (replacedSnapshotRef) {
+    if (replacedSnapshotRef && !session.replacedSnapshotRef) {
       await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
         env: input.env,
         replacedSnapshotRef,
@@ -1577,6 +1607,14 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
     replacedSnapshotRef,
     snapshotRef: input.snapshotRef,
   });
+}
+
+function isReplacementRefSameAsSnapshotRef(
+  replacedSnapshotRef: HostedExecutionSnapshotRefValue,
+  snapshotRef: HostedWorkspaceSnapshotV2Ref,
+): boolean {
+  return isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
+    && hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, snapshotRef);
 }
 
 async function deleteReplacedWorkspaceSnapshotRef(input: {
@@ -2058,6 +2096,33 @@ async function fetchHostedExecutionWorkspaceSnapshotCheckpoint(input: {
     path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
+}
+
+async function readCurrentHostedWorkspaceSnapshotRef(input: {
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  fetchImpl: typeof fetch;
+  userId: string;
+}): Promise<HostedExecutionSnapshotRefValue | null> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.environment.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+      : {}),
+    baseUrl: input.environment.hostedWebBaseUrl,
+    boundUserId: input.userId,
+    callbackSigning: input.environment.webCallbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "GET",
+    path: HOSTED_RUNTIME_WORKSPACE_PATH,
+    timeoutMs: input.environment.webControlTimeoutMs,
+  });
+  if (!response.ok) {
+    throw new Error(`Hosted workspace read failed with HTTP ${response.status}.`);
+  }
+  const workspaceRead = parseHostedWorkspaceReadResponse(await response.json());
+  if (workspaceRead.workspace && workspaceRead.workspace.userId !== input.userId) {
+    throw new Error("Hosted workspace read user mismatch.");
+  }
+  return workspaceRead.workspace?.snapshotRef ?? null;
 }
 
 function readWorkspaceSnapshotAad(value: unknown, label: string): HostedWorkspaceSnapshotV2Aad {

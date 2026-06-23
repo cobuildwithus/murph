@@ -205,22 +205,22 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
     protectedAttachmentIds: [protectedAttachmentId],
   });
 
-  assert.equal(result.expiredAttachments, 2);
+  assert.equal(result.expiredAttachments, 3);
   assert.equal(await fileExists(vaultRoot, imagePath), false);
   assert.equal(await fileExists(vaultRoot, audioPath), false);
   assert.equal(await fileExists(vaultRoot, documentPath), true);
   assert.equal(await fileExists(vaultRoot, protectedPath), true);
-  assert.equal(await fileExists(vaultRoot, tamperedPath), true);
+  assert.equal(await fileExists(vaultRoot, tamperedPath), false);
   assert.deepEqual(
     result.records.map((record) => record.storedPath).sort(),
-    [audioPath, imagePath].sort(),
+    [audioPath, imagePath, tamperedPath].sort(),
   );
 
   const retentionRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: buildInboxAttachmentRetentionLedgerPath("2026-07-05T00:00:00.000Z"),
   });
-  assert.equal(retentionRecords.length, 2);
+  assert.equal(retentionRecords.length, 3);
   assert.equal(
     (
       await runInboxMediaRetention({

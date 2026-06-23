@@ -100,9 +100,7 @@ export function createWorkspaceSnapshotSessionService(input: {
         }
       }
       await input.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
-      if (session.replacedSnapshotRef) {
-        await service.syncOrphanCandidateAlarm(session.userId);
-      }
+      await service.syncOrphanCandidateAlarm(session.userId);
       input.state.waitUntil(
         service.cleanupOrphanCandidatesBestEffort(sessionInput.userId),
       );
@@ -178,6 +176,21 @@ export function createWorkspaceSnapshotSessionService(input: {
         state: input.state,
         userId,
       });
+      const sessionSnapshotCandidate = currentSession
+        ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(currentSession)
+        : null;
+      if (sessionSnapshotCandidate) {
+        const createdAtMs = Date.parse(sessionSnapshotCandidate.createdAt);
+        if (
+          Number.isFinite(createdAtMs)
+          && nowMs - createdAtMs >= WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS
+        ) {
+          eligibleCandidates.push([
+            workspaceSnapshotUploadSessionCurrentStorageKey(),
+            sessionSnapshotCandidate,
+          ]);
+        }
+      }
       const sessionReplacedCandidate = currentSession
         ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(currentSession)
         : null;
@@ -288,6 +301,15 @@ export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
     state: input.state,
     userId: input.userId,
   });
+  const sessionSnapshotCandidate = currentSession
+    ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(currentSession)
+    : null;
+  if (sessionSnapshotCandidate) {
+    nextAtMs = selectEarliestWorkspaceSnapshotCleanupAlarm(
+      nextAtMs,
+      sessionSnapshotCandidate.createdAt,
+    );
+  }
   const sessionReplacedCandidate = currentSession
     ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(currentSession)
     : null;
@@ -324,6 +346,18 @@ async function readWorkspaceSnapshotUploadSessionForCleanup(input: {
   }
   const session = parseHostedWorkspaceSnapshotUploadSession(value);
   return session.userId === input.userId ? session : null;
+}
+
+function buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(
+  session: HostedWorkspaceSnapshotUploadSession,
+): HostedWorkspaceSnapshotV2OrphanCandidate {
+  return {
+    createdAt: session.createdAt,
+    objectKey: session.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+    snapshotId: session.snapshotId,
+    userId: session.userId,
+  };
 }
 
 function buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(

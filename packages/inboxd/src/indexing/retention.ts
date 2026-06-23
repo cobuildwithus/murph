@@ -185,7 +185,7 @@ export async function runInboxMediaRetention(
           }
           materializeCandidateCount += 1;
         }
-        if (integrity.kind !== "missing" && !isExpectedInboxMediaIntegrity(integrity, attachment)) {
+        if (integrity.kind === "invalid") {
           continue;
         }
         candidates.push({
@@ -286,7 +286,7 @@ export async function runInboxMediaRetention(
               candidate.storedPath,
               input.signal,
             );
-            if (!isExpectedInboxMediaIntegrity(integrity, candidate.attachment)) {
+            if (integrity.kind !== "ok") {
               continue;
             }
             if (selectedCandidateCount >= maxAttachments) {
@@ -355,15 +355,6 @@ export async function runInboxMediaRetention(
   } finally {
     closeActiveAttachmentParseJobProtector(activeParserJobProtector);
   }
-}
-
-function isExpectedInboxMediaIntegrity(
-  integrity: Awaited<ReturnType<typeof hashExistingVaultFile>>,
-  attachment: InboxCaptureAttachmentRecord,
-): integrity is { kind: "ok"; byteSize: number; sha256: string } {
-  return integrity.kind === "ok" &&
-    integrity.byteSize === (attachment.byteSize ?? integrity.byteSize) &&
-    integrity.sha256 === attachment.sha256;
 }
 
 function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {

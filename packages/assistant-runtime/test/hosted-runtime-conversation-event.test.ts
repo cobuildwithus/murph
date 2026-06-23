@@ -290,6 +290,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
@@ -789,6 +790,8 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
   });
 
   it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
     const order: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
@@ -854,35 +857,14 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
     expect(order).toEqual(["processCapture"]);
     expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
+      nextWakeAt: "2026-04-08T00:01:00.000Z",
       parserProcessed: 0,
     });
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
     expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
-    expect(inboxRuntime.claimNextAttachmentParseJob).toHaveBeenCalledTimes(3);
-    expect(inboxRuntime.claimNextAttachmentParseJob).toHaveBeenNthCalledWith(1, {
-      captureId: "capture_after_parser_setup_failure",
-    });
-    expect(inboxRuntime.claimNextAttachmentParseJob).toHaveBeenNthCalledWith(2, {
-      captureId: "capture_after_parser_setup_failure",
-    });
-    expect(inboxRuntime.claimNextAttachmentParseJob).toHaveBeenNthCalledWith(3, {
-      captureId: "capture_after_parser_setup_failure",
-    });
-    expect(inboxRuntime.failAttachmentParseJob).toHaveBeenCalledTimes(2);
-    expect(inboxRuntime.failAttachmentParseJob).toHaveBeenNthCalledWith(1, {
-      attempt: 2,
-      errorCode: "hosted_parser_drain_failed",
-      errorMessage: "Hosted conversation parser drain failed.",
-      jobId: "job_123",
-    });
-    expect(inboxRuntime.failAttachmentParseJob).toHaveBeenNthCalledWith(2, {
-      attempt: 2,
-      errorCode: "hosted_parser_drain_failed",
-      errorMessage: "Hosted conversation parser drain failed.",
-      jobId: "job_456",
-    });
+    expect(inboxRuntime.claimNextAttachmentParseJob).not.toHaveBeenCalled();
+    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
     expect(logRequests).toHaveLength(1);
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
@@ -894,11 +876,63 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCode: "runtime_error",
-          parserTerminalizedPendingJobs: 2,
+          nextWakeAtPresent: true,
+          parserTerminalizedPendingJobs: 0,
           safeErrorMessage: "Hosted execution runtime failed.",
         },
       }),
     ]);
+
+    mocks.openInboxRuntime.mockResolvedValueOnce(inboxRuntime);
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: vi.fn(),
+      processCapture: vi.fn(async () => {
+        order.push("processCaptureRetry");
+        return {
+          captureId: "capture_after_parser_setup_failure",
+          createdAt: "2026-04-08T00:01:00.000Z",
+          deduped: false,
+          envelopePath: "raw/inbox/linq/capture_after_parser_setup_failure/envelope.json",
+          eventId: "evt_capture_after_parser_setup_failure_retry",
+        };
+      }),
+      runtime: input.runtime,
+    }));
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const retryResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: {
+        ...createRuntimeWithLogPort(logRequests),
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_setup_failure_retry",
+        linqMessage: {
+          chatId: "chat_after_parser_setup_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:01:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(order).toEqual(["processCapture", "processCaptureRetry"]);
+    expect(retryResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 2,
+    });
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(2);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
+    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
   });
 
   it("does not initialize parser tooling for legacy non-media pending jobs", async () => {

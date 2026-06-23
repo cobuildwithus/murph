@@ -52,6 +52,8 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
+const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
+
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
   metrics: HostedConversationWakeMetrics;
@@ -91,7 +93,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
         { cause: error },
       );
     }
-    const parserProcessed = await drainHostedConversationParsers({
+    const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       parserToolchain: input.runtime.parserToolchain ?? null,
       platform: input.runtime.platform,
@@ -99,10 +101,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
 
-    const metrics: HostedConversationWakeMetrics = {
-      nextWakeAt: null,
-      parserProcessed,
-    };
     return {
       capture: persistedCapture,
       metrics,
@@ -122,7 +120,7 @@ async function drainHostedConversationParsers(input: {
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   vaultRoot: string;
-}): Promise<number> {
+}): Promise<HostedConversationWakeMetrics> {
   const hasPendingJob = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
     limit: 1,
@@ -135,9 +133,10 @@ async function drainHostedConversationParsers(input: {
       runtime: input.runtime,
     })
   ) {
-    return 0;
+    return createHostedConversationParserMetrics();
   }
 
+  let parserService: ReturnType<typeof createInboxParserService>;
   try {
     const parserConfig = await createConfiguredParserRegistry({
       ...(input.parserToolchain
@@ -153,12 +152,21 @@ async function drainHostedConversationParsers(input: {
         : {}),
       vaultRoot: input.vaultRoot,
     });
-    const parserService = createInboxParserService({
+    parserService = createInboxParserService({
       ffmpeg: parserConfig.ffmpeg,
       registry: parserConfig.registry,
       runtime: input.runtime,
       vaultRoot: input.vaultRoot,
     });
+  } catch (error) {
+    return await logHostedConversationParserSetupFailure({
+      captureId: input.captureId,
+      error,
+      platform: input.platform,
+    });
+  }
+
+  try {
     const results = await parserService.drain({
       captureId: input.captureId,
     });
@@ -195,15 +203,12 @@ async function drainHostedConversationParsers(input: {
         platform: input.platform,
       });
     }
-    return results.length;
+    return createHostedConversationParserMetrics({
+      parserProcessed: results.length,
+    });
   } catch (error) {
     const errorCode = deriveHostedExecutionErrorCode(error);
     const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-    const parserTerminalizedPendingJobs = failClaimableHostedConversationParserJobs({
-      captureId: input.captureId,
-      errorMessage: "Hosted conversation parser drain failed.",
-      runtime: input.runtime,
-    });
     await writeHostedRuntimeLogBestEffort({
       entry: {
         component: "mailbox",
@@ -218,38 +223,57 @@ async function drainHostedConversationParsers(input: {
             typeof diagnostics?.errorMessage === "string"
               ? diagnostics.errorMessage
               : "Hosted conversation parser drain failed.",
-          parserTerminalizedPendingJobs,
+          parserTerminalizedPendingJobs: 0,
         },
       },
       platform: input.platform,
     });
-    return 0;
+    return createHostedConversationParserMetrics();
   }
 }
 
-function failClaimableHostedConversationParserJobs(input: {
+async function logHostedConversationParserSetupFailure(input: {
   captureId: string;
-  errorMessage: string;
-  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
-}): number {
-  let failedJobs = 0;
-  while (true) {
-    const job = input.runtime.claimNextAttachmentParseJob({
-      captureId: input.captureId,
-    });
-    if (!job) {
-      return failedJobs;
-    }
-    const result = input.runtime.failAttachmentParseJob({
-      attempt: job.attempts,
-      errorCode: "hosted_parser_drain_failed",
-      errorMessage: input.errorMessage,
-      jobId: job.jobId,
-    });
-    if (result.applied) {
-      failedJobs += 1;
-    }
-  }
+  error: unknown;
+  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+}): Promise<HostedConversationWakeMetrics> {
+  const errorCode = deriveHostedExecutionErrorCode(input.error);
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  const nextWakeAt = new Date(Date.now() + HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS)
+    .toISOString();
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "mailbox",
+      errorCode,
+      eventCode: "mailbox.parser_drain_failed",
+      level: "warn",
+      phase: "import",
+      redactedJson: {
+        captureIdPresent: Boolean(input.captureId),
+        errorCode,
+        nextWakeAtPresent: true,
+        parserTerminalizedPendingJobs: 0,
+        safeErrorMessage:
+          typeof diagnostics?.errorMessage === "string"
+            ? diagnostics.errorMessage
+            : "Hosted conversation parser setup failed.",
+      },
+    },
+    platform: input.platform,
+  });
+  return createHostedConversationParserMetrics({
+    nextWakeAt,
+  });
+}
+
+function createHostedConversationParserMetrics(input: {
+  nextWakeAt?: string | null;
+  parserProcessed?: number;
+} = {}): HostedConversationWakeMetrics {
+  return {
+    nextWakeAt: input.nextWakeAt ?? null,
+    parserProcessed: input.parserProcessed ?? 0,
+  };
 }
 
 interface HostedParserFailureLogItem {

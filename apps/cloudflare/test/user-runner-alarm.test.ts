@@ -2436,6 +2436,8 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it("records the previous workspace snapshot object when replacing the active upload session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
     const { runner, storageValues } = createRunnerHarness({ bucket });
     const previousObjectKey =

@@ -37,6 +37,7 @@ import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionWorkingSnapshotRef,
@@ -4309,22 +4310,22 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-      return new Response(
-        JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-          "5",
-          checkpointRequest.snapshotRef,
-        )),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            checkpointRequest.snapshotRef,
+          )),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
+        );
+      },
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4357,9 +4358,10 @@ describe("handleRunnerOutboundRequest", () => {
       }),
     }));
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
-    const checkpointInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
+    const checkpointInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
     expect(JSON.parse(String(checkpointInit?.body))).toEqual(expect.objectContaining({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
@@ -4420,25 +4422,26 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-      return new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            checkpointRequest.snapshotRef,
-          ),
-          replacedSnapshotRef,
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            replacedSnapshotRef,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
+        );
+      },
     }));
 
     const response = await handleRunnerOutboundRequest(
@@ -4533,9 +4536,9 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: async (args) => {
       if (String(args[0]) === `https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`) {
         return await fixture.fetchMock(...args);
       }
@@ -4555,6 +4558,7 @@ describe("handleRunnerOutboundRequest", () => {
           status: 200,
         },
       );
+      },
     }));
 
     const response = await handleRunnerOutboundRequest(
@@ -4638,25 +4642,26 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-      return new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            checkpointRequest.snapshotRef,
-          ),
-          replacedSnapshotRef,
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            replacedSnapshotRef,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
+        );
+      },
     }));
 
     const response = await handleRunnerOutboundRequest(
@@ -4733,26 +4738,28 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-      return new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            checkpointRequest.snapshotRef,
-          ),
-          replacedSnapshotRef,
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            replacedSnapshotRef,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
-    }));
+        );
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
@@ -4768,7 +4775,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace replaced snapshot cleanup failed.",
     });
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledOnce();
@@ -4781,6 +4788,86 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("does not checkpoint when the replaced snapshot cleanup ref cannot be persisted first", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_replaced_ref_recording_fails";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_previous_ref_recording_fails";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 5,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    runner.createHostedWorkspaceSnapshotUploadSession.mockImplementationOnce(async () => {
+      throw new Error("session write failed");
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: () => {
+        throw new Error("checkpoint should not run without durable cleanup state");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace replaced snapshot cleanup state is unavailable.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      snapshotId,
+    });
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)?.replacedSnapshotRef).toBeUndefined();
   });
 
   it("finishes replaced snapshot cleanup when completion retry sees the new snapshot already current", async () => {
@@ -4830,29 +4917,30 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(
-        args,
-        "workspace snapshot checkpoint retry request",
-      );
-      return new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            checkpointRequest.snapshotRef,
-          ),
-          checkpointConflictReason: "workspace_version",
-          checkpointed: false,
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(
+          args,
+          "workspace snapshot checkpoint retry request",
+        );
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            checkpointConflictReason: "workspace_version",
+            checkpointed: false,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
+        );
+      },
     }));
 
     const response = await handleRunnerOutboundRequest(
@@ -4937,25 +5025,26 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      ...args: Parameters<typeof fetch>
-    ): Promise<Response> => {
-      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-      return new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-            "5",
-            checkpointRequest.snapshotRef,
-          ),
-          replacedSnapshotRef,
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            replacedSnapshotRef,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
           },
-          status: 200,
-        },
-      );
+        );
+      },
     }));
 
     const response = await handleRunnerOutboundRequest(
@@ -5039,6 +5128,9 @@ describe("handleRunnerOutboundRequest", () => {
           status: 200,
         });
       }
+      if (url.href === `https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}` && method === "GET") {
+        return createHostedWorkspaceReadFetchResponse();
+      }
       if (
         url.href === "https://web.example.test/api/internal/hosted-workspace/checkpoint"
         && method === "POST"
@@ -5076,7 +5168,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(bindingHead).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const headUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     verifyLocalS3SigV4QueryUrl({
       accessKeyId: "r2_access_fixture_test",
@@ -5858,17 +5950,19 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({
-        error: "stale checkpoint",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: () => new Response(
+        JSON.stringify({
+          error: "stale checkpoint",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 409,
         },
-        status: 409,
-      },
-    ));
+      ),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -5885,7 +5979,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint failed.",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
@@ -5933,8 +6027,10 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async () => {
-      throw new Error("ambiguous checkpoint failure");
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: () => {
+        throw new Error("ambiguous checkpoint failure");
+      },
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -5952,7 +6048,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint failed.",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
@@ -5995,18 +6091,20 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({
-        ...createHostedWorkspaceCheckpointResponse("4", null),
-        checkpointed: false,
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: () => new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponse("4", null),
+          checkpointed: false,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
         },
-        status: 200,
-      },
-    ));
+      ),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -6023,7 +6121,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint CAS failed.",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
@@ -6066,19 +6164,21 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({
-        ...createHostedWorkspaceCheckpointResponse("4", null),
-        checkpointConflictReason: "foreground_pending",
-        checkpointed: false,
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: () => new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponse("4", null),
+          checkpointConflictReason: "foreground_pending",
+          checkpointed: false,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
         },
-        status: 200,
-      },
-    ));
+      ),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -6107,7 +6207,7 @@ describe("handleRunnerOutboundRequest", () => {
         version: "4",
       }),
     }));
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
@@ -6150,26 +6250,28 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-      const checkpointRequest = readTestFetchBodyObject(args, "mutated checkpoint request");
-      const publishedRef = requireTestObject(checkpointRequest.snapshotRef, "mutated checkpoint ref");
-      const archive = requireTestObject(publishedRef.archive, "mutated checkpoint ref archive");
-      const mutatedRef = {
-        ...publishedRef,
-        archive: {
-          ...archive,
-          plaintextArchiveSha256: "d".repeat(64),
-        },
-      };
-      return new Response(
-        JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef("5", mutatedRef)),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(args, "mutated checkpoint request");
+        const publishedRef = requireTestObject(checkpointRequest.snapshotRef, "mutated checkpoint ref");
+        const archive = requireTestObject(publishedRef.archive, "mutated checkpoint ref archive");
+        const mutatedRef = {
+          ...publishedRef,
+          archive: {
+            ...archive,
+            plaintextArchiveSha256: "d".repeat(64),
           },
-          status: 200,
-        },
-      );
+        };
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef("5", mutatedRef)),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      },
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -6187,7 +6289,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint ref mismatch.",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
@@ -8050,6 +8152,56 @@ function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
       snapshotRef,
     },
   };
+}
+
+function createHostedWorkspaceReadResponse(
+  snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
+): HostedWorkspaceReadResponse {
+  return {
+    fetchedAt: "2026-04-26T00:00:05.000Z",
+    workspace: {
+      checkpointedAt: "2026-04-26T00:00:05.000Z",
+      createdAt: "2026-04-26T00:00:00.000Z",
+      inboxMediaRetentionWakeAt: null,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef,
+      updatedAt: "2026-04-26T00:00:05.000Z",
+      userId: "member_123",
+      version: "4",
+    },
+  };
+}
+
+function createHostedWorkspaceReadFetchResponse(
+  snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
+): Response {
+  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(snapshotRef)), {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    status: 200,
+  });
+}
+
+function isHostedWorkspaceReadFetch(args: Parameters<typeof fetch>): boolean {
+  const [request, init] = args;
+  const url = request instanceof Request ? request.url : String(request);
+  const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+  return url === `https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}` && method === "GET";
+}
+
+function createWorkspaceSnapshotCompleteWebFetchMock(input: {
+  currentSnapshotRef?: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"];
+  onCheckpoint(args: Parameters<typeof fetch>): Promise<Response> | Response;
+}): ReturnType<typeof vi.fn<typeof fetch>> {
+  return vi.fn<typeof fetch>(async (...args: Parameters<typeof fetch>): Promise<Response> => {
+    if (isHostedWorkspaceReadFetch(args)) {
+      return createHostedWorkspaceReadFetchResponse(input.currentSnapshotRef ?? null);
+    }
+    return await input.onCheckpoint(args);
+  });
 }
 
 function readTestFetchBodyObject(
