@@ -5,7 +5,7 @@ import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 
-const HANDOFF_DONE_REPLY_BODY = "done";
+const HANDOFF_DONE_REPLY_BODY = "Done";
 
 export async function POST(
   request: Request,
