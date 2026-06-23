@@ -1,8 +1,7 @@
-import { CheckCircle2, Clock3, Monitor } from "lucide-react";
+import { CheckCircle2, Clock3 } from "lucide-react";
 
+import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
-import { ComputerHandoffDoneButton } from "@/src/components/computer-use/computer-handoff-done-button";
-import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -99,28 +98,11 @@ export default async function ComputerHandoffPage({
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
-      <iframe
-        allow={state.iframeAllow}
-        className="block h-dvh w-full border-0 bg-foreground"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
-        src={state.liveViewUrl}
-        title="Murph browser handoff"
+      <ComputerHandoffActiveView
+        doneEndpoint={doneEndpoint}
+        iframeAllow={state.iframeAllow}
+        liveViewUrl={state.liveViewUrl}
       />
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
-      >
-        <ComputerHandoffFloatingIsland
-          handle={
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            </span>
-          }
-        >
-          <ComputerHandoffDoneButton endpoint={doneEndpoint} />
-        </ComputerHandoffFloatingIsland>
-      </div>
     </main>
   );
 }
