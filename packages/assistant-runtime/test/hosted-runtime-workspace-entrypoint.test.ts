@@ -442,6 +442,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       }), {
         async createCheckpointSnapshot() {
+          const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+          const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+          assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
           return {
             snapshotRef: createWorkspaceSnapshotV2Ref(
               "snapshot-legacy-vault-format-migration-checkpoint",

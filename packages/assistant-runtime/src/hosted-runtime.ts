@@ -339,9 +339,11 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
   return existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata));
 }
 
-async function ensureHostedVaultFormatCurrentForRuntime(
-  vaultRoot: string,
-): Promise<HostedVaultFormatMigrationRuntimeResult> {
+async function ensureHostedVaultFormatCurrentForRuntime(input: {
+  assertRuntimeNotAborted: () => void;
+  vaultRoot: string;
+}): Promise<HostedVaultFormatMigrationRuntimeResult> {
+  const { assertRuntimeNotAborted, vaultRoot } = input;
   if (!hasHostedVaultMetadata(vaultRoot)) {
     return { mutated: false };
   }
@@ -352,11 +354,13 @@ async function ensureHostedVaultFormatCurrentForRuntime(
 
   let mutated = false;
   while (true) {
+    assertRuntimeNotAborted();
     const result = await runIntegrationIngestMigration({
       vaultRoot,
       apply: true,
       maxBundles: HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES,
     });
+    assertRuntimeNotAborted();
     mutated ||= result.mutated;
     if (result.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
       return { mutated };
@@ -837,10 +841,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    const hostedVaultFormatMigration = await raceHostedRuntimeCancellation(
-      ensureHostedVaultFormatCurrentForRuntime(restored.vaultRoot),
-      runtimeAbortController.signal,
-    );
+    const hostedVaultFormatMigration = await ensureHostedVaultFormatCurrentForRuntime({
+      assertRuntimeNotAborted,
+      vaultRoot: restored.vaultRoot,
+    });
     assertRuntimeNotAborted();
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
