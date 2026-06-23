@@ -11,7 +11,7 @@ import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-s
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { cn } from "@/src/lib/utils";
 
-const HANDOFF_DONE_REPLY_BODY = "done";
+const HANDOFF_DONE_REPLY_BODY = "Done";
 
 export default async function ComputerHandoffPage({
   params,

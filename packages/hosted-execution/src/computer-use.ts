@@ -98,139 +98,11 @@ export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
 export type HostedComputerFinishOutcome =
   (typeof HOSTED_COMPUTER_FINISH_OUTCOMES)[number];
 
-export function isHostedComputerNavigationUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      isHostedComputerPublicNavigationHost(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-export function isHostedComputerPublicNavigationHost(value: string): boolean {
-  const hostname = normalizeComputerNavigationHostname(value);
-  if (!hostname) {
-    return false;
-  }
-
-  if (isHostedComputerIpLiteral(hostname)) {
-    return isHostedComputerPublicIpAddress(hostname);
-  }
-
-  if (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") ||
-    hostname.endsWith(".internal")
-  ) {
-    return false;
-  }
-
-  return hostname.includes(".");
-}
-
-export function isHostedComputerIpLiteral(value: string): boolean {
-  const hostname = normalizeComputerNavigationHostname(value);
-  return Boolean(readComputerNavigationIpv4(hostname)) || hostname.includes(":");
-}
-
-export function isHostedComputerPublicIpAddress(value: string): boolean {
-  const hostname = normalizeComputerNavigationHostname(value);
-  const mappedIpv4 = hostname.match(/(?:::ffff:|:)(\d{1,3}(?:\.\d{1,3}){3})$/iu)?.[1] ?? null;
-  const ipv4 = readComputerNavigationIpv4(mappedIpv4 ?? hostname);
-  if (ipv4) {
-    return isPublicComputerNavigationIpv4(ipv4);
-  }
-
-  if (!hostname.includes(":")) {
-    return false;
-  }
-
-  return isPublicComputerNavigationIpv6(hostname);
-}
-
-function normalizeComputerNavigationHostname(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^\[/u, "")
-    .replace(/\]$/u, "")
-    .replace(/\.$/u, "");
-}
-
-function readComputerNavigationIpv4(value: string): [number, number, number, number] | null {
-  const parts = value.split(".");
-  if (parts.length !== 4) {
-    return null;
-  }
-  const octets: [number, number, number, number] = [0, 0, 0, 0];
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index] ?? "";
-    if (!/^\d{1,3}$/u.test(part)) {
-      return null;
-    }
-    const parsed = Number(part);
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 255) {
-      return null;
-    }
-    octets[index] = parsed;
-  }
-  return octets;
-}
-
-function isPublicComputerNavigationIpv4([a, b]: [number, number, number, number]): boolean {
-  if (a === 0 || a === 10 || a === 127 || a >= 224) {
-    return false;
-  }
-  if (a === 100 && b >= 64 && b <= 127) {
-    return false;
-  }
-  if (a === 169 && b === 254) {
-    return false;
-  }
-  if (a === 172 && b >= 16 && b <= 31) {
-    return false;
-  }
-  if (a === 192 && (b === 0 || b === 168)) {
-    return false;
-  }
-  if (a === 198 && (b === 18 || b === 19 || b === 51)) {
-    return false;
-  }
-  if (a === 203 && b === 0) {
-    return false;
-  }
-  return true;
-}
-
-function isPublicComputerNavigationIpv6(value: string): boolean {
-  const normalized = value.toLowerCase();
-  if (
-    normalized.startsWith("::") ||
-    normalized.startsWith("64:ff9b:") ||
-    normalized.startsWith("100:") ||
-    normalized.startsWith("2001:0:") ||
-    normalized.startsWith("2001:2:") ||
-    normalized.startsWith("2002:") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    /^fe[89ab][0-9a-f]?:/u.test(normalized) ||
-    normalized.startsWith("ff") ||
-    normalized.startsWith("2001:db8:")
-  ) {
-    return false;
-  }
-
-  return /^[0-9a-f:.]+$/u.test(normalized);
-}
-
-const hostedComputerNavigationUrlSchema = z
+const hostedComputerStartUrlSchema = z
   .string()
-  .url()
-  .refine(isHostedComputerNavigationUrl, {
-    message: "Hosted computer navigation URLs must use public http or https hosts.",
-  });
+  .trim()
+  .min(1)
+  .max(4_000);
 
 export const hostedComputerDeliveryContextSchema = z
   .object({
@@ -244,7 +116,7 @@ export const hostedComputerStartRunRequestSchema = z
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
-    startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
+    startUrl: hostedComputerStartUrlSchema.nullable().default(null),
   })
   .strict()
   .transform(({ goal: _goal, ...request }) => request);

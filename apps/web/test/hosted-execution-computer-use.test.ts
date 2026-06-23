@@ -549,7 +549,7 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toBeNull();
   });
 
-  it("rejects non-web start URLs before reaching Kernel", async () => {
+  it("passes arbitrary start URLs to Kernel navigation", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const startKernel = createFakeKernel();
     const startService = new ComputerUseService({
@@ -569,10 +569,14 @@ describe("ComputerUseService", () => {
     await expect(startService.startRun({
       memberId: "member_123",
       startUrl: "data:text/html,<h1>owned</h1>",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
     });
-    expect(startKernel.createdSessionIds).toEqual([]);
+    expect(startKernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(startKernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "data:text/html,<h1>owned</h1>",
+    );
   });
 
   it("does not restore terminal URL or title from a stale observe result", async () => {
@@ -1498,10 +1502,9 @@ describe("ComputerUseService", () => {
       }),
     ]);
     expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
-    expect(kernel.executePlaywrightCalls).toBe(2);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("route(\"**/*\"");
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("page.goto(");
-    expect(kernel.executePlaywrightInputs[1]?.code ?? "").toContain("page.goto(");
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("page.goto(");
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("route(\"**/*\"");
     expect(store.run).toMatchObject({
       lastTitle: "Page",
       lastUrl: "https://example.test/",
@@ -1599,7 +1602,7 @@ describe("ComputerUseService", () => {
     }));
   });
 
-  it("installs the public-network route guard before storing a blank browser live view", async () => {
+  it("stores a blank browser live view without extra navigation setup", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       memberRuns: [],
@@ -1625,12 +1628,7 @@ describe("ComputerUseService", () => {
       status: "running",
     });
 
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    const guardCode = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(guardCode).toContain("route(\"**/*\"");
-    expect(guardCode).toContain("route.abort(\"blockedbyclient\")");
-    expect(guardCode).not.toContain("murphDnsPublicCache");
-    expect(guardCode).not.toContain("page.goto(");
+    expect(kernel.executePlaywrightCalls).toBe(0);
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
       status: "running",
@@ -1754,7 +1752,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects start URLs whose DNS resolves to private network addresses before creating a browser", async () => {
+  it("does not preflight start URL DNS before creating a browser", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -1767,10 +1765,6 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       kernel,
-      navigationDnsLookup: async () => [
-        { address: "93.184.216.34" },
-        { address: "169.254.169.254" },
-      ],
       now: () => now,
       store,
     });
@@ -1778,12 +1772,13 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
     });
-    expect(kernel.createdBrowserInputs).toEqual([]);
-    expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.createdBrowserInputs).toHaveLength(1);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("https://dentist.example.test");
   });
 
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
@@ -2148,7 +2143,7 @@ describe("ComputerUseService", () => {
 
     expect(kernel.executePlaywrightCalls).toBe(1);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("route(\"**/*\"");
+    expect(code).not.toContain("route(\"**/*\"");
     expect(code).toContain("getByRole('button', { name: 'Place order', exact: true })");
     expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
@@ -2172,6 +2167,7 @@ describe("ComputerUseService", () => {
         throw computerUseError({
           code: "HOSTED_COMPUTER_EVAL_FAILED",
           details: {
+            kernelError: "Error: strict mode violation: button matched multiple elements",
             kernelErrorPresent: true,
             kernelStderrPresent: true,
             kernelStdoutPresent: false,
@@ -2197,6 +2193,7 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
         codeHash: expect.any(String),
+        kernelError: "Error: strict mode violation: button matched multiple elements",
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,
@@ -2213,7 +2210,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("passes raw Playwright source through the guarded wrapper", async () => {
+  it("passes raw Playwright source through the wrapper", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
       executeResult: {
@@ -2244,8 +2241,8 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18000);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
     expect(code).toContain("await page.waitForTimeout(0); return { waited: true };");
-    expect(code).toContain("route(\"**/*\"");
-    expect(code).toContain("isMurphPublicNavigationUrl(__murphUrl)");
+    expect(code).not.toContain("route(\"**/*\"");
+    expect(code).not.toContain("isMurphPublicNavigationUrl");
   });
 
   it("rejects malformed browser action state results as unknown outcomes", async () => {
@@ -2319,7 +2316,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects browser action state results with private final URLs", async () => {
+  it("accepts browser action state results with non-public final URLs", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -2346,18 +2343,20 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
+    })).resolves.toMatchObject({
+      result: { inspected: true },
+      title: "Internal",
+      url: "http://127.0.0.1/latest/meta-data",
     });
     expect(kernel.executePlaywrightCalls).toBe(1);
     expect(store.run).toMatchObject({
-      lastTitle: "Old title",
-      lastUrl: "https://old.example.test",
+      lastTitle: "Internal",
+      lastUrl: "http://127.0.0.1/latest/meta-data",
       status: "running",
     });
   });
 
-  it("uses the Kernel-side public-network route guard for raw browser actions", async () => {
+  it("runs raw browser actions without injecting a route guard", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2371,7 +2370,6 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       kernel,
-      navigationDnsLookup: async () => [{ address: "93.184.216.34" }],
       now: () => now,
       store,
     });
@@ -2388,11 +2386,11 @@ describe("ComputerUseService", () => {
     });
 
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("node:dns/promises");
-    expect(code).toContain("unroute(\"**/*\"");
-    expect(code).toContain("route(\"**/*\"");
-    expect(code).toContain("route.abort(\"blockedbyclient\")");
     expect(code).toContain("await page.goto('https://example.com/checkout'");
+    expect(code).not.toContain("node:dns/promises");
+    expect(code).not.toContain("unroute(\"**/*\"");
+    expect(code).not.toContain("route(\"**/*\"");
+    expect(code).not.toContain("route.abort(\"blockedbyclient\")");
     expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",
@@ -3070,9 +3068,8 @@ describe("ComputerUseService", () => {
       kernel.createdBrowserInputs[0]?.browserName,
     );
     expect(kernel.createdBrowserInputs.every((browserInput) => !("startUrl" in browserInput))).toBe(true);
-    expect(kernel.executePlaywrightInputs.some((executeInput) =>
-      executeInput.code.includes("route(\"**/*\"") &&
-      !executeInput.code.includes("page.goto(")
+    expect(kernel.executePlaywrightInputs.every((executeInput) =>
+      !executeInput.code.includes("route(\"**/*\"")
     )).toBe(true);
   });
 
@@ -3160,9 +3157,9 @@ describe("ComputerUseService", () => {
       }),
     ]);
     expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
-    const guardCode = kernel.executePlaywrightInputs.at(-1)?.code ?? "";
-    expect(guardCode).toContain("route(\"**/*\"");
-    expect(guardCode).not.toContain("page.goto(");
+    expect(kernel.executePlaywrightInputs.every((executeInput) =>
+      !executeInput.code.includes("route(\"**/*\"")
+    )).toBe(true);
   });
 
   it("deletes an orphan replacement browser before retrying a browserless login checkpoint", async () => {

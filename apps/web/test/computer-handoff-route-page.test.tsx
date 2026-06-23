@@ -119,7 +119,7 @@ describe("computer handoff route and page", () => {
     expect(mocks.service.readHandoffPageState).not.toHaveBeenCalled();
   });
 
-  it("returns the preferred contact deep link with a literal done body", async () => {
+  it("returns the preferred contact deep link with a literal Done body", async () => {
     const response = await computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
         method: "POST",
@@ -129,7 +129,7 @@ describe("computer handoff route and page", () => {
     const body = (await response.json()) as { redirectTo: string };
 
     expect(response.status).toBe(200);
-    expect(body.redirectTo).toBe("sms:+15550100001?body=done");
+    expect(body.redirectTo).toBe("sms:+15550100001?body=Done");
     expect(body.redirectTo).not.toContain("private");
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -176,9 +176,9 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("Suggested reply"), false);
     assert.equal(markup.includes("finished_browser_step"), false);
     assert.deepEqual(hrefs, [
-      "sms:+15550100001?body=done",
-      "https://t.me/withmurph_bot?text=done",
-      "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph&amp;body=done",
+      "sms:+15550100001?body=Done",
+      "https://t.me/withmurph_bot?text=Done",
+      "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph&amp;body=Done",
     ]);
     expect(mocks.service.readHandoffPageState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -186,7 +186,7 @@ describe("computer handoff route and page", () => {
     });
   });
 
-  it("renders a literal done fallback when completed handoff has no contact channel", async () => {
+  it("renders a literal Done fallback when completed handoff has no contact channel", async () => {
     mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
       initialContactChannels: {
         email: false,
@@ -203,7 +203,7 @@ describe("computer handoff route and page", () => {
 
     assert.match(markup, /Browser step saved/);
     assert.match(markup, /Return to your Murph thread and reply with:/);
-    assert.match(markup, />done</);
+    assert.match(markup, />Done</);
     assert.equal(markup.includes("Suggested reply"), false);
     assert.equal(markup.includes("finished_browser_step"), false);
   });

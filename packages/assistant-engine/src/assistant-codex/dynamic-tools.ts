@@ -13,7 +13,6 @@ import {
   hostedComputerActRequestSchema,
   hostedComputerOsControlRequestSchema,
   hostedComputerPauseForUserRequestSchema,
-  isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
@@ -549,10 +548,9 @@ const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
 
 const computerNavigationUrlSchema = z
   .string()
-  .url()
-  .refine(isHostedComputerNavigationUrl, {
-    message: 'Hosted computer navigation URLs must use http or https.',
-  })
+  .trim()
+  .min(1)
+  .max(4_000)
 
 const computerStartRunArgumentsSchema = z
   .object({
@@ -1620,12 +1618,32 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
     readHostedComputerApiErrorDetailLine('codeHash', record.codeHash),
     readHostedComputerApiErrorDetailLine('computerOsControl', record.computerOsControl),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightError', record.kernelError),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightStderr', record.kernelStderr),
     readHostedComputerApiErrorDetailLine('kernelErrorPresent', record.kernelErrorPresent),
     readHostedComputerApiErrorDetailLine('kernelStderrPresent', record.kernelStderrPresent),
     readHostedComputerApiErrorDetailLine('kernelStdoutPresent', record.kernelStdoutPresent),
   ].filter((line): line is string => line !== null)
 
   return lines.length > 0 ? lines.join('\n') : null
+}
+
+function readHostedComputerApiErrorDiagnosticBlock(
+  label: string,
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const text = value.trim()
+  if (!text) {
+    return null
+  }
+
+  return text.includes('\n')
+    ? `${label}:\n${text}`
+    : `${label}: ${text}`
 }
 
 function readHostedComputerApiErrorDetailLine(

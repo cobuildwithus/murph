@@ -109,6 +109,24 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('guides explicit structured product feedback capture', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Product feedback:')
+    expect(prompt).toContain('`murph.submit_product_feedback`')
+    expect(prompt).toContain(
+      'treat explicit Murph product frustration, feature requests, or interest in shipped changelog items as feedback worth capturing',
+    )
+    expect(prompt).toContain(
+      'Record only the structured kind/topic and any relevant changelog item ids',
+    )
+    expect(prompt).toContain(
+      'Never submit inferred or silent feedback, raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose',
+    )
+    expect(prompt).not.toContain('feedback tags')
+    expect(prompt).not.toContain('feedbackTags')
+  })
+
   it('keeps the default profile on the shared execution guidance only', () => {
     const text = buildAssistantExecutionBehaviorText({
       profile: 'default',

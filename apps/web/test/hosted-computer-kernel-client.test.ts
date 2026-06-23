@@ -34,6 +34,7 @@ const kernelSdkMocks = vi.hoisted(() => {
     Kernel,
     NotFoundError: class NotFoundError extends Error {},
     computer,
+    playwrightExecute: kernelClient.browsers.playwright.execute,
   };
 });
 
@@ -179,4 +180,86 @@ describe("KernelComputerClient", () => {
       message: "Computer OS control failed.",
     });
   });
+
+  it("returns redacted Playwright evaluation diagnostics for failed browser code", async () => {
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+    kernelSdkMocks.playwrightExecute.mockResolvedValueOnce({
+      error: [
+        "Error: strict mode violation: getByRole('button', { name: 'Place order' }) resolved to 2 elements",
+        "    at locator.click (/tmp/project/test.ts:10:5)",
+        "See https://shop.example.test/account?debug=redaction-canary-value",
+      ].join("\n"),
+      stderr: "TimeoutError: page.waitForLoadState timed out\n    at /app/runner.js:20:1",
+      stdout: "model-controlled console output should stay hidden",
+      success: false,
+    });
+
+    let thrown: unknown;
+    try {
+      await client.executePlaywright({
+        code: "await page.getByRole('button', { name: 'Place order' }).click();",
+        sessionId: "kernel-session-1",
+        timeoutMs: 15000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "HOSTED_COMPUTER_EVAL_FAILED",
+      details: {
+        kernelError: expect.stringContaining("strict mode violation"),
+        kernelErrorPresent: true,
+        kernelStderr: expect.stringContaining("TimeoutError"),
+        kernelStderrPresent: true,
+        kernelStdoutPresent: true,
+      },
+      message: "Computer browser evaluation failed.",
+      retryable: true,
+    });
+    const details = readErrorDetails(thrown);
+    const serializedDetails = JSON.stringify(details);
+    expect(serializedDetails).not.toContain("redaction-canary-value");
+    expect(serializedDetails).not.toContain("/tmp/project");
+    expect(serializedDetails).not.toContain("/app/");
+    expect(serializedDetails).not.toContain("https://shop.example.test");
+    expect(serializedDetails).not.toContain("model-controlled console output");
+  });
+
+  it("bounds long Playwright evaluation diagnostics", async () => {
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+    kernelSdkMocks.playwrightExecute.mockResolvedValueOnce({
+      error: `Error: strict mode violation\n${"x".repeat(5000)}`,
+      success: false,
+    });
+
+    let thrown: unknown;
+    try {
+      await client.executePlaywright({
+        code: "await page.getByRole('button').click();",
+        sessionId: "kernel-session-1",
+        timeoutMs: 15000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const details = readErrorDetails(thrown);
+    expect(details.kernelError).toEqual(expect.any(String));
+    const kernelError = details.kernelError as string;
+    expect(kernelError.length).toBeLessThanOrEqual(4000);
+    expect(kernelError).toContain("strict mode violation");
+    expect(kernelError).toMatch(/\.\.\.$/u);
+  });
 });
+
+function readErrorDetails(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object" || !("details" in error)) {
+    throw new Error("Expected error details.");
+  }
+  const details = error.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    throw new Error("Expected object error details.");
+  }
+  return Object.fromEntries(Object.entries(details));
+}
