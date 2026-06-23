@@ -11,7 +11,7 @@ import {
   dmSans400FontPath,
   fraunces400FontPath,
   fraunces600FontPath,
-  logoDarkSvgPath,
+  logoSvgPath,
 } from "../../../../font-files";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +46,7 @@ export async function GET(
     readFile(fraunces400FontPath).then(toArrayBuffer),
     readFile(fraunces600FontPath).then(toArrayBuffer),
     readFile(dmSans400FontPath).then(toArrayBuffer),
-    readFile(logoDarkSvgPath),
+    readFile(logoSvgPath),
   ]);
   const logoDataUri = `data:image/svg+xml;base64,${logoBuffer.toString("base64")}`;
 
@@ -73,8 +73,6 @@ function DigestCard({
     return null;
   }
   const publishedOn = hero.publishedOn;
-  const headline = buildHeadline(items);
-  const breakdown = buildBreakdown(items);
 
   return (
     <div
@@ -120,36 +118,16 @@ function DigestCard({
 
       <div
         style={{
-          alignItems: "flex-end",
           display: "flex",
-          gap: 14,
-          marginTop: 18,
+          fontFamily: "Fraunces",
+          fontSize: 64,
+          fontWeight: 600,
+          letterSpacing: -1.2,
+          lineHeight: 0.98,
+          marginTop: 20,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            fontFamily: "Fraunces",
-            fontSize: 80,
-            fontWeight: 600,
-            letterSpacing: -1.5,
-            lineHeight: 0.95,
-          }}
-        >
-          {headline}
-        </div>
-        <div
-          style={{
-            color: COLOR.muted,
-            display: "flex",
-            fontSize: 14,
-            letterSpacing: 0.9,
-            paddingBottom: 12,
-            textTransform: "uppercase",
-          }}
-        >
-          {breakdown}
-        </div>
+        What&rsquo;s new with Murph
       </div>
 
       <HeroPanel item={hero} />
@@ -292,36 +270,6 @@ function AlsoNew({ items }: { items: readonly PublishedChangelogItem[] }) {
       </div>
     </div>
   );
-}
-
-function buildHeadline(items: readonly PublishedChangelogItem[]): string {
-  const featureCount = items.filter((item) => item.kind === "feature").length;
-  const improvementCount = items.length - featureCount;
-  if (items.length === 1) {
-    return items[0]!.kind === "feature" ? "New feature." : "Worth a look.";
-  }
-  if (featureCount > 0 && improvementCount === 0) {
-    return "New features.";
-  }
-  if (improvementCount > 0 && featureCount === 0) {
-    return "Under the hood.";
-  }
-  return "Shipped.";
-}
-
-function buildBreakdown(items: readonly PublishedChangelogItem[]): string {
-  const featureCount = items.filter((item) => item.kind === "feature").length;
-  const improvementCount = items.length - featureCount;
-  const parts: string[] = [];
-  if (featureCount > 0) {
-    parts.push(`${featureCount} ${featureCount === 1 ? "feature" : "features"}`);
-  }
-  if (improvementCount > 0) {
-    parts.push(
-      `${improvementCount} ${improvementCount === 1 ? "improvement" : "improvements"}`,
-    );
-  }
-  return parts.join(" · ");
 }
 
 

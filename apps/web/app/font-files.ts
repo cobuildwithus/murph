@@ -8,3 +8,4 @@ export const fraunces600FontPath = join(appDir, "fonts", "Fraunces-600.ttf");
 export const dmSans400FontPath = join(appDir, "fonts", "DMSans-400.ttf");
 
 export const logoDarkSvgPath = join(appDir, "..", "public", "logo-dark.svg");
+export const logoSvgPath = join(appDir, "..", "public", "logo.svg");
