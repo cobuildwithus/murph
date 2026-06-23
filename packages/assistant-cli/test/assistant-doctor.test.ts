@@ -118,6 +118,7 @@ const BASE_SESSION: AssistantSession = {
   },
   codexResume: null,
   resumeState: null,
+  pendingComputerResume: null,
   provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-doctor',

@@ -213,6 +213,7 @@ describe('assistant redaction helpers', () => {
         codexHome: '/tmp/codex-home',
       },
       resumeState: null,
+      pendingComputerResume: null,
       sessionId: 'session-alpha',
       target: {
         adapter: 'codex-cli',

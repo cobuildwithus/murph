@@ -149,6 +149,7 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.computerResumeConsumed).toBeUndefined();
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -165,7 +166,7 @@ describe("murph computer dynamic tools", () => {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
         },
-        resumeRunId: null,
+        resumeRunId: "hcr_paused_run",
         startUrl: "https://shop.example.test/checkout",
       });
 
@@ -195,6 +196,7 @@ describe("murph computer dynamic tools", () => {
       env: {},
       fetchImpl,
       hostedToolContext: createHostedToolContext({
+        computerResumeRunId: "hcr_paused_run",
         deliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
@@ -207,7 +209,47 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.computerResumeConsumed).toBe(true);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps pending resume state when a resume start still returns awaiting_user", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        awaitingReason: "final_confirmation",
+        expiresAt: "2026-06-17T13:00:00.000Z",
+        lastTitle: "Checkout",
+        lastUrl: "https://shop.example.test/checkout",
+        reused: true,
+        runId: "hcr_paused_run",
+        status: "awaiting_user",
+      })
+    );
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        startUrl: null,
+      },
+      tool: "computer_start_run",
+    }));
+
+    if (!request || request.kind !== "computer-start-run") {
+      throw new Error("Expected computer_start_run request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        computerResumeRunId: "hcr_paused_run",
+        hostedMailboxItemIds: ["hmi_latest_user_reply"],
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.computerResumeConsumed).toBeUndefined();
   });
 
   it.each([
@@ -286,11 +328,8 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        resumeAfterMailboxItemId: "hmi_user_reply",
-        resumeDeliveryContext: {
-          conversationId: "conversation-123",
-          recipientKey: "recipient-123",
-        },
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: null,
         resumeRunId: null,
       }),
     ]);
@@ -775,6 +814,7 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
+    expect(result.computerResumeConsumed).toBeUndefined();
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
@@ -784,6 +824,8 @@ describe("murph computer dynamic tools", () => {
       status: "awaiting_user",
       suggestedReply: "done",
     });
+    expect(result.computerRunPausedForUser).toBe(true);
+    expect(result.computerPausedRunId).toBe("run_123");
   });
 
   it("returns hosted handoff URLs to Codex without using progress delivery", async () => {
@@ -986,6 +1028,7 @@ function dynamicToolCall(input: {
 }
 
 function createHostedToolContext(input: {
+  computerResumeRunId?: string | null;
   computerToolsAvailable?: boolean;
   deliveryContext?: {
     conversationId: string | null;
@@ -996,6 +1039,7 @@ function createHostedToolContext(input: {
   sendResult?: Awaited<ReturnType<AssistantHostedToolContext["sendRequiredUserMessage"]>>;
 } = {}): AssistantHostedToolContext {
   return {
+    currentHostedComputerResumeRunId: () => input.computerResumeRunId ?? null,
     currentHostedDeliveryContext: () => input.deliveryContext ?? null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
     computerToolsAvailable: input.computerToolsAvailable ?? true,

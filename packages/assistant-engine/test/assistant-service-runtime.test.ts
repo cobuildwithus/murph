@@ -2957,6 +2957,82 @@ describe("assistant turn finalizer seam", () => {
     );
   });
 
+  it("persists pending computer resume after a successful pause", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T14:10:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession();
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        prompt: "Pause for handoff.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        pendingComputerResumeRunId: "hcr_paused_run",
+        response: "Please finish checkout in the handoff.",
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T14:09:00.000Z",
+      turnId: "turn-computer-pause",
+    });
+
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingComputerResume: {
+          runId: "hcr_paused_run",
+        },
+      })
+    );
+    expect(saved.pendingComputerResume).toEqual({
+      runId: "hcr_paused_run",
+    });
+  });
+
+  it("clears pending computer resume after a successful resume", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T14:20:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      pendingComputerResume: {
+        runId: "hcr_paused_run",
+      },
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        prompt: "Continue checkout.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        computerResumeConsumed: true,
+        response: "I continued.",
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T14:19:00.000Z",
+      turnId: "turn-computer-resume",
+    });
+
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingComputerResume: null,
+      })
+    );
+    expect(saved.pendingComputerResume).toBeNull();
+  });
+
   it("clears provider resume state when requested and only persists the assistant transcript", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:30:00.000Z"));
@@ -3569,6 +3645,7 @@ function createRoute(input?: {
 
 function createAssistantSession(input?: {
   binding?: AssistantSession["binding"];
+  pendingComputerResume?: AssistantSession["pendingComputerResume"];
   providerOptions?: AssistantProviderSessionOptions;
   resumeState?: AssistantSession["resumeState"];
   sessionId?: string;
@@ -3610,6 +3687,7 @@ function createAssistantSession(input?: {
     conversationId: input?.sessionId ?? "session-test",
     createdAt: "2026-04-08T00:00:00.000Z",
     lastTurnAt: null,
+    pendingComputerResume: input?.pendingComputerResume ?? null,
     provider: "codex-cli",
     providerOptions,
     resumeState: input?.resumeState ?? null,
@@ -3686,9 +3764,11 @@ function createProviderResult(input?: {
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null;
   assistantContractFingerprint?: string;
   attemptCount?: number;
+  computerResumeConsumed?: boolean | null;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
   finalAction?: AssistantNoReplyDisposition;
+  pendingComputerResumeRunId?: string | null;
   rawEvents?: unknown[];
   response?: string;
   route?: CodexThreadIdentity;
@@ -3730,6 +3810,8 @@ function createProviderResult(input?: {
         }
       : {}),
     ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
+    computerResumeConsumed: input?.computerResumeConsumed ?? null,
+    pendingComputerResumeRunId: input?.pendingComputerResumeRunId ?? null,
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),

@@ -270,6 +270,7 @@ describe('hosted assistant context diagnostics', () => {
         provider: 'codex-cli',
         providerOptions,
         resumeState: null,
+        pendingComputerResume: null,
         schema: 'murph.assistant-conversation.v2',
         sessionId,
         target,

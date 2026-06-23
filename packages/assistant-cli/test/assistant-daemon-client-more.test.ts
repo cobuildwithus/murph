@@ -116,6 +116,7 @@ const TEST_SESSION = {
   },
   codexResume: null,
   resumeState: null,
+  pendingComputerResume: null,
   provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-daemon-more',

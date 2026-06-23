@@ -15,6 +15,7 @@ export interface AssistantHostedDeliveryContext {
 }
 
 export interface AssistantHostedToolContext {
+  currentHostedComputerResumeRunId(): string | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -42,6 +43,17 @@ export function createAssistantHostedToolContext(input: {
 
   return {
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentHostedComputerResumeRunId: () => {
+      const deliveryContext = readDeliveryContext()
+      const runId =
+        deliveryContext.messageInput.hostedDeliveryIdempotency
+          ?.computerResumeRunId
+        ?? deliveryContext.session.pendingComputerResume?.runId
+        ?? null
+      return typeof runId === 'string' && runId.trim().length > 0
+        ? runId
+        : null
+    },
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency

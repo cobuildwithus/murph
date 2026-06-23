@@ -611,6 +611,8 @@ type HostedComputerToolPayloadSanitizer =
   | 'start'
 
 export interface MurphDynamicToolExecutionResult {
+  computerResumeConsumed?: boolean
+  computerPausedRunId?: string | null
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -959,6 +961,14 @@ function currentHostedMailboxItemId(
   return null
 }
 
+function currentHostedComputerResumeRunId(
+  hostedToolContext: AssistantHostedToolContext | null,
+): string | null {
+  return normalizeNullableString(
+    hostedToolContext?.currentHostedComputerResumeRunId() ?? null,
+  )
+}
+
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -1245,10 +1255,16 @@ async function executeHostedComputerPauseForUserTool(input: {
     return toolTextResult(false, apiResult.errorText)
   }
 
+  const pausePayload = readSanitizedComputerPausePayload(apiResult.payload)
   return toolTextResult(
     true,
-    safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
-    { computerRunPausedForUser: true },
+    safeToolPayloadText(pausePayload),
+    {
+      computerPausedRunId: typeof pausePayload.runId === 'string'
+        ? pausePayload.runId
+        : null,
+      computerRunPausedForUser: true,
+    },
   )
 }
 
@@ -1258,17 +1274,28 @@ async function executeHostedComputerStartRunTool(input: {
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
-  return await executeHostedComputerApiTool({
+  const body = buildHostedComputerStartRunBody({
+    args: input.args,
+    hostedToolContext: input.hostedToolContext,
+  })
+  const apiResult = await callHostedComputerApi({
     abortSignal: input.abortSignal,
-    body: buildHostedComputerStartRunBody({
-      args: input.args,
-      hostedToolContext: input.hostedToolContext,
-    }),
+    body,
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
-    sanitizer: 'start',
     unknownOutcomeOnTransportError: true,
   })
+  if (!apiResult.ok) {
+    return toolTextResult(false, apiResult.errorText)
+  }
+  const payload = sanitizeHostedComputerPayload('start', apiResult.payload)
+  const result = toolTextResult(true, safeToolPayloadText(payload))
+  return typeof body.resumeRunId === 'string' && payload.status === 'running'
+    ? {
+        ...result,
+        computerResumeConsumed: true,
+      }
+    : result
 }
 
 function buildHostedComputerStartRunBody(input: {
@@ -1276,16 +1303,17 @@ function buildHostedComputerStartRunBody(input: {
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { startUrl } = input.args
-  const resumeAfterMailboxItemId = currentHostedMailboxItemId(
-    input.hostedToolContext,
-  )
+  const resumeRunId = currentHostedComputerResumeRunId(input.hostedToolContext)
+  const resumeAfterMailboxItemId = resumeRunId
+    ? currentHostedMailboxItemId(input.hostedToolContext)
+    : null
   return {
     goal: 'Hosted computer task.',
     resumeAfterMailboxItemId,
-    resumeDeliveryContext: resumeAfterMailboxItemId
+    resumeDeliveryContext: resumeRunId && resumeAfterMailboxItemId
       ? currentHostedDeliveryContext(input.hostedToolContext)
       : null,
-    resumeRunId: null,
+    resumeRunId,
     startUrl,
   }
 }
@@ -1635,7 +1663,10 @@ function safeToolPayloadText(payload: unknown): string {
 function toolTextResult(
   success: boolean,
   text: string,
-  extra?: Pick<MurphDynamicToolExecutionResult, 'computerRunPausedForUser'>,
+  extra?: Pick<
+    MurphDynamicToolExecutionResult,
+    'computerPausedRunId' | 'computerResumeConsumed' | 'computerRunPausedForUser'
+  >,
 ): MurphDynamicToolExecutionResult {
   return {
     ...extra,

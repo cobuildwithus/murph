@@ -432,6 +432,12 @@ function isPublicAssistantResponseMediaHost(hostname: string): boolean {
   return true
 }
 
+const assistantPendingComputerResumeSchema = z
+  .object({
+    runId: z.string().trim().min(1).max(200),
+  })
+  .strict()
+
 const assistantPersistedSessionV1Schema = z
   .object({
     schema: z.literal('murph.assistant-session.v1'),
@@ -447,6 +453,7 @@ const assistantPersistedSessionV1Schema = z
     updatedAt: isoTimestampSchema,
     lastTurnAt: isoTimestampSchema.nullable(),
     turnCount: z.number().int().nonnegative(),
+    pendingComputerResume: assistantPendingComputerResumeSchema.nullable().default(null),
   })
   .strict()
 
@@ -462,6 +469,7 @@ export const assistantPersistedSessionSchema = z
     updatedAt: isoTimestampSchema,
     lastTurnAt: isoTimestampSchema.nullable(),
     turnCount: z.number().int().nonnegative(),
+    pendingComputerResume: assistantPendingComputerResumeSchema.nullable().default(null),
   })
   .strict()
 
@@ -551,6 +559,7 @@ function normalizeAssistantPersistedConversation(
     return assistantPersistedSessionSchema.parse({
       ...value,
       codexResume: normalizeCodexResumeState(value.codexResume),
+      pendingComputerResume: value.pendingComputerResume,
     })
   }
 
@@ -565,6 +574,7 @@ function normalizeAssistantPersistedConversation(
     updatedAt: value.updatedAt,
     lastTurnAt: value.lastTurnAt,
     turnCount: value.turnCount,
+    pendingComputerResume: value.pendingComputerResume,
   })
 }
 

@@ -252,6 +252,8 @@ export interface AssistantProviderTurnExecutionResult {
   rawEvents: unknown[]
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
   finalAction?: AssistantNoReplyDisposition
+  computerResumeConsumed?: boolean | null
+  pendingComputerResumeRunId?: string | null
   reactions?: readonly AssistantCurrentMessageReactionAction[] | null
   response: string
   // Completed final answers that were followed by a steered user message and
