@@ -28,11 +28,12 @@ describe("hosted computer runtime logs", () => {
     const error = computerUseError({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
-        kernelError: "locator.click: Timeout 20000ms exceeded",
-        kernelStderr: "page context closed",
+        kernelErrorPresent: true,
+        kernelStderrPresent: true,
+        kernelStdoutPresent: false,
       },
       httpStatus: 502,
-      message: "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+      message: "Computer browser evaluation failed.",
       retryable: true,
     });
     const run = vi.fn(async () => {
@@ -41,13 +42,7 @@ describe("hosted computer runtime logs", () => {
 
     await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
       action: {
-        action: "click",
-        locator: {
-          by: "role",
-          exact: true,
-          name: "Place your order",
-          role: "button",
-        },
+        code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
         timeoutMs: 20000,
       },
       memberId: "member_123",
@@ -63,13 +58,12 @@ describe("hosted computer runtime logs", () => {
       level: "warn",
       phase: "error",
       redacted: {
-        browserActionKind: "click",
-        computerLocatorType: "role",
         computerOperationKind: "act",
         httpStatus: 502,
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,
+        playwrightCodeHash: expect.any(String),
         retryable: true,
         safeErrorMessage: "Hosted computer tool failed.",
         timeoutMs: 20000,

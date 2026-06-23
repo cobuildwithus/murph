@@ -32,9 +32,8 @@ import {
 } from "../src/bundles.ts";
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-  HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
@@ -715,53 +714,19 @@ describe("hosted execution coverage gaps", () => {
       outcome: "failed",
     });
 
-    const clickStep = {
-      action: "click" as const,
-      locator: {
-        by: "role" as const,
-        exact: false,
-        name: "Add to cart",
-        role: "button",
-      },
-    };
-    expect(parseHostedComputerActRequest(clickStep)).toEqual({
-      ...clickStep,
+    expect(parseHostedComputerActRequest({
+      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+    })).toEqual({
+      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
       timeoutMs: 15000,
     });
     expect(parseHostedComputerActRequest({
-      ...clickStep,
+      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     })).toEqual({
-      ...clickStep,
+      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerActRequest({
-      action: "goto",
-      timeoutMs: 15000,
-      url: "https://example.com/checkout",
-    })).toEqual({
-      action: "goto",
-      timeoutMs: 15000,
-      url: "https://example.com/checkout",
-    });
-    for (const key of HOSTED_COMPUTER_PRESS_KEYS) {
-      expect(parseHostedComputerActRequest({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      })).toEqual({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      });
-    }
-    for (const key of ["a", "A", "1", "Space", "Control+V", "Meta+V"]) {
-      expect(() => parseHostedComputerActRequest({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      })).toThrow(/Hosted computer act request is invalid/u);
-    }
     for (const unsafeUrl of [
       "javascript:alert(1)",
       "data:text/html,<h1>owned</h1>",
@@ -781,10 +746,6 @@ describe("hosted execution coverage gaps", () => {
       expect(() => parseHostedComputerStartRunRequest({
         startUrl: unsafeUrl,
       })).toThrow(/Hosted computer start-run request is invalid/u);
-      expect(() => parseHostedComputerActRequest({
-        action: "goto",
-        url: unsafeUrl,
-      })).toThrow(/Hosted computer act request is invalid/u);
     }
     expect(isHostedComputerNavigationUrl("https://example.com/checkout")).toBe(true);
     expect(isHostedComputerNavigationUrl("http://192.168.1.10/router")).toBe(false);
@@ -795,20 +756,13 @@ describe("hosted execution coverage gaps", () => {
       selector: "button[type=submit]",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      action: "click",
-      locator: { by: "css", selector: "button[type=submit]" },
-      timeoutMs: 15000,
+      code: "",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      steps: [clickStep],
+      code: "x".repeat(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH + 1),
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      action: "fill",
-      locator: { by: "label", text: "Name" },
-      value: "x".repeat(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH + 1),
-    })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedComputerActRequest({
-      ...clickStep,
+      code: "return true;",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
     })).toThrow(/Hosted computer act request is invalid/u);
 

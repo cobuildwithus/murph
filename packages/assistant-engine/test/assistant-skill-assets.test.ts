@@ -105,11 +105,11 @@ describe('assistant skill assets', () => {
     expect(computerUseSkill.triggerHint).toContain(
       'ordering contacts, supplements, OTC products, health equipment, groceries, or meals',
     )
-    expect(raw).toContain('computer_act` is the only browser action primitive')
-    expect(raw).toContain('runs one bounded browser action against the current page')
-    expect(raw).toContain('Pass one action per call')
-    expect(raw).toContain('role/name, label, placeholder, text')
-    expect(raw).toContain('hidden DOM values')
+    expect(raw).toContain('computer_act` is the browser execution primitive')
+    expect(raw).toContain('runs bounded Playwright code against the current page')
+    expect(raw).toContain('Pass Playwright')
+    expect(raw).toContain('locator(...).nth(index)')
+    expect(raw).toMatch(/hidden browser\s+credentials/u)
     expect(raw).toContain('murph.computer_pause_for_user')
     expect(raw).toContain('Amazon is a candidate, not an automatic default')
     expect(raw).toContain('Ground browser work with connected apps')
@@ -134,7 +134,7 @@ describe('assistant skill assets', () => {
     expect(playbook).toContain('Order prepared meals or a meal-kit plan')
     expect(raw).not.toContain('CSS only')
     expect(raw).not.toContain('Use `computer_act` only for URL navigation')
-    expect(raw).not.toContain('Pass Playwright code')
+    expect(raw).not.toContain('Pass one action per call')
     expect(raw).not.toContain('handoffPurpose="manual_browser_help"')
   })
 

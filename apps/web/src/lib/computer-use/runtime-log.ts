@@ -7,6 +7,7 @@ import type {
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { recordHostedRuntimeLog } from "../hosted-workspace/store";
+import { shortHash } from "./ids";
 
 type HostedComputerToolOperation =
   | "act"
@@ -79,16 +80,13 @@ function buildHostedComputerToolFailureRedactedJson(input: {
 
   return {
     computerOperationKind: input.operation,
-    ...(action ? { browserActionKind: action.action } : {}),
-    ...(action && "locator" in action && action.locator
-      ? { computerLocatorType: action.locator.by }
-      : {}),
+    ...(action ? { playwrightCodeHash: shortHash(action.code) } : {}),
     ...readHostedComputerToolTiming(action),
     ...(domainError ? { httpStatus: domainError.httpStatus } : {}),
     ...(domainError ? { retryable: domainError.retryable } : {}),
-    kernelErrorPresent: typeof details.kernelError === "string" && details.kernelError.length > 0,
-    kernelStderrPresent: typeof details.kernelStderr === "string" && details.kernelStderr.length > 0,
-    kernelStdoutPresent: typeof details.kernelStdout === "string" && details.kernelStdout.length > 0,
+    kernelErrorPresent: details.kernelErrorPresent === true,
+    kernelStderrPresent: details.kernelStderrPresent === true,
+    kernelStdoutPresent: details.kernelStdoutPresent === true,
     safeErrorMessage: "Hosted computer tool failed.",
     unknownOutcome: isHostedComputerUnknownOutcomeFailure({
       errorCode: input.errorCode,
@@ -102,9 +100,6 @@ function readHostedComputerToolTiming(
 ): HostedRuntimeRedactedJson {
   if (!action) {
     return {};
-  }
-  if (action.action === "wait") {
-    return { waitMs: action.ms };
   }
   return { timeoutMs: action.timeoutMs };
 }

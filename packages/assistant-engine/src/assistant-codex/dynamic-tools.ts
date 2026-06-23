@@ -5,10 +5,11 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
-  hostedComputerDeliveryContextSchema,
   hostedComputerPauseForUserRequestSchema,
   isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
@@ -65,7 +66,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -247,10 +248,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      resumeRunId: {
-        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
-        default: null,
-      },
       startUrl: {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
@@ -274,48 +271,39 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   },
 } as const
 
-type JsonSchemaObject = Record<string, unknown>
-
-const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
 }
 
-function buildComputerActInputSchema(): JsonSchemaObject {
-  const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
-  const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
-
-  return {
-    oneOf: actionSchemas.map(addRunIdToActionSchema),
-    type: 'object',
-  }
-}
-
-function addRunIdToActionSchema(schema: unknown): JsonSchemaObject {
-  const record = asRecord(schema) ?? {}
-  const properties = asRecord(record.properties) ?? {}
-  const required = Array.isArray(record.required)
-    ? record.required.filter((item): item is string => typeof item === 'string')
-    : []
-
-  return {
-    ...record,
-    properties: {
-      runId: { type: 'string', minLength: 1 },
-      ...properties,
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    runId: { type: 'string', minLength: 1 },
+    code: {
+      type: 'string',
+      minLength: 1,
+      maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+      description:
+        'Playwright TypeScript/JavaScript source to execute against the current Kernel page. The page, context, and browser objects are available in scope. Return concise JSON-serializable data when useful.',
     },
-    required: ['runId', ...required],
-  }
-}
+    timeoutMs: {
+      type: 'integer',
+      minimum: 1000,
+      maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+      default: 15000,
+    },
+  },
+  required: ['runId', 'code'],
+} as const
 
 export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
+    'Run bounded Playwright TypeScript/JavaScript against the current Kernel browser page for a computer run. Use normal Playwright locators and APIs for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, and page inspection. Use computer_observe when page state is needed before or after code execution.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -480,9 +468,6 @@ const submitProductFeedbackArgumentsSchema = z
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
-  'resumeAfterMailboxItemId',
-  'resumeDeliveryContext',
-  'resumeRunId',
   'startUrl',
 ] as const
 
@@ -495,9 +480,6 @@ const computerNavigationUrlSchema = z
 
 const computerStartRunArgumentsSchema = z
   .object({
-    resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
-    resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
-    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
@@ -883,21 +865,7 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
-        schemaRootKeys: [
-          'runId',
-          'action',
-          'url',
-          'locator',
-          'value',
-          'text',
-          'key',
-          'deltaX',
-          'deltaY',
-          'delayMs',
-          'ms',
-          'state',
-          'timeoutMs',
-        ],
+        schemaRootKeys: ['runId', 'code', 'timeoutMs'],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -970,13 +938,6 @@ function canExecuteComputerDynamicTools(
   hostedToolContext: AssistantHostedToolContext | null,
 ): boolean {
   return hostedToolContext?.computerToolsAvailable === true
-}
-
-function currentHostedMailboxItemId(
-  hostedToolContext: AssistantHostedToolContext | null,
-): string | null {
-  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
-  return itemIds[itemIds.length - 1] ?? null
 }
 
 function currentHostedDeliveryContext(
@@ -1301,16 +1262,12 @@ function buildHostedComputerStartRunBody(input: {
   args: ComputerStartRunToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
-  const { resumeRunId, startUrl } = input.args
+  const { startUrl } = input.args
   return {
     goal: 'Hosted computer task.',
-    resumeAfterMailboxItemId: resumeRunId
-      ? currentHostedMailboxItemId(input.hostedToolContext)
-      : null,
-    resumeDeliveryContext: resumeRunId
-      ? currentHostedDeliveryContext(input.hostedToolContext)
-      : null,
-    resumeRunId,
+    resumeAfterMailboxItemId: null,
+    resumeDeliveryContext: null,
+    resumeRunId: null,
     startUrl,
   }
 }
@@ -1502,13 +1459,11 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
   }
 
   const lines = [
-    readHostedComputerApiErrorDetailLine('browserAction', record.browserAction),
-    readHostedComputerApiErrorDetailLine('locator', record.locator),
+    readHostedComputerApiErrorDetailLine('codeHash', record.codeHash),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
-    readHostedComputerApiErrorDetailLine('waitMs', record.waitMs),
-    readHostedComputerApiErrorDetailLine('kernelError', record.kernelError),
-    readHostedComputerApiErrorDetailLine('kernelStderr', record.kernelStderr),
-    readHostedComputerApiErrorDetailLine('kernelStdout', record.kernelStdout),
+    readHostedComputerApiErrorDetailLine('kernelErrorPresent', record.kernelErrorPresent),
+    readHostedComputerApiErrorDetailLine('kernelStderrPresent', record.kernelStderrPresent),
+    readHostedComputerApiErrorDetailLine('kernelStdoutPresent', record.kernelStdoutPresent),
   ].filter((line): line is string => line !== null)
 
   return lines.length > 0 ? lines.join('\n') : null
@@ -1609,6 +1564,9 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
+        result: Object.prototype.hasOwnProperty.call(record, 'result')
+          ? record.result
+          : null,
         ...readStringField(record, 'title'),
         ...readStringOrNullField(record, 'url'),
       }

@@ -239,7 +239,7 @@ describe('assistant execution prompt contract', () => {
       'Inspect calendar conflicts in the requested window only when scheduling availability would change the action',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_act` to run one bounded browser action against the current Kernel page',
+      'Use `murph.computer_act` to run bounded Playwright TypeScript/JavaScript against the current Kernel page',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
