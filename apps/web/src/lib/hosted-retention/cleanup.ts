@@ -113,8 +113,8 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
 }
 
 async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRecheckSignal> {
-  const module = await import("../hosted-orchestration/signal-runtime");
-  return module.signalHostedRuntimeRecheckRuntime;
+  const runtimeSignalModule = await import("../hosted-orchestration/signal-runtime");
+  return runtimeSignalModule.signalHostedRuntimeRecheckRuntime;
 }
 
 async function deleteExpiredMailboxItems(input: {
