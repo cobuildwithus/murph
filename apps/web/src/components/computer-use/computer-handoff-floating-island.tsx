@@ -37,16 +37,25 @@ export function ComputerHandoffFloatingIsland({
 
   useEffect(() => {
     if (!persistKey) return;
+    let restoreFrame: number | null = null;
     try {
       const raw = window.localStorage.getItem(persistKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<Offset>;
       if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-        setOffset({ x: parsed.x, y: parsed.y });
+        const restoredOffset = { x: parsed.x, y: parsed.y };
+        restoreFrame = window.requestAnimationFrame(() => {
+          setOffset(restoredOffset);
+        });
       }
     } catch {
       // ignore corrupted storage
     }
+    return () => {
+      if (restoreFrame !== null) {
+        window.cancelAnimationFrame(restoreFrame);
+      }
+    };
   }, [persistKey]);
 
   const reclampToViewport = useCallback(() => {
