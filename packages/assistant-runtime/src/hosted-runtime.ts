@@ -303,6 +303,7 @@ const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as con
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
+const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
 
 interface HostedInitialMailboxImportPlan {
   bootstrapRequired: boolean;
@@ -312,6 +313,10 @@ interface HostedInitialMailboxImportPlan {
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
   result: HostedMailboxImportCheckpointResult;
+}
+
+interface HostedVaultFormatMigrationRuntimeResult {
+  mutated: boolean;
 }
 
 function resolveHostedInitialMailboxImportPlan(input: {
@@ -334,22 +339,27 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
   return existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata));
 }
 
-async function ensureHostedVaultFormatCurrentForRuntime(vaultRoot: string): Promise<void> {
+async function ensureHostedVaultFormatCurrentForRuntime(
+  vaultRoot: string,
+): Promise<HostedVaultFormatMigrationRuntimeResult> {
   if (!hasHostedVaultMetadata(vaultRoot)) {
-    return;
+    return { mutated: false };
   }
 
   if (await readHostedVaultStoredFormatVersion(vaultRoot) === CURRENT_VAULT_FORMAT_VERSION) {
-    return;
+    return { mutated: false };
   }
 
+  let mutated = false;
   while (true) {
     const result = await runIntegrationIngestMigration({
       vaultRoot,
       apply: true,
+      maxBundles: HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES,
     });
+    mutated ||= result.mutated;
     if (result.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
-      return;
+      return { mutated };
     }
     if (result.blockerCount > 0) {
       throw new VaultError(
@@ -827,7 +837,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    await raceHostedRuntimeCancellation(
+    const hostedVaultFormatMigration = await raceHostedRuntimeCancellation(
       ensureHostedVaultFormatCurrentForRuntime(restored.vaultRoot),
       runtimeAbortController.signal,
     );
@@ -1007,8 +1017,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
         nowMs: Date.now(),
       });
+      const initialMailboxImportRequiresCheckpoint = initialMailboxImport.checkpointDeferred
+        && initialMailboxImport.stateChanged;
+      const hostedVaultFormatMigrationRequiresCheckpoint = hostedVaultFormatMigration.mutated;
 
-      if (initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged) {
+      if (initialMailboxImportRequiresCheckpoint || hostedVaultFormatMigrationRequiresCheckpoint) {
         emitPhaseLog({
           details: {
             nextWakeAtPresent: nextWake.nextWakeAt !== null,
@@ -1394,8 +1407,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
       trackMailboxPostCheckpointEffects(result);
-      runtimeStateDirty ||= result.runtimeStateDirty;
-      if (result.runtimeStateDirty) {
+      const runtimeDirtyAfterForeground = result.runtimeStateDirty
+        || hostedVaultFormatMigration.mutated;
+      runtimeStateDirty ||= runtimeDirtyAfterForeground;
+      if (runtimeDirtyAfterForeground) {
         markIdleCheckpointTimerAfterDirtyWork();
       }
       // Best-effort consented vault-share offer: runs once per wake after the foreground

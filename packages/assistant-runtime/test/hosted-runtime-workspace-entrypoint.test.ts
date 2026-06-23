@@ -426,9 +426,10 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("migrates restored legacy vault metadata before serving hosted runtime work", async () => {
+  test("marks restored legacy vault migration dirty for the hosted checkpoint path", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-legacy-vault-format-migration");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     let restoreCallCount = 0;
 
     try {
@@ -441,7 +442,11 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       }), {
         async createCheckpointSnapshot() {
-          throw new Error("Legacy vault format migration test should not checkpoint.");
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-legacy-vault-format-migration-checkpoint",
+            ),
+          };
         },
         async importItem() {
           throw new Error("Legacy vault format migration test should not import mailbox items.");
@@ -449,7 +454,7 @@ describe("hosted workspace runtime entrypoint", () => {
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events: [], items: [] }),
           workspacePort: createWorkspacePort({
-            checkpointRequests: [],
+            checkpointRequests,
             events: [],
             workspace: createWorkspaceState({ snapshotRef, version: "0" }),
           }),
@@ -486,6 +491,8 @@ describe("hosted workspace runtime entrypoint", () => {
       const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
       const migratedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
       assert.equal(migratedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {
       await removeTempRoot(vaultRoot);
     }
