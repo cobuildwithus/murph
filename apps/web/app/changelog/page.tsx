@@ -7,8 +7,10 @@ import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  CHANGELOG_PREVIEW_CARD_ITEMS,
   type ChangelogItem,
   listChangelogEditions,
+  listPublishedChangelogItems,
 } from "@/src/lib/changelog";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -385,21 +387,16 @@ const VISUALS: Record<string, ReactNode> = {
 const DESCRIPTION =
   "See what is new in Murph, why it matters, and the simplest way to try each update.";
 
-const PREVIEW_CARD_ITEM_IDS = [
-  "connected-apps-tools",
-  "email-auto-reply",
-  "food-label-database",
-  "apple-health-expansion",
-  "thread-auto-compaction",
-] as const;
+// Top-N most recent items by date+priority, same source as /api/changelog.
+const PREVIEW_CARD_ITEM_IDS = listPublishedChangelogItems()
+  .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
+  .map((item) => item.id);
 
 const PREVIEW_CARD_IMAGE = {
   alt: "What's new in Murph — recent features and improvements.",
   height: 630,
   type: "image/png",
-  url: buildAbsoluteChangelogUrl(
-    buildChangelogCardPath([...PREVIEW_CARD_ITEM_IDS]),
-  ),
+  url: buildAbsoluteChangelogUrl(buildChangelogCardPath(PREVIEW_CARD_ITEM_IDS)),
   width: 1200,
 } as const;
 
