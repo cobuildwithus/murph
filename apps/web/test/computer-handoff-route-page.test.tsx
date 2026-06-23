@@ -98,7 +98,7 @@ describe("computer handoff route and page", () => {
       params: Promise.resolve({ token: "handoff-token" }),
     }));
 
-    assert.match(markup, /Sign in to open this browser handoff/);
+    assert.match(markup, /Sign in to open this private page/);
     assert.match(markup, /Log in or sign up/);
     expect(mocks.createComputerUseService).not.toHaveBeenCalled();
     expect(mocks.service.readHandoffPageState).not.toHaveBeenCalled();
@@ -169,7 +169,8 @@ describe("computer handoff route and page", () => {
     }));
     const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
 
-    assert.match(markup, /Browser step saved/);
+    assert.match(markup, /All set/);
+    assert.match(markup, /Reply to Murph to continue\./);
     assert.match(markup, /Reply in Messages/);
     assert.match(markup, /Reply in Telegram/);
     assert.match(markup, /Reply in Email/);
@@ -201,7 +202,7 @@ describe("computer handoff route and page", () => {
       params: Promise.resolve({ token: "handoff-token" }),
     }));
 
-    assert.match(markup, /Browser step saved/);
+    assert.match(markup, /All set/);
     assert.match(markup, /Return to your Murph thread and reply with:/);
     assert.match(markup, />Done</);
     assert.equal(markup.includes("Suggested reply"), false);

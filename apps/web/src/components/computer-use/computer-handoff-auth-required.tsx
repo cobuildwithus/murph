@@ -23,14 +23,14 @@ export function ComputerHandoffAuthRequiredState() {
         </span>
         <p className="mt-6 flex items-center gap-2 font-mono text-xs uppercase text-muted-foreground">
           <MonitorCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-          Private handoff
+          Private page
         </p>
         <h1 className="mt-4 font-serif text-3xl leading-tight text-balance sm:text-4xl">
-          Sign in to open this browser handoff
+          Sign in to open this private page
         </h1>
         <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground text-pretty">
           This link is private to the Murph account that received it. Sign in,
-          then this page will reload so you can finish the browser step.
+          then this page will reload so you can finish here.
         </p>
 
         <div className="mt-8 flex flex-col items-center gap-3">

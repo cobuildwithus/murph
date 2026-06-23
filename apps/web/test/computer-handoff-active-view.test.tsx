@@ -58,7 +58,7 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   });
   const savingStatus = container.querySelector('[aria-busy="true"][role="status"]');
   assert.ok(savingStatus);
-  expect(savingStatus.textContent).toContain("Saving browser step");
+  expect(savingStatus.textContent).toContain("Saving your progress");
   expect(savingStatus.querySelector("svg .murph-loader-dot")).toBeTruthy();
   expect(container.querySelector("iframe")).toBe(iframe);
 
@@ -75,7 +75,7 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   const successStatus = container.querySelector('[role="status"]');
   assert.ok(successStatus);
-  expect(successStatus.textContent).toContain("Browser step saved");
+  expect(successStatus.textContent).toContain("All set");
   const fallbackLink = successStatus.querySelector("a");
   assert.ok(fallbackLink);
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");

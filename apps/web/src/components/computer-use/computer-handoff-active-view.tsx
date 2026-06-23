@@ -67,7 +67,7 @@ export function ComputerHandoffActiveView({
         referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
         src={liveViewUrl}
-        title="Murph browser handoff"
+        title="Murph private page"
       />
       <div
         className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
@@ -91,7 +91,7 @@ export function ComputerHandoffActiveView({
               size="lg"
               onClick={onDone}
               disabled={phase.kind !== "idle"}
-              aria-label="Finish browser step and reply to Murph"
+              aria-label="Mark this done and reply to Murph"
             >
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               Done
@@ -108,7 +108,7 @@ export function ComputerHandoffActiveView({
         >
           <MurphPulseLoader className="h-24 w-auto" />
           <p className="font-serif text-2xl font-normal text-foreground">
-            Saving browser step
+            Saving your progress
           </p>
         </div>
       ) : null}
@@ -120,7 +120,7 @@ export function ComputerHandoffActiveView({
         >
           <CheckCircle2 className="h-8 w-8 text-primary" aria-hidden="true" />
           <p className="font-serif text-2xl font-normal text-foreground">
-            Browser step saved
+            All set
           </p>
           <a
             ref={successAnchorRef}

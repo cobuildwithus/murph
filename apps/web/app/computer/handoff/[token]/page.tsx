@@ -37,18 +37,18 @@ export default async function ComputerHandoffPage({
     const isCompleted = state.kind === "completed";
     const Icon = isCompleted ? CheckCircle2 : Clock3;
     const title = isCompleted
-      ? "Browser step saved"
+      ? "All set"
       : state.kind === "checkpointing"
-        ? "Saving browser step"
-        : "Browser handoff expired";
+        ? "Saving your progress"
+        : "This link expired";
     const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
     const nextStep = isCompleted
-      ? "Reply to Murph to continue the browser run."
+      ? "Reply to Murph to continue."
       : state.kind === "checkpointing"
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
-        : "Return to Murph and ask to restart this browser step.";
+        : "Return to Murph and ask for a new link.";
     const contactOptions = isCompleted
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
