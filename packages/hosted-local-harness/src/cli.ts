@@ -75,27 +75,18 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
     return;
   }
 
-  if (subcommand === "down") {
-    throw new Error(
-      [
-        "hosted-local worktree down is disabled until worktree up records process ownership.",
-        "Stop the foreground `hosted-local worktree up` process directly.",
-      ].join(" "),
-    );
-  }
-
   const {
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
     removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
     resolveHostedLocalWorktreeConfig,
-    writeHostedLocalWorktreeManifest,
   } = await import("./dev-hosted-local/worktree.ts");
 
   switch (subcommand) {
     case "env": {
       const config = await resolveHostedLocalWorktreeConfig({
         env: io.env ?? process.env,
+        probePorts: false,
         slug,
       });
       (io.stdout ?? process.stdout).write(formatHostedLocalWorktreeEnv(config));
@@ -104,9 +95,9 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
     case "doctor": {
       const config = await resolveHostedLocalWorktreeConfig({
         env: io.env ?? process.env,
+        probePorts: false,
         slug,
       });
-      await writeHostedLocalWorktreeManifest(config);
       await runDoctor(["--profile", "worktree", ...rest], {
         ...io,
         env: config.env,
@@ -118,7 +109,6 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
         env: io.env ?? process.env,
         slug,
       });
-      await writeHostedLocalWorktreeManifest(config);
       const databaseState = await ensureHostedLocalWorktreeDatabase(config);
       try {
         await runUp(["--profile", "worktree"], {

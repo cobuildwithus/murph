@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
@@ -21,7 +21,6 @@ export interface HostedLocalWorktreeConfig {
   databaseName: string;
   databaseUrl: string;
   env: NodeJS.ProcessEnv;
-  manifestPath: string;
   paths: HostedLocalWorktreePaths;
   ports: HostedLocalWorktreePorts;
   profileName: "worktree";
@@ -30,18 +29,6 @@ export interface HostedLocalWorktreeConfig {
     webBaseUrl: string;
     workerBaseUrl: string;
   };
-}
-
-export interface HostedLocalWorktreeManifest {
-  buildId: string;
-  databaseName: string;
-  paths: HostedLocalWorktreePaths;
-  ports: HostedLocalWorktreePorts;
-  profileName: "worktree";
-  schemaVersion: 1;
-  slug: string;
-  updatedAt: string;
-  urls: HostedLocalWorktreeConfig["urls"];
 }
 
 export interface HostedLocalWorktreePaths {
@@ -90,10 +77,9 @@ export async function resolveHostedLocalWorktreeConfig(input: {
   slug: string;
 }): Promise<HostedLocalWorktreeConfig> {
   const slug = normalizeHostedLocalWorktreeSlug(input.slug);
-  const existingManifest = await readHostedLocalWorktreeManifest(slug);
-  const ports = existingManifest?.ports ?? (input.probePorts === false
+  const ports = input.probePorts === false
     ? deriveHostedLocalWorktreePorts(slug)
-    : await resolveAvailableHostedLocalWorktreePorts(slug));
+    : await resolveAvailableHostedLocalWorktreePorts(slug);
   return buildHostedLocalWorktreeConfig({
     env: input.env,
     ports,
@@ -139,7 +125,6 @@ export function buildHostedLocalWorktreeConfig(input: {
     databaseName,
     databaseUrl,
     env,
-    manifestPath: path.join(rootDir, "manifest.json"),
     paths,
     ports: input.ports,
     profileName: HOSTED_LOCAL_WORKTREE_PROFILE,
@@ -149,54 +134,6 @@ export function buildHostedLocalWorktreeConfig(input: {
       workerBaseUrl: `http://127.0.0.1:${input.ports.worker}`,
     },
   };
-}
-
-export function buildHostedLocalWorktreeManifest(
-  config: HostedLocalWorktreeConfig,
-): HostedLocalWorktreeManifest {
-  return {
-    buildId: config.buildId,
-    databaseName: config.databaseName,
-    paths: config.paths,
-    ports: config.ports,
-    profileName: config.profileName,
-    schemaVersion: 1,
-    slug: config.slug,
-    updatedAt: new Date().toISOString(),
-    urls: config.urls,
-  };
-}
-
-export async function writeHostedLocalWorktreeManifest(
-  config: HostedLocalWorktreeConfig,
-): Promise<HostedLocalWorktreeManifest> {
-  const manifest = buildHostedLocalWorktreeManifest(config);
-  const manifestPath = path.join(repoRoot, config.manifestPath);
-  await mkdir(path.dirname(manifestPath), { mode: 0o700, recursive: true });
-  const tempPath = `${manifestPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(manifest, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(tempPath, manifestPath);
-  return manifest;
-}
-
-async function readHostedLocalWorktreeManifest(
-  slug: string,
-): Promise<Pick<HostedLocalWorktreeManifest, "ports"> | null> {
-  try {
-    const manifestPath = path.join(
-      repoRoot,
-      HOSTED_LOCAL_WORKTREE_ROOT,
-      slug,
-      "manifest.json",
-    );
-    const contents = await readFile(manifestPath, "utf8");
-    return parseHostedLocalWorktreeManifest(contents, slug);
-  } catch {
-    return null;
-  }
 }
 
 export async function ensureHostedLocalWorktreeDatabase(
@@ -305,6 +242,11 @@ export function formatHostedLocalWorktreeEnv(
       "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG",
       config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG,
     ],
+    ["MURPH_DEV_LINQ_WEBHOOK_TUNNEL", config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL],
+    [
+      "MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER",
+      config.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER,
+    ],
     ["NEXT_DIST_DIR_MODE", config.env.NEXT_DIST_DIR_MODE],
     ["NEXT_DIST_DIR_SUFFIX", config.env.NEXT_DIST_DIR_SUFFIX],
   ] as const;
@@ -312,7 +254,6 @@ export function formatHostedLocalWorktreeEnv(
   return [
     `# hosted-local worktree ${config.slug}`,
     `# database: ${config.databaseName}`,
-    `# manifest: ${config.manifestPath}`,
     ...entries.map(([key, value]) => `export ${key}=${shellQuote(value ?? "")}`),
     "",
   ].join("\n");
@@ -465,9 +406,10 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_DEV_CF_PERSIST_DIR: input.paths.wranglerPersistDir,
     MURPH_DEV_DATABASE_URL: input.databaseUrl,
     MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH: input.paths.cryptoStatePath,
-    MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
-      input.paths.linqWebhookRegistrationCachePath,
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: input.paths.linqWebhookTunnelConfigPath,
+    ...buildHostedLocalWorktreeLinqEnv({
+      baseEnv: input.baseEnv,
+      paths: input.paths,
+    }),
     MURPH_DEV_MINIO_DATA_DIR: input.paths.minioDataDir,
     MURPH_DEV_MINIO_PORT: String(input.ports.minio),
     MURPH_DEV_TEMP_DIR: input.paths.tempDir,
@@ -480,6 +422,59 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_DEV_WORKER_PORT: String(input.ports.worker),
     NEXT_DIST_DIR_MODE: "smoke",
     NEXT_DIST_DIR_SUFFIX: input.slug,
+  };
+}
+
+function buildHostedLocalWorktreeLinqEnv(input: {
+  baseEnv: NodeJS.ProcessEnv;
+  paths: HostedLocalWorktreePaths;
+}): NodeJS.ProcessEnv {
+  const tunnelMode = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL?.trim();
+  const skipRegister = input.baseEnv.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER?.trim();
+  const publicUrl = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim();
+  const wantsTunnel = tunnelMode !== undefined
+    && tunnelMode.length > 0
+    && !["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
+  const wantsRegistration = skipRegister !== "1"
+    && (wantsTunnel || Boolean(publicUrl));
+
+  if (!wantsTunnel && !wantsRegistration) {
+    return {
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        input.paths.linqWebhookRegistrationCachePath,
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: input.paths.linqWebhookTunnelConfigPath,
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+    };
+  }
+
+  const tunnelConfig = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim();
+  const tunnelName = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME?.trim();
+  if (wantsTunnel && (!tunnelName || tunnelName === "dev" || !tunnelConfig)) {
+    throw new Error(
+      [
+        "Hosted-local worktree live Linq tunnel delivery requires",
+        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME to be non-default and",
+        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG to point at a dedicated worktree tunnel config.",
+      ].join(" "),
+    );
+  }
+
+  if (wantsRegistration && !wantsTunnel && !publicUrl) {
+    throw new Error(
+      "Hosted-local worktree live Linq registration requires MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL or a dedicated tunnel.",
+    );
+  }
+
+  return {
+    MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+      input.paths.linqWebhookRegistrationCachePath,
+    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: tunnelMode ?? "0",
+    MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+      tunnelConfig ?? input.paths.linqWebhookTunnelConfigPath,
+    ...(wantsRegistration
+      ? { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0" }
+      : { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1" }),
   };
 }
 
@@ -559,66 +554,6 @@ function deriveHostedLocalWorktreePort(
   const offset = Number.parseInt(hash.slice(0, 8), 16)
     % HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE;
   return base + offset;
-}
-
-function parseHostedLocalWorktreeManifest(
-  contents: string,
-  slug: string,
-): Pick<HostedLocalWorktreeManifest, "ports"> | null {
-  const parsed: unknown = JSON.parse(contents);
-  if (!isRecord(parsed)) {
-    return null;
-  }
-  if (
-    parsed.schemaVersion !== 1
-    || parsed.profileName !== HOSTED_LOCAL_WORKTREE_PROFILE
-    || parsed.slug !== slug
-  ) {
-    return null;
-  }
-  if (!isRecord(parsed.ports)) {
-    return null;
-  }
-
-  const ports = {
-    minio: parseHostedLocalWorktreeManifestPort(parsed.ports.minio, "minio"),
-    temporal: parseHostedLocalWorktreeManifestPort(
-      parsed.ports.temporal,
-      "temporal",
-    ),
-    web: parseHostedLocalWorktreeManifestPort(parsed.ports.web, "web"),
-    worker: parseHostedLocalWorktreeManifestPort(parsed.ports.worker, "worker"),
-  };
-  if (
-    ports.minio === null
-    || ports.temporal === null
-    || ports.web === null
-    || ports.worker === null
-  ) {
-    return null;
-  }
-
-  return {
-    ports: {
-      minio: ports.minio,
-      temporal: ports.temporal,
-      web: ports.web,
-      worker: ports.worker,
-    },
-  };
-}
-
-function parseHostedLocalWorktreeManifestPort(
-  value: unknown,
-  name: keyof HostedLocalWorktreePorts,
-): number | null {
-  if (!Number.isInteger(value)) {
-    return null;
-  }
-  const port = value as number;
-  const base = HOSTED_LOCAL_WORKTREE_PORT_RANGES[name];
-  const max = base + HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE - 1;
-  return port >= base && port <= max ? port : null;
 }
 
 async function pickAvailableHostedLocalWorktreePort(

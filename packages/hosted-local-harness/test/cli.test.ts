@@ -29,7 +29,6 @@ const removeCreatedHostedLocalWorktreeDatabaseIfUnpaired = vi.hoisted(() =>
 const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
   vi.fn(async () => createHostedLocalWorktreeConfig()),
 );
-const writeHostedLocalWorktreeManifest = vi.hoisted(() => vi.fn(async () => ({})));
 const resolveHostedLocalDevConfig = vi.hoisted(() =>
   vi.fn(() => ({
     linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
@@ -84,7 +83,6 @@ vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   formatHostedLocalWorktreeEnv,
   removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
-  writeHostedLocalWorktreeManifest,
 }));
 
 vi.mock("../src/dev-hosted-local/config.ts", () => ({
@@ -218,6 +216,7 @@ describe("hosted-local run CLI", () => {
 
     expect(resolveHostedLocalWorktreeConfig).toHaveBeenCalledWith({
       env: {},
+      probePorts: false,
       slug: "feature-a",
     });
     expect(formatHostedLocalWorktreeEnv).toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
@@ -225,7 +224,7 @@ describe("hosted-local run CLI", () => {
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
-  test("writes worktree state before running doctor with the worktree profile", async () => {
+  test("runs doctor with deterministic worktree env and no persisted lifecycle state", async () => {
     const output = createBufferedStdout();
 
     await runHostedLocalCli(["worktree", "doctor", "feature-a", "--json"], {
@@ -233,9 +232,11 @@ describe("hosted-local run CLI", () => {
       stdout: output.stdout,
     });
 
-    expect(writeHostedLocalWorktreeManifest).toHaveBeenCalledWith(
-      createHostedLocalWorktreeConfig(),
-    );
+    expect(resolveHostedLocalWorktreeConfig).toHaveBeenCalledWith({
+      env: {},
+      probePorts: false,
+      slug: "feature-a",
+    });
     expect(runDoctorCommand).toHaveBeenCalledWith("node", ["--version"]);
     expect(runDoctorCommand).toHaveBeenCalledWith("pnpm", ["--version"]);
     expect(runDoctorCommand).toHaveBeenCalledWith("docker", ["info"]);
@@ -244,7 +245,7 @@ describe("hosted-local run CLI", () => {
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
-  test("prepares worktree state before delegating worktree up to the normal stack", async () => {
+  test("prepares worktree resources before delegating worktree up to the normal stack", async () => {
     const output = createBufferedStdout();
 
     await runHostedLocalCli(["worktree", "up", "feature-a"], {
@@ -252,9 +253,10 @@ describe("hosted-local run CLI", () => {
       stdout: output.stdout,
     });
 
-    expect(writeHostedLocalWorktreeManifest).toHaveBeenCalledWith(
-      createHostedLocalWorktreeConfig(),
-    );
+    expect(resolveHostedLocalWorktreeConfig).toHaveBeenCalledWith({
+      env: {},
+      slug: "feature-a",
+    });
     expect(ensureHostedLocalWorktreeDatabase).toHaveBeenCalledWith(
       createHostedLocalWorktreeConfig(),
     );
@@ -327,7 +329,7 @@ describe("hosted-local run CLI", () => {
     expect(output.text()).not.toContain("left in place");
   });
 
-  test("fails closed instead of guessing worktree process ownership for down", async () => {
+  test("rejects worktree down because it has no ownership-aware lifecycle", async () => {
     const output = createBufferedStdout();
 
     await expect(
@@ -335,9 +337,8 @@ describe("hosted-local run CLI", () => {
         env: {},
         stdout: output.stdout,
       }),
-    ).rejects.toThrow("worktree down is disabled until worktree up records process ownership");
+    ).rejects.toThrow("Unknown hosted-local worktree command: down");
 
-    expect(resolveHostedLocalWorktreeConfig).not.toHaveBeenCalled();
     expect(output.text()).toBe("");
   });
 
@@ -560,7 +561,6 @@ function createHostedLocalWorktreeConfig() {
       MURPH_DEV_WEB_PORT: "3101",
       MURPH_HOSTED_LOCAL_PROFILE: "worktree",
     },
-    manifestPath: ".tmp/hosted-local-worktrees/feature-a/manifest.json",
     paths: {},
     ports: {
       minio: 9101,

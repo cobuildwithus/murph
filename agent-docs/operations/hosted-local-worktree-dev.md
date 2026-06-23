@@ -61,10 +61,9 @@ The helper:
   Temporal port, temp dir, Wrangler persist dir, MinIO data dir, generated
   crypto-state path, Linq webhook registration cache path, Linq tunnel config,
   `NEXT_DIST_DIR_MODE=smoke`, and `NEXT_DIST_DIR_SUFFIX=<slug>`
-- writes a non-secret manifest at
-  `.tmp/hosted-local-worktrees/<slug>/manifest.json`
-- preserves live Stripe and Linq support; this is not the E2E profile and does
-  not inherit E2E-only skips
+- preserves live Stripe support
+- disables live Linq tunnel startup and webhook registration by default; a
+  worktree must opt in with a dedicated public URL or tunnel config
 - keeps generated local crypto state paired with the slug-specific database
 
 Companion commands:
@@ -72,15 +71,16 @@ Companion commands:
 ```bash
 pnpm hosted-local worktree doctor <slug> [--json]
 pnpm hosted-local worktree env <slug>
-pnpm hosted-local worktree down <slug>
 ```
 
 `doctor` applies the worktree env internally and checks the resolved non-secret
 config. `env` is inspection-only: it prints the resolved exports with the
-database URL redacted, so do not source it as a complete startup env. `down`
-uses the saved manifest ports when present, falls back to the slug-derived
-ports/build id, stops only the matching local processes, runner containers, and
-MinIO sidecar, and removes the slug manifest.
+database URL redacted, so do not source it as a complete startup env.
+
+There is intentionally no out-of-band `worktree down` lifecycle command yet.
+Stop the foreground `pnpm hosted-local worktree up <slug>` process directly.
+Do not kill worktree resources by port number alone; add an ownership record
+before introducing a background cleanup command.
 
 ## Manual Fallback
 
@@ -174,8 +174,8 @@ Use one of these:
   `.tmp/cloudflared-linq-webhook.<slug>.yml` whose ingress service targets the
   worktree web port.
 
-Agents should keep live Linq registration disabled unless the task explicitly
-requires inbound provider delivery:
+The helper sets these defaults. Agents should keep them unless the task
+explicitly requires inbound provider delivery:
 
 ```bash
 MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0 \
@@ -183,8 +183,8 @@ MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1
 ```
 
 When live Linq delivery is required, set the local inbound phone allowlist and
-use a dedicated tunnel target. Do not reuse the main checkout's tunnel hostname
-unless its service has been intentionally repointed to this worktree.
+use a dedicated tunnel target. Do not reuse the main checkout's tunnel name or
+hostname unless its service has been intentionally repointed to this worktree.
 
 ## Implementation Notes
 
@@ -201,9 +201,7 @@ parallel shell runner. The relevant surfaces are:
 The helper uses small, typed primitives:
 
 - `resolveHostedLocalWorktreeConfig({ slug, env })`
-- `writeHostedLocalWorktreeManifest(config)`
 - `ensureHostedLocalWorktreeDatabase(config)`
-- `stopHostedLocalWorktreeResources({ slug, env })`
 - `MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE` config parsing instead of a
   hard-coded shared cache
 
@@ -221,5 +219,5 @@ When an agent needs `pnpm dev` from a secondary worktree:
    state, temp state, Wrangler state, Next dist suffix, Linq registration cache,
    and optional tunnel target are all set.
 4. Never paste secret values into the chat, docs, commits, logs, or examples.
-5. Stop the stack with `pnpm hosted-local worktree down <slug>` when the proof is
-   done or before reusing the slug for a different branch.
+5. Stop the foreground `pnpm hosted-local worktree up <slug>` process directly
+   when the proof is done or before reusing the slug for a different branch.

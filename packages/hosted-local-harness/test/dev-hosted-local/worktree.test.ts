@@ -8,19 +8,16 @@ type SpawnSyncResult = {
 };
 
 const worktreeMocks = vi.hoisted(() => ({
-  mkdir: vi.fn(async () => {}),
   readFile: vi.fn(async () => {
     const error = new Error("missing") as NodeJS.ErrnoException;
     error.code = "ENOENT";
     throw error;
   }),
-  rename: vi.fn(async () => {}),
   spawnSync: vi.fn<() => SpawnSyncResult>(() => ({
     status: 0,
     stderr: "",
     stdout: "",
   })),
-  writeFile: vi.fn(async () => {}),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -28,22 +25,17 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
-  mkdir: worktreeMocks.mkdir,
   readFile: worktreeMocks.readFile,
-  rename: worktreeMocks.rename,
-  writeFile: worktreeMocks.writeFile,
 }));
 
 import {
   buildHostedLocalWorktreeConfig,
-  buildHostedLocalWorktreeManifest,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
   removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
-  writeHostedLocalWorktreeManifest,
 } from "../../src/dev-hosted-local/worktree.ts";
 
 const ports = {
@@ -137,9 +129,6 @@ describe("hosted-local worktree config", () => {
     expect(config.slug).toBe("feature-a");
     expect(config.databaseName).toBe("murph_dev_feature_a");
     expect(config.buildId).toBe("worktree-feature-a");
-    expect(config.manifestPath).toBe(
-      ".tmp/hosted-local-worktrees/feature-a/manifest.json",
-    );
     expect(config.paths).toMatchObject({
       cryptoStatePath:
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
@@ -157,6 +146,10 @@ describe("hosted-local worktree config", () => {
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
       MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
         ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_MINIO_PORT: "9101",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_TEMPORAL_PORT: "7301",
@@ -168,8 +161,46 @@ describe("hosted-local worktree config", () => {
 
     const rendered = formatHostedLocalWorktreeEnv(config);
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
+    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
+    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
     expect(rendered).not.toContain(config.databaseUrl);
+  });
+
+  it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {
+    expect(() =>
+      buildHostedLocalWorktreeConfig({
+        env: {
+          MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+          MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+        },
+        ports,
+        slug: "feature-a",
+      })
+    ).toThrow("live Linq tunnel delivery requires");
+  });
+
+  it("allows explicit live Linq opt-in with a dedicated worktree tunnel", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+          ".tmp/cloudflared-linq-webhook.feature-a.yml",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "feature-a",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/cloudflared-linq-webhook.feature-a.yml",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "feature-a",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+    });
   });
 
   it("preserves an existing loopback local database authority while replacing the database name", () => {
@@ -202,32 +233,22 @@ describe("hosted-local worktree config", () => {
     expect(config.ports.minio).toBeLessThan(9400);
   });
 
-  it("reuses manifest ports instead of probing new ports for an existing slug", async () => {
-    worktreeMocks.readFile.mockResolvedValueOnce(JSON.stringify({
-      ports: {
-        minio: 9108,
-        temporal: 7308,
-        web: 3108,
-        worker: 8808,
-      },
-      profileName: "worktree",
-      schemaVersion: 1,
-      slug: "feature-a",
-    }));
-
+  it("uses deterministic preferred ports when probing is disabled", async () => {
     const config = await resolveHostedLocalWorktreeConfig({
       env: {},
+      probePorts: false,
+      slug: "feature-a",
+    });
+    const repeated = await resolveHostedLocalWorktreeConfig({
+      env: {},
+      probePorts: false,
       slug: "feature-a",
     });
 
-    expect(config.ports).toEqual({
-      minio: 9108,
-      temporal: 7308,
-      web: 3108,
-      worker: 8808,
-    });
-    expect(config.urls.webBaseUrl).toBe("http://127.0.0.1:3108");
-    expect(config.urls.workerBaseUrl).toBe("http://127.0.0.1:8808");
+    expect(config.ports).toEqual(repeated.ports);
+    expect(worktreeMocks.readFile).not.toHaveBeenCalled();
+    expect(config.urls.webBaseUrl).toBe(`http://127.0.0.1:${config.ports.web}`);
+    expect(config.urls.workerBaseUrl).toBe(`http://127.0.0.1:${config.ports.worker}`);
   });
 
   it("rejects slugs that cannot safely name local resources", () => {
@@ -252,53 +273,6 @@ describe("hosted-local worktree config", () => {
         slug: "Bad",
       })
     ).toThrow("worktree slug");
-  });
-
-  it("builds a non-secret manifest", () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-    const manifest = buildHostedLocalWorktreeManifest(config);
-
-    expect(manifest).toMatchObject({
-      buildId: "worktree-feature-a",
-      databaseName: "murph_dev_feature_a",
-      profileName: "worktree",
-      schemaVersion: 1,
-      slug: "feature-a",
-    });
-    expect(JSON.stringify(manifest)).not.toContain(config.databaseUrl);
-  });
-
-  it("writes the manifest atomically without persisting database credentials", async () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-
-    const manifest = await writeHostedLocalWorktreeManifest(config);
-
-    expect(manifest.slug).toBe("feature-a");
-    expect(worktreeMocks.mkdir).toHaveBeenCalledWith(
-      expect.stringContaining(".tmp/hosted-local-worktrees/feature-a"),
-      { mode: 0o700, recursive: true },
-    );
-    expect(worktreeMocks.writeFile).toHaveBeenCalledTimes(1);
-    const [tempPath, contents, writeOptions] = worktreeMocks.writeFile.mock.calls[0]!;
-    expect(String(tempPath)).toContain("manifest.json.");
-    expect(String(contents)).toContain('"slug": "feature-a"');
-    expect(String(contents)).not.toContain(config.databaseUrl);
-    expect(writeOptions).toMatchObject({
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    expect(worktreeMocks.rename).toHaveBeenCalledWith(
-      tempPath,
-      expect.stringContaining(".tmp/hosted-local-worktrees/feature-a/manifest.json"),
-    );
   });
 
   it("validates paired crypto state when the explicit database create skip flag is set", async () => {
