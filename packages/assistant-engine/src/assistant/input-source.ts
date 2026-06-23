@@ -215,10 +215,13 @@ async function listStoredAssistantInputCandidates(input: {
 
 export function assistantInputCandidateFromStoredEvent(
   event: AssistantInputEventRecord,
+  input?: {
+    hostedMailboxItemId?: string | null
+  },
 ): AssistantInputCandidate {
   return assistantInputCandidateFromStoredEventWithHostedMailboxItem({
     event,
-    hostedMailboxItemId: null,
+    hostedMailboxItemId: input?.hostedMailboxItemId ?? null,
   })
 }
 

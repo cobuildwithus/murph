@@ -49,6 +49,7 @@ export {
 } from './attachment-file-name.js'
 export {
   recordHostedMailboxAssistantInputItem,
+  readHostedMailboxAssistantInputItems,
 } from './hosted-mailbox-input-items.js'
 export {
   assistantInputCandidateFromStoredEvent,
