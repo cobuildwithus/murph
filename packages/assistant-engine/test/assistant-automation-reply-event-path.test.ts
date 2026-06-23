@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
 import type { AssistantInputConversationRef } from '../src/assistant/input-store.ts'
 import type {
@@ -20,6 +21,7 @@ import {
 
 const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
+  listAssistantTranscriptEntries: vi.fn(),
   listAssistantTurnReceipts: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
@@ -49,6 +51,8 @@ vi.mock('../src/assistant/store.ts', async () => {
   )
   return {
     ...actual,
+    listAssistantTranscriptEntries:
+      replyEventPathMocks.listAssistantTranscriptEntries,
     resolveAssistantSession: replyEventPathMocks.resolveAssistantSession,
   }
 })
@@ -66,6 +70,9 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 
 beforeEach(() => {
   replyEventPathMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
+  replyEventPathMocks.listAssistantTranscriptEntries
+    .mockReset()
+    .mockResolvedValue([])
   replyEventPathMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
   replyEventPathMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('session not found'), {
@@ -421,6 +428,69 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('telegram reminder')
   })
 
+  it('matches hosted email history by stable conversation thread when serialized targets rotate', async () => {
+    const vault = await createTempVault()
+    const outboundTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<sent-email-message@example.test>',
+      references: ['<root-email-message@example.test>'],
+      subject: 'Thread context',
+      to: ['sender@example.test'],
+    })
+    const inboundTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<reply-email-message@example.test>',
+      references: [
+        '<root-email-message@example.test>',
+        '<sent-email-message@example.test>',
+      ],
+      subject: 'Thread context',
+      to: ['assistant@example.test'],
+    })
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-hosted-email',
+        message: 'serialized target context',
+        providerThreadId: null,
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+        target: outboundTarget,
+        threadId: 'thread-1',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'email',
+        messageId: '<reply-email-message@example.test>',
+        threadId: inboundTarget,
+      },
+      source: 'email',
+      text: 'What did you just send?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.deliveryTarget).toBe(inboundTarget)
+    expect(sendInput.turnContext).toContain('serialized target context')
+  })
+
   it('does not repeat cross-session context after the chat session advances', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
@@ -460,19 +530,26 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput).not.toHaveProperty('turnContext')
   })
 
-  it('suppresses a self-authored echo using confirmed outbox delivery', async () => {
+  it('suppresses a self-authored echo using recent assistant transcript despite timestamp skew', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
-        intentId: 'intent-echo',
-        message: 'Reminder sent',
-        sentAt: '2026-04-08T00:05:00.000Z',
-        sessionId: 'session-automation',
-      }),
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:05:01.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      {
+        createdAt: '2026-04-08T00:05:01.000Z',
+        kind: 'assistant',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: 'Reminder sent',
+      },
     ])
     const candidate = createAssistantInputCandidate({
       actorIsSelf: true,
-      occurredAt: '2026-04-08T00:06:00.000Z',
+      occurredAt: '2026-04-08T00:05:00.000Z',
       optionalInboxCaptureId: null,
       source: 'email',
       text: '  Reminder   sent  ',

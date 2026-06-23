@@ -375,6 +375,19 @@ function createSentOutboxIntent(input: {
   }
 }
 
+function createTranscriptEntry(input: {
+  createdAt: string
+  kind?: 'assistant' | 'error' | 'status' | 'thinking' | 'user'
+  text: string
+}) {
+  return {
+    createdAt: input.createdAt,
+    kind: input.kind ?? 'assistant',
+    schema: 'murph.assistant-transcript-entry.v1',
+    text: input.text,
+  }
+}
+
 function createListResult(
   items: readonly Record<string, unknown>[],
   overrides: Partial<{
@@ -5650,11 +5663,18 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('skips recent self-authored assistant echoes', async () => {
-    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createSentOutboxIntent({
-        message: 'same text',
-        sentAt: '2026-04-08T00:00:00.000Z',
+  it('skips recent self-authored assistant echoes when the provider timestamp precedes the transcript write', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:01.000Z',
+        sessionId: 'session-echo',
+      },
+    })
+    replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:01.000Z',
+        text: 'same text',
       }),
     ])
     const inboxServices = createInboxServices({
@@ -5662,7 +5682,148 @@ describe('assistant auto-reply runtime', () => {
         createShowResult(
           createCaptureDetail({
             actorIsSelf: true,
-            occurredAt: '2026-04-08T00:05:00.000Z',
+            occurredAt: '2026-04-08T00:00:00.000Z',
+            source: 'linq',
+            text: 'same text',
+            threadId: 'thread-1',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          actorIsSelf: true,
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'linq',
+          text: 'same text',
+          threadId: 'thread-1',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('skips self-authored echoes that match an older recent assistant transcript entry', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:04.000Z',
+        sessionId: 'session-echo-multiple',
+      },
+    })
+    replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:01.000Z',
+        text: 'first reminder',
+      }),
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:04.000Z',
+        text: 'second reminder',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            actorIsSelf: true,
+            occurredAt: '2026-04-08T00:00:05.000Z',
+            source: 'linq',
+            text: 'first reminder',
+            threadId: 'thread-1',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          actorIsSelf: true,
+          occurredAt: '2026-04-08T00:00:05.000Z',
+          source: 'linq',
+          text: 'first reminder',
+          threadId: 'thread-1',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not suppress self-authored input from outbox history alone', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        message: 'same text',
+        sentAt: '2026-04-08T00:01:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            actorIsSelf: true,
+            occurredAt: '2026-04-08T00:02:00.000Z',
             text: 'same text',
           }),
         ),
@@ -5675,7 +5836,7 @@ describe('assistant auto-reply runtime', () => {
       createReplyGroupItem(
         createCaptureSummary({
           actorIsSelf: true,
-          occurredAt: '2026-04-08T00:05:00.000Z',
+          occurredAt: '2026-04-08T00:02:00.000Z',
           text: 'same text',
         }),
       ),
@@ -5699,10 +5860,11 @@ describe('assistant auto-reply runtime', () => {
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
       stopScanning: false,
     })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
   })
 
   it('still replies when self-authored captures cannot be matched to a recent assistant echo', async () => {
