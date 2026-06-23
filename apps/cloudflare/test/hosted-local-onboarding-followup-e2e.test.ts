@@ -1,5 +1,8 @@
 import { createHmac } from "node:crypto";
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from "@murphai/assistant-engine";
+import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
@@ -31,33 +34,11 @@ import {
 
 const userId = `member_local_linq_onboarding_followup_${Date.now()}`;
 const linqWebhookSecret = "linq-local-onboarding-followup-secret";
-const followupSlug = "finish-onboarding-followup";
-const followupTitle = "Finish Murph onboarding follow-up";
-const followupSummary = "Daily setup continuation check until Murph onboarding is complete.";
-const followupInstructions = [
-  "Goal: close or gently advance Murph onboarding after hosted signup without re-asking setup context the vault already knows. The first scheduled occurrence is intentionally deferred until after the signup day.",
-  "",
-  "Before deciding, run `vault-cli assistant onboarding resume-context --format json`.",
-  "",
-  "Success criteria: onboarding is no longer open, or the user receives one brief question for the smallest genuinely unresolved onboarding step.",
-  "",
-  "If `onboarding.status` is `completed`, archive this automation with `vault-cli automation set-status finish-onboarding-followup --status archived`, then return skip. If archiving fails, still return skip without messaging the user so this check can retry later.",
-  "",
-  "If `onboarding.status` is `open` but resume-context or the available recent user messages show the onboarding completion criteria are already satisfied through answers, saved setup facts, skipped individual fields, or deferrals, run `vault-cli assistant onboarding complete --reason user_answered`. If recent user messages show a clear overall onboarding opt-out, run `vault-cli assistant onboarding complete --reason user_declined` instead. If the output shows completed, archive this automation, then return skip. If completion or archiving fails, return skip without messaging the user so this check can retry later.",
-  "",
-  "If onboarding is still genuinely open, use resume-context and the available recent user messages as saved setup evidence. Open status alone is not evidence that setup facts are missing. Treat saved, skipped, declined individual fields, not-relevant, or clearly answered-in-chat setup context as resolved. If most setup context is already present, ask about the next meaningful first-experiment setup or deferral decision instead of more intake.",
-  "",
-  "Before sending, triple-check resume-context and the available recent user messages for an answer to the question you would ask. The last thing we want is to bug the user after they already answered onboarding. If there is no useful next unresolved question, return skip rather than sending a generic setup nudge.",
-  "",
-  "Output: send one brief, natural, low-pressure in-chat question only when a real unresolved step remains. Do not mention internal state or this automation, and do not use a fixed script. The user's answer will be handled by the next normal Murph onboarding turn.",
-].join("\n");
-const followupTags = [
-  "assistant",
-  "scheduled",
-  "onboarding",
-  "murph-managed",
-  "murph-managed:onboarding-followup",
-] as const;
+const followupSlug = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug;
+const followupTitle = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title;
+const followupSummary = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary;
+const followupInstructions = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions;
+const followupTags = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";

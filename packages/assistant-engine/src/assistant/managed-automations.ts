@@ -1,4 +1,5 @@
 import {
+  patchAutomation,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -21,6 +22,9 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
+
+export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
 export type MurphManagedAutomationSchedule = Exclude<
   AutomationSchedule,
@@ -77,6 +81,21 @@ const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
   'assistant',
   'scheduled',
   'murph-managed',
+] as const
+
+const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
+  'This scheduled check helps continue Murph setup.',
+  '',
+  'First inspect onboarding status with `vault-cli assistant onboarding status`.',
+  '',
+  'If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.',
+  '',
+  'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
+].join('\n')
+
+const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
+  'assistant',
+  'onboarding',
 ] as const
 
 export const MURPH_MANAGED_AUTOMATIONS = [
@@ -388,7 +407,48 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
+  if (await reconcileExistingOnboardingFollowupAutomation({
+    now,
+    vaultRoot: input.vaultRoot,
+  })) {
+    result.updated += 1
+  }
+
   return result
+}
+
+async function reconcileExistingOnboardingFollowupAutomation(input: {
+  now: Date
+  vaultRoot: string
+}): Promise<boolean> {
+  const existing = await showAutomation({
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!existing || existing.status === 'archived') {
+    return false
+  }
+
+  if (!isManagedOnboardingFollowupAutomation(existing)) {
+    return false
+  }
+
+  if (!onboardingFollowupAutomationDefinitionChanged(existing)) {
+    return false
+  }
+
+  await patchAutomation({
+    continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+    instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    lookup: existing.automationId,
+    now: input.now,
+    summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+    tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+    title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    vaultRoot: input.vaultRoot,
+  })
+
+  return true
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -422,6 +482,45 @@ async function resolveMurphManagedAutomationCreateRoute(
     resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
     routeValidationProfile,
   )
+}
+
+function onboardingFollowupAutomationDefinitionChanged(
+  existing: AutomationRecord,
+): boolean {
+  return existing.title !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title ||
+    existing.summary !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary ||
+    existing.continuityPolicy !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy ||
+    existing.instructions !== MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions ||
+    !murphManagedAutomationValuesEqual(
+      existing.tags,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+    )
+}
+
+function isManagedOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  return isCurrentManagedOnboardingFollowupAutomation(automation) ||
+    isLegacySeededOnboardingFollowupAutomation(automation)
+}
+
+function isCurrentManagedOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  const tags = new Set(automation.tags)
+  return tags.has('murph-managed') &&
+    tags.has('murph-managed:onboarding-followup')
+}
+
+function isLegacySeededOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&
+    murphManagedAutomationValuesEqual(
+      automation.tags,
+      LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS,
+    )
 }
 
 function murphManagedAutomationSeedChanged(
