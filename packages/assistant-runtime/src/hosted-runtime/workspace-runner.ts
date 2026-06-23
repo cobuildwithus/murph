@@ -526,7 +526,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     );
     await mergePendingForegroundAssistantInputWake({
       now: input.now,
-      preserveExistingWake: true,
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
@@ -553,12 +552,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
     await foregroundMailboxImportLoop.stop();
     if (foregroundConversationWorkObserved) {
-      // stop() drains any foreground import already in flight, so re-read pending
-      // assistant input here before post-cleanup null/later wakes can hide it.
-      await mergePendingForegroundAssistantInputWake({
+      // stop() drains any foreground import already in flight. Preserve the
+      // selected durable wake, but nudge the outer dirty loop to run the new
+      // foreground pass before idle checkpointing when there is assistant work
+      // queued from that import.
+      await notifyPendingForegroundAssistantInputWake({
         now: input.now,
-        preserveExistingWake: false,
-        result: assistantPhaseResult,
+        runtimeWakeSignal: input.runtimeWakeSignal ?? null,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -613,17 +613,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           errorCode: "assistant_after_checkpoint_checkpoint_failed",
           input,
         });
-      }
-    }
-    if (foregroundConversationWorkObserved) {
-      const pendingForegroundAssistantWakeMerged = await mergePendingForegroundAssistantInputWake({
-        now: input.now,
-        preserveExistingWake: false,
-        result: assistantPhaseResult,
-        vaultRoot: input.vaultRoot,
-      });
-      if (pendingForegroundAssistantWakeMerged) {
-        projectedWakeRequiresCheckpoint = false;
       }
     }
     await stageHostedConversationMailboxConsumedAckBestEffort({
@@ -1477,22 +1466,18 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 
 async function mergePendingForegroundAssistantInputWake(input: {
   now?: (() => string) | null;
-  preserveExistingWake: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
-}): Promise<boolean> {
-  if (input.preserveExistingWake && input.result.nextWakeAt) {
-    return false;
+}): Promise<void> {
+  if (input.result.nextWakeAt) {
+    return;
   }
-  if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
-    return false;
-  }
-  const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
+  const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
     now: input.now,
     vaultRoot: input.vaultRoot,
   });
   if (!wakeAt) {
-    return false;
+    return;
   }
 
   mergeHostedAssistantWake({
@@ -1500,7 +1485,38 @@ async function mergePendingForegroundAssistantInputWake(input: {
     result: input.result,
     wakeAt,
   });
-  return input.result.nextWakeAt !== null && input.result.nextWakeReason === "assistant";
+}
+
+async function notifyPendingForegroundAssistantInputWake(input: {
+  now?: (() => string) | null;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+  vaultRoot: string;
+}): Promise<void> {
+  if (!input.runtimeWakeSignal) {
+    return;
+  }
+  const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!wakeAt) {
+    return;
+  }
+
+  input.runtimeWakeSignal.notify();
+}
+
+async function resolvePendingForegroundAssistantInputWakeAt(input: {
+  now?: (() => string) | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
+    return null;
+  }
+  return await resolveHostedPendingAssistantInputWakeAt({
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 function canSkipPendingAssistantInputProbe(vaultRoot: string): boolean {

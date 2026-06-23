@@ -2036,7 +2036,18 @@ function mergeHostedWorkspaceInvocationProjection(
     replaceWake?: boolean;
   } = {},
 ): HostedWorkspaceInvocationProjection {
-  const selectedWake = options.replaceWake
+  const preserveCheckpointGatedWake =
+    options.replaceWake === true
+    && previous.projectedWakeRequiresCheckpoint
+    && previous.nextWakeAt !== null
+    && previous.nextWakeReason !== "assistant"
+    && next.nextWakeAt === null;
+  const selectedWake = preserveCheckpointGatedWake
+    ? {
+        nextWakeAt: previous.nextWakeAt,
+        nextWakeReason: previous.nextWakeReason,
+      }
+    : options.replaceWake
     ? {
         nextWakeAt: next.nextWakeAt,
         nextWakeReason: next.nextWakeReason,
@@ -2052,7 +2063,9 @@ function mergeHostedWorkspaceInvocationProjection(
         },
       ]);
   let selectedWakeRequiresCheckpoint = false;
-  if (options.replaceWake) {
+  if (preserveCheckpointGatedWake) {
+    selectedWakeRequiresCheckpoint = true;
+  } else if (options.replaceWake) {
     selectedWakeRequiresCheckpoint = next.projectedWakeRequiresCheckpoint
       || (
         previous.projectedWakeRequiresCheckpoint
@@ -2077,7 +2090,7 @@ function mergeHostedWorkspaceInvocationProjection(
       ...previous.redactedStatus,
       ...next.redactedStatus,
     },
-    status: options.replaceWake
+    status: options.replaceWake && !preserveCheckpointGatedWake
       ? next.status
       : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
   };
