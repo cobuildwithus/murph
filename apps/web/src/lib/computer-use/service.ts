@@ -41,6 +41,7 @@ const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
+const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
@@ -187,6 +188,16 @@ export class ComputerUseService {
         if (!activeRun) {
           return await this.startRunWithStore(input, store);
         }
+      }
+      if (activeRun.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
+        return await this.resumeAwaitingRunById({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          runId: activeRun.id,
+          store,
+        });
       }
       return runHandle(activeRun, true);
     }
@@ -373,7 +384,7 @@ export class ComputerUseService {
       result = await kernel.executePlaywright({
         code: buildComputerActCode(input),
         sessionId,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: input.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
       });
     } catch (error) {
       throw addComputerActFailureContext(error, input);

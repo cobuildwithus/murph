@@ -1610,7 +1610,7 @@ describe('assistant codex runtime', () => {
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
-  it('allows finish_without_reply after pausing a computer run for the user', async () => {
+  it('rejects finish_without_reply after pausing a computer run for the user', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1703,11 +1703,11 @@ describe('assistant codex runtime', () => {
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'finished without reply',
+                  text: 'finish_without_reply unavailable after computer_pause_for_user; send a normal final response with the handoff URL or next step for the user',
                 },
               ],
             },
@@ -1751,9 +1751,9 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [0],
-      finalAction: { kind: 'none' },
-      finalMessage: '',
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: 'Paused for confirmation: https://web.example.test/computer/handoff/raw-token',
     })
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })

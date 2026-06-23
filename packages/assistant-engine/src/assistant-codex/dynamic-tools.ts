@@ -946,6 +946,19 @@ function currentHostedDeliveryContext(
   return hostedToolContext?.currentHostedDeliveryContext() ?? null
 }
 
+function currentHostedMailboxItemId(
+  hostedToolContext: AssistantHostedToolContext | null,
+): string | null {
+  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
+  for (let index = itemIds.length - 1; index >= 0; index -= 1) {
+    const itemId = normalizeNullableString(itemIds[index])
+    if (itemId) {
+      return itemId
+    }
+  }
+  return null
+}
+
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -1263,10 +1276,15 @@ function buildHostedComputerStartRunBody(input: {
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { startUrl } = input.args
+  const resumeAfterMailboxItemId = currentHostedMailboxItemId(
+    input.hostedToolContext,
+  )
   return {
     goal: 'Hosted computer task.',
-    resumeAfterMailboxItemId: null,
-    resumeDeliveryContext: null,
+    resumeAfterMailboxItemId,
+    resumeDeliveryContext: resumeAfterMailboxItemId
+      ? currentHostedDeliveryContext(input.hostedToolContext)
+      : null,
     resumeRunId: null,
     startUrl,
   }

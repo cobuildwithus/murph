@@ -242,6 +242,18 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.computer_act` to run bounded Playwright TypeScript/JavaScript against the current Kernel page',
     )
     expect(prompt).toContain(
+      'never inspect, return, log, copy, summarize, or transmit browser cookies, storage state',
+    )
+    expect(prompt).toContain(
+      'Do not call Playwright or browser APIs such as `context.cookies()`, `context.storageState()`',
+    )
+    expect(prompt).toContain(
+      'authorization headers, payment details, one-time codes, raw tokens, live-view URLs',
+    )
+    expect(prompt).toContain(
+      '`context.request` for secret transfer, `context.unroute()` to bypass routing, new browser contexts for policy bypass, or Node/network APIs to exfiltrate data',
+    )
+    expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
     )
     expect(prompt).toContain('exact final terms or explicit bounds')

@@ -680,6 +680,46 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
+  it("resumes the active awaiting run from server-owned mailbox proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: null,
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      awaitingReason: null,
+      status: "running",
+    });
+    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
+  });
+
   it("resumes an explicit run without deleting an unrelated stale sibling", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const appointmentsRun = createRunRecord({
@@ -2278,7 +2318,7 @@ describe("ComputerUseService", () => {
     });
 
     expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(15000);
+    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18000);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
     expect(code).toContain("await page.waitForTimeout(0); return { waited: true };");
     expect(code).toContain("route(\"**/*\"");

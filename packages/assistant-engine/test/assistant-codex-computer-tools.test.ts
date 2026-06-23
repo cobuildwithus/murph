@@ -152,6 +152,64 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("sends server-owned resume proof from hosted context without exposing resume ids", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        goal: "Hosted computer task.",
+        resumeAfterMailboxItemId: "hmi_latest_user_reply",
+        resumeDeliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
+        resumeRunId: null,
+        startUrl: "https://shop.example.test/checkout",
+      });
+
+      return jsonResponse({
+        awaitingReason: null,
+        expiresAt: "2026-06-17T13:00:00.000Z",
+        lastTitle: "Checkout",
+        lastUrl: "https://shop.example.test/checkout",
+        reused: true,
+        runId: "run_123",
+        status: "running",
+      });
+    });
+
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        startUrl: "https://shop.example.test/checkout",
+      },
+      tool: "computer_start_run",
+    }));
+
+    if (!request || request.kind !== "computer-start-run") {
+      throw new Error("Expected computer_start_run request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        deliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
+        hostedMailboxItemIds: ["hmi_prior_context", "hmi_latest_user_reply"],
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { profileKey: "appointments" },
     { legacyProfileKey: "appointments" },
@@ -228,7 +286,11 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        resumeAfterMailboxItemId: null,
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        resumeDeliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
         resumeRunId: null,
       }),
     ]);

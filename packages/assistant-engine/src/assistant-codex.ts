@@ -2738,6 +2738,26 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       computerToolsLockedAfterUserPause &&
+      (dynamicToolRequest.kind === 'finish-without-reply' ||
+        dynamicToolRequest.kind === 'invalid-finish-without-reply-arguments')
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply unavailable after computer_pause_for_user; send a normal final response with the handoff URL or next step for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
       void tryWriteRpcMessage({
