@@ -5803,7 +5803,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
-  it('does not suppress self-authored input from outbox history alone', async () => {
+  it('suppresses self-authored echoes from confirmed cross-session outbox history', async () => {
     replyMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -5814,7 +5814,7 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.listAssistantOutboxIntents.mockResolvedValue([
       createSentOutboxIntent({
         message: 'same text',
-        sentAt: '2026-04-08T00:01:00.000Z',
+        sentAt: '2026-04-08T00:02:01.000Z',
         sessionId: 'session-automation',
       }),
     ])
@@ -5860,11 +5860,11 @@ describe('assistant auto-reply runtime', () => {
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 1,
-      skipped: 0,
+      replied: 0,
+      skipped: 1,
       stopScanning: false,
     })
-    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('still replies when self-authored captures cannot be matched to a recent assistant echo', async () => {

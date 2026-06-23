@@ -1080,9 +1080,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     maxSessionAgeMs: input.sessionMaxAgeMs,
     vault: input.vault,
   })
+  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
+  const conversationDeliveryTarget =
+    deliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group)
   if (
     input.group.firstItem.summary.actorIsSelf &&
     await isRecentSelfAuthoredAssistantEcho({
+      deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
       session: existingSession,
       vault: input.vault,
@@ -1093,11 +1097,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
-  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
   const latestCrossSessionMessage =
     await resolveAssistantAutoReplyLatestCrossSessionDelivery({
-      deliveryTarget:
-        deliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group),
+      deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
       session: existingSession,
       vault: input.vault,
@@ -3085,44 +3087,75 @@ function createDeferredSkipDecision(
 }
 
 async function isRecentSelfAuthoredAssistantEcho(input: {
+  deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
   session: AssistantSession | null
   vault: string
 }): Promise<boolean> {
-  if (input.session === null) {
-    return false
-  }
-
   const inputText = normalizeNullableString(input.input.text)
   const inputTime = Date.parse(input.input.occurredAt)
   if (inputText === null || !Number.isFinite(inputTime)) {
     return false
   }
 
-  const transcriptEntries = await listAssistantTranscriptEntries(
-    input.vault,
-    input.session.sessionId,
-  )
-  for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
-    const entry = transcriptEntries[index]
-    if (entry?.kind !== 'assistant' || normalizeNullableString(entry.text) === null) {
-      continue
-    }
+  if (input.session !== null) {
+    const transcriptEntries = await listAssistantTranscriptEntries(
+      input.vault,
+      input.session.sessionId,
+    )
+    for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+      const entry = transcriptEntries[index]
+      if (
+        entry?.kind !== 'assistant' ||
+        normalizeNullableString(entry.text) === null
+      ) {
+        continue
+      }
 
-    const entryTime = Date.parse(entry.createdAt)
-    if (!Number.isFinite(entryTime)) {
-      continue
-    }
+      const entryTime = Date.parse(entry.createdAt)
+      if (!Number.isFinite(entryTime)) {
+        continue
+      }
 
-    if (
-      Math.abs(inputTime - entryTime) <= SELF_AUTHORED_ECHO_WINDOW_MS &&
-      normalizeComparableText(entry.text) === normalizeComparableText(inputText)
-    ) {
-      return true
+      if (isAssistantAutoReplyRecentEchoMatch({
+        inputText,
+        inputTime,
+        message: entry.text,
+        messageTime: entryTime,
+      })) {
+        return true
+      }
     }
   }
 
-  return false
+  const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
+    {
+      deliveryTarget: input.deliveryTarget,
+      input: input.input,
+      vault: input.vault,
+    },
+  )
+  return matchingDeliveries.some((delivery) =>
+    isAssistantAutoReplyRecentEchoMatch({
+      inputText,
+      inputTime,
+      message: delivery.message,
+      messageTime: delivery.sentAtMs,
+    }),
+  )
+}
+
+function isAssistantAutoReplyRecentEchoMatch(input: {
+  inputText: string
+  inputTime: number
+  message: string
+  messageTime: number
+}): boolean {
+  return (
+    Math.abs(input.inputTime - input.messageTime) <=
+      SELF_AUTHORED_ECHO_WINDOW_MS &&
+    normalizeComparableText(input.message) === normalizeComparableText(input.inputText)
+  )
 }
 
 async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
@@ -3138,45 +3171,14 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     return null
   }
 
-  const intents = await listAssistantOutboxIntents(input.vault)
-  const matchingDeliveries = intents
-    .flatMap((intent) => {
-      if (intent.status !== 'sent' || intent.operation !== null) {
-        return []
-      }
-
-      const delivery = intent.delivery
-      if (
-        !delivery ||
-        delivery.kind === 'message-reaction' ||
-        normalizeNullableString(delivery.channel) !== channel ||
-        !assistantAutoReplyOutboxIntentMatchesConversation({
-          conversation: input.input.conversation,
-          intent,
-        }) ||
-        !assistantAutoReplyOutboxDeliveryMatchesTarget({
-          conversation: input.input.conversation,
-          delivery,
-          deliveryTarget,
-          intent,
-        })
-      ) {
-        return []
-      }
-
-      const message = normalizeNullableString(intent.message)
-      const sentAtMs = Date.parse(delivery.sentAt)
-      if (!message || !Number.isFinite(sentAtMs) || sentAtMs > inputTime) {
-        return []
-      }
-
-      return [{
-        intentId: intent.intentId,
-        message,
-        sentAtMs,
-        sessionId: intent.sessionId,
-      }]
+  const matchingDeliveries = (
+    await listAssistantAutoReplyMatchingOutboxDeliveries({
+      deliveryTarget,
+      input: input.input,
+      vault: input.vault,
     })
+  )
+    .filter((delivery) => delivery.sentAtMs <= inputTime)
     .sort((left, right) =>
       left.sentAtMs === right.sentAtMs
         ? left.intentId.localeCompare(right.intentId)
@@ -3195,6 +3197,64 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       (!Number.isFinite(lastTurnAtMs) || delivery.sentAtMs > lastTurnAtMs),
     )
     .at(-1)?.message ?? null
+}
+
+interface AssistantAutoReplyMatchingOutboxDelivery {
+  intentId: string
+  message: string
+  sentAtMs: number
+  sessionId: string
+}
+
+async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
+  deliveryTarget: string | null
+  input: AssistantAutoReplyPrimaryInput
+  vault: string
+}): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
+  const channel = normalizeNullableString(input.input.source)
+  const deliveryTarget = normalizeNullableString(input.deliveryTarget)
+  if (!channel || !deliveryTarget) {
+    return []
+  }
+
+  const intents = await listAssistantOutboxIntents(input.vault)
+  return intents.flatMap((intent) => {
+    if (intent.status !== 'sent' || intent.operation !== null) {
+      return []
+    }
+
+    const delivery = intent.delivery
+    if (
+      !delivery ||
+      delivery.kind === 'message-reaction' ||
+      normalizeNullableString(delivery.channel) !== channel ||
+      !assistantAutoReplyOutboxIntentMatchesConversation({
+        conversation: input.input.conversation,
+        intent,
+      }) ||
+      !assistantAutoReplyOutboxDeliveryMatchesTarget({
+        conversation: input.input.conversation,
+        delivery,
+        deliveryTarget,
+        intent,
+      })
+    ) {
+      return []
+    }
+
+    const message = normalizeNullableString(intent.message)
+    const sentAtMs = Date.parse(delivery.sentAt)
+    if (!message || !Number.isFinite(sentAtMs)) {
+      return []
+    }
+
+    return [{
+      intentId: intent.intentId,
+      message,
+      sentAtMs,
+      sessionId: intent.sessionId,
+    }]
+  })
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {
