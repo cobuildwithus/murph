@@ -929,6 +929,8 @@ export async function runHostedDeviceSyncPass(
   let processedJobs = 0;
 
   try {
+    service.setDenseRawRetentionWakeAt(resolveHostedDeviceSyncYieldRetryAt());
+
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
