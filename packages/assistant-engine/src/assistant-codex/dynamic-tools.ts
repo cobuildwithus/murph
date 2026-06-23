@@ -187,7 +187,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback after the user explicitly expresses product frustration, asks for a feature, or shows interest in shipped changelog items. Summarize the product feedback concisely; never include tags, topics, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -201,7 +201,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise product-only summary of the explicit feedback. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
+          'Concise product-only summary. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
       },
       relatedChangelogItemIds: {
         type: 'array',

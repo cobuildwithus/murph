@@ -89,6 +89,8 @@ describe("assistant product feedback", () => {
     expect(schema).toContain('"minItems":1');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
+    expect(schema).toContain('Speculative:');
+    expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
   });
 
