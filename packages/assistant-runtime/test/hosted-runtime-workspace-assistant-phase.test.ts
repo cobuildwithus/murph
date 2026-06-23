@@ -248,7 +248,7 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 } as const;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -674,6 +674,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redactedLogEntries: [],
       },
       status: "processed",
+    });
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -4850,9 +4853,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("2026-04-27T00:10:00.000Z");
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -4911,7 +4914,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalled();
@@ -4946,7 +4949,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 0,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
@@ -4961,6 +4963,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
     }));
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    const postCheckpoint = await result.afterCheckpoint?.();
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: "2026-04-27T00:15:00.000Z",
