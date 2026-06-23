@@ -19,6 +19,7 @@ import {
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   resolveHostedLocalStripeEnvFilePath,
+  resolveWranglerLocalDevWorkerName,
   shouldSyncLocalDatabaseSchema,
 } from "../../src/dev-hosted-local/environment.ts";
 import type {
@@ -37,6 +38,7 @@ const localConfig: HostedLocalDevConfig = {
   forceResetLocalDatabase: false,
   forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
+  linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "auto",
   linqWebhookTunnelName: "dev",
@@ -698,6 +700,74 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBeUndefined();
   });
 
+  it("lets explicit worktree remote-crypto disable override existing env files", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/prod/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nREMOTE\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
+      },
+      oidcIdentity,
+      overrides: {
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "0",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
+      generatedAuthorityPrivateJwkJson,
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+  });
+
+  it("uses the shared truthy parser for remote hosted crypto opt-in", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/prod/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nREMOTE\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "yes",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("production");
+    expect(merged.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBeUndefined();
+  });
+
   it("rejects stale local Codex bridge proxy values from existing worker env", () => {
     expect(() =>
       mergeCloudflareLocalEnv({
@@ -834,6 +904,29 @@ describe("resolveHostedLocalPersistentCryptoStatePath", () => {
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
     })).toContain(".tmp/hosted-local-dev-crypto-state.dev.vars");
+  });
+
+  it("uses the worktree-local crypto state path when configured", () => {
+    const statePath = resolveHostedLocalPersistentCryptoStatePath({
+      MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
+        ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+      MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+    });
+
+    expect(statePath).toContain(
+      ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
+    );
+  });
+
+  it("rejects worktree crypto state outside repo-local .tmp", () => {
+    expect(() =>
+      resolveHostedLocalPersistentCryptoStatePath({
+        MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH: "../outside.dev.vars",
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      })
+    ).toThrow("repo-local .tmp");
   });
 
   it("does not persist generated crypto state for E2E profiles", () => {
@@ -1417,6 +1510,20 @@ describe("buildWranglerLocalDevConfig", () => {
       },
       max_instances: 1,
     });
+  });
+
+  it("uses an isolated worker name for worktree-scoped dev runs", () => {
+    const source = {
+      MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+    };
+    const workerName = resolveWranglerLocalDevWorkerName(source);
+
+    expect(workerName).toMatch(/^murph-worktree-[a-f0-9]{24}$/u);
+    expect(workerName.startsWith("murph-hosted-")).toBe(false);
+    expect(buildWranglerEnvFileText(source)).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
+    expect(buildWranglerVarArgs(source).join("\n")).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
   });
 
   it("re-roots generated paths to the temp config directory", () => {

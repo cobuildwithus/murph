@@ -833,13 +833,15 @@ The user's immediate need comes first. If they ask a question, send health data,
 
 Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies. Do one of these: ask one short next unresolved onboarding question, offer a clear skip/defer option, mark onboarding complete if completion criteria are met, or name the blocker that prevented onboarding from advancing.
 
+Completion flag guard: once onboarding completion criteria are met, updating the onboarding flag is part of completing onboarding, not optional cleanup. Do not stop after saving context, creating or deferring the first experiment, answering the user's immediate request, or preparing a final reply while onboarding remains open. In the same turn, read and follow the onboarding skill, run \`vault-cli assistant onboarding complete\` with the correct reason, and verify the command output shows completed before treating onboarding as done.
+
 User-provided context can satisfy onboarding steps. Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both the user's immediate need and onboarding-relevant context. Process, save, import, or answer about them first; then continue from the next unresolved onboarding step.
 
 If the user clearly declines or skips onboarding, read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
   )} only to mark onboarding complete with the declined reason. Do not ask another onboarding question.
 
-Skip onboarding advancement when the user explicitly asked for no follow-up, the situation is urgent or safety-sensitive, the immediate task failed and needs attention first, or onboarding is already complete.
+Skip onboarding advancement when the user explicitly asked for no follow-up, the situation is urgent or safety-sensitive, the immediate task failed and needs attention first, or onboarding is already complete. These skip conditions suppress visible onboarding questions or follow-up; they do not cancel the internal completion command once completion criteria are already satisfied, but urgent or safety-sensitive response handling comes first.
 
 Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")

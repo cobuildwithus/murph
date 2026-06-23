@@ -3,6 +3,7 @@ export interface HostedLocalDevConfig {
   forceResetLocalDatabase: boolean;
   forceResetLocalTemporal: boolean;
   linqWebhookPublicUrl: string | null;
+  linqWebhookRegistrationCachePath: string | null;
   linqWebhookTunnelConfigPath: string;
   linqWebhookTunnelMode: "auto" | "disabled" | "required";
   linqWebhookTunnelName: string;

@@ -1475,6 +1475,12 @@ describe('assistant Murph onboarding guidance', () => {
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(prompt).toContain(
+      'Completion flag guard: once onboarding completion criteria are met, updating the onboarding flag is part of completing onboarding, not optional cleanup',
+    )
+    expect(prompt).toContain(
+      'run `vault-cli assistant onboarding complete` with the correct reason, and verify the command output shows completed before treating onboarding as done',
+    )
+    expect(prompt).toContain(
       'User-provided context can satisfy onboarding steps',
     )
     expect(prompt).toContain(
@@ -1488,6 +1494,9 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'Skip onboarding advancement when the user explicitly asked for no follow-up',
+    )
+    expect(prompt).toContain(
+      'These skip conditions suppress visible onboarding questions or follow-up; they do not cancel the internal completion command once completion criteria are already satisfied, but urgent or safety-sensitive response handling comes first.',
     )
     expect(prompt).toContain(
       'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion',

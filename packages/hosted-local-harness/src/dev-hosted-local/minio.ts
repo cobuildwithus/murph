@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -7,10 +8,8 @@ import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
 
 import {
-  HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
-  HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
   repoRoot,
 } from "./constants.ts";
 import {
@@ -48,6 +47,11 @@ interface HostedLocalMinioPublishTarget {
   publishHost: string;
 }
 
+interface HostedLocalMinioCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
 export interface HostedLocalMinioServer {
   containerName: string;
   env: Record<string, string>;
@@ -78,6 +82,11 @@ export async function maybeStartHostedLocalMinio(input: {
     : await allocateHostedLocalMinioPort();
   const publishTarget = await resolveHostedLocalMinioPublishTarget(input.containerHost, input.env);
   const controlHost = publishTarget.controlHost;
+  const buildIdLabelValue = sanitizeHostedLocalMinioNameSegment(input.buildId);
+  const containerName = `${HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX}${buildIdLabelValue}`;
+  await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
+    buildId: buildIdLabelValue,
+  });
   await assertHostedLocalMinioPortAvailable(port, publishTarget.publishHost);
   const dataDir = resolveHostedLocalMinioDataDir({
     env: input.env,
@@ -87,9 +96,8 @@ export async function maybeStartHostedLocalMinio(input: {
     mode: 0o700,
     recursive: true,
   });
+  const credentials = resolveHostedLocalMinioCredentials(input.env);
 
-  const buildIdLabelValue = sanitizeHostedLocalMinioNameSegment(input.buildId);
-  const containerName = `${HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX}${buildIdLabelValue}`;
   const startContainer = async (): Promise<BufferedNamedChildProcess> => {
     await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
       buildId: buildIdLabelValue,
@@ -127,8 +135,8 @@ export async function maybeStartHostedLocalMinio(input: {
     ], {
       ...input.env,
       MINIO_REGION_NAME: "auto",
-      MINIO_ROOT_PASSWORD: HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
-      MINIO_ROOT_USER: HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
+      MINIO_ROOT_PASSWORD: credentials.secretAccessKey,
+      MINIO_ROOT_USER: credentials.accessKeyId,
     }, {
       pipeOutput: input.pipeOutput,
       stderrTarget: input.stderrTarget,
@@ -168,13 +176,13 @@ export async function maybeStartHostedLocalMinio(input: {
   return {
     containerName,
     env: {
-      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: credentials.accessKeyId,
       HOSTED_R2_PRESIGN_ACCOUNT_ID: HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(controlHost)}:${port}`,
       HOSTED_R2_PRESIGN_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(endpointHost)}:${port}`,
-      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: credentials.secretAccessKey,
       ...bridgeMarkerEnv,
       ...localMarkerEnv,
     },
@@ -200,6 +208,15 @@ export async function maybeStartHostedLocalMinio(input: {
       return childProcess;
     },
     processes: () => processes,
+  };
+}
+
+function resolveHostedLocalMinioCredentials(env: NodeJS.ProcessEnv): HostedLocalMinioCredentials {
+  return {
+    accessKeyId: env.HOSTED_R2_PRESIGN_ACCESS_KEY_ID?.trim()
+      || `murph-local-${randomBytes(12).toString("hex")}`,
+    secretAccessKey: env.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?.trim()
+      || randomBytes(32).toString("base64url"),
   };
 }
 
@@ -510,13 +527,30 @@ async function resolveHostedLocalMinioPublishTarget(
     || normalized === "127.0.0.1"
     || normalized === "::1"
     || normalized === "[::1]"
-    || normalized === "host.docker.internal"
-    || normalized === "host.containers.internal"
   ) {
     return {
       controlHost: "127.0.0.1",
       dockerBridgeHost: null,
-      publishHost: "0.0.0.0",
+      publishHost: "127.0.0.1",
+    };
+  }
+
+  if (
+    normalized === "host.docker.internal"
+    || normalized === "host.containers.internal"
+  ) {
+    if (process.platform === "linux") {
+      const dockerBridgeGateway = await resolveDockerBridgeGatewayHost(env);
+      return {
+        controlHost: dockerBridgeGateway,
+        dockerBridgeHost: dockerBridgeGateway,
+        publishHost: dockerBridgeGateway,
+      };
+    }
+    return {
+      controlHost: "127.0.0.1",
+      dockerBridgeHost: null,
+      publishHost: "127.0.0.1",
     };
   }
 

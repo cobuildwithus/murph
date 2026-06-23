@@ -6,6 +6,7 @@ import {
   DEFAULT_WORKER_PORT,
   DEFAULT_WORKER_PROTOCOL,
   DEFAULT_STRIPE_ENV_FILE,
+  DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE,
   DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
   DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -39,6 +40,8 @@ export function resolveHostedLocalDevConfig(
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
     forceResetLocalTemporal: env.MURPH_DEV_FORCE_RESET_TEMPORAL === "1",
     linqWebhookPublicUrl: env.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim() || null,
+    linqWebhookRegistrationCachePath:
+      parseOptionalCachePath(env.MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE),
     linqWebhookTunnelConfigPath:
       env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim()
       || DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
@@ -80,6 +83,17 @@ function resolveHostedLocalTemporalConfig(
       || env.HOSTED_TEMPORAL_TASK_QUEUE?.trim()
       || DEFAULT_TEMPORAL_TASK_QUEUE,
   };
+}
+
+function parseOptionalCachePath(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE;
+  }
+  if (["0", "false", "none", "off"].includes(normalized.toLowerCase())) {
+    return null;
+  }
+  return normalized;
 }
 
 function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
@@ -231,6 +245,7 @@ export function printHelp(): void {
       `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME=${DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME}  cloudflared named tunnel to run for local Linq webhooks`,
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
       "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
+      `  MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE=${DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE}  Cache local Linq webhook registration fingerprints; set 0 to disable`,
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
       "  MURPH_DEV_TEMPORAL=auto            Temporal mode: auto reuses a local Temporal listener or starts one; managed always starts one; external uses caller-supplied Temporal; disabled skips orchestration",
       "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for auto/managed mode",

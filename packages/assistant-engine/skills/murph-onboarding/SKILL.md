@@ -152,6 +152,7 @@ If the user chooses an option to set up, or if baseline logging is needed as par
 - A standalone tracking routine, generic "send me updates" instruction, or "log for a few days" plan does not resolve onboarding unless it is part of a concrete experiment setup handled through experiment onboarding.
 - After the orientation and first experiment setup checks are satisfied, verify that every useful setup answer they supplied has already been persisted through the saving rules above.
 - If any useful answer has not been saved yet, save it through the same canonical vault commands before marking onboarding complete.
+- Updating the onboarding flag is the final required onboarding action, not optional cleanup. When the completion criteria become true in a turn, do not end the turn until you have attempted `vault-cli assistant onboarding complete` with the correct reason and checked the output.
 - After required canonical memory/goal writes succeed, mark onboarding complete as an internal action with `vault-cli assistant onboarding complete --reason user_answered`.
 - Treat onboarding as completed only when the command output shows an onboarding status of completed. If the command errors, onboarding is still open: do not claim or assume completion, continue the turn normally, and retry the completion command on the next onboarding-relevant turn.
 - If a required canonical write fails, do not mark onboarding complete. Briefly tell the user setup context did not finish saving yet and continue normally.

@@ -17,7 +17,9 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
+  HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
@@ -37,6 +39,7 @@ import {
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
   includesWranglerLocalDevAiBinding,
+  isHostedLocalTruthyEnvValue,
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   readOptionalSimpleEnvFile,
@@ -202,6 +205,7 @@ export async function startHostedLocalDevStack(input: {
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
+  assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
@@ -484,15 +488,10 @@ export async function startHostedLocalDevStack(input: {
         resolveHostedLocalPersistentCryptoStatePath(runtimeEnv);
       const shouldLinkGlobalCloudflareDevVars = shouldUseGlobalCloudflareDevVarsSymlink(runtimeEnv);
       if (persistentCryptoStatePath !== null) {
-        await mkdir(path.dirname(persistentCryptoStatePath), {
-          mode: 0o700,
-          recursive: true,
-        });
-        await writeFile(persistentCryptoStatePath, hostedLocalStateEnvText, {
-          encoding: "utf8",
-          mode: 0o600,
-        });
-        await chmod(persistentCryptoStatePath, 0o600);
+        await writePrivateTextFileAtomically(
+          persistentCryptoStatePath,
+          hostedLocalStateEnvText,
+        );
       }
       await writeFile(workerEnvPath, workerEnvText, {
         encoding: "utf8",
@@ -640,14 +639,6 @@ export async function startHostedLocalDevStack(input: {
         env: workerProcessEnv ?? workerRuntimeEnv,
         scope: runnerCleanupScope,
       });
-      if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(initialEnv)) {
-        await cleanupHostedRunnerImages({
-          cwd: repoRoot,
-          env: workerProcessEnv ?? workerRuntimeEnv,
-          ignoreErrors: true,
-          scope: runnerCleanupScope,
-        });
-      }
       await cleanupHostedRunnerContainerLocalState({
         env: workerProcessEnv ?? workerRuntimeEnv,
         persistDir: workerPersistDir,
@@ -945,14 +936,14 @@ export async function startHostedLocalDevStack(input: {
             cwd: repoRoot,
             env: workerProcessEnv ?? workerRuntimeEnv,
             ignoreErrors: true,
+            scope: "current-build",
           });
-          if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(workerProcessEnv ?? workerRuntimeEnv)) {
-            await cleanupHostedRunnerImages({
-              cwd: repoRoot,
-              env: workerProcessEnv ?? workerRuntimeEnv,
-              ignoreErrors: true,
-            });
-          }
+          await cleanupHostedRunnerImages({
+            cwd: repoRoot,
+            env: workerProcessEnv ?? workerRuntimeEnv,
+            ignoreErrors: true,
+            scope: "current-build",
+          });
         }
         if (minioServer !== null) {
           await cleanupHostedLocalMinioContainerBestEffort(
@@ -1010,6 +1001,7 @@ export async function startHostedLocalDevStack(input: {
         if (linqWebhookSetup?.shouldRegister) {
           await registerHostedLocalLinqWebhookSubscription({
             env: runtimeEnv,
+            registrationCachePath: config.linqWebhookRegistrationCachePath,
             setup: linqWebhookSetup,
             stderrTarget: input.stderrTarget,
           });
@@ -1098,14 +1090,14 @@ export async function startHostedLocalDevStack(input: {
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
         ignoreErrors: true,
+        scope: "current-build",
       }).catch(() => {});
-      if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(workerProcessEnv ?? workerRuntimeEnv)) {
-        await cleanupHostedRunnerImages({
-          cwd: repoRoot,
-          env: workerProcessEnv ?? workerRuntimeEnv,
-          ignoreErrors: true,
-        }).catch(() => {});
-      }
+      await cleanupHostedRunnerImages({
+        cwd: repoRoot,
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        ignoreErrors: true,
+        scope: "current-build",
+      }).catch(() => {});
     }
     if (minioServer !== null) {
       await cleanupHostedLocalMinioContainerBestEffort(
@@ -1460,6 +1452,14 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
+function hasHostedLocalWorktreeScope(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]?.trim());
+}
+
+function usesHostedLocalIsolatedRunnerScope(env: NodeJS.ProcessEnv): boolean {
+  return requiresHostedLocalE2eIsolation(env) || hasHostedLocalWorktreeScope(env);
+}
+
 function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
   return requiresHostedLocalE2eIsolation(env)
     && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
@@ -1528,6 +1528,37 @@ async function symlinkIfPresent(sourcePath: string, targetPath: string): Promise
   }
 
   await symlink(sourcePath, targetPath, "dir");
+}
+
+async function writePrivateTextFileAtomically(
+  filePath: string,
+  contents: string,
+): Promise<void> {
+  await mkdir(path.dirname(filePath), { mode: 0o700, recursive: true });
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, contents, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(tempPath, 0o600);
+    await rename(tempPath, filePath);
+    await chmod(filePath, 0o600);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function assertHostedLocalWorktreeRuntimePreconditions(env: NodeJS.ProcessEnv): void {
+  if (!hasHostedLocalWorktreeScope(env)) {
+    return;
+  }
+  if (isHostedLocalWorkerReuseEnabled(env)) {
+    throw new Error(
+      "MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled for hosted-local worktree scopes.",
+    );
+  }
 }
 
 async function prepareIsolatedDockerConfig(input: {
@@ -1604,15 +1635,11 @@ function resolveDockerCliPluginSourceDirs(env: NodeJS.ProcessEnv): string[] {
 function resolvePreStartHostedRunnerContainerCleanupScope(
   env: NodeJS.ProcessEnv,
 ): HostedRunnerContainerCleanupScope {
-  return requiresHostedLocalE2eIsolation(env) ? "current-build" : "all-builds";
-}
-
-function shouldCleanupHostedRunnerImagesDuringStackLifecycle(env: NodeJS.ProcessEnv): boolean {
-  return !requiresHostedLocalE2eIsolation(env);
+  return usesHostedLocalIsolatedRunnerScope(env) ? "current-build" : "all-builds";
 }
 
 function shouldUseGlobalCloudflareDevVarsSymlink(env: NodeJS.ProcessEnv): boolean {
-  return !requiresHostedLocalE2eIsolation(env);
+  return !usesHostedLocalIsolatedRunnerScope(env);
 }
 
 function resolveHostedWebHealthCommonsDevCachePaths(env: NodeJS.ProcessEnv): string[] {
@@ -1890,8 +1917,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {
-  const value = env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]?.trim().toLowerCase();
-  return value === "1" || value === "true";
+  return isHostedLocalTruthyEnvValue(env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
 }
 
 function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undefined>>(
@@ -2138,8 +2164,10 @@ function resolveHostedLocalTempDir(
   override: string,
 ): string {
   const tempRoot = path.join(root, ".tmp");
+  const worktreeStateRoot = path.resolve(root, HOSTED_LOCAL_WORKTREE_ROOT);
   const resolved = path.resolve(root, override);
   const relative = path.relative(tempRoot, resolved);
+  const relativeToWorktreeState = path.relative(worktreeStateRoot, resolved);
 
   if (
     relative.length === 0
@@ -2148,6 +2176,16 @@ function resolveHostedLocalTempDir(
     || path.isAbsolute(relative)
   ) {
     throw new Error("MURPH_DEV_TEMP_DIR must resolve inside the repo-local .tmp directory.");
+  }
+  if (
+    relativeToWorktreeState.length === 0
+    || relativeToWorktreeState === "."
+    || (!relativeToWorktreeState.startsWith("..")
+      && !path.isAbsolute(relativeToWorktreeState))
+  ) {
+    throw new Error(
+      "MURPH_DEV_TEMP_DIR must not resolve inside the hosted-local worktree state directory.",
+    );
   }
 
   return resolved;
@@ -2482,9 +2520,6 @@ export function terminateKnownHostedLocalProcessResidue(input: {
         `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
         "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
       ]),
-    ...(!input.owned.healthCommons
-      ? []
-      : ["pnpm health-commons:generate:watch"]),
     ...(!input.owned.linqTunnel
       ? []
       : [

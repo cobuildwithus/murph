@@ -570,6 +570,9 @@ function buildHostedLocalE2eIsolationDefaults(input: {
     MURPH_DEV_WORKER_PORT:
       input.env.MURPH_DEV_WORKER_PORT?.trim()
       || String(40_000 + offset),
+    TEMPORAL_DEV_HEADLESS:
+      input.env.TEMPORAL_DEV_HEADLESS?.trim()
+      || "1",
     NEXT_DIST_DIR_MODE:
       input.env.NEXT_DIST_DIR_MODE?.trim()
       || "smoke",

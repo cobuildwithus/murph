@@ -8,6 +8,7 @@ const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset";
 const VIEWPORT_MARGIN = 12;
 
 type Offset = { x: number; y: number };
+const DEFAULT_OFFSET: Offset = { x: 0, y: 0 };
 
 interface DragState {
   pointerId: number;
@@ -32,30 +33,16 @@ export function ComputerHandoffFloatingIsland({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 });
+  const [offset, setOffset] = useState<Offset>(DEFAULT_OFFSET);
   const [grabbing, setGrabbing] = useState(false);
 
   useEffect(() => {
-    if (!persistKey) return;
-    let restoreFrame: number | null = null;
-    try {
-      const raw = window.localStorage.getItem(persistKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<Offset>;
-      if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-        const restoredOffset = { x: parsed.x, y: parsed.y };
-        restoreFrame = window.requestAnimationFrame(() => {
-          setOffset(restoredOffset);
-        });
-      }
-    } catch {
-      // ignore corrupted storage
-    }
-    return () => {
-      if (restoreFrame !== null) {
-        window.cancelAnimationFrame(restoreFrame);
-      }
-    };
+    const storedOffset = readStoredOffset(persistKey);
+    if (!storedOffset) return;
+    const frame = window.requestAnimationFrame(() => {
+      setOffset(storedOffset);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [persistKey]);
 
   const reclampToViewport = useCallback(() => {
@@ -168,4 +155,19 @@ export function ComputerHandoffFloatingIsland({
       {children}
     </div>
   );
+}
+
+function readStoredOffset(persistKey: string | null | undefined): Offset | null {
+  if (!persistKey) return null;
+  try {
+    const raw = window.localStorage.getItem(persistKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Offset>;
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // ignore corrupted storage
+  }
+  return null;
 }
