@@ -136,7 +136,6 @@ export class ComputerUseService {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
-    resumeRunId: string | null;
     startUrl: string | null;
   }): Promise<ComputerRunHandle> {
     await this.store.requireMemberComputerUseAvailable({
@@ -149,22 +148,10 @@ export class ComputerUseService {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
-    resumeRunId: string | null;
     startUrl: string | null;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-
-    if (input.resumeRunId) {
-      return await this.resumeAwaitingRunById({
-        memberId: input.memberId,
-        now,
-        resumeAfterMailboxItemId: input.resumeAfterMailboxItemId ?? null,
-        resumeDeliveryContext: input.resumeDeliveryContext ?? null,
-        runId: input.resumeRunId,
-        store,
-      });
-    }
 
     let activeRun = await store.findActiveRunForMember({
       memberId: input.memberId,
@@ -188,6 +175,16 @@ export class ComputerUseService {
         if (!activeRun) {
           return await this.startRunWithStore(input, store);
         }
+      }
+      if (activeRun.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
+        return await this.resumeAwaitingRunById({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          runId: activeRun.id,
+          store,
+        });
       }
       return runHandle(activeRun, true);
     }
@@ -362,7 +359,7 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ title: string | null; url: string | null }> {
+  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -390,6 +387,7 @@ export class ComputerUseService {
     });
 
     return {
+      result: state.result,
       title: state.title,
       url: state.url,
     };
@@ -1980,7 +1978,7 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 function buildComputerActCode(input: HostedComputerActRequest): string {
   return [
     buildPlaywrightPublicNavigationGuardCode(),
-    "await (async () => {",
+    "const __murphUserResult = await (async () => {",
     input.code,
     "\n})();",
     "const __murphUrl = page.url();",
@@ -1990,6 +1988,7 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
     "}",
     "const __murphTitle = await page.title().catch(() => null);",
     "return {",
+    "  result: typeof __murphUserResult === 'undefined' ? null : __murphUserResult,",
     "  title: __murphTitle,",
     "  url: __murphUrl,",
     "};",
@@ -2228,6 +2227,7 @@ function readBrowserStateResult(value: unknown): {
 }
 
 function readRequiredBrowserActionStateResult(value: unknown): {
+  result: unknown;
   title: string | null;
   url: string | null;
 } {
@@ -2246,6 +2246,9 @@ function readRequiredBrowserActionStateResult(value: unknown): {
   }
 
   return {
+    result: value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>).result ?? null
+      : null,
     title: state.title,
     url: state.url,
   };

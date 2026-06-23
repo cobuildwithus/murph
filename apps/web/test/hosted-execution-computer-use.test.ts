@@ -568,7 +568,6 @@ describe("ComputerUseService", () => {
     });
     await expect(startService.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "data:text/html,<h1>owned</h1>",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
@@ -667,7 +666,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).resolves.toMatchObject({
       runId: "hcr_run123",
@@ -680,7 +678,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
-  it("resumes an explicit run without deleting an unrelated stale sibling", async () => {
+  it("resumes the active awaiting run without deleting an unrelated stale sibling", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const appointmentsRun = createRunRecord({
       awaitingReason: "login_needed",
@@ -720,7 +718,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_appointments",
       startUrl: null,
     })).resolves.toMatchObject({
       runId: "hcr_appointments",
@@ -761,7 +758,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_skewed_old_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
@@ -771,7 +767,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("requires explicit resume to come from the paused delivery context", async () => {
+  it("requires server-owned resume proof to come from the paused delivery context", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "login_needed",
@@ -805,7 +801,6 @@ describe("ComputerUseService", () => {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
       },
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_CONTEXT_MISMATCH",
@@ -815,7 +810,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an awaiting run without a fresh user reply proof", async () => {
+  it("returns an awaiting run when hidden user reply proof is missing", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "login_needed",
@@ -833,10 +828,12 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: "hcr_run123",
       startUrl: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    })).resolves.toMatchObject({
+      awaitingReason: "login_needed",
+      reused: true,
+      runId: "hcr_run123",
+      status: "awaiting_user",
     });
     expect(store.run).toMatchObject({
       status: "awaiting_user",
@@ -876,7 +873,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
@@ -890,7 +886,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an explicit run while a handoff is still open", async () => {
+  it("does not resume the active awaiting run while a handoff is still open", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
       purpose: "login",
@@ -914,7 +910,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     });
 
@@ -961,7 +956,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
@@ -1002,7 +996,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_EXPIRED",
@@ -1047,7 +1040,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1097,7 +1089,6 @@ describe("ComputerUseService", () => {
     const result = await service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     });
 
@@ -1151,7 +1142,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_EXPIRED",
@@ -1196,7 +1186,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
@@ -1215,7 +1204,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an awaiting run without an explicit resume run id", async () => {
+  it("reuses an awaiting member run when no hidden resume proof exists", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "final_confirmation",
@@ -1233,7 +1222,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1266,7 +1254,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
@@ -1294,7 +1281,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1335,7 +1321,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1353,7 +1338,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1394,7 +1378,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1411,7 +1394,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1453,7 +1435,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1498,7 +1479,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1567,7 +1547,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       reused: false,
@@ -1607,7 +1586,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test/follow-up",
     })).resolves.toMatchObject({
       reused: false,
@@ -1641,7 +1619,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     })).resolves.toMatchObject({
       reused: false,
@@ -1686,7 +1663,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test/intake",
     });
 
@@ -1725,7 +1701,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1762,7 +1737,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1803,7 +1777,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
@@ -1836,7 +1809,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
@@ -1887,7 +1859,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
@@ -1928,7 +1899,6 @@ describe("ComputerUseService", () => {
       store: firstStore,
     }).startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
     await new ComputerUseService({
@@ -1940,7 +1910,6 @@ describe("ComputerUseService", () => {
       store: secondStore,
     }).startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1973,7 +1942,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
@@ -2004,7 +1972,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -2026,7 +1993,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       status: "running",
@@ -2061,7 +2027,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
@@ -2096,7 +2061,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
@@ -2177,6 +2141,7 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toEqual({
+      result: { clicked: true },
       title: "Order placed",
       url: "https://shop.example.test/order/confirmed?token=secret",
     });
@@ -2185,7 +2150,7 @@ describe("ComputerUseService", () => {
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("getByRole('button', { name: 'Place order', exact: true })");
-    expect(code).not.toContain("__murphUserResult");
+    expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
@@ -2417,6 +2382,7 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toMatchObject({
+      result: { navigated: true },
       title: "Public page",
       url: "https://example.com/checkout?token=secret#step",
     });
@@ -2427,7 +2393,7 @@ describe("ComputerUseService", () => {
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("route.abort(\"blockedbyclient\")");
     expect(code).toContain("await page.goto('https://example.com/checkout'");
-    expect(code).not.toContain("__murphUserResult");
+    expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",
       lastUrl: "https://example.com/checkout",
@@ -2747,7 +2713,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       reused: false,
@@ -3808,7 +3773,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",

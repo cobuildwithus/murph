@@ -1,6 +1,10 @@
 import type {
   HostedComputerActRequest,
 } from "@murphai/hosted-execution/computer-use";
+import {
+  buildHostedExecutionSafeErrorDetails,
+  normalizeHostedExecutionOperatorMessage,
+} from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
@@ -87,12 +91,39 @@ function buildHostedComputerToolFailureRedactedJson(input: {
     kernelErrorPresent: details.kernelErrorPresent === true,
     kernelStderrPresent: details.kernelStderrPresent === true,
     kernelStdoutPresent: details.kernelStdoutPresent === true,
-    safeErrorMessage: "Hosted computer tool failed.",
+    ...readSafeComputerErrorSummary(input.error),
     unknownOutcome: isHostedComputerUnknownOutcomeFailure({
       errorCode: input.errorCode,
       httpStatus: domainError?.httpStatus ?? null,
     }),
   };
+}
+
+function readSafeComputerErrorSummary(error: unknown): HostedRuntimeRedactedJson {
+  const safeMessage = normalizeHostedExecutionOperatorMessage(
+    error instanceof Error ? error.message : String(error),
+  );
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const detail = readSafeComputerErrorDetail(details, "errorDetail");
+  const cause = readSafeComputerErrorDetail(details, "errorCause");
+
+  return {
+    safeErrorMessage: safeMessage,
+    ...(detail && detail !== safeMessage ? { computerErrorDetail: detail } : {}),
+    ...(cause && cause !== safeMessage && cause !== detail
+      ? { computerErrorCause: cause }
+      : {}),
+  };
+}
+
+function readSafeComputerErrorDetail(
+  details: Record<string, unknown> | null,
+  key: "errorCause" | "errorDetail",
+): string | null {
+  const value = details?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : null;
 }
 
 function readHostedComputerToolTiming(

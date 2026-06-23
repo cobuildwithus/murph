@@ -201,7 +201,6 @@ export const hostedComputerStartRunRequestSchema = z
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
-    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict()

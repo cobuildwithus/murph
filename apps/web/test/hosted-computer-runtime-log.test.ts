@@ -24,7 +24,7 @@ describe("hosted computer runtime logs", () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({});
   });
 
-  it("records metadata-only runtime logs for computer action failures", async () => {
+  it("records diagnostic runtime logs for computer action failures without raw action code", async () => {
     const error = computerUseError({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
@@ -65,7 +65,7 @@ describe("hosted computer runtime logs", () => {
         kernelStdoutPresent: false,
         playwrightCodeHash: expect.any(String),
         retryable: true,
-        safeErrorMessage: "Hosted computer tool failed.",
+        safeErrorMessage: "Computer browser evaluation failed.",
         timeoutMs: 20000,
         unknownOutcome: true,
       },
@@ -79,8 +79,10 @@ describe("hosted computer runtime logs", () => {
     );
   });
 
-  it("records generic metadata for unexpected failures without leaking raw error text", async () => {
-    const error = new Error("browser crashed after visiting private checkout token");
+  it("records redacted unexpected failure messages and causes", async () => {
+    const error = new Error("browser crashed", {
+      cause: new Error("page context closed"),
+    });
     const run = vi.fn(async () => {
       throw error;
     });
@@ -103,13 +105,14 @@ describe("hosted computer runtime logs", () => {
         kernelErrorPresent: false,
         kernelStderrPresent: false,
         kernelStdoutPresent: false,
-        safeErrorMessage: "Hosted computer tool failed.",
+        computerErrorCause: "page context closed",
+        safeErrorMessage: "browser crashed",
         unknownOutcome: false,
       },
       userId: "member_123",
     });
-    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
-      "private checkout token",
+    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).toContain(
+      "page context closed",
     );
   });
 

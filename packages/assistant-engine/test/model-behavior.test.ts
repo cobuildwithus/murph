@@ -270,10 +270,10 @@ describe('assistant execution prompt contract', () => {
       'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response to summarize the pause and include the returned `handoffUrl` when direct browser takeover is needed.',
     )
     expect(prompt).toContain(
-      'call `murph.computer_start_run` with `resumeRunId` set to the run id returned by the prior `murph.computer_pause_for_user` result',
+      'call `murph.computer_start_run` normally',
     )
     expect(prompt).toContain(
-      'The runtime supplies hidden mailbox proof and delivery context.',
+      'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain(

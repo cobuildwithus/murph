@@ -252,12 +252,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
       },
-      resumeRunId: {
-        anyOf: [{ type: 'string' }, { type: 'null' }],
-        default: null,
-        description:
-          'Set this to a paused computer run id from a prior computer_pause_for_user result only when the current user message is intended to continue that paused run. Do not invent or guess ids.',
-      },
     },
   },
 } as const
@@ -474,7 +468,6 @@ const submitProductFeedbackArgumentsSchema = z
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
-  'resumeRunId',
   'startUrl',
 ] as const
 
@@ -487,7 +480,6 @@ const computerNavigationUrlSchema = z
 
 const computerStartRunArgumentsSchema = z
   .object({
-    resumeRunId: computerRunIdSchema.nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
@@ -1283,17 +1275,14 @@ function buildHostedComputerStartRunBody(input: {
   args: ComputerStartRunToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
-  const { resumeRunId, startUrl } = input.args
-  const resumeAfterMailboxItemId = resumeRunId
-    ? currentHostedMailboxItemId(input.hostedToolContext)
-    : null
+  const { startUrl } = input.args
+  const resumeAfterMailboxItemId = currentHostedMailboxItemId(input.hostedToolContext)
   return {
     goal: 'Hosted computer task.',
     resumeAfterMailboxItemId,
-    resumeDeliveryContext: resumeRunId && resumeAfterMailboxItemId
+    resumeDeliveryContext: resumeAfterMailboxItemId
       ? currentHostedDeliveryContext(input.hostedToolContext)
       : null,
-    resumeRunId,
     startUrl,
   }
 }
@@ -1590,6 +1579,7 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
+        result: record.result ?? null,
         ...readStringField(record, 'title'),
         ...readStringOrNullField(record, 'url'),
       }

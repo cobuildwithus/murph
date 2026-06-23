@@ -71,7 +71,7 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
-    expect(JSON.stringify(startTool?.inputSchema)).toContain("resumeRunId");
+    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("resumeRunId");
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
@@ -109,7 +109,6 @@ describe("murph computer dynamic tools", () => {
         goal: "Hosted computer task.",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
-        resumeRunId: null,
         startUrl: null,
       });
 
@@ -136,7 +135,6 @@ describe("murph computer dynamic tools", () => {
     }
 
     expect(request.args).toEqual({
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -153,7 +151,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("sends model-selected resume id with server-owned proof", async () => {
+  it("sends server-owned resume proof without model resume ids", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -166,7 +164,6 @@ describe("murph computer dynamic tools", () => {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
         },
-        resumeRunId: "hcr_paused_run",
         startUrl: "https://shop.example.test/checkout",
       });
 
@@ -183,7 +180,6 @@ describe("murph computer dynamic tools", () => {
 
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        resumeRunId: "hcr_paused_run",
         startUrl: "https://shop.example.test/checkout",
       },
       tool: "computer_start_run",
@@ -216,6 +212,7 @@ describe("murph computer dynamic tools", () => {
     { profileKey: "appointments" },
     { legacyProfileKey: "appointments" },
     { memberScopedProfileRequired: true },
+    { resumeRunId: "hcr_paused_run" },
     { resumeAfterMailboxItemId: "model_supplied_mailbox_item" },
     {
       resumeDeliveryContext: {
@@ -278,7 +275,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          resumeRunId: null,
           startUrl: null,
         },
         kind: "computer-start-run",
@@ -288,9 +284,11 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(bodies).toEqual([
       expect.objectContaining({
-        resumeAfterMailboxItemId: null,
-        resumeDeliveryContext: null,
-        resumeRunId: null,
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        resumeDeliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
       }),
     ]);
     expect(bodies[0]).not.toHaveProperty("profileKey");
@@ -310,7 +308,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: null,
       request: {
         args: {
-          resumeRunId: null,
           startUrl: null,
         },
         kind: "computer-start-run",
@@ -386,7 +383,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          resumeRunId: null,
           startUrl: "https://shop.example.test",
         },
         kind: "computer-start-run",
@@ -439,6 +435,7 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(true);
     const payload = JSON.parse(result.rpcResult.contentItems[0]!.text);
     expect(payload).toEqual({
+      result: { clicked: true },
       title: "Checkout",
       url: "https://shop.example.test/order?secret=raw",
     });

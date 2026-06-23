@@ -363,10 +363,9 @@ Pause only when Murph is actually blocked: expired login, CAPTCHA, missing
 payment or identity details, a choice the user has not authorized, sensitive
 entry that needs private takeover, or a page that needs direct user takeover.
 When pausing, use `computer_pause_for_user`; after the user replies in a way
-that intentionally continues the paused run, call `computer_start_run` with
-`resumeRunId` set to the run id returned by the prior pause result, then observe
-before acting. The runtime supplies hidden mailbox proof and delivery context.
-Do not invent ids or use ids from unrelated pauses.
+that intentionally continues the paused run, call `computer_start_run` normally,
+then observe before acting. The runtime supplies hidden mailbox proof and
+delivery context and selects the active awaiting run. Do not invent resume ids.
 The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
 reply when direct takeover is needed.

@@ -692,19 +692,21 @@ describe("hosted execution coverage gaps", () => {
       memberScopedProfileRequired: true,
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
+      resumeRunId: "hcr_paused_run",
+      startUrl: "https://example.test/start",
+    })).toThrow(TypeError);
     expect(parseHostedComputerStartRunRequest({
       goal: "Runner goal.",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
-      resumeRunId: null,
       startUrl: null,
     });
     expect(parseHostedComputerStartRunRequest({
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
-      resumeRunId: null,
       startUrl: null,
     });
     expect(parseHostedComputerFinishRunRequest({
