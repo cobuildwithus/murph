@@ -1137,8 +1137,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain('wire_api = "responses"');
       expect(codexConfigToml).toContain("requires_openai_auth = false");
       expect(codexConfigToml).toContain("supports_websockets = false");
-      expect(codexConfigToml).toContain("request_max_retries = 0");
-      expect(codexConfigToml).toContain("stream_max_retries = 0");
+      expect(codexConfigToml).toContain("request_max_retries = 4");
+      expect(codexConfigToml).toContain("stream_max_retries = 5");
     } finally {
       if (previousHostedHome === undefined) {
         delete process.env.HOSTED_HOME;
