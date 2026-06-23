@@ -93,6 +93,12 @@ const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
   'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
 ].join('\n')
 
+const LEGACY_ACCELERATED_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
+  'First inspect onboarding status with `vault-cli assistant onboarding status`.',
+  'If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.',
+  'If onboarding is still open, send a short message inviting setup to continue.',
+].join(' ')
+
 const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
   'assistant',
   'onboarding',
@@ -518,10 +524,9 @@ function isLegacySeededOnboardingFollowupAutomation(
   return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
     automation.title === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title &&
     automation.summary === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary &&
-    automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&
-    murphManagedAutomationValuesEqual(
-      automation.schedule,
-      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+    (
+      automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS ||
+      automation.instructions === LEGACY_ACCELERATED_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS
     ) &&
     murphManagedAutomationValuesEqual(
       automation.tags,
