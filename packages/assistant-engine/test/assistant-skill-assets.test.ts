@@ -918,6 +918,12 @@ describe('assistant skill assets', () => {
       'If any useful answer has not been saved yet, save it through the same canonical vault commands before marking onboarding complete',
     )
     expect(raw).toContain(
+      'Updating the onboarding flag is the final required onboarding action, not optional cleanup',
+    )
+    expect(raw).toContain(
+      'do not end the turn until you have attempted `vault-cli assistant onboarding complete` with the correct reason and checked the output',
+    )
+    expect(raw).toContain(
       'After required canonical memory/goal writes succeed, mark onboarding complete',
     )
     expect(raw).toContain(
