@@ -40,6 +40,9 @@ import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
 import {
+  prepareHostedWorkspaceSnapshotRestore,
+} from "../workspace-snapshot-restore-preparation.ts";
+import {
   buildHostedRunnerMetadataOnlyErrorDetails,
   buildHostedRunnerRedactedErrorJson,
 } from "./diagnostics.js";
@@ -560,14 +563,51 @@ export class RuntimeInvocationService {
       this.input.runnerRuntimeEnvSource,
     );
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
-    const runtimeConfig = await this.buildForegroundRunnerJobRuntimeConfig({
-      commandBudget: input.commandBudget,
+    const webControlTimeoutMs = input.commandBudget
+      ? readRuntimeProcessingCommandStepTimeoutMs({
+          budget: input.commandBudget,
+          stepTimeoutMs: this.input.env.webControlTimeoutMs,
+        })
+      : undefined;
+    const stores = await this.input.runnerStoreCache.ensure(
+      input.userId,
+      webControlTimeoutMs === undefined
+        ? undefined
+        : { webControlTimeoutMs },
+    );
+    const readRunnerSecrets = async () =>
+      await stores.runnerSecrets.readRunnerSecrets(input.userId);
+    const prepareSnapshotRestore = async () =>
+      await prepareHostedWorkspaceSnapshotRestore({
+        configSource,
+        crypto: stores.crypto,
+        userId: input.userId,
+        workspace: input.workspace,
+      });
+    const [runnerSecrets, workspaceSnapshotPathHashSecret, preparedSnapshotRestore] =
+      await Promise.all([
+        input.commandBudget
+          ? runRuntimeProcessingCommandStep({
+              budget: input.commandBudget,
+              operation: readRunnerSecrets,
+              stepTimeoutMs: this.input.env.webControlTimeoutMs,
+            })
+          : readRunnerSecrets(),
+        deriveHostedWorkspaceSnapshotPathHashSecret(configSource),
+        input.commandBudget
+          ? runRuntimeProcessingCommandStep({
+              budget: input.commandBudget,
+              operation: prepareSnapshotRestore,
+              stepTimeoutMs: this.input.env.webControlTimeoutMs,
+            })
+          : prepareSnapshotRestore(),
+      ]);
+    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource,
       forwardedEnv,
-      userId: input.userId,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
     });
-    const workspaceSnapshotPathHashSecret =
-      await deriveHostedWorkspaceSnapshotPathHashSecret(configSource);
     const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerIdentity = readHostedRunnerContainerIdentity({
       containerName: input.token.runnerContainerName,
@@ -586,6 +626,7 @@ export class RuntimeInvocationService {
           }
         : {}),
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
+      ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
       request: {
         attemptId: input.token.attemptId,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
@@ -612,6 +653,7 @@ export class RuntimeInvocationService {
             forwardedEnv,
             userEnv,
           }),
+        preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,
@@ -640,39 +682,6 @@ export class RuntimeInvocationService {
       runnerContainerName: input.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       userId: input.input.userId,
-    });
-  }
-
-  private async buildForegroundRunnerJobRuntimeConfig(input: {
-    commandBudget?: RuntimeProcessingCommandBudget;
-    configSource: Readonly<Record<string, string | undefined>>;
-    forwardedEnv: Readonly<Record<string, string>>;
-    userId: string;
-  }): Promise<ReturnType<typeof buildHostedRunnerJobRuntimeConfig>> {
-    const webControlTimeoutMs = input.commandBudget
-      ? readRuntimeProcessingCommandStepTimeoutMs({
-          budget: input.commandBudget,
-          stepTimeoutMs: this.input.env.webControlTimeoutMs,
-        })
-      : undefined;
-    const { runnerSecrets: runnerSecretsService } = await this.input.runnerStoreCache.ensure(
-      input.userId,
-      webControlTimeoutMs === undefined
-        ? undefined
-        : { webControlTimeoutMs },
-    );
-    const runnerSecrets = input.commandBudget
-      ? await runRuntimeProcessingCommandStep({
-          budget: input.commandBudget,
-          operation: async () => await runnerSecretsService.readRunnerSecrets(input.userId),
-          stepTimeoutMs: this.input.env.webControlTimeoutMs,
-        })
-      : await runnerSecretsService.readRunnerSecrets(input.userId);
-    return buildHostedRunnerJobRuntimeConfig({
-      configSource: input.configSource,
-      forwardedEnv: input.forwardedEnv,
-      rewritePlatformUrlsForContainer: true,
-      runnerSecrets,
     });
   }
 
