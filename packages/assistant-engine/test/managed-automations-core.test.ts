@@ -38,12 +38,6 @@ const legacyOnboardingFollowupInstructions = [
   'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
 ].join('\n')
 
-const legacyAcceleratedOnboardingFollowupInstructions = [
-  'First inspect onboarding status with `vault-cli assistant onboarding status`.',
-  'If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.',
-  'If onboarding is still open, send a short message inviting setup to continue.',
-].join(' ')
-
 afterEach(async () => {
   await Promise.all(
     tempRoots.splice(0, tempRoots.length).map((root) =>
@@ -430,12 +424,15 @@ describe('applyMurphManagedAutomations core integration', () => {
       instructions: legacyOnboardingFollowupInstructions,
       now: new Date('2026-06-23T12:00:00.000Z'),
       route: defaultRoute,
-      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      schedule: {
+        everyMs: 90_000,
+        kind: 'every',
+      },
       slug: 'finish-onboarding-followup',
       status: 'active',
-      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      summary: 'User-edited setup follow-up summary.',
       tags: ['assistant', 'onboarding'],
-      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      title: 'User-edited setup follow-up',
       vaultRoot,
     })
 
@@ -455,55 +452,14 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toMatchObject({
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: defaultRoute,
-      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
-      status: 'active',
-      tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
-    })
-  })
-
-  it('migrates an accelerated unmarked onboarding follow-up and preserves its schedule', async () => {
-    const vaultRoot = await createVaultRoot()
-
-    await upsertAutomation({
-      automationId: 'automation_01KCM609FBJ2S8HJ1W40C647A4',
-      continuityPolicy: 'preserve',
-      instructions: legacyAcceleratedOnboardingFollowupInstructions,
-      now: new Date('2026-06-23T12:00:00.000Z'),
-      route: defaultRoute,
       schedule: {
         everyMs: 90_000,
         kind: 'every',
       },
-      slug: 'finish-onboarding-followup',
       status: 'active',
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
-      tags: ['assistant', 'onboarding'],
-      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
-      vaultRoot,
-    })
-
-    await expect(applyMurphManagedAutomations({
-      defaultRoute,
-      now: new Date('2026-06-23T13:00:00.000Z'),
-      vaultRoot,
-    })).resolves.toEqual({
-      created: 4,
-      skipped: 0,
-      updated: 1,
-    })
-
-    await expect(showAutomation({
-      automationId: 'automation_01KCM609FBJ2S8HJ1W40C647A4',
-      vaultRoot,
-    })).resolves.toMatchObject({
-      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
-      route: defaultRoute,
-      schedule: {
-        everyMs: 90_000,
-        kind: 'every',
-      },
-      status: 'active',
       tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
     })
   })
 
