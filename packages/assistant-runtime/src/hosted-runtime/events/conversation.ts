@@ -123,16 +123,18 @@ async function drainHostedConversationParsers(input: {
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   vaultRoot: string;
 }): Promise<number> {
-  const pendingJobs = input.runtime.listAttachmentParseJobs({
+  const hasPendingJob = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
-    limit: 20,
+    limit: 1,
     state: "pending",
-  });
-  if (!hasPendingHostedConversationMediaParseJob({
-    captureId: input.captureId,
-    pendingJobs,
-    runtime: input.runtime,
-  })) {
+  }).length > 0;
+  if (
+    !hasPendingJob ||
+    !hasPendingHostedConversationMediaParseJob({
+      captureId: input.captureId,
+      runtime: input.runtime,
+    })
+  ) {
     return 0;
   }
 
@@ -197,6 +199,11 @@ async function drainHostedConversationParsers(input: {
   } catch (error) {
     const errorCode = deriveHostedExecutionErrorCode(error);
     const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+    const parserTerminalizedPendingJobs = failClaimableHostedConversationParserJobs({
+      captureId: input.captureId,
+      errorMessage: "Hosted conversation parser drain failed.",
+      runtime: input.runtime,
+    });
     await writeHostedRuntimeLogBestEffort({
       entry: {
         component: "mailbox",
@@ -211,11 +218,37 @@ async function drainHostedConversationParsers(input: {
             typeof diagnostics?.errorMessage === "string"
               ? diagnostics.errorMessage
               : "Hosted conversation parser drain failed.",
+          parserTerminalizedPendingJobs,
         },
       },
       platform: input.platform,
     });
     return 0;
+  }
+}
+
+function failClaimableHostedConversationParserJobs(input: {
+  captureId: string;
+  errorMessage: string;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+}): number {
+  let failedJobs = 0;
+  while (true) {
+    const job = input.runtime.claimNextAttachmentParseJob({
+      captureId: input.captureId,
+    });
+    if (!job) {
+      return failedJobs;
+    }
+    const result = input.runtime.failAttachmentParseJob({
+      attempt: job.attempts,
+      errorCode: "hosted_parser_drain_failed",
+      errorMessage: input.errorMessage,
+      jobId: job.jobId,
+    });
+    if (result.applied) {
+      failedJobs += 1;
+    }
   }
 }
 
@@ -249,30 +282,24 @@ function collectHostedParserFailures(input: {
 
 function hasPendingHostedConversationMediaParseJob(input: {
   captureId: string;
-  pendingJobs: ReadonlyArray<{ attachmentId: string }>;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
 }): boolean {
-  if (input.pendingJobs.length === 0) {
-    return false;
-  }
-
   const capture = input.runtime.getCapture(input.captureId);
   if (!capture) {
     return false;
   }
 
-  const mediaAttachmentIds = new Set(
-    capture.attachments
-      .filter((attachment) =>
-        attachment.kind === "audio" || attachment.kind === "video"
-      )
-      .map((attachment) => attachment.attachmentId)
-      .filter((attachmentId): attachmentId is string =>
-        typeof attachmentId === "string" && attachmentId.length > 0
-      ),
-  );
-
-  return input.pendingJobs.some((job) => mediaAttachmentIds.has(job.attachmentId));
+  return capture.attachments.some((attachment) => {
+    if (attachment.kind !== "audio" && attachment.kind !== "video") {
+      return false;
+    }
+    return input.runtime.listAttachmentParseJobs({
+      attachmentId: attachment.attachmentId,
+      captureId: input.captureId,
+      limit: 1,
+      state: "pending",
+    }).length > 0;
+  });
 }
 
 async function normalizeHostedConversationMessageWake(input: {

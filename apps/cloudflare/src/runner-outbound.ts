@@ -1494,16 +1494,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     objectKey: snapshotRef.objectKey,
     snapshotId: input.snapshotId,
     userId: input.userId,
-  });
-  const replacedSnapshotCleanupOk = await deleteReplacedWorkspaceSnapshotObject({
+  }).catch(() => undefined);
+  await deleteReplacedWorkspaceSnapshotObject({
     bucket: input.bucket,
     checkpoint,
     env: input.env,
     snapshotRef,
-  });
-  if (!replacedSnapshotCleanupOk) {
-    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 502);
-  }
+  }).catch(() => undefined);
 
   return json({
     checkpoint,
@@ -1517,7 +1514,7 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}): Promise<boolean> {
+}): Promise<void> {
   const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
   if (
     !isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
@@ -1527,9 +1524,8 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
       userId: input.snapshotRef.userId,
     }))
   ) {
-    return true;
+    return;
   }
-  let recordedOrphanCandidate = false;
   try {
     await recordWorkspaceSnapshotOrphanCandidate({
       env: input.env,
@@ -1537,19 +1533,14 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
       snapshotId: replacedSnapshotRef.snapshotId,
       userId: replacedSnapshotRef.userId,
     });
-    recordedOrphanCandidate = true;
   } catch {
     // Direct deletion below can still complete cleanup without a retry record.
   }
-  const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
+  await deleteWorkspaceSnapshotObjectBestEffort({
     bucket: input.bucket,
     env: input.env,
     objectKey: replacedSnapshotRef.objectKey,
   });
-  if (!deleted && !recordedOrphanCandidate) {
-    return false;
-  }
-  return true;
 }
 
 async function isHostedWorkspaceSnapshotV2RefOwnedByUser(input: {

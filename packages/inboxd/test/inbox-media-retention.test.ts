@@ -515,7 +515,7 @@ test("runInboxMediaRetention materializes bounded missing candidates before hash
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 });
 
-test("runInboxMediaRetention protects audio while its parser job is nonterminal", async () => {
+test("runInboxMediaRetention protects audio while its parser job is fresh and nonterminal", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-parser-job");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const captureId = "cap_retention_parser_job";
@@ -561,6 +561,12 @@ test("runInboxMediaRetention protects audio while its parser job is nonterminal"
     const pendingJob = runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0];
     assert.ok(pendingJob);
     assert.equal(pendingJob.state, "pending");
+    await updateAttachmentParseJobTimes({
+      createdAt: "2026-07-04T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: pendingJob.jobId,
+      startedAt: null,
+    });
 
     const protectedResult = await runInboxMediaRetention({
       now: "2026-07-05T00:00:00.000Z",
@@ -569,14 +575,11 @@ test("runInboxMediaRetention protects audio while its parser job is nonterminal"
     assert.equal(protectedResult.expiredAttachments, 0);
     assert.equal(await fileExists(vaultRoot, audioPath), true);
 
-    const runningJob = runtime.claimNextAttachmentParseJob({
-      attachmentId: pendingJob.attachmentId,
-    });
-    assert.ok(runningJob);
-    runtime.failAttachmentParseJob({
-      attempt: runningJob.attempts,
-      errorMessage: "parser unavailable",
-      jobId: runningJob.jobId,
+    await updateAttachmentParseJobTimes({
+      createdAt: "2026-06-01T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: pendingJob.jobId,
+      startedAt: null,
     });
 
     const expiredResult = await runInboxMediaRetention({
@@ -585,6 +588,136 @@ test("runInboxMediaRetention protects audio while its parser job is nonterminal"
     });
     assert.equal(expiredResult.expiredAttachments, 1);
     assert.equal(await fileExists(vaultRoot, audioPath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention protects audio while its running parser job is fresh", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-running-parser-job");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const captureId = "cap_retention_running_parser_job";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VN",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: {
+      source: "telegram",
+      externalId: "msg-running-parser-job-media",
+      thread: {
+        id: "thread-running-parser-job",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      text: "old audio with running parser work",
+      attachments: [
+        {
+          kind: "audio",
+          mime: "audio/mp4",
+          fileName: "voice.m4a",
+          data: Buffer.from("audio-bytes"),
+        },
+      ],
+      raw: {},
+    },
+  });
+  const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(audioPath);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    runtime.enqueueDerivedJobs({
+      captureId,
+      stored: persisted.stored,
+    });
+    const pendingJob = runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0];
+    assert.ok(pendingJob);
+    const runningJob = runtime.claimNextAttachmentParseJob({
+      captureId,
+    });
+    assert.ok(runningJob);
+    assert.equal(runningJob.state, "running");
+    await updateAttachmentParseJobTimes({
+      createdAt: "2026-06-01T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: runningJob.jobId,
+      startedAt: "2026-07-04T00:00:00.000Z",
+    });
+
+    const protectedResult = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(await fileExists(vaultRoot, audioPath), true);
+
+    await updateAttachmentParseJobTimes({
+      createdAt: "2026-06-01T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: runningJob.jobId,
+      startedAt: "2026-06-01T00:00:00.000Z",
+    });
+
+    const expiredResult = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(expiredResult.expiredAttachments, 1);
+    assert.equal(expiredResult.records[0]?.attachmentId, pendingJob.attachmentId);
+    assert.equal(await fileExists(vaultRoot, audioPath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-legacy-parser-row");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const captureId = "cap_retention_legacy_parser_row";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VJ",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-legacy-parser-row",
+      imageBytes,
+      text: "old image with legacy parser row",
+      threadId: "thread-legacy-parser-row",
+    }),
+  });
+  const imageAttachment = persisted.stored.attachments[0];
+  assert.ok(imageAttachment);
+  const imagePath = imageAttachment.storedPath ?? "";
+  assert.ok(imagePath);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    await insertLegacyAttachmentParseJob({
+      attachmentId: imageAttachment.attachmentId,
+      captureId,
+      createdAt: "2026-07-04T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: "job_legacy_image_parser_row",
+      state: "pending",
+    });
+
+    const result = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(result.expiredAttachments, 1);
+    assert.equal(result.records[0]?.attachmentId, imageAttachment.attachmentId);
+    assert.equal(await fileExists(vaultRoot, imagePath), false);
   } finally {
     runtime.close();
   }
@@ -1229,34 +1362,35 @@ test("rebuildRuntimeFromVault derives available audio transcripts from parser ma
   const captureId = "cap_retention_available_derived";
   const attachmentId = `att_${captureId}_01`;
   const transcriptText = "Available audio transcript after rebuild.";
+  const inbound: InboundCapture = {
+    source: "telegram",
+    externalId: "msg-available-derived",
+    thread: {
+      id: "thread-available-derived",
+      isDirect: true,
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    text: "available audio media",
+    attachments: [
+      {
+        kind: "audio",
+        mime: "audio/mp4",
+        fileName: "voice.m4a",
+        data: Buffer.from("audio-bytes"),
+      },
+    ],
+    raw: {},
+  };
 
   const persisted = await persistCanonicalInboxCapture({
     vaultRoot,
     captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VK",
     storedAt: "2026-06-01T00:00:00.000Z",
-    input: {
-      source: "telegram",
-      externalId: "msg-available-derived",
-      thread: {
-        id: "thread-available-derived",
-        isDirect: true,
-      },
-      actor: {
-        isSelf: false,
-      },
-      occurredAt: "2026-06-01T00:00:00.000Z",
-      text: "available audio media",
-      attachments: [
-        {
-          kind: "audio",
-          mime: "audio/mp4",
-          fileName: "voice.m4a",
-          data: Buffer.from("audio-bytes"),
-        },
-      ],
-      raw: {},
-    },
+    input: inbound,
   });
   const audio = persisted.stored.attachments[0];
   assert.ok(audio);
@@ -1277,7 +1411,7 @@ test("rebuildRuntimeFromVault derives available audio transcripts from parser ma
 
   const runtime = await openInboxRuntime({ vaultRoot });
   try {
-    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    await rebuildRuntimeFromVault({ enqueueParserJobs: true, vaultRoot, runtime });
     const capture = runtime.getCapture(captureId);
     assert.ok(capture);
     assert.equal(capture.attachments[0]?.storedPath, audioPath);
@@ -1286,6 +1420,13 @@ test("rebuildRuntimeFromVault derives available audio transcripts from parser ma
     assert.equal(capture.attachments[0]?.parseState, "succeeded");
     assert.equal(capture.attachments[0]?.transcriptText, transcriptText);
     assert.equal(runtime.searchCaptures({ limit: 10, text: "available audio transcript" }).length, 1);
+    assert.equal(runtime.listAttachmentParseJobs({ captureId, limit: 10 }).length, 0);
+
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+    const replayed = await pipeline.processCapture(inbound);
+    assert.equal(replayed.deduped, true);
+    assert.equal(replayed.captureId, captureId);
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "succeeded");
     assert.equal(runtime.listAttachmentParseJobs({ captureId, limit: 10 }).length, 0);
   } finally {
     runtime.close();
@@ -1534,6 +1675,61 @@ async function writeInboxParserAttempt(input: {
     })}\n`,
   );
   return manifestPath;
+}
+
+async function insertLegacyAttachmentParseJob(input: {
+  attachmentId: string;
+  captureId: string;
+  createdAt: string;
+  databasePath: string;
+  jobId: string;
+  state: "pending" | "running";
+}): Promise<void> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const database = new DatabaseSync(input.databasePath);
+  try {
+    database
+      .prepare(
+        `
+          insert into attachment_parse_job (
+            job_id,
+            capture_id,
+            attachment_id,
+            pipeline,
+            state,
+            attempts,
+            created_at
+          ) values (?, ?, ?, 'attachment_text', ?, 0, ?)
+        `,
+      )
+      .run(input.jobId, input.captureId, input.attachmentId, input.state, input.createdAt);
+  } finally {
+    database.close();
+  }
+}
+
+async function updateAttachmentParseJobTimes(input: {
+  createdAt: string;
+  databasePath: string;
+  jobId: string;
+  startedAt: string | null;
+}): Promise<void> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const database = new DatabaseSync(input.databasePath);
+  try {
+    database
+      .prepare(
+        `
+          update attachment_parse_job
+          set created_at = ?,
+              started_at = ?
+          where job_id = ?
+        `,
+      )
+      .run(input.createdAt, input.startedAt, input.jobId);
+  } finally {
+    database.close();
+  }
 }
 
 async function fileExists(vaultRoot: string, relativePath: string): Promise<boolean> {

@@ -97,9 +97,9 @@ export async function runInboxMediaRetention(
   let hasMoreEligibleAttachments = false;
   let nextEligibleAt: string | null = null;
 
-  const hasActiveParserJob = async (attachmentId: string): Promise<boolean> => {
+  const hasActiveParserJob = async (attachment: InboxCaptureAttachmentRecord): Promise<boolean> => {
     activeParserJobProtector ??= await openActiveAttachmentParseJobProtector(input.vaultRoot);
-    return activeParserJobProtector.hasActiveJob(attachmentId);
+    return activeParserJobProtector.hasActiveJob(attachment, cutoffMs);
   };
 
   try {
@@ -148,7 +148,7 @@ export async function runInboxMediaRetention(
           hasMoreEligibleAttachments = true;
           break captureLoop;
         }
-        if (await hasActiveParserJob(attachment.attachmentId)) {
+        if (await hasActiveParserJob(attachment)) {
           continue;
         }
 
@@ -227,7 +227,7 @@ export async function runInboxMediaRetention(
             protectedCaptureIds.has(candidate.capture.captureId) ||
             protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
             protectedStoredPaths.has(candidate.storedPath) ||
-            await hasActiveParserJob(candidate.attachment.attachmentId)
+            (await hasActiveParserJob(candidate.attachment))
           ) {
             continue;
           }
@@ -505,7 +505,10 @@ function normalizeRawInboxMediaPath(value: string | null | undefined): string | 
 
 interface ActiveAttachmentParseJobProtector {
   close(): void;
-  hasActiveJob(attachmentId: string): boolean;
+  hasActiveJob(
+    attachment: InboxCaptureAttachmentRecord,
+    cutoffMs: number,
+  ): boolean;
 }
 
 function closeActiveAttachmentParseJobProtector(
@@ -522,28 +525,50 @@ async function openActiveAttachmentParseJobProtector(
     close() {
       runtime.close();
     },
-    hasActiveJob(attachmentId) {
-      return hasActiveAttachmentParseJob(runtime, attachmentId);
+    hasActiveJob(attachment, cutoffMs) {
+      return hasActiveAttachmentParseJob(runtime, attachment, cutoffMs);
     },
   };
 }
 
 function hasActiveAttachmentParseJob(
   runtime: InboxRuntimeStore,
-  attachmentId: string,
+  attachment: InboxCaptureAttachmentRecord,
+  cutoffMs: number,
 ): boolean {
-  return (
-    runtime.listAttachmentParseJobs({
-      attachmentId,
+  if (attachment.kind !== "audio" && attachment.kind !== "video") {
+    return false;
+  }
+
+  const activeJobs = [
+    ...runtime.listAttachmentParseJobs({
+      attachmentId: attachment.attachmentId,
       limit: 1,
       state: "pending",
-    }).length > 0 ||
-    runtime.listAttachmentParseJobs({
-      attachmentId,
+    }),
+    ...runtime.listAttachmentParseJobs({
+      attachmentId: attachment.attachmentId,
       limit: 1,
       state: "running",
-    }).length > 0
+    }),
+  ];
+
+  return activeJobs.some((job) =>
+    isFreshAttachmentParseJobProtection({
+      cutoffMs,
+      jobCreatedAt: job.createdAt,
+      jobStartedAt: job.startedAt ?? null,
+    }),
   );
+}
+
+function isFreshAttachmentParseJobProtection(input: {
+  cutoffMs: number;
+  jobCreatedAt: string;
+  jobStartedAt: string | null;
+}): boolean {
+  const protectedAtMs = Date.parse(input.jobStartedAt ?? input.jobCreatedAt);
+  return Number.isFinite(protectedAtMs) && protectedAtMs > input.cutoffMs;
 }
 
 async function hashExistingVaultFile(

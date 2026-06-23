@@ -790,6 +790,20 @@ test("rebuildRuntimeFromVault preserves nonterminal parser jobs for replayed cap
     assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "running");
     assert.equal(countRows(runtime.databasePath, "capture"), 1);
     assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+    await rebuildRuntimeFromVault({ enqueueParserJobs: true, vaultRoot, runtime });
+
+    const replayed = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+    assert.equal(replayed.length, 1);
+    assert.equal(replayed[0]?.state, "pending");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "pending");
+    assert.equal(countRows(runtime.databasePath, "capture"), 1);
+    assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+    const replayedClaim = runtime.claimNextAttachmentParseJob({ captureId });
+    assert.ok(replayedClaim);
+    assert.equal(replayedClaim.jobId, replayed[0]?.jobId);
+    assert.equal(replayedClaim.state, "running");
   } finally {
     runtime.close();
   }

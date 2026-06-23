@@ -714,11 +714,25 @@ function createInboxRuntimeStore(
       where attachment_id = ?
     `,
   );
+  const readAttachmentParserStateStatement = database.prepare(
+    `
+      select parser_state
+      from capture_attachment
+      where attachment_id = ?
+    `,
+  );
   const deleteTerminalAttachmentParseJobsStatement = database.prepare(
     `
       delete from attachment_parse_job
       where attachment_id = ?
         and state not in ('pending', 'running')
+    `,
+  );
+  const deleteActiveAttachmentParseJobsForCaptureStatement = database.prepare(
+    `
+      delete from attachment_parse_job
+      where capture_id = ?
+        and state in ('pending', 'running')
     `,
   );
   const clearAttachmentParseProjectionStatement = database.prepare(
@@ -869,13 +883,23 @@ function createInboxRuntimeStore(
     }
   }
 
+  function hasSucceededAttachmentParserProjection(attachmentId: string): boolean {
+    const row = readAttachmentParserStateStatement.get(attachmentId) as
+      | { parser_state?: string | null }
+      | undefined;
+    return row?.parser_state === "succeeded";
+  }
+
   function enqueueAttachmentParseJobsForProjection(input: {
     captureId: string;
     attachments: StoredAttachment[];
     createdAt: string;
   }): void {
     for (const attachment of input.attachments) {
-      if (!shouldEnqueueParseJobForProjection(attachment)) {
+      if (
+        !shouldEnqueueParseJobForProjection(attachment) ||
+        hasSucceededAttachmentParserProjection(attachment.attachmentId)
+      ) {
         continue;
       }
 
@@ -1209,6 +1233,9 @@ function createInboxRuntimeStore(
 
         for (const entry of normalizedEntries) {
           replayedCaptureIds.add(entry.captureId);
+          if (options.enqueueParserJobs) {
+            deleteActiveAttachmentParseJobsForCaptureStatement.run(entry.captureId);
+          }
           upsertCaptureProjection(entry, { replaceParserState: true });
           if (options.enqueueParserJobs) {
             enqueueAttachmentParseJobsForProjection({
@@ -1475,7 +1502,9 @@ function normalizeLimit(limit: number | undefined, fallback: number): number {
   return Math.min(limit, 200);
 }
 
-function shouldEnqueueParseJobForProjection(attachment: StoredAttachment): boolean {
+function shouldEnqueueParseJobForProjection(
+  attachment: StoredAttachment,
+): boolean {
   return (
     AUTOMATIC_ATTACHMENT_PARSE_KINDS.has(attachment.kind) &&
     typeof attachment.storedPath === "string" &&

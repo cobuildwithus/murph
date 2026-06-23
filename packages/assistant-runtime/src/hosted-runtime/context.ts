@@ -762,6 +762,7 @@ export async function ensureHostedInboxSidecarReady(input: {
   try {
     await inboxServices.init({
       rebuild: input.rebuild,
+      rebuildParserJobs: false,
       requestId: input.requestId,
       vault: vaultRoot,
     });

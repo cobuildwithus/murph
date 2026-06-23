@@ -571,6 +571,7 @@ export type DoctorTargetResolution =
 
 export interface InitInput extends CommandContext {
   rebuild?: boolean
+  rebuildParserJobs?: boolean
 }
 
 export interface SetupInput extends CommandContext {
