@@ -5313,6 +5313,152 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("late foreground input does not clear gate for selected retryable outbox wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-outbox-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const outboxRetryWakeAt = "2026-04-27T00:00:00.000Z";
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_outbox_gate",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-outbox-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            if (item.item.id === "mailbox_item_entrypoint_foreground_outbox_gate_conversation_late") {
+              lateConversationInputId = inputId;
+            }
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                version: "4",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_outbox_gate_conversation_late",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_foreground_outbox_gate_conversation_late",
+                ));
+              });
+              return {
+                afterCheckpoint: async () => {
+                  events.push("outbox.afterCheckpoint");
+                  return {
+                    checkpointReason: "outbox_receipt" as const,
+                    nextWakeAt: outboxRetryWakeAt,
+                    nextWakeReason: "assistant",
+                    redactedStatus: {
+                      hostedAssistantNextWakeAt: outboxRetryWakeAt,
+                    },
+                  };
+                },
+                checkpointReason: "outbox_sending" as const,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(lateConversationInputId);
+      assert.ok(events.includes("outbox.afterCheckpoint"));
+      assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, outboxRetryWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, outboxRetryWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("same selected device-sync wake keeps checkpoint gate across idle wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-same-device-gate-"));
     const events: string[] = [];
