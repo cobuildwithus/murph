@@ -23,9 +23,6 @@ const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
 const formatHostedLocalWorktreeEnv = vi.hoisted(() =>
   vi.fn(() => "export MURPH_DEV_DATABASE_URL='[redacted]'\n"),
 );
-const removeCreatedHostedLocalWorktreeDatabaseIfUnpaired = vi.hoisted(() =>
-  vi.fn(async () => ({ removed: false, unpaired: false })),
-);
 const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
   vi.fn(async () => createHostedLocalWorktreeConfig()),
 );
@@ -81,7 +78,6 @@ vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
 vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
-  removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
 }));
 
@@ -129,10 +125,6 @@ describe("hosted-local run CLI", () => {
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
-    removeCreatedHostedLocalWorktreeDatabaseIfUnpaired.mockResolvedValue({
-      removed: false,
-      unpaired: false,
-    });
     resolveHostedLocalWorktreeConfig.mockResolvedValue(createHostedLocalWorktreeConfig());
     formatHostedLocalWorktreeEnv.mockReturnValue("export MURPH_DEV_DATABASE_URL='[redacted]'\n");
     runDoctorCommand.mockImplementation((command: string, args: readonly string[]) => ({
@@ -266,15 +258,10 @@ describe("hosted-local run CLI", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "worktree",
       }),
     }));
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfUnpaired).not.toHaveBeenCalled();
   });
 
-  test("removes a newly created unpaired worktree database when stack startup fails", async () => {
+  test("leaves a newly created worktree database in place when stack startup fails", async () => {
     ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
-    removeCreatedHostedLocalWorktreeDatabaseIfUnpaired.mockResolvedValueOnce({
-      removed: true,
-      unpaired: true,
-    });
     startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
     const output = createBufferedStdout();
 
@@ -286,29 +273,6 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfUnpaired).toHaveBeenCalledWith(
-      createHostedLocalWorktreeConfig(),
-    );
-    expect(output.text()).not.toContain("left in place");
-  });
-
-  test("checks a newly created worktree database pairing after worktree up returns", async () => {
-    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
-    removeCreatedHostedLocalWorktreeDatabaseIfUnpaired.mockResolvedValueOnce({
-      removed: false,
-      unpaired: false,
-    });
-    const output = createBufferedStdout();
-
-    await runHostedLocalCli(["worktree", "up", "feature-a"], {
-      env: {},
-      stderr: output.stdout,
-      stdout: output.stdout,
-    });
-
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfUnpaired).toHaveBeenCalledWith(
-      createHostedLocalWorktreeConfig(),
-    );
     expect(output.text()).not.toContain("left in place");
   });
 
@@ -325,7 +289,6 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
-    expect(removeCreatedHostedLocalWorktreeDatabaseIfUnpaired).not.toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
   });
 

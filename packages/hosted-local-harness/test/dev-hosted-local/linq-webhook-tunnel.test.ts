@@ -252,6 +252,34 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
     });
   });
 
+  it("registers a worktree public URL without starting a tunnel", async () => {
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
+    const { resolveHostedLocalWorktreeDevConfig } = await import("../../src/dev-hosted-local/worktree.ts");
+    const worktreeConfig = resolveHostedLocalWorktreeDevConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://feature-a.example.test",
+      },
+      slug: "feature-a",
+    });
+
+    await expect(resolveHostedLocalLinqWebhookSetup({
+      config: worktreeConfig,
+      env: {
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      fileExists: async () => false,
+    })).resolves.toMatchObject({
+      publicBaseUrl: "https://feature-a.example.test",
+      shouldRegister: true,
+      shouldStartTunnel: false,
+      targetUrl: "https://feature-a.example.test/api/hosted-onboarding/linq/webhook",
+      tunnelConfigPath: null,
+      tunnelName: null,
+    });
+  });
+
   it("requires a local inbound allowlist before enabling Linq webhook handling", async () => {
     const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 

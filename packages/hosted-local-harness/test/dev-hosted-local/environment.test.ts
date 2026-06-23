@@ -1443,10 +1443,13 @@ describe("buildWranglerLocalDevConfig", () => {
   });
 
   it("uses an isolated worker name for worktree profile runs", () => {
-    expect(resolveWranglerLocalDevWorkerName({
+    const workerName = resolveWranglerLocalDevWorkerName({
       MURPH_HOSTED_LOCAL_PROFILE: "worktree",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
-    })).toMatch(/^murph-hosted-worktree-[a-f0-9]{24}$/u);
+    });
+
+    expect(workerName).toMatch(/^murph-worktree-[a-f0-9]{24}$/u);
+    expect(workerName.startsWith("murph-hosted-")).toBe(false);
   });
 
   it("re-roots generated paths to the temp config directory", () => {

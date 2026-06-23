@@ -32,7 +32,6 @@ import {
   buildHostedLocalWorktreeConfig,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
-  removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
@@ -203,6 +202,26 @@ describe("hosted-local worktree config", () => {
     });
   });
 
+  it("uses auto Linq mode for explicit public URL registration without a tunnel", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://feature-a.example.test",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://feature-a.example.test",
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "auto",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+    });
+  });
+
   it("preserves an existing loopback local database authority while replacing the database name", () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {
@@ -217,12 +236,17 @@ describe("hosted-local worktree config", () => {
     );
   });
 
-  it("probes available ports for the default config resolution path", async () => {
+  it("uses deterministic slug ports for the default config resolution path", async () => {
     const config = await resolveHostedLocalWorktreeConfig({
       env: {},
       slug: "feature-a",
     });
+    const repeated = await resolveHostedLocalWorktreeConfig({
+      env: {},
+      slug: "feature-a",
+    });
 
+    expect(config.ports).toEqual(repeated.ports);
     expect(config.ports.web).toBeGreaterThanOrEqual(3100);
     expect(config.ports.web).toBeLessThan(3400);
     expect(config.ports.worker).toBeGreaterThanOrEqual(8800);
@@ -233,7 +257,7 @@ describe("hosted-local worktree config", () => {
     expect(config.ports.minio).toBeLessThan(9400);
   });
 
-  it("uses deterministic preferred ports when probing is disabled", async () => {
+  it("keeps deterministic slug ports when probing is disabled", async () => {
     const config = await resolveHostedLocalWorktreeConfig({
       env: {},
       probePorts: false,
@@ -432,58 +456,6 @@ describe("hosted-local worktree config", () => {
     await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
       "paired hosted-local crypto state file is incomplete",
     );
-  });
-
-  it("drops a newly created slug database only while crypto state is still unpaired", async () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-
-    await expect(
-      removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(config),
-    ).resolves.toEqual({
-      removed: true,
-      unpaired: true,
-    });
-
-    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
-      "dropdb",
-      expect.arrayContaining([
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "5432",
-        "--username",
-        "postgres",
-        "--if-exists",
-        "murph_dev_feature_a",
-      ]),
-      expect.objectContaining({
-        encoding: "utf8",
-      }),
-    );
-  });
-
-  it("keeps a newly created slug database after durable crypto state exists", async () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-    worktreeMocks.readFile.mockResolvedValueOnce(
-      buildValidHostedLocalWorktreeCryptoStateText(),
-    );
-
-    await expect(
-      removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(config),
-    ).resolves.toEqual({
-      removed: false,
-      unpaired: false,
-    });
-
-    expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
   it("redacts database diagnostics when local database setup fails", async () => {

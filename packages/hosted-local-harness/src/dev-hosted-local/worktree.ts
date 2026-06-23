@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import net from "node:net";
 import path from "node:path";
 
 import {
@@ -52,11 +51,6 @@ export interface HostedLocalWorktreeDatabaseState {
   created: boolean;
 }
 
-export interface HostedLocalWorktreeDatabaseCleanupResult {
-  removed: boolean;
-  unpaired: boolean;
-}
-
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
@@ -77,12 +71,9 @@ export async function resolveHostedLocalWorktreeConfig(input: {
   slug: string;
 }): Promise<HostedLocalWorktreeConfig> {
   const slug = normalizeHostedLocalWorktreeSlug(input.slug);
-  const ports = input.probePorts === false
-    ? deriveHostedLocalWorktreePorts(slug)
-    : await resolveAvailableHostedLocalWorktreePorts(slug);
   return buildHostedLocalWorktreeConfig({
     env: input.env,
-    ports,
+    ports: deriveHostedLocalWorktreePorts(slug),
     slug,
   });
 }
@@ -191,27 +182,6 @@ export async function ensureHostedLocalWorktreeDatabase(
   );
 }
 
-export async function removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(
-  config: HostedLocalWorktreeConfig,
-): Promise<HostedLocalWorktreeDatabaseCleanupResult> {
-  if (await isHostedLocalWorktreeCryptoStateUsable(config)) {
-    return { removed: false, unpaired: false };
-  }
-
-  const { commonArgs, commonEnv, database } =
-    resolveHostedLocalWorktreeDatabaseCommand(config);
-  const dropResult = spawnSync("dropdb", [
-    ...commonArgs,
-    "--if-exists",
-    database.databaseName,
-  ], {
-    encoding: "utf8",
-    env: commonEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return { removed: dropResult.status === 0, unpaired: true };
-}
-
 export function formatHostedLocalWorktreeEnv(
   config: HostedLocalWorktreeConfig,
 ): string {
@@ -297,22 +267,6 @@ async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
         "Drop that slug database or restore the crypto state file before running the worktree stack again.",
       ].join("\n"),
     );
-  }
-}
-
-async function isHostedLocalWorktreeCryptoStateUsable(
-  config: HostedLocalWorktreeConfig,
-): Promise<boolean> {
-  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
-    return true;
-  }
-
-  try {
-    const contents = await readHostedLocalWorktreeCryptoStateText(config);
-    assertHostedLocalWorktreeCryptoStateContents(contents);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -437,6 +391,7 @@ function buildHostedLocalWorktreeLinqEnv(input: {
     && !["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
   const wantsRegistration = skipRegister !== "1"
     && (wantsTunnel || Boolean(publicUrl));
+  const resolvedTunnelMode = publicUrl && !tunnelMode ? "auto" : tunnelMode;
 
   if (!wantsTunnel && !wantsRegistration) {
     return {
@@ -469,7 +424,7 @@ function buildHostedLocalWorktreeLinqEnv(input: {
   return {
     MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
       input.paths.linqWebhookRegistrationCachePath,
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: tunnelMode ?? "0",
+    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: resolvedTunnelMode ?? "0",
     MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
       tunnelConfig ?? input.paths.linqWebhookTunnelConfigPath,
     ...(wantsRegistration
@@ -525,26 +480,6 @@ function deriveHostedLocalWorktreePorts(slug: string): HostedLocalWorktreePorts 
   };
 }
 
-async function resolveAvailableHostedLocalWorktreePorts(
-  slug: string,
-): Promise<HostedLocalWorktreePorts> {
-  const preferred = deriveHostedLocalWorktreePorts(slug);
-  return {
-    minio: await pickAvailableHostedLocalWorktreePort("127.0.0.1", preferred.minio, "minio"),
-    temporal: await pickAvailableHostedLocalWorktreePort(
-      "127.0.0.1",
-      preferred.temporal,
-      "temporal",
-    ),
-    web: await pickAvailableHostedLocalWorktreePort("127.0.0.1", preferred.web, "web"),
-    worker: await pickAvailableHostedLocalWorktreePort(
-      "127.0.0.1",
-      preferred.worker,
-      "worker",
-    ),
-  };
-}
-
 function deriveHostedLocalWorktreePort(
   slug: string,
   name: keyof HostedLocalWorktreePorts,
@@ -554,46 +489,6 @@ function deriveHostedLocalWorktreePort(
   const offset = Number.parseInt(hash.slice(0, 8), 16)
     % HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE;
   return base + offset;
-}
-
-async function pickAvailableHostedLocalWorktreePort(
-  host: string,
-  preferredPort: number,
-  name: keyof HostedLocalWorktreePorts,
-): Promise<number> {
-  const base = HOSTED_LOCAL_WORKTREE_PORT_RANGES[name];
-  const initialOffset = preferredPort - base;
-  for (let attempt = 0; attempt < HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE; attempt += 1) {
-    const port = base + ((initialOffset + attempt) % HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE);
-    if (await isPortAvailable(host, port)) {
-      return port;
-    }
-  }
-
-  throw new Error(`No available hosted-local worktree ${name} port in ${base}-${base + HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE - 1}.`);
-}
-
-async function isPortAvailable(host: string, port: number): Promise<boolean> {
-  return await new Promise<boolean>((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", (error) => {
-      if (isNodeError(error) && error.code === "EADDRINUSE") {
-        resolve(false);
-        return;
-      }
-      reject(error);
-    });
-    server.once("listening", () => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(true);
-      });
-    });
-    server.listen(port, host);
-  });
 }
 
 function parseHostedLocalWorktreeDatabaseUrl(value: string): {

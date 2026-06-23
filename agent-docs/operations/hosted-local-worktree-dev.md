@@ -1,6 +1,6 @@
 # Hosted Local Worktree Dev
 
-Last verified: 2026-06-22
+Last verified: 2026-06-23
 
 ## Purpose
 
@@ -54,8 +54,9 @@ pnpm hosted-local worktree up <slug>
 The helper:
 
 - validates `<slug>` as lowercase letters, digits, and hyphens
-- derives and probes unique local ports for web, Worker, Temporal, and MinIO
-  from stable per-slug ranges
+- derives deterministic local ports for web, Worker, Temporal, and MinIO from
+  stable per-slug ranges; a duplicate slug must fail normal startup port checks
+  instead of selecting alternate ports
 - creates or verifies the slug-specific local Postgres database
 - sets the worktree profile, local database URL, web/Worker ports, managed
   Temporal port, temp dir, Wrangler persist dir, MinIO data dir, generated
