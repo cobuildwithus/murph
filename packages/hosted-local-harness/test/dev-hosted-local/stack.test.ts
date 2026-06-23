@@ -3063,6 +3063,18 @@ describe("hosted local dev stack", () => {
     );
   });
 
+  it("rejects temp dir overrides inside hosted-local worktree state", async () => {
+    vi.stubEnv("MURPH_DEV_TEMP_DIR", ".tmp/hosted-local-worktrees/feature-a");
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: process.env,
+    })).rejects.toThrow(
+      "MURPH_DEV_TEMP_DIR must not resolve inside the hosted-local worktree state directory.",
+    );
+  });
+
   it("fails closed when local hosted dev is configured with a non-hosted assistant provider", async () => {
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
 

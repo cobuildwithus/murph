@@ -197,6 +197,24 @@ describe("hosted-local worktree config", () => {
     expect(config.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("0");
   });
 
+  it("drops inherited temp dir overrides from worktree startup env", () => {
+    for (const tempDir of [
+      ".tmp/hosted-local-worktrees",
+      ".tmp/hosted-local-worktrees/feature-a",
+    ]) {
+      const config = buildHostedLocalWorktreeConfig({
+        env: {
+          MURPH_DEV_TEMP_DIR: tempDir,
+        },
+        ports,
+        slug: "feature-a",
+      });
+
+      expect(config.env.MURPH_DEV_TEMP_DIR).toBeUndefined();
+      expect(formatHostedLocalWorktreeEnv(config)).not.toContain("MURPH_DEV_TEMP_DIR");
+    }
+  });
+
   it("rejects remote hosted crypto mode for worktree commands", () => {
     for (const value of ["1", "yes"]) {
       expect(() =>

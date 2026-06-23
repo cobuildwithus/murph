@@ -8,6 +8,7 @@ import process from "node:process";
 import {
   DEFAULT_DATABASE_URL,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+  HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -68,7 +69,6 @@ export interface HostedLocalWorktreeLock {
 }
 
 const HOSTED_LOCAL_WORKTREE_PROFILE = "dev";
-const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
 const HOSTED_LOCAL_WORKTREE_LOCK_ROOT = "murph-hosted-local-worktree-locks";
 const HOSTED_LOCAL_WORKTREE_PORT_RANGE_SIZE = 300;
@@ -467,8 +467,11 @@ function buildHostedLocalWorktreeEnv(input: {
   ports: HostedLocalWorktreePorts;
   slug: string;
 }): NodeJS.ProcessEnv {
+  const env = { ...input.baseEnv };
+  delete env.MURPH_DEV_TEMP_DIR;
+
   return {
-    ...input.baseEnv,
+    ...env,
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: input.buildId,
     [HOSTED_LOCAL_WORKTREE_SCOPE_ENV]: input.slug,
     [USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]: "0",

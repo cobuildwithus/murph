@@ -128,6 +128,7 @@ export const HEALTH_POLL_INTERVAL_MS = 500;
 export const HEALTH_REQUEST_TIMEOUT_MS = 20_000;
 export const HOSTED_WEB_DEV_DIST_DIR = ".next-dev";
 export const HOSTED_WEB_SMOKE_DIST_DIR = ".next-smoke";
+export const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 export const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 export const HOSTED_LOCAL_WORKTREE_SCOPE_ENV = "MURPH_DEV_WORKTREE_SCOPE";
 export const HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV =

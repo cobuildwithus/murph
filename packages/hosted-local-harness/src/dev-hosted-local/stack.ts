@@ -17,6 +17,7 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_WEB_DEV_DIST_DIR,
@@ -2163,8 +2164,10 @@ function resolveHostedLocalTempDir(
   override: string,
 ): string {
   const tempRoot = path.join(root, ".tmp");
+  const worktreeStateRoot = path.resolve(root, HOSTED_LOCAL_WORKTREE_ROOT);
   const resolved = path.resolve(root, override);
   const relative = path.relative(tempRoot, resolved);
+  const relativeToWorktreeState = path.relative(worktreeStateRoot, resolved);
 
   if (
     relative.length === 0
@@ -2173,6 +2176,16 @@ function resolveHostedLocalTempDir(
     || path.isAbsolute(relative)
   ) {
     throw new Error("MURPH_DEV_TEMP_DIR must resolve inside the repo-local .tmp directory.");
+  }
+  if (
+    relativeToWorktreeState.length === 0
+    || relativeToWorktreeState === "."
+    || (!relativeToWorktreeState.startsWith("..")
+      && !path.isAbsolute(relativeToWorktreeState))
+  ) {
+    throw new Error(
+      "MURPH_DEV_TEMP_DIR must not resolve inside the hosted-local worktree state directory.",
+    );
   }
 
   return resolved;
