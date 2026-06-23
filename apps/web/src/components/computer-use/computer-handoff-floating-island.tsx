@@ -21,28 +21,6 @@ interface DragState {
   height: number;
 }
 
-function readStoredOffset(persistKey: string | null): Offset {
-  if (!persistKey || typeof window === "undefined") {
-    return { x: 0, y: 0 };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(persistKey);
-    if (!raw) {
-      return { x: 0, y: 0 };
-    }
-
-    const parsed = JSON.parse(raw) as Partial<Offset>;
-    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-      return { x: parsed.x, y: parsed.y };
-    }
-  } catch {
-    // ignore corrupted storage
-  }
-
-  return { x: 0, y: 0 };
-}
-
 export function ComputerHandoffFloatingIsland({
   handle,
   children,
@@ -54,8 +32,22 @@ export function ComputerHandoffFloatingIsland({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [offset, setOffset] = useState<Offset>(() => readStoredOffset(persistKey));
+  const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      const raw = window.localStorage.getItem(persistKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Offset>;
+      if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+        setOffset({ x: parsed.x, y: parsed.y });
+      }
+    } catch {
+      // ignore corrupted storage
+    }
+  }, [persistKey]);
 
   const reclampToViewport = useCallback(() => {
     const el = rootRef.current;

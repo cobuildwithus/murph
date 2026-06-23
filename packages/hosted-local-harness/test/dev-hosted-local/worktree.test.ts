@@ -8,7 +8,6 @@ type SpawnSyncResult = {
 };
 
 const worktreeMocks = vi.hoisted(() => ({
-  access: vi.fn(async () => {}),
   cleanupHostedLocalMinioBuildContainersBestEffort: vi.fn(async () => {}),
   cleanupHostedRunnerContainers: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
@@ -33,7 +32,6 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
-  access: worktreeMocks.access,
   mkdir: worktreeMocks.mkdir,
   readFile: worktreeMocks.readFile,
   rename: worktreeMocks.rename,
@@ -60,6 +58,7 @@ import {
   buildHostedLocalWorktreeManifest,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
+  removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
@@ -74,10 +73,66 @@ const ports = {
   worker: 8801,
 };
 
+function buildValidHostedLocalWorktreeCryptoStateText(
+  overrides: Record<string, string> = {},
+): string {
+  const privateJwk = JSON.stringify({
+    crv: "P-256",
+    d: "test-d",
+    kty: "EC",
+    x: "test-x",
+    y: "test-y",
+  });
+  const publicJwkRecord = {
+    crv: "P-256",
+    kty: "EC",
+    x: "test-x",
+    y: "test-y",
+  };
+  const publicJwk = JSON.stringify(publicJwkRecord);
+  const publicKeyPem =
+    "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----";
+  const authorityVersion =
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/local-test";
+  const values = {
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authorityVersion,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: publicKeyPem,
+    HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+      [authorityVersion]: {
+        publicKeyPem,
+        status: "active",
+      },
+    }),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+      "cloudflare-automation:local",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: privateJwk,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK: publicJwk,
+    HOSTED_CRYPTO_ENV: "local",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: authorityVersion,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: publicKeyPem,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: privateJwk,
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+    HOSTED_DEVICE_ROUTING_INDEX_KEY: "device-routing-key",
+    HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
+    HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: privateJwk,
+    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: JSON.stringify({
+      v1: publicJwkRecord,
+    }),
+    ...overrides,
+  };
+
+  return `${Object.entries(values)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join("\n")}\n`;
+}
+
 describe("hosted-local worktree config", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    worktreeMocks.access.mockResolvedValue(undefined);
     worktreeMocks.readFile.mockImplementation(async () => {
       const error = new Error("missing") as NodeJS.ErrnoException;
       error.code = "ENOENT";
@@ -167,6 +222,34 @@ describe("hosted-local worktree config", () => {
     expect(config.ports.minio).toBeLessThan(9400);
   });
 
+  it("reuses manifest ports instead of probing new ports for an existing slug", async () => {
+    worktreeMocks.readFile.mockResolvedValueOnce(JSON.stringify({
+      ports: {
+        minio: 9108,
+        temporal: 7308,
+        web: 3108,
+        worker: 8808,
+      },
+      profileName: "worktree",
+      schemaVersion: 1,
+      slug: "feature-a",
+    }));
+
+    const config = await resolveHostedLocalWorktreeConfig({
+      env: {},
+      slug: "feature-a",
+    });
+
+    expect(config.ports).toEqual({
+      minio: 9108,
+      temporal: 7308,
+      web: 3108,
+      worker: 8808,
+    });
+    expect(config.urls.webBaseUrl).toBe("http://127.0.0.1:3108");
+    expect(config.urls.workerBaseUrl).toBe("http://127.0.0.1:8808");
+  });
+
   it("rejects slugs that cannot safely name local resources", () => {
     expect(() =>
       buildHostedLocalWorktreeConfig({
@@ -238,7 +321,30 @@ describe("hosted-local worktree config", () => {
     );
   });
 
-  it("skips local database setup when the explicit skip flag is set", async () => {
+  it("validates paired crypto state when the explicit database create skip flag is set", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_SKIP_WORKTREE_DB_CREATE: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.readFile.mockResolvedValueOnce(
+      buildValidHostedLocalWorktreeCryptoStateText(),
+    );
+
+    await expect(ensureHostedLocalWorktreeDatabase(config)).resolves.toEqual({
+      created: false,
+    });
+
+    expect(worktreeMocks.readFile).toHaveBeenCalledWith(
+      expect.stringContaining(".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars"),
+      "utf8",
+    );
+    expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("refuses the database create skip flag when paired crypto state is missing", async () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {
         MURPH_DEV_SKIP_WORKTREE_DB_CREATE: "1",
@@ -247,7 +353,9 @@ describe("hosted-local worktree config", () => {
       slug: "feature-a",
     });
 
-    await ensureHostedLocalWorktreeDatabase(config);
+    await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
+      "paired hosted-local crypto state file is missing",
+    );
 
     expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
@@ -259,9 +367,11 @@ describe("hosted-local worktree config", () => {
       slug: "feature-a",
     });
 
-    await ensureHostedLocalWorktreeDatabase(config);
+    await expect(ensureHostedLocalWorktreeDatabase(config)).resolves.toEqual({
+      created: true,
+    });
 
-    expect(worktreeMocks.access).not.toHaveBeenCalled();
+    expect(worktreeMocks.readFile).not.toHaveBeenCalled();
     expect(worktreeMocks.spawnSync).toHaveBeenCalledTimes(1);
     expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
       "createdb",
@@ -297,11 +407,17 @@ describe("hosted-local worktree config", () => {
         stderr: "",
         stdout: "1",
       });
+    worktreeMocks.readFile.mockResolvedValueOnce(
+      buildValidHostedLocalWorktreeCryptoStateText(),
+    );
 
-    await ensureHostedLocalWorktreeDatabase(config);
+    await expect(ensureHostedLocalWorktreeDatabase(config)).resolves.toEqual({
+      created: false,
+    });
 
-    expect(worktreeMocks.access).toHaveBeenCalledWith(
+    expect(worktreeMocks.readFile).toHaveBeenCalledWith(
       expect.stringContaining(".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars"),
+      "utf8",
     );
     expect(worktreeMocks.spawnSync).toHaveBeenNthCalledWith(
       2,
@@ -335,13 +451,85 @@ describe("hosted-local worktree config", () => {
         stderr: "",
         stdout: "1",
       });
-    worktreeMocks.access.mockRejectedValueOnce(
-      Object.assign(new Error("missing"), { code: "ENOENT" }),
-    );
-
     await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
       "paired hosted-local crypto state file is missing",
     );
+  });
+
+  it("refuses to reuse a slug database when its paired crypto state is truncated", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.spawnSync
+      .mockReturnValueOnce({
+        status: 1,
+        stderr: "database already exists",
+        stdout: "",
+      })
+      .mockReturnValueOnce({
+        status: 0,
+        stderr: "",
+        stdout: "1",
+      });
+    worktreeMocks.readFile.mockResolvedValueOnce('HOSTED_CRYPTO_ENV="local"\n');
+
+    await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
+      "paired hosted-local crypto state file is incomplete",
+    );
+  });
+
+  it("drops a newly created slug database only while crypto state is still unpaired", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+
+    await expect(
+      removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(config),
+    ).resolves.toEqual({
+      removed: true,
+      unpaired: true,
+    });
+
+    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
+      "dropdb",
+      expect.arrayContaining([
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5432",
+        "--username",
+        "postgres",
+        "--if-exists",
+        "murph_dev_feature_a",
+      ]),
+      expect.objectContaining({
+        encoding: "utf8",
+      }),
+    );
+  });
+
+  it("keeps a newly created slug database after durable crypto state exists", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.readFile.mockResolvedValueOnce(
+      buildValidHostedLocalWorktreeCryptoStateText(),
+    );
+
+    await expect(
+      removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(config),
+    ).resolves.toEqual({
+      removed: false,
+      unpaired: false,
+    });
+
+    expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
   it("redacts database diagnostics when local database setup fails", async () => {

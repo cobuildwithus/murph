@@ -709,13 +709,23 @@ describe("hosted local dev stack", () => {
         mode: 0o600,
       },
     );
-    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+    const cryptoStateWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      String(filePath).startsWith("/tmp/murph-dev-crypto-state.dev.vars.")
+      && String(filePath).endsWith(".tmp")
+    );
+    if (!cryptoStateWrite) {
+      throw new Error("missing atomic crypto state temp write");
+    }
+    const [cryptoStateTempPath, cryptoStateText, cryptoStateWriteOptions] =
+      cryptoStateWrite;
+    expect(cryptoStateText).toBe('HOSTED_CRYPTO_ENV="local"\n');
+    expect(cryptoStateWriteOptions).toMatchObject({
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(
+      cryptoStateTempPath,
       "/tmp/murph-dev-crypto-state.dev.vars",
-      'HOSTED_CRYPTO_ENV="local"\n',
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
     );
     expect(vi.mocked(symlink)).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
@@ -1156,13 +1166,28 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
-    expect(writeFile).toHaveBeenCalledWith(
+    const worktreeCryptoStateWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      String(filePath).startsWith(
+        "/repo/.tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars.",
+      )
+      && String(filePath).endsWith(".tmp")
+    );
+    if (!worktreeCryptoStateWrite) {
+      throw new Error("missing atomic worktree crypto state temp write");
+    }
+    const [
+      worktreeCryptoStateTempPath,
+      worktreeCryptoStateText,
+      worktreeCryptoStateWriteOptions,
+    ] = worktreeCryptoStateWrite;
+    expect(worktreeCryptoStateText).toBe('HOSTED_CRYPTO_ENV="local"\n');
+    expect(worktreeCryptoStateWriteOptions).toMatchObject({
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    expect(rename).toHaveBeenCalledWith(
+      worktreeCryptoStateTempPath,
       "/repo/.tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
-      'HOSTED_CRYPTO_ENV="local"\n',
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
     );
     expect(symlink).not.toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",

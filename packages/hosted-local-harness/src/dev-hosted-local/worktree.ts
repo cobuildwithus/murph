@@ -1,17 +1,19 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
 import {
   DEFAULT_DATABASE_URL,
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   repoRoot,
 } from "./constants.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
-import { buildHostedRunnerLocalBuildId } from "./environment.ts";
+import { parsePrivateEcP256Jwk } from "./crypto.ts";
+import { buildHostedRunnerLocalBuildId, parseEnvText } from "./environment.ts";
 import { cleanupHostedLocalMinioBuildContainersBestEffort } from "./minio.ts";
 import { cleanupHostedRunnerContainers } from "./runtime.ts";
 import { terminateKnownHostedLocalProcessResidue } from "./stack.ts";
@@ -62,6 +64,15 @@ export interface HostedLocalWorktreePorts {
   worker: number;
 }
 
+export interface HostedLocalWorktreeDatabaseState {
+  created: boolean;
+}
+
+export interface HostedLocalWorktreeDatabaseCleanupResult {
+  removed: boolean;
+  unpaired: boolean;
+}
+
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
@@ -82,9 +93,10 @@ export async function resolveHostedLocalWorktreeConfig(input: {
   slug: string;
 }): Promise<HostedLocalWorktreeConfig> {
   const slug = normalizeHostedLocalWorktreeSlug(input.slug);
-  const ports = input.probePorts === false
+  const existingManifest = await readHostedLocalWorktreeManifest(slug);
+  const ports = existingManifest?.ports ?? (input.probePorts === false
     ? deriveHostedLocalWorktreePorts(slug)
-    : await resolveAvailableHostedLocalWorktreePorts(slug);
+    : await resolveAvailableHostedLocalWorktreePorts(slug));
   return buildHostedLocalWorktreeConfig({
     env: input.env,
     ports,
@@ -192,25 +204,14 @@ async function readHostedLocalWorktreeManifest(
 
 export async function ensureHostedLocalWorktreeDatabase(
   config: HostedLocalWorktreeConfig,
-): Promise<void> {
+): Promise<HostedLocalWorktreeDatabaseState> {
   if (config.env[HOSTED_LOCAL_WORKTREE_DB_CREATE_SKIP_ENV]?.trim() === "1") {
-    return;
+    await assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(config);
+    return { created: false };
   }
 
-  const database = parseHostedLocalWorktreeDatabaseUrl(config.databaseUrl);
-  const commonArgs = [
-    "--host",
-    database.host,
-    "--port",
-    String(database.port),
-    "--username",
-    database.username,
-  ];
-  const commonEnv = {
-    ...process.env,
-    PGCONNECT_TIMEOUT: "5",
-    ...(database.password ? { PGPASSWORD: database.password } : {}),
-  };
+  const { commonArgs, commonEnv, database } =
+    resolveHostedLocalWorktreeDatabaseCommand(config);
   const createResult = spawnSync("createdb", [
     ...commonArgs,
     database.databaseName,
@@ -220,7 +221,7 @@ export async function ensureHostedLocalWorktreeDatabase(
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (createResult.status === 0) {
-    return;
+    return { created: true };
   }
 
   const checkResult = spawnSync("psql", [
@@ -236,7 +237,7 @@ export async function ensureHostedLocalWorktreeDatabase(
   });
   if (checkResult.status === 0) {
     await assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(config);
-    return;
+    return { created: false };
   }
 
   const createDiagnostic = redactHostedLocalWorktreeDatabaseDiagnostic(
@@ -254,6 +255,27 @@ export async function ensureHostedLocalWorktreeDatabase(
       checkDiagnostic ? `psql: ${checkDiagnostic}` : null,
     ].filter(Boolean).join("\n"),
   );
+}
+
+export async function removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(
+  config: HostedLocalWorktreeConfig,
+): Promise<HostedLocalWorktreeDatabaseCleanupResult> {
+  if (await isHostedLocalWorktreeCryptoStateUsable(config)) {
+    return { removed: false, unpaired: false };
+  }
+
+  const { commonArgs, commonEnv, database } =
+    resolveHostedLocalWorktreeDatabaseCommand(config);
+  const dropResult = spawnSync("dropdb", [
+    ...commonArgs,
+    "--if-exists",
+    database.databaseName,
+  ], {
+    encoding: "utf8",
+    env: commonEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return { removed: dropResult.status === 0, unpaired: true };
 }
 
 export async function stopHostedLocalWorktreeResources(input: {
@@ -366,15 +388,105 @@ async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
   }
 
   try {
-    await access(path.join(repoRoot, config.paths.cryptoStatePath));
-  } catch {
+    const contents = await readHostedLocalWorktreeCryptoStateText(config);
+    assertHostedLocalWorktreeCryptoStateContents(contents);
+  } catch (error) {
+    const reason = error instanceof Error && error.message
+      ? error.message
+      : "is invalid";
     throw new Error(
       [
-        `Refusing to reuse local Postgres database ${config.databaseName} because its paired hosted-local crypto state file is missing.`,
+        `Refusing to reuse local Postgres database ${config.databaseName} because its paired hosted-local crypto state file ${reason}.`,
         `Expected crypto state: ${config.paths.cryptoStatePath}`,
         "Drop that slug database or restore the crypto state file before running the worktree stack again.",
       ].join("\n"),
     );
+  }
+}
+
+async function isHostedLocalWorktreeCryptoStateUsable(
+  config: HostedLocalWorktreeConfig,
+): Promise<boolean> {
+  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
+    return true;
+  }
+
+  try {
+    const contents = await readHostedLocalWorktreeCryptoStateText(config);
+    assertHostedLocalWorktreeCryptoStateContents(contents);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readHostedLocalWorktreeCryptoStateText(
+  config: HostedLocalWorktreeConfig,
+): Promise<string> {
+  try {
+    return await readFile(
+      path.join(repoRoot, config.paths.cryptoStatePath),
+      "utf8",
+    );
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error("is missing");
+    }
+    throw new Error("could not be read");
+  }
+}
+
+function assertHostedLocalWorktreeCryptoStateContents(contents: string): void {
+  const parsed = parseEnvText(contents);
+  const missing = HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES.filter(
+    (name) => !parsed[name]?.trim(),
+  );
+  if (missing.length > 0) {
+    throw new Error(`is incomplete; missing ${missing.join(", ")}`);
+  }
+
+  if (parsed.HOSTED_CRYPTO_ENV.trim().toLowerCase() !== "local") {
+    throw new Error("is not local generated crypto state");
+  }
+
+  for (const name of [
+    "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+    "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+    "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+  ] as const) {
+    try {
+      parsePrivateEcP256Jwk(parsed[name]!, name);
+    } catch {
+      throw new Error(`has invalid ${name}`);
+    }
+  }
+
+  for (const name of [
+    "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON",
+    "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+    "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON",
+  ] as const) {
+    assertJsonRecordEnv(parsed[name]!, name);
+  }
+
+  const authorityPublicKey = parsed.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM;
+  if (
+    !authorityPublicKey.includes("-----BEGIN PUBLIC KEY-----")
+    || !authorityPublicKey.includes("-----END PUBLIC KEY-----")
+  ) {
+    throw new Error("has invalid HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
+  }
+}
+
+function assertJsonRecordEnv(value: string, name: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`has invalid ${name}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`has invalid ${name}`);
   }
 }
 
@@ -498,7 +610,7 @@ function parseHostedLocalWorktreeManifest(
   contents: string,
   slug: string,
 ): Pick<HostedLocalWorktreeManifest, "ports"> | null {
-  const parsed = JSON.parse(contents) as unknown;
+  const parsed: unknown = JSON.parse(contents);
   if (!isRecord(parsed)) {
     return null;
   }
@@ -614,6 +726,30 @@ function parseHostedLocalWorktreeDatabaseUrl(value: string): {
     password: decodeURIComponent(url.password),
     port: url.port ? Number.parseInt(url.port, 10) : 5432,
     username: decodeURIComponent(url.username || "postgres"),
+  };
+}
+
+function resolveHostedLocalWorktreeDatabaseCommand(config: HostedLocalWorktreeConfig): {
+  commonArgs: string[];
+  commonEnv: NodeJS.ProcessEnv;
+  database: ReturnType<typeof parseHostedLocalWorktreeDatabaseUrl>;
+} {
+  const database = parseHostedLocalWorktreeDatabaseUrl(config.databaseUrl);
+  return {
+    commonArgs: [
+      "--host",
+      database.host,
+      "--port",
+      String(database.port),
+      "--username",
+      database.username,
+    ],
+    commonEnv: {
+      ...process.env,
+      PGCONNECT_TIMEOUT: "5",
+      ...(database.password ? { PGPASSWORD: database.password } : {}),
+    },
+    database,
   };
 }
 
