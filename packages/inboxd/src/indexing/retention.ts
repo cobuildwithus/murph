@@ -97,9 +97,11 @@ export async function runInboxMediaRetention(
   let hasMoreEligibleAttachments = false;
   let nextEligibleAt: string | null = null;
 
-  const hasActiveParserJob = async (attachment: InboxCaptureAttachmentRecord): Promise<boolean> => {
+  const resolveActiveParserJobProtectionExpiresAt = async (
+    attachment: InboxCaptureAttachmentRecord,
+  ): Promise<string | null> => {
     activeParserJobProtector ??= await openActiveAttachmentParseJobProtector(input.vaultRoot);
-    return activeParserJobProtector.hasActiveJob(attachment, cutoffMs);
+    return activeParserJobProtector.resolveProtectionExpiresAt(attachment, cutoffMs);
   };
 
   try {
@@ -148,7 +150,14 @@ export async function runInboxMediaRetention(
           hasMoreEligibleAttachments = true;
           break captureLoop;
         }
-        if (await hasActiveParserJob(attachment)) {
+        const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
+          attachment,
+        );
+        if (parserJobProtectionExpiresAt) {
+          nextEligibleAt = selectEarliestRetentionWake(
+            nextEligibleAt,
+            parserJobProtectionExpiresAt,
+          );
           continue;
         }
 
@@ -226,9 +235,19 @@ export async function runInboxMediaRetention(
             latestDurableRawInboxRefs.has(candidate.storedPath) ||
             protectedCaptureIds.has(candidate.capture.captureId) ||
             protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
-            protectedStoredPaths.has(candidate.storedPath) ||
-            (await hasActiveParserJob(candidate.attachment))
+            protectedStoredPaths.has(candidate.storedPath)
           ) {
+            continue;
+          }
+
+          const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
+            candidate.attachment,
+          );
+          if (parserJobProtectionExpiresAt) {
+            nextEligibleAt = selectEarliestRetentionWake(
+              nextEligibleAt,
+              parserJobProtectionExpiresAt,
+            );
             continue;
           }
 
@@ -505,10 +524,10 @@ function normalizeRawInboxMediaPath(value: string | null | undefined): string | 
 
 interface ActiveAttachmentParseJobProtector {
   close(): void;
-  hasActiveJob(
+  resolveProtectionExpiresAt(
     attachment: InboxCaptureAttachmentRecord,
     cutoffMs: number,
-  ): boolean;
+  ): string | null;
 }
 
 function closeActiveAttachmentParseJobProtector(
@@ -525,19 +544,19 @@ async function openActiveAttachmentParseJobProtector(
     close() {
       runtime.close();
     },
-    hasActiveJob(attachment, cutoffMs) {
-      return hasActiveAttachmentParseJob(runtime, attachment, cutoffMs);
+    resolveProtectionExpiresAt(attachment, cutoffMs) {
+      return resolveActiveAttachmentParseJobProtectionExpiresAt(runtime, attachment, cutoffMs);
     },
   };
 }
 
-function hasActiveAttachmentParseJob(
+function resolveActiveAttachmentParseJobProtectionExpiresAt(
   runtime: InboxRuntimeStore,
   attachment: InboxCaptureAttachmentRecord,
   cutoffMs: number,
-): boolean {
+): string | null {
   if (attachment.kind !== "audio" && attachment.kind !== "video") {
-    return false;
+    return null;
   }
 
   const activeJobs = [
@@ -553,22 +572,35 @@ function hasActiveAttachmentParseJob(
     }),
   ];
 
-  return activeJobs.some((job) =>
-    isFreshAttachmentParseJobProtection({
+  let protectionExpiresAt: string | null = null;
+  for (const job of activeJobs) {
+    const jobProtectionExpiresAt = resolveFreshAttachmentParseJobProtectionExpiresAt({
       cutoffMs,
       jobCreatedAt: job.createdAt,
       jobStartedAt: job.startedAt ?? null,
-    }),
-  );
+    });
+    if (jobProtectionExpiresAt) {
+      protectionExpiresAt = selectEarliestRetentionWake(
+        protectionExpiresAt,
+        jobProtectionExpiresAt,
+      );
+    }
+  }
+
+  return protectionExpiresAt;
 }
 
-function isFreshAttachmentParseJobProtection(input: {
+function resolveFreshAttachmentParseJobProtectionExpiresAt(input: {
   cutoffMs: number;
   jobCreatedAt: string;
   jobStartedAt: string | null;
-}): boolean {
+}): string | null {
   const protectedAtMs = Date.parse(input.jobStartedAt ?? input.jobCreatedAt);
-  return Number.isFinite(protectedAtMs) && protectedAtMs > input.cutoffMs;
+  if (!Number.isFinite(protectedAtMs) || protectedAtMs <= input.cutoffMs) {
+    return null;
+  }
+
+  return new Date(protectedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString();
 }
 
 async function hashExistingVaultFile(

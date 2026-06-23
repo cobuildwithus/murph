@@ -573,20 +573,16 @@ test("runInboxMediaRetention protects audio while its parser job is fresh and no
       vaultRoot,
     });
     assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(protectedResult.hasMoreEligibleAttachments, false);
+    assert.equal(protectedResult.nextEligibleAt, "2026-07-18T00:00:00.000Z");
     assert.equal(await fileExists(vaultRoot, audioPath), true);
 
-    await updateAttachmentParseJobTimes({
-      createdAt: "2026-06-01T00:00:00.000Z",
-      databasePath: runtime.databasePath,
-      jobId: pendingJob.jobId,
-      startedAt: null,
-    });
-
     const expiredResult = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-07-18T00:00:00.000Z",
       vaultRoot,
     });
     assert.equal(expiredResult.expiredAttachments, 1);
+    assert.equal(expiredResult.nextEligibleAt, null);
     assert.equal(await fileExists(vaultRoot, audioPath), false);
   } finally {
     runtime.close();
@@ -655,21 +651,95 @@ test("runInboxMediaRetention protects audio while its running parser job is fres
       vaultRoot,
     });
     assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(protectedResult.hasMoreEligibleAttachments, false);
+    assert.equal(protectedResult.nextEligibleAt, "2026-07-18T00:00:00.000Z");
     assert.equal(await fileExists(vaultRoot, audioPath), true);
 
-    await updateAttachmentParseJobTimes({
-      createdAt: "2026-06-01T00:00:00.000Z",
-      databasePath: runtime.databasePath,
-      jobId: runningJob.jobId,
-      startedAt: "2026-06-01T00:00:00.000Z",
-    });
-
     const expiredResult = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-07-18T00:00:00.000Z",
       vaultRoot,
     });
     assert.equal(expiredResult.expiredAttachments, 1);
+    assert.equal(expiredResult.nextEligibleAt, null);
     assert.equal(expiredResult.records[0]?.attachmentId, pendingJob.attachmentId);
+    assert.equal(await fileExists(vaultRoot, audioPath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention reschedules when parser work appears before the locked recheck", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-parser-recheck");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const captureId = "cap_retention_parser_recheck";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VP",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: {
+      source: "telegram",
+      externalId: "msg-parser-recheck-media",
+      thread: {
+        id: "thread-parser-recheck",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      text: "old audio with late parser work",
+      attachments: [
+        {
+          kind: "audio",
+          mime: "audio/mp4",
+          fileName: "voice.m4a",
+          data: Buffer.from("audio-bytes"),
+        },
+      ],
+      raw: {},
+    },
+  });
+  const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(audioPath);
+  const audioBytes = await fs.readFile(path.join(vaultRoot, audioPath));
+  await fs.unlink(path.join(vaultRoot, audioPath));
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    const protectedResult = await runInboxMediaRetention({
+      materializeCandidatePaths: async (storedPaths) => {
+        assert.deepEqual([...storedPaths], [audioPath]);
+        await writeVaultBytes(vaultRoot, audioPath, audioBytes);
+        runtime.enqueueDerivedJobs({
+          captureId,
+          stored: persisted.stored,
+        });
+        const pendingJob = runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0];
+        assert.ok(pendingJob);
+        await updateAttachmentParseJobTimes({
+          createdAt: "2026-07-04T00:00:00.000Z",
+          databasePath: runtime.databasePath,
+          jobId: pendingJob.jobId,
+          startedAt: null,
+        });
+      },
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(protectedResult.hasMoreEligibleAttachments, false);
+    assert.equal(protectedResult.nextEligibleAt, "2026-07-18T00:00:00.000Z");
+    assert.equal(await fileExists(vaultRoot, audioPath), true);
+
+    const expiredResult = await runInboxMediaRetention({
+      now: "2026-07-18T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(expiredResult.expiredAttachments, 1);
+    assert.equal(expiredResult.nextEligibleAt, null);
     assert.equal(await fileExists(vaultRoot, audioPath), false);
   } finally {
     runtime.close();
