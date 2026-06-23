@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { cn } from "@/src/lib/utils";
 
-const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset";
+const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset.v2";
 const VIEWPORT_MARGIN = 12;
 
 type Offset = { x: number; y: number };
