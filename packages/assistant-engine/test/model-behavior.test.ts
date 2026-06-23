@@ -118,11 +118,12 @@ describe('assistant execution prompt contract', () => {
       'treat explicit Murph product frustration, feature requests, or interest in shipped changelog items as feedback worth capturing',
     )
     expect(prompt).toContain(
-      'Record only the structured kind/topic and any relevant changelog item ids',
+      'Record only the structured kind, a concise product-only summary, and any relevant changelog item ids',
     )
     expect(prompt).toContain(
-      'Never submit inferred or silent feedback, raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose',
+      'Never submit inferred or silent feedback, tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads',
     )
+    expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
   })

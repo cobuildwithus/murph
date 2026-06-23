@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
 
 const prismaMocks = vi.hoisted(() => ({
   createMany: vi.fn(),
@@ -57,7 +58,7 @@ describe("recordHostedProductFeedback", () => {
         expect.objectContaining({
           memberId: "member_123",
           relatedChangelogItemIdsJson: ["native-message-formatting"],
-          topic: "changelog",
+          summary: "Interested in native message formatting.",
         }),
       ],
       skipDuplicates: true,
@@ -91,7 +92,7 @@ describe("recordHostedProductFeedback", () => {
       feedback: makeFeedback({
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        topic: "integrations",
+        summary: "Wants Strava integration support.",
       }),
       memberId: "member_123",
     });
@@ -102,7 +103,7 @@ describe("recordHostedProductFeedback", () => {
         expect.objectContaining({
           kind: "feature_request",
           relatedChangelogItemIdsJson: [],
-          topic: "integrations",
+          summary: "Wants Strava integration support.",
         }),
       ],
     }));
@@ -111,6 +112,8 @@ describe("recordHostedProductFeedback", () => {
   it.each([
     ["empty changelog ids for shipped interest", makeFeedback({ relatedChangelogItemIds: [] })],
     ["unknown changelog ids", makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] })],
+    ["empty summary", makeFeedback({ summary: " \n\t " })],
+    ["oversized summary", makeFeedback({ summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH + 1) })],
   ])("rejects %s before persistence", async (_label, feedback) => {
     await expect(recordHostedProductFeedback({
       feedback,
@@ -128,6 +131,12 @@ describe("normalizeHostedProductFeedback", () => {
     expect(normalizeHostedProductFeedback(makeFeedback())).toEqual(makeFeedback());
   });
 
+  it("normalizes bounded summary text", () => {
+    expect(normalizeHostedProductFeedback(makeFeedback({
+      summary: "  Wants   better message formatting.  ",
+    })).summary).toBe("Wants better message formatting.");
+  });
+
   it("throws the hosted onboarding error type for rejected content", () => {
     expect(() =>
       normalizeHostedProductFeedback(
@@ -141,13 +150,13 @@ function makeFeedback(input: {
   idempotencyKey?: string;
   kind?: "feature_interest" | "feature_request" | "frustration";
   relatedChangelogItemIds?: string[];
-  topic?: "changelog" | "integrations";
+  summary?: string;
 } = {}) {
   return {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
     kind: input.kind ?? "feature_interest",
     relatedChangelogItemIds:
       input.relatedChangelogItemIds ?? ["native-message-formatting"],
-    topic: input.topic ?? "changelog",
+    summary: input.summary ?? "Interested in native message formatting.",
   };
 }

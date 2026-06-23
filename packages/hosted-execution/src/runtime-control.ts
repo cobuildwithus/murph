@@ -695,31 +695,13 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_TOPICS = [
-  "assistant_quality",
-  "billing",
-  "changelog",
-  "dashboard",
-  "experiments",
-  "integrations",
-  "messaging",
-  "notifications",
-  "onboarding",
-  "performance",
-  "privacy",
-  "settings",
-  "wearables",
-  "other",
-] as const;
-
-export type HostedProductFeedbackTopic =
-  (typeof HOSTED_PRODUCT_FEEDBACK_TOPICS)[number];
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
 
 export interface HostedRuntimeProductFeedbackRecord {
   idempotencyKey: string;
   kind: HostedProductFeedbackKind;
-  topic: HostedProductFeedbackTopic;
   relatedChangelogItemIds: string[];
+  summary: string;
 }
 
 export interface HostedRuntimeProductFeedbackRecordRequest {

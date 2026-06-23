@@ -244,6 +244,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('murph.submit_product_feedback')
     expect(seed.instructions).toContain('another feature in mind')
     expect(seed.instructions).toContain('expresses product frustration')
+    expect(seed.instructions).toContain('concise product-only summary')
+    expect(seed.instructions).toContain('tags, topics, raw user wording')
+    expect(seed.instructions).not.toContain('kind/topic')
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date('2026-06-22T12:00:00.000Z'),

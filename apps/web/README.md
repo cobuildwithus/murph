@@ -128,7 +128,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
 - `HostedProductFeedback` owns assistant-captured structured product feedback
-  without storing raw conversation text, health details, tags, or free-form feature prose
+  with only a bounded product-only summary, kind, and optional changelog ids,
+  without storing raw conversation text, health details, tags, topics, or provider payloads
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;

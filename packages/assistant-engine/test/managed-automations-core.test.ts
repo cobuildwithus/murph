@@ -183,6 +183,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('murph.submit_product_feedback')
     expect(productUpdatesRecord?.instructions).toContain('another feature in mind')
     expect(productUpdatesRecord?.instructions).toContain('expresses product frustration')
+    expect(productUpdatesRecord?.instructions).toContain('concise product-only summary')
+    expect(productUpdatesRecord?.instructions).toContain('tags, topics, raw user wording')
+    expect(productUpdatesRecord?.instructions).not.toContain('kind/topic')
     expect(productUpdatesRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )

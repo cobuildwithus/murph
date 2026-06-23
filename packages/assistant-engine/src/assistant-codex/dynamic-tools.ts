@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
-  HOSTED_PRODUCT_FEEDBACK_TOPICS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -187,7 +187,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback after the user explicitly expresses product frustration, asks for a feature, or shows interest in shipped changelog items. Never include raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose.',
+    'Record structured product feedback after the user explicitly expresses product frustration, asks for a feature, or shows interest in shipped changelog items. Summarize the product feedback concisely; never include tags, topics, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -196,9 +196,12 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
       },
-      topic: {
+      summary: {
         type: 'string',
-        enum: [...HOSTED_PRODUCT_FEEDBACK_TOPICS],
+        minLength: 1,
+        maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+        description:
+          'Concise product-only summary of the explicit feedback. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -212,7 +215,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         },
       },
     },
-    required: ['kind', 'topic'],
+    required: ['kind', 'summary'],
     oneOf: [
       {
         properties: {
@@ -523,7 +526,12 @@ const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const submitProductFeedbackArgumentsSchema = z
   .object({
     kind: z.enum(HOSTED_PRODUCT_FEEDBACK_KINDS),
-    topic: z.enum(HOSTED_PRODUCT_FEEDBACK_TOPICS),
+    summary: z
+      .string()
+      .trim()
+      .min(1)
+      .max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
+      .transform((value) => value.replace(/\s+/gu, ' ')),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
       .max(7)

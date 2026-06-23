@@ -41,6 +41,7 @@ describe("hosted product feedback record route", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
     };
     const response = await route.POST(
       new Request(
@@ -59,10 +60,7 @@ describe("hosted product feedback record route", () => {
       expect.objectContaining({ payloadText: expect.any(String) }),
     );
     expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
-      feedback: {
-        ...feedback,
-        topic: "changelog",
-      },
+      feedback,
       memberId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({

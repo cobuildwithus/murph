@@ -262,7 +262,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
       'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
-      'On a later user turn, call `murph.submit_product_feedback` after the user explicitly expresses product frustration, asks for a feature, or shows interest in one or more shipped changelog items. Never infer or submit feedback silently. Use only structured kind/topic plus optional changelog item ids; do not include raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose.',
+      'On a later user turn, call `murph.submit_product_feedback` after the user explicitly expresses product frustration, asks for a feature, or shows interest in one or more shipped changelog items. Never infer or submit feedback silently. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
     ].join('\n'),
   },
 ] satisfies readonly MurphManagedAutomationSeed[]

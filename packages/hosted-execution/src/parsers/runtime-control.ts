@@ -26,7 +26,7 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
-  HOSTED_PRODUCT_FEEDBACK_TOPICS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -81,7 +81,6 @@ import {
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedProductFeedbackKind,
-  type HostedProductFeedbackTopic,
   type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
@@ -621,7 +620,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       "idempotencyKey",
       "kind",
       "relatedChangelogItemIds",
-      "topic",
+      "summary",
     ]),
     "Hosted runtime product feedback request feedback",
   );
@@ -635,9 +634,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
     );
   }
   const kind = parseHostedProductFeedbackKind(feedback.kind);
-  const topic = feedback.topic === undefined
-    ? defaultHostedProductFeedbackTopic(kind)
-    : parseHostedProductFeedbackTopic(feedback.topic);
+  const summary = parseHostedProductFeedbackSummary(feedback.summary);
   const relatedChangelogItemIds = parseHostedProductFeedbackSlugArray(
     readOptionalStringArray(
       feedback.relatedChangelogItemIds,
@@ -660,7 +657,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       idempotencyKey,
       kind,
       relatedChangelogItemIds,
-      topic,
+      summary,
     },
   };
 }
@@ -694,18 +691,19 @@ function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKi
   return kind as HostedProductFeedbackKind;
 }
 
-function parseHostedProductFeedbackTopic(value: unknown): HostedProductFeedbackTopic {
-  const topic = requireString(value, "Hosted runtime product feedback topic");
-  if (!HOSTED_PRODUCT_FEEDBACK_TOPICS.includes(topic as HostedProductFeedbackTopic)) {
-    throw new TypeError("Hosted runtime product feedback topic is not supported.");
+function parseHostedProductFeedbackSummary(value: unknown): string {
+  const summary = requireString(value, "Hosted runtime product feedback summary")
+    .trim()
+    .replace(/\s+/gu, " ");
+  if (
+    summary.length === 0 ||
+    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `Hosted runtime product feedback summary must be between 1 and ${HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH} characters.`,
+    );
   }
-  return topic as HostedProductFeedbackTopic;
-}
-
-function defaultHostedProductFeedbackTopic(
-  kind: HostedProductFeedbackKind,
-): HostedProductFeedbackTopic {
-  return kind === "feature_interest" ? "changelog" : "other";
+  return summary;
 }
 
 function parseHostedProductFeedbackSlugArray(

@@ -327,6 +327,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const productFeedbackSummaryMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260623193000_hosted_product_feedback_summary/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -371,11 +378,13 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_ai_usage_token_pricing_basis",
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
+      "2026062100_hosted_ai_usage_period_counter_backfill",
       "2026062100_hosted_computer_single_member_profile",
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
       "20260622190000_add_hosted_product_feedback",
       "20260623170000_generalize_hosted_product_feedback",
+      "20260623193000_hosted_product_feedback_summary",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -395,6 +404,9 @@ describe("hosted Prisma baseline migration", () => {
     expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
     expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
     expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
+    expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
+    expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
+    expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

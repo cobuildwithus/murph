@@ -189,7 +189,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
-        topic: "changelog",
+        summary: "Interested in native message formatting.",
       },
     },
     name: "hosted product feedback recording",

@@ -2,9 +2,10 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import type {
-  HostedRuntimeProductFeedbackRecord,
-  HostedRuntimeProductFeedbackRecordResponse,
+import {
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  type HostedRuntimeProductFeedbackRecord,
+  type HostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { resolveChangelogCardItems } from "@/src/lib/changelog";
@@ -24,7 +25,7 @@ export async function recordHostedProductFeedback(input: {
         kind: feedback.kind,
         memberId: input.memberId,
         relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
-        topic: feedback.topic,
+        summary: feedback.summary,
       },
     ],
     skipDuplicates: true,
@@ -39,7 +40,10 @@ export async function recordHostedProductFeedback(input: {
 export function normalizeHostedProductFeedback(
   feedback: HostedRuntimeProductFeedbackRecord,
 ): HostedRuntimeProductFeedbackRecord {
+  const summary = feedback.summary.trim().replace(/\s+/gu, " ");
   if (
+    summary.length === 0 ||
+    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH ||
     (feedback.kind === "feature_interest" &&
       feedback.relatedChangelogItemIds.length === 0) ||
     (feedback.relatedChangelogItemIds.length > 0 &&
@@ -52,7 +56,7 @@ export function normalizeHostedProductFeedback(
     idempotencyKey: feedback.idempotencyKey,
     kind: feedback.kind,
     relatedChangelogItemIds: [...feedback.relatedChangelogItemIds],
-    topic: feedback.topic,
+    summary,
   };
 }
 
@@ -73,6 +77,6 @@ function rejectHostedProductFeedback(): never {
   throw hostedOnboardingError({
     code: "HOSTED_PRODUCT_FEEDBACK_REJECTED",
     httpStatus: 400,
-    message: "Product feedback must reference published changelog items.",
+    message: "Product feedback must include a bounded summary and reference published changelog items when changelog ids are present.",
   });
 }

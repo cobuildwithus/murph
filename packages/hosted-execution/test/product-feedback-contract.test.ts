@@ -11,7 +11,7 @@ describe("hosted product feedback contracts", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
-      topic: "changelog",
+      summary: "Interested in native message formatting.",
     };
     expect(parseHostedRuntimeProductFeedbackRecordRequest({ feedback })).toEqual({
       feedback,
@@ -31,6 +31,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "not-a-digest",
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -38,7 +39,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: [],
-        topic: "changelog",
+        summary: "Interested in native message formatting.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -46,7 +47,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "bug_report",
         relatedChangelogItemIds: ["native-message-formatting"],
-        topic: "integrations",
+        summary: "Wants a bug-report workflow.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -54,7 +55,22 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        topic: "unknown-topic",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "x".repeat(501),
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -63,7 +79,16 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        topic: "messaging",
+        summary: "Wants better message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+        topic: "integrations",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -74,7 +99,7 @@ describe("hosted product feedback contracts", () => {
           "native-message-formatting",
           "native-message-formatting",
         ],
-        topic: "changelog",
+        summary: "Interested in native message formatting.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -82,7 +107,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: ["NativeMessageFormatting"],
-        topic: "changelog",
+        summary: "Interested in native message formatting.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -99,25 +124,25 @@ describe("hosted product feedback contracts", () => {
           "seven",
           "eight",
         ],
-        topic: "changelog",
+        summary: "Interested in many changelog items.",
       },
     })).toThrow();
   });
 
-  it("supports structured feature requests and old changelog-only payloads", () => {
+  it("supports structured feature requests and frustrations", () => {
     expect(parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
         idempotencyKey: "b".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        topic: "integrations",
+        summary: "  Wants Strava   integration support.  ",
       },
     })).toEqual({
       feedback: {
         idempotencyKey: "b".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        topic: "integrations",
+        summary: "Wants Strava integration support.",
       },
     });
 
@@ -125,29 +150,14 @@ describe("hosted product feedback contracts", () => {
       feedback: {
         idempotencyKey: "d".repeat(64),
         kind: "frustration",
-        topic: "performance",
+        summary: "The dashboard feels slow.",
       },
     })).toEqual({
       feedback: {
         idempotencyKey: "d".repeat(64),
         kind: "frustration",
         relatedChangelogItemIds: [],
-        topic: "performance",
-      },
-    });
-
-    expect(parseHostedRuntimeProductFeedbackRecordRequest({
-      feedback: {
-        idempotencyKey: "c".repeat(64),
-        kind: "feature_interest",
-        relatedChangelogItemIds: ["native-message-formatting"],
-      },
-    })).toEqual({
-      feedback: {
-        idempotencyKey: "c".repeat(64),
-        kind: "feature_interest",
-        relatedChangelogItemIds: ["native-message-formatting"],
-        topic: "changelog",
+        summary: "The dashboard feels slow.",
       },
     });
   });
