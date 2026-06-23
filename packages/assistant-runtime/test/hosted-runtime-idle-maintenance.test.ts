@@ -432,6 +432,48 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     }
   });
 
+  it("passes active media protections to inbox media retention", async () => {
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: null,
+      records: [],
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.5",
+      pendingWork: false,
+      protectedAttachmentIds: ["att_active_01"],
+      protectedCaptureIds: ["cap_active"],
+      protectedStoredPaths: [
+        "raw/inbox/telegram/self/2026/04/cap_active/attachments/01__voice.m4a",
+      ],
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxMediaRetention).toHaveBeenCalledWith(expect.objectContaining({
+      protectedAttachmentIds: ["att_active_01"],
+      protectedCaptureIds: ["cap_active"],
+      protectedStoredPaths: [
+        "raw/inbox/telegram/self/2026/04/cap_active/attachments/01__voice.m4a",
+      ],
+      vaultRoot: "/vault",
+    }));
+  });
+
   it("tags estimated compaction usage with explicit estimate provenance", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",

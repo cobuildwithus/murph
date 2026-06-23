@@ -10,7 +10,6 @@ export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
-export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS = 2 * 60 * 60 * 1000;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
@@ -71,11 +70,7 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   prisma: PrismaClient;
   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
 }): Promise<{ failures: number; sent: number }> {
-  const claimedUntil = new Date(
-    input.now.getTime() + HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CLAIM_MS,
-  );
-  const workspaces = await claimDueInboxMediaRetentionSignalWorkspaces({
-    claimedUntil,
+  const workspaces = await readDueInboxMediaRetentionSignalWorkspaces({
     now: input.now,
     prisma: input.prisma,
   });
@@ -121,25 +116,16 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   return { failures, sent };
 }
 
-async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
-  claimedUntil: Date;
+async function readDueInboxMediaRetentionSignalWorkspaces(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<Array<{ userId: string }>> {
   return await input.prisma.$queryRaw<Array<{ userId: string }>>`
-    WITH due AS (
-      SELECT "user_id"
-      FROM "hosted_workspace"
-      WHERE "inbox_media_retention_wake_at" <= ${input.now}
-      ORDER BY "inbox_media_retention_wake_at" ASC, "user_id" ASC
-      LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE "hosted_workspace" AS workspace
-    SET "inbox_media_retention_wake_at" = ${input.claimedUntil}
-    FROM due
-    WHERE workspace."user_id" = due."user_id"
-    RETURNING workspace."user_id" AS "userId"
+    SELECT "user_id" AS "userId"
+    FROM "hosted_workspace"
+    WHERE "inbox_media_retention_wake_at" <= ${input.now}
+    ORDER BY "inbox_media_retention_wake_at" ASC, "user_id" ASC
+    LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
   `;
 }
 

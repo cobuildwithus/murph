@@ -1516,13 +1516,16 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     snapshotId: input.snapshotId,
     userId: input.userId,
   }).catch(() => undefined);
-  await deleteReplacedWorkspaceSnapshotObject({
+  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotObject({
     bucket: input.bucket,
     checkpoint,
     env: input.env,
     environment: input.environment,
     snapshotRef,
-  }).catch(() => undefined);
+  });
+  if (!replacedSnapshotCleanupSucceeded) {
+    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
+  }
 
   return json({
     checkpoint,
@@ -1537,10 +1540,10 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}): Promise<void> {
+}): Promise<boolean> {
   const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
   if (!replacedSnapshotRef) {
-    return;
+    return true;
   }
 
   if (isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)) {
@@ -1551,45 +1554,41 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
         userId: input.snapshotRef.userId,
       }))
     ) {
-      return;
+      return true;
     }
-    try {
-      await recordWorkspaceSnapshotOrphanCandidate(input.env, {
-        createdAt: new Date().toISOString(),
-        objectKey: replacedSnapshotRef.objectKey,
-        schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-        snapshotId: replacedSnapshotRef.snapshotId,
-        userId: replacedSnapshotRef.userId,
-      });
-    } catch {
-      // Direct deletion below can still complete cleanup without a retry record.
-    }
-    await deleteWorkspaceSnapshotObjectBestEffort({
+    const orphanRecorded = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
+      createdAt: new Date().toISOString(),
+      objectKey: replacedSnapshotRef.objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: replacedSnapshotRef.snapshotId,
+      userId: replacedSnapshotRef.userId,
+    }).catch(() => false);
+    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
       bucket: input.bucket,
       env: input.env,
       objectKey: replacedSnapshotRef.objectKey,
     });
-    return;
+    return orphanRecorded || deleted;
   }
 
-  try {
-    await recordWorkspaceSnapshotOrphanCandidate(input.env, {
-      createdAt: new Date().toISOString(),
-      kind: "legacy_workspace_snapshot",
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: `legacy-${input.snapshotRef.snapshotId}`,
-      snapshotRef: replacedSnapshotRef,
-      userId: input.snapshotRef.userId,
-    });
-  } catch {
-    // Direct deletion below can still complete cleanup without a retry record.
-  }
-  await deleteReplacedLegacyWorkspaceSnapshotBundles({
+  const orphanRecorded = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
+    createdAt: new Date().toISOString(),
+    kind: "legacy_workspace_snapshot",
+    schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+    snapshotId: `legacy-${input.snapshotRef.snapshotId}`,
+    snapshotRef: replacedSnapshotRef,
+    userId: input.snapshotRef.userId,
+  }).catch(() => false);
+  const deleted = await deleteReplacedLegacyWorkspaceSnapshotBundles({
     env: input.env,
     environment: input.environment,
     replacedSnapshotRef,
     userId: input.snapshotRef.userId,
-  });
+  }).then(
+    () => true,
+    () => false,
+  );
+  return orphanRecorded || deleted;
 }
 
 async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
@@ -1623,6 +1622,18 @@ async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
       userId: input.userId,
     });
   }));
+}
+
+async function recordWorkspaceSnapshotOrphanCandidate(
+  env: RunnerOutboundEnvironmentSource,
+  candidate: HostedWorkspaceSnapshotOrphanCandidate,
+): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
+  if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
+    return false;
+  }
+  await stub.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
+  return true;
 }
 
 function collectLegacyWorkspaceSnapshotBundleRefs(
@@ -1724,17 +1735,6 @@ async function retireWorkspaceSnapshotUploadSession(input: {
       objectKey: input.objectKey,
     });
   }
-}
-
-async function recordWorkspaceSnapshotOrphanCandidate(
-  env: RunnerOutboundEnvironmentSource,
-  candidate: HostedWorkspaceSnapshotOrphanCandidate,
-): Promise<void> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
-  if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
-    return;
-  }
-  await stub.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {

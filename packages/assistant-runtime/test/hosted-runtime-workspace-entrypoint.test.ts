@@ -136,6 +136,7 @@ import {
   ensureHostedInboxSidecarReady,
 } from "../src/hosted-runtime/context.ts";
 import {
+  collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -875,79 +876,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
       assert.ok(audioPath);
-      await saveAssistantAutomationState(vaultRoot, {
-        autoReply: [{
-          channel: "linq",
-          eligibleAfter: null,
-          enabledAt: recordedAt,
-        }],
-        updatedAt: recordedAt,
-        version: 1,
-      });
-      const pendingInput = await upsertAssistantInputEvent({
-        event: {
-          content: {
-            text: "pending old media",
-            transcriptText: "pending old media",
-            userMessageContent: [{
-              text: "pending old media",
-              type: "text" as const,
-            }],
-          },
-          conversation: {
-            accountId: "acct_1",
-            actorId: "actor_1",
-            actorIsSelf: false,
-            source: "linq",
-            threadId: "thread-workspace-retention-only",
-            threadIsDirect: true,
-          },
-          occurredAt: recordedAt,
-          receivedAt: recordedAt,
-          replyTarget: {
-            channel: "linq",
-            messageId: "msg_workspace_retention_only",
-            threadId: "thread-workspace-retention-only",
-          },
-          sourceRef: {
-            dedupeKey: "dedupe_workspace_retention_only",
-            eventId: "evt_workspace_retention_only",
-            itemId: "item_workspace_retention_only",
-            kind: "hosted-mailbox" as const,
-            lane: "conversation" as const,
-            laneSeq: "10",
-            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-            payloadSource: "inline" as const,
-            source: "hosted-mailbox" as const,
-            wakeSchema: "murph.hosted-execution-wake.v1",
-          },
-        },
-        vault: vaultRoot,
-      });
-      await updateAssistantInputProjection({
-        inputId: pendingInput.inputId,
-        projection: {
-          captureId: "cap_workspace_retention_only",
-          status: "succeeded",
-        },
-        vault: vaultRoot,
-      });
-      await updateAssistantInputAttachmentEvidence({
-        attachmentEvidence: {
-          attachments: [],
-          optionalInboxCaptureId: "cap_workspace_retention_only",
-          reasonCode: "inbox_projection_unavailable",
-          source: "hosted-inbox-projection",
-          status: "failed",
-          updatedAt: recordedAt,
-        },
-        inputId: pendingInput.inputId,
-        vault: vaultRoot,
-      });
-      await enqueueHostedPendingAssistantInputId({
-        inputId: pendingInput.inputId,
-        vaultRoot,
-      });
+      assert.ok((await stat(path.join(vaultRoot, audioPath))).isFile());
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -1046,6 +975,90 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
       assert.ok(audioPath);
+      assert.ok((await stat(path.join(vaultRoot, audioPath))).isFile());
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "telegram",
+          eligibleAfter: null,
+          enabledAt: recordedAt,
+        }],
+        updatedAt: recordedAt,
+        version: 1,
+      });
+      const pendingInput = await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: "pending old media",
+            transcriptText: "pending old media",
+            userMessageContent: [{
+              text: "pending old media",
+              type: "text" as const,
+            }],
+          },
+          conversation: {
+            accountId: "acct_1",
+            actorId: "actor_1",
+            actorIsSelf: false,
+            source: "telegram",
+            threadId: "thread-workspace-retention-only",
+            threadIsDirect: true,
+          },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          replyTarget: {
+            channel: "telegram",
+            messageId: "msg-workspace-retention-only",
+            threadId: "thread-workspace-retention-only",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_workspace_retention_only",
+            eventId: "evt_workspace_retention_only",
+            itemId: "item_workspace_retention_only",
+            kind: "hosted-mailbox" as const,
+            lane: "conversation" as const,
+            laneSeq: "10",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            payloadSource: "inline" as const,
+            source: "hosted-mailbox" as const,
+            wakeSchema: "murph.hosted-execution-wake.v1",
+          },
+        },
+        vault: vaultRoot,
+      });
+      await updateAssistantInputProjection({
+        inputId: pendingInput.inputId,
+        projection: {
+          captureId: "cap_workspace_retention_only",
+          status: "succeeded",
+        },
+        vault: vaultRoot,
+      });
+      await updateAssistantInputAttachmentEvidence({
+        attachmentEvidence: {
+          attachments: [],
+          optionalInboxCaptureId: "cap_workspace_retention_only",
+          reasonCode: "inbox_projection_unavailable",
+          source: "hosted-inbox-projection",
+          status: "failed",
+          updatedAt: recordedAt,
+        },
+        inputId: pendingInput.inputId,
+        vault: vaultRoot,
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: pendingInput.inputId,
+        vaultRoot,
+      });
+      assert.deepEqual(
+        await collectHostedPendingAssistantInputMediaRetentionProtections({
+          vaultRoot,
+        }),
+        {
+          protectedAttachmentIds: [],
+          protectedCaptureIds: ["cap_workspace_retention_only"],
+          protectedStoredPaths: [],
+        },
+      );
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -1094,7 +1107,6 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      await assert.rejects(stat(path.join(vaultRoot, audioPath)), { code: "ENOENT" });
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, dueWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant_due");

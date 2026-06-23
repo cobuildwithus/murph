@@ -4684,7 +4684,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("returns the committed checkpoint when post-CAS cleanup fails", async () => {
+  it("rejects snapshot completion when replaced snapshot cleanup has no durable outcome", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_replaces_previous_cleanup_fails";
@@ -4767,18 +4767,11 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(expect.objectContaining({
-      checkpoint: expect.objectContaining({
-        checkpointed: true,
-        replacedSnapshotRef,
-        workspace: expect.objectContaining({
-          userId: "member_123",
-          version: "5",
-        }),
-      }),
-      ok: true,
-    }));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace replaced snapshot cleanup failed.",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
       snapshotId,
       userId: "member_123",
