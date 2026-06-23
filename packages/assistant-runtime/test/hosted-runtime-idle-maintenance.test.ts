@@ -181,6 +181,89 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     }
   });
 
+  it("reschedules inbox media retention when shutdown is already signaled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        retryInboxMediaRetentionOnShutdown: true,
+        resolveAssistantSessionId: null,
+        shutdownSignal: AbortSignal.abort(new Error("Synthetic container shutdown.")),
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      });
+
+      expect(outcome).toEqual({
+        kind: "skipped",
+        nextWakeAt: new Date(
+          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "inbox_media_retention",
+        reason: "shutdown",
+        threadContextTokensBefore: null,
+      });
+      expect(runInboxMediaRetention).not.toHaveBeenCalled();
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reschedules inbox media retention when shutdown interrupts retention", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    const shutdownController = new AbortController();
+    const shutdownReason = new Error("Synthetic container shutdown.");
+    runInboxMediaRetention.mockImplementation((input: { signal: AbortSignal }) => {
+      shutdownController.abort(shutdownReason);
+      throw input.signal.reason;
+    });
+
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        retryInboxMediaRetentionOnShutdown: true,
+        resolveAssistantSessionId: null,
+        shutdownSignal: shutdownController.signal,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      });
+
+      expect(outcome).toEqual({
+        kind: "skipped",
+        nextWakeAt: new Date(
+          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "inbox_media_retention",
+        reason: "shutdown",
+        threadContextTokensBefore: null,
+      });
+      expect(runInboxMediaRetention).toHaveBeenCalledWith({
+        materializeCandidatePaths: undefined,
+        protectedAttachmentIds: undefined,
+        protectedCaptureIds: undefined,
+        protectedStoredPaths: undefined,
+        signal: expect.any(AbortSignal),
+        vaultRoot: "/vault",
+      });
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("passes active pending attachment protections to inbox media retention", async () => {
     const materializeRetentionCandidatePaths = vi.fn(async () => {});
     runInboxMediaRetention.mockResolvedValue({
@@ -327,6 +410,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
+        retryInboxMediaRetentionOnShutdown: true,
         resolveAssistantSessionId: null,
         shutdownSignal: null,
         vaultRoot: "/vault",

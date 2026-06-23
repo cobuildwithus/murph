@@ -52,6 +52,7 @@ import {
 import {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   runHostedIdleCheckpointMaintenance,
+  type HostedIdleMaintenanceOutcome,
 } from "./hosted-runtime/idle-maintenance.ts";
 import {
   getOrCreateHostedCliRuntimeBridge,
@@ -1337,14 +1338,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
       trackMailboxPostCheckpointEffects(result);
-      const inboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
+      const committedInboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
         nowMs: Date.now(),
         workspace: workspaceRead.workspace,
       });
-      runtimeStateDirty ||= result.runtimeStateDirty || inboxMediaRetentionWakeDue;
+      runtimeStateDirty ||= result.runtimeStateDirty || committedInboxMediaRetentionWakeDue;
       if (result.runtimeStateDirty) {
         markIdleCheckpointTimerAfterDirtyWork();
-      } else if (inboxMediaRetentionWakeDue) {
+      } else if (committedInboxMediaRetentionWakeDue) {
         idleCheckpointStartByMs = Date.now();
       }
       // Best-effort consented vault-share offer: runs once per wake after the foreground
@@ -1539,6 +1540,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
               }
             : null,
+          retryInboxMediaRetentionOnShutdown: isHostedInboxMediaRetentionWakeDue({
+            nowMs: Date.now(),
+            workspace: workspaceRead.workspace,
+          }) || committedInboxMediaRetentionWakeDue,
           resolveAssistantSessionId: (codexThreadId) =>
             findAssistantSessionIdByCodexThreadId(restored.vaultRoot, codexThreadId),
           shutdownSignal: options.shutdownSignal ?? null,
@@ -1581,16 +1586,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
           continue;
         }
-        const idleCheckpointWake = selectEarliestHostedRuntimeWake([
-          {
-            at: accumulatedProjection.nextWakeAt,
-            reason: accumulatedProjection.nextWakeReason,
-          },
-          {
-            at: idleMaintenance.nextWakeAt ?? null,
-            reason: idleMaintenance.nextWakeReason ?? null,
-          },
-        ]);
+        const idleCheckpointWake = selectHostedIdleCheckpointWake({
+          idleMaintenance,
+          projectedWakeAt: accumulatedProjection.nextWakeAt,
+          projectedWakeReason: accumulatedProjection.nextWakeReason,
+        });
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
@@ -2921,6 +2921,53 @@ function selectEarliestHostedRuntimeWake(
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
   };
+}
+
+function selectHostedIdleCheckpointWake(input: {
+  idleMaintenance: HostedIdleMaintenanceOutcome;
+  projectedWakeAt: string | null;
+  projectedWakeReason: string | null;
+}): {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+} {
+  const selectedWake = selectEarliestHostedRuntimeWake([
+    {
+      at: input.projectedWakeAt,
+      reason: input.projectedWakeReason,
+    },
+    {
+      at: input.idleMaintenance.nextWakeAt ?? null,
+      reason: input.idleMaintenance.nextWakeReason ?? null,
+    },
+  ]);
+
+  if (isShutdownInboxMediaRetentionWake(input.idleMaintenance)) {
+    return {
+      nextWakeAt: selectedWake.nextWakeAt,
+      nextWakeReason: selectedWake.nextWakeAt ? "inbox_media_retention" : null,
+    };
+  }
+
+  return selectedWake;
+}
+
+function isShutdownInboxMediaRetentionWake(
+  outcome: HostedIdleMaintenanceOutcome,
+): outcome is HostedIdleMaintenanceOutcome & {
+  nextWakeAt: string;
+  nextWakeReason: "inbox_media_retention";
+} {
+  if (
+    !("reason" in outcome)
+    || outcome.reason !== "shutdown"
+    || outcome.nextWakeReason !== "inbox_media_retention"
+    || !outcome.nextWakeAt
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function readHostedWorkspaceDurableCheckpointEffectWake(

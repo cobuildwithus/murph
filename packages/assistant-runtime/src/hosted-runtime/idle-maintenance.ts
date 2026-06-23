@@ -64,13 +64,19 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  retryInboxMediaRetentionOnShutdown?: boolean;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
   vaultRoot?: string | null;
   wakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedIdleMaintenanceOutcome> {
   if (input.shutdownSignal?.aborted) {
-    return { kind: "skipped", reason: "shutdown", threadContextTokensBefore: null };
+    return buildInterruptedMaintenanceOutcome({
+      retryInboxMediaRetentionOnShutdown: input.retryInboxMediaRetentionOnShutdown === true,
+      shutdownSignal: input.shutdownSignal,
+      vaultRoot: input.vaultRoot ?? null,
+      wakeInterrupted: false,
+    });
   }
 
   const abortController = new AbortController();
@@ -106,7 +112,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       } catch (error) {
         if (isInboxMediaRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
+            retryInboxMediaRetentionOnShutdown: input.retryInboxMediaRetentionOnShutdown === true,
             shutdownSignal: input.shutdownSignal,
+            vaultRoot: input.vaultRoot,
             wakeInterrupted,
           });
         }
@@ -117,7 +125,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     }
     if (abortController.signal.aborted) {
       return buildInterruptedMaintenanceOutcome({
+        retentionWake,
+        retryInboxMediaRetentionOnShutdown: input.retryInboxMediaRetentionOnShutdown === true,
         shutdownSignal: input.shutdownSignal,
+        vaultRoot: input.vaultRoot,
         wakeInterrupted,
       });
     }
@@ -287,14 +298,34 @@ function attachInboxMediaRetentionWake(
 }
 
 function buildInterruptedMaintenanceOutcome(input: {
+  retentionWake?: HostedIdleMaintenanceWake;
+  retryInboxMediaRetentionOnShutdown: boolean;
   shutdownSignal: AbortSignal | null;
+  vaultRoot?: string | null;
   wakeInterrupted: boolean;
 }): HostedIdleMaintenanceOutcome {
-  return {
+  const outcome: HostedIdleMaintenanceOutcome = {
     kind: "skipped",
     reason: input.shutdownSignal?.aborted && !input.wakeInterrupted
       ? "shutdown"
       : "pending_work",
     threadContextTokensBefore: null,
   };
+
+  if (!input.shutdownSignal?.aborted || input.wakeInterrupted || !input.vaultRoot) {
+    return outcome;
+  }
+
+  if (input.retentionWake?.nextWakeAt) {
+    return attachInboxMediaRetentionWake(outcome, input.retentionWake);
+  }
+
+  if (!input.retryInboxMediaRetentionOnShutdown) {
+    return outcome;
+  }
+
+  return attachInboxMediaRetentionWake(
+    outcome,
+    resolveInboxMediaRetentionFailureWake(),
+  );
 }

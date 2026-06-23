@@ -9909,6 +9909,291 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
+  test("an already-signalled shutdown preserves a retry wake for due media retention", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+    const recordedAt = "2026-04-01T00:00:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const retryWakeAt = "2026-04-15T00:05:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const persisted = await persistCanonicalInboxCapture({
+        vaultRoot,
+        captureId: "cap_workspace_shutdown_retention_wake",
+        eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V3",
+        storedAt: recordedAt,
+        input: {
+          source: "telegram",
+          externalId: "msg-workspace-shutdown-retention-wake",
+          accountId: "self",
+          thread: {
+            id: "thread-workspace-shutdown-retention-wake",
+            isDirect: true,
+          },
+          actor: {
+            isSelf: false,
+          },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          text: "old media",
+          attachments: [
+            {
+              kind: "audio",
+              mime: "audio/mp4",
+              fileName: "voice.m4a",
+              data: Buffer.from("audio-bytes"),
+            },
+          ],
+          raw: {},
+        },
+      });
+      const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+      assert.ok(audioPath);
+      shutdownController.abort(new Error("Synthetic container SIGTERM."));
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_due_retention_wake",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-retention-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "inbox_media_retention",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return { progressed: false };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, retryWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, retryWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("a shutdown media-retention wake keeps its reason on a competing assistant wake", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+    const assistantWakeAt = "2026-04-15T00:01:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      shutdownController.abort(new Error("Synthetic container SIGTERM."));
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_retention_beats_assistant_wake",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-retention-beats-assistant.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "inbox_media_retention",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: assistantWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: assistantWakeAt,
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, assistantWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedAssistantNextWakeAt,
+        assistantWakeAt,
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, assistantWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("a shutdown after a projected wake pass still preserves due media retention", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+    const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const projectedWakeAt = new Date(Date.now() + 15).toISOString();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_after_projected_wake_retention",
+            idleCheckpointDelayMs: 75,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-after-projected-retention.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "inbox_media_retention",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(
+              `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeReason ?? "none"}`,
+            );
+            if (assistantPhaseCalls === 1) {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: projectedWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantNextWakeAt: projectedWakeAt,
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            shutdownController.abort(new Error("Synthetic container SIGTERM."));
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: null,
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1:inbox_media_retention",
+        "assistant.phase:2:assistant",
+      ]);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, projectedWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
   test("a shutdown signalled mid-wait interrupts the idle window and checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
