@@ -221,9 +221,11 @@ navigation policy. Pause for handoff when sensitive user input is needed.
 6. Finish the run with the correct outcome.
 
 Do not repeat a click because a page seems slow. Wait for a specific state or
-observe first. If a transport or browser error leaves the outcome unknown,
-observe before retrying so Murph does not double-book, double-submit, or add
-duplicate cart items.
+observe first. For side-effecting clicks such as add-to-cart, booking, checkout,
+or final submit buttons, prefer one click followed by a specific confirmation,
+cart count, appointment state, or order state check. If a transport or browser
+error leaves the outcome unknown, observe before retrying so Murph does not
+double-book, double-submit, or add duplicate cart items.
 
 If a control remains unresponsive after a specific wait/observe and one safe
 alternate locator or keyboard path, or the site appears wedged, refresh the
