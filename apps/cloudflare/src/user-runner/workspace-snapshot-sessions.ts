@@ -212,7 +212,10 @@ export function createWorkspaceSnapshotSessionService(input: {
             currentSnapshotRef,
             runnerStoreCache: input.runnerStoreCache,
             session: currentSession,
-            state: input.state,
+          });
+          await service.delete({
+            snapshotId: currentSession.snapshotId,
+            userId: currentSession.userId,
           });
         } catch (error) {
           errors.push(error);
@@ -450,7 +453,6 @@ async function cleanupWorkspaceSnapshotUploadSessionObligations(input: {
   currentSnapshotRef: HostedExecutionSnapshotRef | null;
   runnerStoreCache: Pick<RunnerStoreCache, "ensure">;
   session: HostedWorkspaceSnapshotUploadSession;
-  state: DurableObjectStateLike;
 }): Promise<void> {
   await cleanupV2WorkspaceSnapshotObligation({
     bucket: input.bucket,
@@ -477,8 +479,6 @@ async function cleanupWorkspaceSnapshotUploadSessionObligations(input: {
       });
     }
   }
-
-  await input.state.storage.delete(workspaceSnapshotUploadSessionCurrentStorageKey());
 }
 
 async function cleanupV2WorkspaceSnapshotObligation(input: {

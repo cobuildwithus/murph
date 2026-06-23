@@ -2676,6 +2676,60 @@ describe("HostedUserRunner execution coordination", () => {
     expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
     expect(alarms.at(-1)).toBe("deleted");
   });
+
+  it("does not delete a newer active upload session after stale cleanup completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const staleObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_stale_session.snapshot.enc`;
+    const nextObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_next_session.snapshot.enc`;
+    await bucket.put(staleObjectKey, "stale-encrypted-snapshot");
+    await bucket.put(nextObjectKey, "next-encrypted-snapshot");
+    let storageValues!: Map<string, unknown>;
+    const harness = createRunnerHarness({
+      bucket,
+      onWorkspaceRead() {
+        storageValues.set(
+          workspaceSnapshotUploadSessionCurrentStorageKey(),
+          createWorkspaceSnapshotUploadSessionForTest({
+            objectKey: nextObjectKey,
+            snapshotId: "snapshot_next_session",
+          }),
+        );
+      },
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2RefForTest({
+          objectKey: staleObjectKey,
+          snapshotId: "snapshot_stale_session",
+        }),
+      }),
+    });
+    storageValues = harness.storageValues;
+
+    await harness.runner.createHostedWorkspaceSnapshotUploadSession(
+      {
+        ...createWorkspaceSnapshotUploadSessionForTest({
+          objectKey: staleObjectKey,
+          snapshotId: "snapshot_stale_session",
+        }),
+        createdAt: "2026-04-26T00:00:00.000Z",
+      },
+    );
+    await harness.runner.alarm();
+
+    await expect(harness.runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: "snapshot_next_session",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      objectKey: nextObjectKey,
+      snapshotId: "snapshot_next_session",
+    });
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(bucket.objects.has(nextObjectKey)).toBe(true);
+    expect(bucket.deleted).not.toContain(nextObjectKey);
+  });
 });
 
 function createRunnerHarness(input: {

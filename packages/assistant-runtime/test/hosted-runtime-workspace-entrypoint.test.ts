@@ -1114,6 +1114,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, dueWakeAt);
       assert.equal(result.nextWakeReason, "assistant_due");
+      await assert.rejects(
+        stat(path.join(vaultRoot, audioPath)),
+        (error: unknown) =>
+          error instanceof Error
+          && (error as NodeJS.ErrnoException).code === "ENOENT",
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }
