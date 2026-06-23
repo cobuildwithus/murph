@@ -1590,9 +1590,6 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
-        result: Object.prototype.hasOwnProperty.call(record, 'result')
-          ? record.result
-          : null,
         ...readStringField(record, 'title'),
         ...readStringOrNullField(record, 'url'),
       }

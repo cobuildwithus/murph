@@ -362,7 +362,7 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
+  }): Promise<{ title: string | null; url: string | null }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -390,7 +390,6 @@ export class ComputerUseService {
     });
 
     return {
-      result: state.result,
       title: state.title,
       url: state.url,
     };
@@ -1981,7 +1980,7 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 function buildComputerActCode(input: HostedComputerActRequest): string {
   return [
     buildPlaywrightPublicNavigationGuardCode(),
-    "const __murphUserResult = await (async () => {",
+    "await (async () => {",
     input.code,
     "\n})();",
     "const __murphUrl = page.url();",
@@ -1991,7 +1990,6 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
     "}",
     "const __murphTitle = await page.title().catch(() => null);",
     "return {",
-    "  result: typeof __murphUserResult === 'undefined' ? null : __murphUserResult,",
     "  title: __murphTitle,",
     "  url: __murphUrl,",
     "};",
@@ -2230,7 +2228,6 @@ function readBrowserStateResult(value: unknown): {
 }
 
 function readRequiredBrowserActionStateResult(value: unknown): {
-  result: unknown;
   title: string | null;
   url: string | null;
 } {
@@ -2248,9 +2245,7 @@ function readRequiredBrowserActionStateResult(value: unknown): {
     });
   }
 
-  const record = value as Record<string, unknown>;
   return {
-    result: Object.prototype.hasOwnProperty.call(record, "result") ? record.result : null,
     title: state.title,
     url: state.url,
   };

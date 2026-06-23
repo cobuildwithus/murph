@@ -399,7 +399,7 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
-  it("runs raw Playwright and returns the current action URL and result", async () => {
+  it("runs raw Playwright and returns the current action URL", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -439,7 +439,6 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(true);
     const payload = JSON.parse(result.rpcResult.contentItems[0]!.text);
     expect(payload).toEqual({
-      result: { clicked: true },
       title: "Checkout",
       url: "https://shop.example.test/order?secret=raw",
     });

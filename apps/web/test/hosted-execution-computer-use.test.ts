@@ -2177,7 +2177,6 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toEqual({
-      result: { clicked: true },
       title: "Order placed",
       url: "https://shop.example.test/order/confirmed?token=secret",
     });
@@ -2186,7 +2185,7 @@ describe("ComputerUseService", () => {
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("getByRole('button', { name: 'Place order', exact: true })");
-    expect(code).toContain("__murphUserResult");
+    expect(code).not.toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
@@ -2272,7 +2271,6 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toMatchObject({
-      result: { waited: true },
       title: "Checkout",
       url: "https://shop.example.test/cart",
     });
@@ -2419,7 +2417,6 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toMatchObject({
-      result: { navigated: true },
       title: "Public page",
       url: "https://example.com/checkout?token=secret#step",
     });
@@ -2430,7 +2427,7 @@ describe("ComputerUseService", () => {
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("route.abort(\"blockedbyclient\")");
     expect(code).toContain("await page.goto('https://example.com/checkout'");
-    expect(code).toContain("__murphUserResult");
+    expect(code).not.toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",
       lastUrl: "https://example.com/checkout",
