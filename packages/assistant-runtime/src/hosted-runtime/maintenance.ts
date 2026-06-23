@@ -83,6 +83,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import {
+  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+} from "./system-mailbox-state.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -929,7 +932,11 @@ export async function runHostedDeviceSyncPass(
   let processedJobs = 0;
 
   try {
-    service.setDenseRawRetentionWakeAt(resolveHostedDeviceSyncYieldRetryAt());
+    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+      userId: wake.userId,
+      vaultRoot,
+    });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -1041,10 +1048,14 @@ export async function runHostedDeviceSyncPass(
     const denseRawRetentionWakeAt = denseRawRetention.hasMore
       ? resolveHostedDeviceSyncYieldRetryAt()
       : null;
-    service.setDenseRawRetentionWakeAt(denseRawRetentionWakeAt);
+    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      nextWakeAt: denseRawRetentionWakeAt,
+      userId: wake.userId,
+      vaultRoot,
+    });
 
     return {
-      nextWakeAt: service.getNextWakeAt(),
+      nextWakeAt: earliestHostedMaintenanceWakeAt(service.getNextWakeAt(), denseRawRetentionWakeAt),
       postCheckpointRecord,
       processedJobs,
       skipped: false,

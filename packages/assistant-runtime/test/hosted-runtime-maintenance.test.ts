@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import {
+  restoreHostedExecutionContext,
+  snapshotHostedExecutionContext,
+} from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 const mocks = vi.hoisted(() => ({
@@ -101,6 +105,9 @@ import {
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
+import {
+  readHostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 
 function createMaintenanceDeviceSyncPortStub() {
   return {
@@ -146,6 +153,34 @@ const DEVICE_SYNC_CONFIG = {
   publicBaseUrl: "https://device-sync.example.test",
   secret: "secret_123",
 } as const;
+const FIXED_MAINTENANCE_VAULT_ROOT = "/tmp/vault-root";
+const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
+
+async function readDenseRawRetentionMailboxItem(vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT) {
+  const state = await readHostedSystemMailboxState(vaultRoot);
+  return state.pending.find((item) =>
+    item.mailboxDedupeKey === DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY
+  ) ?? null;
+}
+
+async function expectDenseRawRetentionMailboxWakeAt(
+  nextWakeAt: string | null,
+  vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT,
+): Promise<void> {
+  const item = await readDenseRawRetentionMailboxItem(vaultRoot);
+  if (!nextWakeAt) {
+    assert.equal(item, null);
+    return;
+  }
+
+  assert.ok(item);
+  assert.equal(item.nextAttemptAt, nextWakeAt);
+  assert.equal(item.routeAction, "run-device-sync-wake");
+  if (item.wake.kind !== "device-sync.wake") {
+    assert.fail(`expected device-sync.wake, got ${item.wake.kind}`);
+  }
+  assert.equal(item.wake.reason, "reconcile_due");
+}
 
 function createHostedAutomationRuntime(input: {
   deviceSync?: HostedTimerRuntime["resolvedConfig"]["deviceSync"];
@@ -177,8 +212,12 @@ function createHostedAutomationRuntime(input: {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
+    force: true,
+    recursive: true,
+  });
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
@@ -1294,7 +1333,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker: vi.fn(async () => 0),
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce: vi.fn(async () => undefined),
     };
@@ -1341,14 +1379,10 @@ describe("runHostedDeviceSyncPass", () => {
     await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {
       const controller = new AbortController();
       const close = vi.fn();
-      let denseRawRetentionWakeAt: string | null = null;
       const service = {
         close,
         drainWorker: vi.fn(async () => 0),
-        getNextWakeAt: () => denseRawRetentionWakeAt,
-        setDenseRawRetentionWakeAt: vi.fn((nextWakeAt: string | null) => {
-          denseRawRetentionWakeAt = nextWakeAt;
-        }),
+        getNextWakeAt: () => null,
         listJobFailureDiagnostics: vi.fn(() => []),
         runSchedulerOnce: vi.fn(async () => undefined),
       };
@@ -1382,7 +1416,7 @@ describe("runHostedDeviceSyncPass", () => {
         skipped: true,
       });
       expect(service.runSchedulerOnce).not.toHaveBeenCalled();
-      expect(service.setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+      await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
       expect(close).toHaveBeenCalledTimes(1);
     });
   });
@@ -1413,7 +1447,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1490,7 +1523,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1579,7 +1611,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1618,7 +1649,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1656,7 +1686,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1693,13 +1722,11 @@ describe("runHostedDeviceSyncPass", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 2);
-    const setDenseRawRetentionWakeAt = vi.fn();
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt,
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1751,7 +1778,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 2,
       skipped: false,
     });
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith(null);
+    await expectDenseRawRetentionMailboxWakeAt(null);
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
@@ -1787,16 +1814,11 @@ describe("runHostedDeviceSyncPass", () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
-    let denseRawRetentionWakeAt: string | null = null;
-    const setDenseRawRetentionWakeAt = vi.fn((nextWakeAt: string | null) => {
-      denseRawRetentionWakeAt = nextWakeAt;
-    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
-      getNextWakeAt: () => denseRawRetentionWakeAt,
-      setDenseRawRetentionWakeAt,
+      getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1833,7 +1855,7 @@ describe("runHostedDeviceSyncPass", () => {
     );
 
     assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
@@ -1841,21 +1863,88 @@ describe("runHostedDeviceSyncPass", () => {
     }));
   });
 
+  it("keeps dense raw retention continuation across a hosted snapshot restore", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-dense-retention-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const operatorHomeRoot = path.join(parentRoot, "operator-home");
+    const restoredWorkspaceRoot = path.join(parentRoot, "restored");
+
+    try {
+      await mkdir(operatorHomeRoot, { recursive: true });
+      const close = vi.fn();
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+        close,
+        drainWorker: vi.fn(async () => 0),
+        getNextWakeAt: () => null,
+        listJobFailureDiagnostics: vi.fn(() => []),
+        runSchedulerOnce: vi.fn(async () => undefined),
+      });
+      mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
+        bytesAfter: 1_000,
+        bytesBefore: 10_000,
+        bytesFreed: 9_000,
+        compactedReceiptCount: 0,
+        denseRawBytesAfter: 1_000,
+        denseRawBytesBefore: 10_000,
+        denseRawBytesFreed: 9_000,
+        hasMore: true,
+        mutated: true,
+        skippedCount: 0,
+        tombstonedCanonicalArtifactCount: 0,
+        tombstonedDenseRawArtifactCount: 25,
+        touchedPaths: ["raw/integrations/wearable-provider/2026/04/import/01.json"],
+      });
+
+      const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+        runHostedDeviceSyncPass(
+          {
+            eventId: "evt_device_sync_dense_raw_retention_snapshot",
+            kind: "runtime.timer",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+          vaultRoot,
+          DEVICE_SYNC_CONFIG,
+          createMaintenanceDeviceSyncPortStub(),
+          45_000,
+        )
+      );
+      assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
+      await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z", vaultRoot);
+
+      const snapshot = await snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      });
+      const restored = await restoreHostedExecutionContext({
+        bundle: snapshot.bundle,
+        workspaceRoot: restoredWorkspaceRoot,
+      });
+
+      await expectDenseRawRetentionMailboxWakeAt(
+        "2026-04-08T00:00:30.000Z",
+        restored.vaultRoot,
+      );
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("keeps the prearmed dense raw retention continuation when yielding after retention reports more work", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
-    let denseRawRetentionWakeAt: string | null = null;
     let shouldYieldNow = false;
-    const setDenseRawRetentionWakeAt = vi.fn((nextWakeAt: string | null) => {
-      denseRawRetentionWakeAt = nextWakeAt;
-    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
-      getNextWakeAt: () => denseRawRetentionWakeAt,
-      setDenseRawRetentionWakeAt,
+      getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1903,23 +1992,18 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: true,
     });
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
   });
 
   it("does not start dense raw retention when the maintenance deadline is exhausted", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
-    let denseRawRetentionWakeAt: string | null = null;
-    const setDenseRawRetentionWakeAt = vi.fn((nextWakeAt: string | null) => {
-      denseRawRetentionWakeAt = nextWakeAt;
-    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
-      getNextWakeAt: () => denseRawRetentionWakeAt,
-      setDenseRawRetentionWakeAt,
+      getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -1946,7 +2030,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: false,
     });
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
   });
@@ -1956,16 +2040,11 @@ describe("runHostedDeviceSyncPass", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 1);
-    let denseRawRetentionWakeAt: string | null = null;
-    const setDenseRawRetentionWakeAt = vi.fn((nextWakeAt: string | null) => {
-      denseRawRetentionWakeAt = nextWakeAt;
-    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
-      getNextWakeAt: () => denseRawRetentionWakeAt ?? "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2007,7 +2086,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 1,
       skipped: false,
     });
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     assert.equal(logRequests.length, 1);
     const entry = logRequests[0]?.entries[0];
@@ -2032,7 +2111,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2115,16 +2193,11 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn(() => true);
-    let denseRawRetentionWakeAt: string | null = null;
-    const setDenseRawRetentionWakeAt = vi.fn((nextWakeAt: string | null) => {
-      denseRawRetentionWakeAt = nextWakeAt;
-    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
-      getNextWakeAt: () => denseRawRetentionWakeAt,
-      setDenseRawRetentionWakeAt,
+      getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2157,7 +2230,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(runSchedulerOnce).not.toHaveBeenCalled();
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
-    expect(setDenseRawRetentionWakeAt).toHaveBeenCalledWith("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -2173,7 +2246,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2246,7 +2318,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2321,7 +2392,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2370,7 +2440,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
@@ -2418,7 +2487,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T00:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       runSchedulerOnce,
     });
 
@@ -2464,7 +2532,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => [
         {
           accountId: "local_account_sensitive",
@@ -2649,7 +2716,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-06-08T03:00:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       listJobFailureDiagnostics: vi.fn(() => [
         {
           accountId: "local_account_sleep_sensitive",
@@ -2786,7 +2852,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker: vi.fn(),
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       runSchedulerOnce: vi.fn(),
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -2820,7 +2885,6 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker: vi.fn(async () => 1),
       getNextWakeAt: () => null,
-      setDenseRawRetentionWakeAt: vi.fn(),
       runSchedulerOnce: vi.fn(async () => undefined),
     });
     mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -3581,7 +3645,6 @@ describe("runHostedAssistantAutomationLane", () => {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 1),
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       runSchedulerOnce: vi.fn(async () => undefined),
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
@@ -3752,7 +3815,6 @@ describe("runHostedDeviceSyncWakeLane", () => {
       close: vi.fn(),
       drainWorker,
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
-      setDenseRawRetentionWakeAt: vi.fn(),
       runSchedulerOnce: vi.fn(async () => undefined),
     });
     const shouldYieldDeviceSync = vi.fn(() => false);

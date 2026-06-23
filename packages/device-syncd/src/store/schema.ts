@@ -5,7 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 7;
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 6;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -334,16 +334,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
       create index if not exists device_job_account_running_idx
       on device_job (account_id, status, lease_expires_at);
-
-      create table if not exists device_maintenance_wake (
-        key text primary key,
-        next_wake_at text not null,
-        created_at text not null,
-        updated_at text not null
-      );
-
-      create index if not exists device_maintenance_wake_next_idx
-      on device_maintenance_wake (next_wake_at asc, key asc);
 
       create table if not exists webhook_trace (
         provider text not null,

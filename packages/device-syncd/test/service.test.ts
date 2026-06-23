@@ -3652,20 +3652,6 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
     "2026-03-17T12:00:00.000Z",
   );
 
-  service.setDenseRawRetentionWakeAt("2026-03-17T10:30:00.000Z");
-
-  assert.equal(
-    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
-    "2026-03-17T10:30:00.000Z",
-  );
-
-  service.setDenseRawRetentionWakeAt(null);
-
-  assert.equal(
-    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
-    "2026-03-17T12:00:00.000Z",
-  );
-
   store.enqueueJob({
     accountId: connected.account.id,
     availableAt: "2026-03-17T11:00:00.000Z",
@@ -3739,21 +3725,6 @@ test("device sync store next wake reads scheduled reconciles and queued jobs wit
       }),
       "2026-03-17T11:00:00.000Z",
     );
-
-    store.setDenseRawRetentionWakeAt(
-      "2026-03-17T10:30:00.000Z",
-      "2026-03-17T10:00:00.000Z",
-    );
-
-    assert.equal(
-      resolveDeviceSyncStoreNextWakeAt({
-        stateDatabasePath,
-        vaultRoot: "/unused-vault-root",
-      }),
-      "2026-03-17T10:30:00.000Z",
-    );
-
-    store.setDenseRawRetentionWakeAt(null, "2026-03-17T10:01:00.000Z");
 
     assert.equal(
       resolveDeviceSyncStoreNextWakeAt({
@@ -5070,7 +5041,6 @@ test("sqlite store splits connection, credential, and observation state into exp
     "device_connection",
     "device_credential_state",
     "device_job",
-    "device_maintenance_wake",
     "device_observation_state",
     "oauth_state",
     "webhook_trace",
@@ -5080,7 +5050,6 @@ test("sqlite store splits connection, credential, and observation state into exp
     "device_connection",
     "device_credential_state",
     "device_job",
-    "device_maintenance_wake",
     "device_observation_state",
     "oauth_state",
     "webhook_trace",
@@ -5138,13 +5107,6 @@ test("sqlite store splits connection, credential, and observation state into exp
     "created_at",
     "updated_at",
   ]);
-  assert.deepEqual(readTableColumnsForTesting(store, "device_maintenance_wake"), [
-    "key",
-    "next_wake_at",
-    "created_at",
-    "updated_at",
-  ]);
-
   const credentialRow = readCredentialStateForTesting(store, created.id);
   assert.ok(credentialRow);
   assert.equal(credentialRow.credential_kind, "oauth_tokens");

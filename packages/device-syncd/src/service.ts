@@ -77,7 +77,6 @@ export function resolveDeviceSyncStoreNextWakeAt(input: {
     return earliestIsoTimestamp(
       store.readNextActiveReconcileAt(),
       store.readNextJobWakeAt(),
-      store.readNextMaintenanceWakeAt(),
     );
   } finally {
     store.close();
@@ -167,7 +166,6 @@ export interface DeviceSyncService {
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
   disconnectAccount(accountId: string): Promise<DisconnectAccountResult>;
   getNextWakeAt(now?: string): string | null;
-  setDenseRawRetentionWakeAt(nextWakeAt: string | null): void;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
@@ -490,7 +488,6 @@ class DeviceSyncServiceController {
     const nextWakeAt = earliestIsoTimestamp(
       this.store.readNextActiveReconcileAt(),
       this.store.readNextJobWakeAt(),
-      this.store.readNextMaintenanceWakeAt(),
     );
 
     if (!nextWakeAt) {
@@ -498,10 +495,6 @@ class DeviceSyncServiceController {
     }
 
     return nextWakeAt;
-  }
-
-  setDenseRawRetentionWakeAt(nextWakeAt: string | null): void {
-    this.store.setDenseRawRetentionWakeAt(nextWakeAt, this.nowIso());
   }
 
   async runSchedulerOnce(): Promise<void> {
@@ -1400,8 +1393,6 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
     disconnectAccount: (accountId) => controller.disconnectAccount(accountId),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    setDenseRawRetentionWakeAt: (nextWakeAt) =>
-      controller.setDenseRawRetentionWakeAt(nextWakeAt),
     runSchedulerOnce: () => controller.runSchedulerOnce(),
     runWorkerOnce: () => controller.runWorkerOnce(),
     drainWorker: (limit) => controller.drainWorker(limit),
