@@ -295,6 +295,15 @@ describe('assistant execution prompt contract', () => {
       'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response when the user still needs context or a handoff URL, and finish without reply when no additional user-visible message is useful.',
     )
     expect(prompt).toContain(
+      'say the handoff link is secure or private, tell the user not to send passwords or card details in chat',
+    )
+    expect(prompt).toContain(
+      'saving the site login, session, or payment method can let Murph reuse the trusted browser profile next time unless the site asks again',
+    )
+    expect(prompt).toContain(
+      'Do not imply Murph stores raw credentials or card numbers.',
+    )
+    expect(prompt).toContain(
       'call `murph.computer_start_run` normally',
     )
     expect(prompt).toContain(
