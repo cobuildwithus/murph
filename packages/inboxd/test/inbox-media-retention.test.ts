@@ -455,6 +455,7 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
 
   assert.equal(result.expiredAttachments, 0);
   assert.equal(result.records.length, 0);
+  assert.equal(result.nextEligibleAt, "2026-07-06T00:00:00.000Z");
   assert.equal(await fileExists(vaultRoot, imagePath), true);
   assert.equal(await fileExists(vaultRoot, audioPath), true);
 });

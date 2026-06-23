@@ -38,6 +38,7 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.ts";
 import {
+  workspaceSnapshotUploadSessionCurrentStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
 } from "../src/user-runner/workspace-snapshot-sessions.ts";
 import {
@@ -2562,6 +2563,50 @@ describe("HostedUserRunner execution coordination", () => {
     )).toBeUndefined();
     expect(alarms.at(-1)).toBe("deleted");
   });
+
+  it("cleans replaced workspace snapshots retained on the current upload session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const replacedObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_replaced_session.snapshot.enc`;
+    const currentObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_current_session.snapshot.enc`;
+    await bucket.put(replacedObjectKey, "replaced-encrypted-snapshot");
+    await bucket.put(currentObjectKey, "current-encrypted-snapshot");
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2RefForTest({
+          objectKey: currentObjectKey,
+          snapshotId: "snapshot_current_session",
+        }),
+      }),
+    });
+
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      {
+        ...createWorkspaceSnapshotUploadSessionForTest({
+          objectKey: currentObjectKey,
+          replacedSnapshotRef: createWorkspaceSnapshotV2RefForTest({
+            objectKey: replacedObjectKey,
+            snapshotId: "snapshot_replaced_session",
+          }),
+          snapshotId: "snapshot_current_session",
+        }),
+        createdAt: "2026-04-26T00:00:00.000Z",
+      },
+    );
+
+    expect(alarms).toContain("2026-04-26T01:05:00.000Z");
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(replacedObjectKey);
+    expect(bucket.objects.has(replacedObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
 });
 
 function createRunnerHarness(input: {
@@ -2934,6 +2979,7 @@ function createWorkspaceSnapshotV2RefForTest(input: {
 
 function createWorkspaceSnapshotUploadSessionForTest(input: {
   objectKey: string;
+  replacedSnapshotRef?: HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"];
   snapshotId: string;
 }): HostedWorkspaceSnapshotUploadSession {
   return {
@@ -2954,6 +3000,7 @@ function createWorkspaceSnapshotUploadSessionForTest(input: {
     expiresAt: "2026-04-27T00:10:00.000Z",
     leaseGeneration: "9",
     objectKey: input.objectKey,
+    ...(input.replacedSnapshotRef ? { replacedSnapshotRef: input.replacedSnapshotRef } : {}),
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
     snapshotId: input.snapshotId,
     userId: TEST_USER_ID,

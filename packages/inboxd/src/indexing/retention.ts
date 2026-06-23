@@ -27,6 +27,7 @@ import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
 const INBOX_MEDIA_RETENTION_DAYS = 14;
 const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
 const RETAINABLE_INBOX_MEDIA_KINDS = new Set<InboxCaptureAttachmentRecord["kind"]>([
   "audio",
@@ -81,6 +82,9 @@ export async function runInboxMediaRetention(
   const protectedAttachmentIds = new Set(input.protectedAttachmentIds ?? []);
   const protectedCaptureIds = new Set(input.protectedCaptureIds ?? []);
   const protectedStoredPaths = normalizeProtectedStoredPaths(input.protectedStoredPaths ?? []);
+  const protectedMediaRecheckAt = new Date(
+    Date.parse(now) + INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS,
+  ).toISOString();
   const [captureRecords, durableRawInboxRefs, initialRetentionRecords] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot),
     listDurableRawInboxReferences(input.vaultRoot),
@@ -115,9 +119,6 @@ export async function runInboxMediaRetention(
       if (!Number.isFinite(recordedAtMs)) {
         continue;
       }
-      if (protectedCaptureIds.has(capture.captureId)) {
-        continue;
-      }
 
       for (const attachment of capture.attachments) {
         throwIfRetentionAborted(input.signal);
@@ -125,17 +126,29 @@ export async function runInboxMediaRetention(
         if (!storedPath || !attachment.sha256 || !RETAINABLE_INBOX_MEDIA_KINDS.has(attachment.kind)) {
           continue;
         }
-        if (
-          protectedAttachmentIds.has(attachment.attachmentId) ||
-          protectedStoredPaths.has(storedPath) ||
-          durableRawInboxRefs.has(storedPath)
-        ) {
-          continue;
-        }
 
         const alreadyRetained =
           initiallyRetainedAttachmentIds.has(attachment.attachmentId) ||
           initiallyRetainedStoredPaths.has(storedPath);
+        if (durableRawInboxRefs.has(storedPath)) {
+          continue;
+        }
+        if (
+          !alreadyRetained &&
+          (
+            protectedCaptureIds.has(capture.captureId) ||
+            protectedAttachmentIds.has(attachment.attachmentId) ||
+            protectedStoredPaths.has(storedPath)
+          )
+        ) {
+          nextEligibleAt = selectProtectedMediaRetentionWake({
+            cutoffMs,
+            nextEligibleAt,
+            protectedMediaRecheckAt,
+            recordedAtMs,
+          });
+          continue;
+        }
         if (recordedAtMs > cutoffMs) {
           if (!alreadyRetained) {
             nextEligibleAt = selectEarliestRetentionWake(
@@ -231,12 +244,28 @@ export async function runInboxMediaRetention(
         for (const candidate of candidates) {
           throwIfRetentionAborted(input.signal);
           const isMissingAfterMaterialization = missingAfterMaterialization.has(candidate.storedPath);
+          const alreadyRetained =
+            alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
+            alreadyRetainedStoredPaths.has(candidate.storedPath);
           if (
-            latestDurableRawInboxRefs.has(candidate.storedPath) ||
-            protectedCaptureIds.has(candidate.capture.captureId) ||
-            protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
-            protectedStoredPaths.has(candidate.storedPath)
+            latestDurableRawInboxRefs.has(candidate.storedPath)
           ) {
+            continue;
+          }
+          if (
+            !alreadyRetained &&
+            (
+              protectedCaptureIds.has(candidate.capture.captureId) ||
+              protectedAttachmentIds.has(candidate.attachment.attachmentId) ||
+              protectedStoredPaths.has(candidate.storedPath)
+            )
+          ) {
+            nextEligibleAt = selectProtectedMediaRetentionWake({
+              cutoffMs,
+              nextEligibleAt,
+              protectedMediaRecheckAt,
+              recordedAtMs: Date.parse(candidate.capture.recordedAt),
+            });
             continue;
           }
 
@@ -267,9 +296,6 @@ export async function runInboxMediaRetention(
             selectedCandidateCount += 1;
           }
 
-          const alreadyRetained =
-            alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
-            alreadyRetainedStoredPaths.has(candidate.storedPath);
           if (!alreadyRetained) {
             records.push(
               buildRetentionRecord({
@@ -496,6 +522,21 @@ function selectEarliestRetentionWake(
   }
 
   return Date.parse(candidate) < Date.parse(previous) ? candidate : previous;
+}
+
+function selectProtectedMediaRetentionWake(input: {
+  cutoffMs: number;
+  nextEligibleAt: string | null;
+  protectedMediaRecheckAt: string;
+  recordedAtMs: number;
+}): string | null {
+  if (!Number.isFinite(input.recordedAtMs)) {
+    return input.nextEligibleAt;
+  }
+  const candidate = input.recordedAtMs > input.cutoffMs
+    ? new Date(input.recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString()
+    : input.protectedMediaRecheckAt;
+  return selectEarliestRetentionWake(input.nextEligibleAt, candidate);
 }
 
 function normalizeProtectedStoredPaths(values: Iterable<string>): Set<string> {

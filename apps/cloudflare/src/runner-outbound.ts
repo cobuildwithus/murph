@@ -109,6 +109,7 @@ const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
 const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
+type HostedExecutionSnapshotRefValue = NonNullable<HostedExecutionSnapshotRef>;
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -1488,6 +1489,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
   }
   if (!checkpoint.checkpointed) {
+    const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotCleanup({
+      bucket: input.bucket,
+      checkpoint,
+      env: input.env,
+      environment: input.environment,
+      session,
+      snapshotRef,
+      userId: input.userId,
+    });
+    if (cleanupRetryResponse) {
+      return cleanupRetryResponse;
+    }
     await retireAfterAmbiguousCheckpoint();
     if (checkpoint.checkpointConflictReason === "foreground_pending") {
       return json({
@@ -1508,6 +1521,26 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
 
+  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotObject({
+    bucket: input.bucket,
+    checkpoint,
+    env: input.env,
+    environment: input.environment,
+    session,
+    snapshotRef,
+  });
+  if (!replacedSnapshotCleanupSucceeded) {
+    const replacedSnapshotRef = checkpoint.replacedSnapshotRef ?? null;
+    if (replacedSnapshotRef) {
+      await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
+        env: input.env,
+        replacedSnapshotRef,
+        session,
+        userId: input.userId,
+      });
+    }
+    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
+  }
   await retireWorkspaceSnapshotUploadSession({
     bucket: input.bucket,
     deleteObject: false,
@@ -1516,16 +1549,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     snapshotId: input.snapshotId,
     userId: input.userId,
   }).catch(() => undefined);
-  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotObject({
-    bucket: input.bucket,
-    checkpoint,
-    env: input.env,
-    environment: input.environment,
-    snapshotRef,
-  });
-  if (!replacedSnapshotCleanupSucceeded) {
-    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
-  }
 
   return json({
     checkpoint,
@@ -1539,13 +1562,31 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }): Promise<boolean> {
-  const replacedSnapshotRef = input.checkpoint.replacedSnapshotRef ?? null;
+  const replacedSnapshotRef =
+    input.checkpoint.replacedSnapshotRef ?? input.session.replacedSnapshotRef ?? null;
   if (!replacedSnapshotRef) {
     return true;
   }
+  return await deleteReplacedWorkspaceSnapshotRef({
+    bucket: input.bucket,
+    env: input.env,
+    environment: input.environment,
+    replacedSnapshotRef,
+    snapshotRef: input.snapshotRef,
+  });
+}
 
+async function deleteReplacedWorkspaceSnapshotRef(input: {
+  bucket: WorkspaceSnapshotR2BucketLike | null;
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  replacedSnapshotRef: HostedExecutionSnapshotRefValue;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+}): Promise<boolean> {
+  const replacedSnapshotRef = input.replacedSnapshotRef;
   if (isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)) {
     if (
       hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, input.snapshotRef)
@@ -1591,10 +1632,85 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
   return orphanRecorded || deleted;
 }
 
+async function completeAlreadyCheckpointedWorkspaceSnapshotCleanup(input: {
+  bucket: WorkspaceSnapshotR2BucketLike | null;
+  checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  session: HostedWorkspaceSnapshotUploadSession;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+  userId: string;
+}): Promise<Response | null> {
+  const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
+  if (!replacedSnapshotRef) {
+    return null;
+  }
+  const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
+  if (
+    !isHostedWorkspaceSnapshotV2Ref(currentSnapshotRef) ||
+    !hostedWorkspaceSnapshotV2RefsMatch(currentSnapshotRef, input.snapshotRef)
+  ) {
+    return null;
+  }
+  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotRef({
+    bucket: input.bucket,
+    env: input.env,
+    environment: input.environment,
+    replacedSnapshotRef,
+    snapshotRef: input.snapshotRef,
+  });
+  if (!replacedSnapshotCleanupSucceeded) {
+    await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
+      env: input.env,
+      replacedSnapshotRef,
+      session: input.session,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
+  }
+  await retireWorkspaceSnapshotUploadSession({
+    bucket: input.bucket,
+    deleteObject: false,
+    env: input.env,
+    objectKey: input.snapshotRef.objectKey,
+    snapshotId: input.snapshotRef.snapshotId,
+    userId: input.userId,
+  }).catch(() => undefined);
+
+  return json({
+    checkpoint: {
+      checkpointed: true,
+      replacedSnapshotRef,
+      workspace: {
+        ...input.checkpoint.workspace,
+        snapshotRef: input.snapshotRef,
+      },
+    },
+    ok: true,
+    snapshotRef: input.snapshotRef,
+  });
+}
+
+async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  replacedSnapshotRef: HostedExecutionSnapshotRefValue;
+  session: HostedWorkspaceSnapshotUploadSession;
+  userId: string;
+}): Promise<void> {
+  await createWorkspaceSnapshotUploadSession({
+    env: input.env,
+    session: {
+      ...input.session,
+      replacedSnapshotRef: input.replacedSnapshotRef,
+    },
+    userId: input.userId,
+  });
+}
+
 async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  replacedSnapshotRef: HostedExecutionSnapshotRef;
+  replacedSnapshotRef: HostedExecutionSnapshotRefValue;
   userId: string;
 }): Promise<void> {
   const bundleRefs = collectLegacyWorkspaceSnapshotBundleRefs(input.replacedSnapshotRef);

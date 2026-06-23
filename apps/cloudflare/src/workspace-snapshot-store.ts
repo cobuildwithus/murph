@@ -50,6 +50,7 @@ export interface HostedWorkspaceSnapshotUploadSession {
   expiresAt: string;
   leaseGeneration: string;
   objectKey: string;
+  replacedSnapshotRef?: NonNullable<HostedExecutionSnapshotRef>;
   schema: typeof HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA;
   snapshotId: string;
   userId: string;
@@ -93,6 +94,18 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     throw new TypeError(`${label}.encryption.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME}.`);
   }
 
+  let replacedSnapshotRef: NonNullable<HostedExecutionSnapshotRef> | null = null;
+  if (record.replacedSnapshotRef !== undefined && record.replacedSnapshotRef !== null) {
+    const parsedReplacedSnapshotRef = parseHostedExecutionSnapshotRef(
+      record.replacedSnapshotRef,
+      `${label}.replacedSnapshotRef`,
+    );
+    if (parsedReplacedSnapshotRef === null) {
+      throw new TypeError(`${label}.replacedSnapshotRef must be a hosted execution snapshot ref.`);
+    }
+    replacedSnapshotRef = parsedReplacedSnapshotRef;
+  }
+
   return {
     attemptId: requireString(record.attemptId, `${label}.attemptId`),
     createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
@@ -107,6 +120,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     expiresAt: requireIsoString(record.expiresAt, `${label}.expiresAt`),
     leaseGeneration: requireString(record.leaseGeneration, `${label}.leaseGeneration`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
+    ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
     schema,
     snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
     userId: requireString(record.userId, `${label}.userId`),
