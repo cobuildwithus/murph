@@ -25,9 +25,9 @@ hosted-local profile layered on the existing `pnpm hosted-local up` harness.
 - optional Linq cloudflared tunnel and webhook registration
 
 The harness supports most isolation knobs. A secondary worktree must set unique
-ports, database URL, temp dir, Wrangler persist dir, Next dist suffix, MinIO data
-dir, Temporal port, generated crypto-state path, Linq registration cache, and
-tunnel config together.
+ports, database URL, Wrangler persist dir, Next dist suffix, MinIO data dir,
+Temporal port, generated crypto-state path, Linq registration cache, and tunnel
+config together.
 
 The root `dev` profile still owns the main checkout lane and keeps broad local
 cleanup behavior. Secondary checkouts should use the `worktree` profile through
@@ -59,7 +59,7 @@ The helper:
   instead of selecting alternate ports
 - creates or verifies the slug-specific local Postgres database
 - sets the worktree profile, local database URL, web/Worker ports, managed
-  Temporal port, temp dir, Wrangler persist dir, MinIO data dir, generated
+  Temporal port, Wrangler persist dir, MinIO data dir, generated
   crypto-state path, Linq webhook registration cache path, Linq tunnel config,
   `NEXT_DIST_DIR_MODE=smoke`, and `NEXT_DIST_DIR_SUFFIX=<slug>`
 - preserves live Stripe support
@@ -97,7 +97,6 @@ MURPH_DEV_WEB_PORT=3101 \
 MURPH_DEV_WORKER_PORT=8801 \
 MURPH_DEV_TEMPORAL=managed \
 MURPH_DEV_TEMPORAL_PORT=7301 \
-MURPH_DEV_TEMP_DIR='.tmp/hosted-local-worktrees/<slug>/temp' \
 MURPH_DEV_CF_PERSIST_DIR='../.tmp/hosted-local-worktrees/<slug>/wrangler-state' \
 MURPH_DEV_MINIO_DATA_DIR='.tmp/hosted-local-worktrees/<slug>/minio-r2' \
 MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH='.tmp/hosted-local-worktrees/<slug>/hosted-local-crypto-state.dev.vars' \

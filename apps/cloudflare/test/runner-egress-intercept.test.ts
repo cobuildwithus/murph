@@ -4524,7 +4524,7 @@ describe("hostedRunnerIntercept", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
         LINQ_API_TOKEN: "linq-worker-secret",
-        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
         validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },

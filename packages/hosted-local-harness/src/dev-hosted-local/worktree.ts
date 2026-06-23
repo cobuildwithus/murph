@@ -36,7 +36,6 @@ export interface HostedLocalWorktreePaths {
   linqWebhookTunnelConfigPath: string;
   minioDataDir: string;
   rootDir: string;
-  tempDir: string;
   wranglerPersistDir: string;
 }
 
@@ -49,6 +48,11 @@ export interface HostedLocalWorktreePorts {
 
 export interface HostedLocalWorktreeDatabaseState {
   created: boolean;
+}
+
+export interface HostedLocalWorktreeDatabaseFailureCleanupResult {
+  missingCryptoState: boolean;
+  removed: boolean;
 }
 
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
@@ -94,7 +98,6 @@ export function buildHostedLocalWorktreeConfig(input: {
     linqWebhookTunnelConfigPath: path.join(rootDir, "cloudflared-linq-webhook.yml"),
     minioDataDir: path.join(rootDir, "minio-r2"),
     rootDir,
-    tempDir: path.join(rootDir, "temp"),
     wranglerPersistDir: path.posix.join(
       "..",
       ".tmp",
@@ -200,7 +203,6 @@ export function formatHostedLocalWorktreeEnv(
     ["MURPH_DEV_TEMPORAL", config.env.MURPH_DEV_TEMPORAL],
     ["MURPH_DEV_TEMPORAL_HOST", config.env.MURPH_DEV_TEMPORAL_HOST],
     ["MURPH_DEV_TEMPORAL_PORT", config.env.MURPH_DEV_TEMPORAL_PORT],
-    ["MURPH_DEV_TEMP_DIR", config.env.MURPH_DEV_TEMP_DIR],
     ["MURPH_DEV_CF_PERSIST_DIR", config.env.MURPH_DEV_CF_PERSIST_DIR],
     ["MURPH_DEV_MINIO_DATA_DIR", config.env.MURPH_DEV_MINIO_DATA_DIR],
     ["MURPH_DEV_MINIO_PORT", config.env.MURPH_DEV_MINIO_PORT],
@@ -246,6 +248,30 @@ export function resolveHostedLocalWorktreeDevConfig(input: {
   return resolveHostedLocalDevConfig(config.env);
 }
 
+export async function removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(
+  config: HostedLocalWorktreeConfig,
+): Promise<HostedLocalWorktreeDatabaseFailureCleanupResult> {
+  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
+    return { missingCryptoState: false, removed: false };
+  }
+  if (!await isHostedLocalWorktreeCryptoStateMissing(config)) {
+    return { missingCryptoState: false, removed: false };
+  }
+
+  const { commonArgs, commonEnv, database } =
+    resolveHostedLocalWorktreeDatabaseCommand(config);
+  const dropResult = spawnSync("dropdb", [
+    ...commonArgs,
+    "--if-exists",
+    database.databaseName,
+  ], {
+    encoding: "utf8",
+    env: commonEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return { missingCryptoState: true, removed: dropResult.status === 0 };
+}
+
 async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
   config: HostedLocalWorktreeConfig,
 ): Promise<void> {
@@ -283,6 +309,20 @@ async function readHostedLocalWorktreeCryptoStateText(
       throw new Error("is missing");
     }
     throw new Error("could not be read");
+  }
+}
+
+async function isHostedLocalWorktreeCryptoStateMissing(
+  config: HostedLocalWorktreeConfig,
+): Promise<boolean> {
+  try {
+    await readFile(
+      path.join(repoRoot, config.paths.cryptoStatePath),
+      "utf8",
+    );
+    return false;
+  } catch (error) {
+    return isNodeError(error) && error.code === "ENOENT";
   }
 }
 
@@ -366,7 +406,6 @@ function buildHostedLocalWorktreeEnv(input: {
     }),
     MURPH_DEV_MINIO_DATA_DIR: input.paths.minioDataDir,
     MURPH_DEV_MINIO_PORT: String(input.ports.minio),
-    MURPH_DEV_TEMP_DIR: input.paths.tempDir,
     MURPH_DEV_TEMPORAL: "managed",
     MURPH_DEV_TEMPORAL_HOST: "127.0.0.1",
     MURPH_DEV_TEMPORAL_PORT: String(input.ports.temporal),

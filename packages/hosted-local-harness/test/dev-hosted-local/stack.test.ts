@@ -739,14 +739,7 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "all-builds",
     }));
-    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(2);
-    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      ignoreErrors: true,
-      scope: "all-builds",
-    }));
-    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      ignoreErrors: true,
-    }));
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
     expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
       expect.objectContaining({
         persistDir: "/tmp/murph-dev-env-test/wrangler-state",
@@ -2962,11 +2955,7 @@ describe("hosted local dev stack", () => {
         ignoreErrors: true,
       }),
     );
-    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ignoreErrors: true,
-      }),
-    );
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {

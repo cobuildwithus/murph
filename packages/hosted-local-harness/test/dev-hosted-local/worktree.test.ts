@@ -32,6 +32,7 @@ import {
   buildHostedLocalWorktreeConfig,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
+  removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
@@ -136,7 +137,6 @@ describe("hosted-local worktree config", () => {
       linqWebhookTunnelConfigPath:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
       minioDataDir: ".tmp/hosted-local-worktrees/feature-a/minio-r2",
-      tempDir: ".tmp/hosted-local-worktrees/feature-a/temp",
       wranglerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
     });
     expect(config.env).toMatchObject({
@@ -163,6 +163,7 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
+    expect(rendered).not.toContain("MURPH_DEV_TEMP_DIR");
     expect(rendered).not.toContain(config.databaseUrl);
   });
 
@@ -456,6 +457,56 @@ describe("hosted-local worktree config", () => {
     await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
       "paired hosted-local crypto state file is incomplete",
     );
+  });
+
+  it("drops a newly created slug database after startup failure only while crypto state is missing", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+
+    await expect(
+      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(config),
+    ).resolves.toEqual({
+      missingCryptoState: true,
+      removed: true,
+    });
+
+    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
+      "dropdb",
+      expect.arrayContaining([
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5432",
+        "--username",
+        "postgres",
+        "--if-exists",
+        "murph_dev_feature_a",
+      ]),
+      expect.objectContaining({
+        encoding: "utf8",
+      }),
+    );
+  });
+
+  it("preserves a newly created slug database after startup failure once crypto state exists", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.readFile.mockResolvedValueOnce("partial state exists");
+
+    await expect(
+      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(config),
+    ).resolves.toEqual({
+      missingCryptoState: false,
+      removed: false,
+    });
+
+    expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
   it("redacts database diagnostics when local database setup fails", async () => {
