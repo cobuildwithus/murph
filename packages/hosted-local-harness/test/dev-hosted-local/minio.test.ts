@@ -14,9 +14,14 @@ const childProcessMocks = vi.hoisted(() => ({
     stderr?: string;
     stdout?: string;
   }>,
-  spawn: vi.fn(() => {
+  spawn: vi.fn((command: string, args: readonly string[]) => {
     const child = new EventEmitter();
-    const response = childProcessMocks.spawnResponses.shift() ?? {};
+    const defaultResponse = command === "docker"
+      && args[0] === "network"
+      && args[1] === "inspect"
+      ? { stdout: "172.17.0.1\n" }
+      : {};
+    const response = childProcessMocks.spawnResponses.shift() ?? defaultResponse;
     Object.assign(child, {
       stderr: new EventEmitter(),
       stdout: new EventEmitter(),
@@ -159,7 +164,7 @@ describe("hosted-local MinIO sidecar", () => {
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
     const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
-    expect(publishArg).toEqual(expect.stringMatching(/^127\.0\.0\.1:\d+:9000$/u));
+    expect(publishArg).toEqual(expect.stringMatching(/^172\.17\.0\.1:\d+:9000$/u));
     expect(volumeArg).toBe(".tmp/hosted-local-minio-test/minio-r2:/data");
     expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
@@ -184,6 +189,17 @@ describe("hosted-local MinIO sidecar", () => {
     expect(childProcessMocks.spawn).toHaveBeenCalledWith(
       "docker",
       [
+        "network",
+        "inspect",
+        "bridge",
+        "--format",
+        "{{range .IPAM.Config}}{{if .Gateway}}{{.Gateway}}{{end}}{{end}}",
+      ],
+      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      [
         "ps",
         "-aq",
         "--filter",
@@ -193,6 +209,26 @@ describe("hosted-local MinIO sidecar", () => {
       ],
       expect.objectContaining({ stdio: ["ignore", "pipe", "ignore"] }),
     );
+  });
+
+  it("fails symbolic Docker host aliases when the bridge gateway cannot be resolved", async () => {
+    childProcessMocks.spawnResponses = [
+      {
+        exitCode: 1,
+        stderr: "bridge unavailable",
+      },
+    ];
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).rejects.toThrow("bridge unavailable");
+    expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
   });
 
   it("starts a complete local R2 presign sidecar for the normal hosted-local dev profile", async () => {
@@ -528,6 +564,7 @@ describe("hosted-local MinIO sidecar", () => {
 
   it("removes the named MinIO container and label-matching stale containers on startup failure", async () => {
     childProcessMocks.spawnResponses = [
+      { stdout: "172.17.0.1\n" },
       {},
       { stdout: "" },
       {},

@@ -514,13 +514,22 @@ async function resolveHostedLocalMinioPublishTarget(
     || normalized === "127.0.0.1"
     || normalized === "::1"
     || normalized === "[::1]"
-    || normalized === "host.docker.internal"
-    || normalized === "host.containers.internal"
   ) {
     return {
       controlHost: "127.0.0.1",
       dockerBridgeHost: null,
       publishHost: "127.0.0.1",
+    };
+  }
+
+  if (
+    normalized === "host.docker.internal"
+    || normalized === "host.containers.internal"
+  ) {
+    return {
+      controlHost: "127.0.0.1",
+      dockerBridgeHost: null,
+      publishHost: await resolveDockerBridgeGatewayHost(env),
     };
   }
 

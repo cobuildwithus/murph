@@ -23,9 +23,6 @@ const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
 const formatHostedLocalWorktreeEnv = vi.hoisted(() =>
   vi.fn(() => "export MURPH_DEV_DATABASE_URL='[redacted]'\n"),
 );
-const removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing = vi.hoisted(() =>
-  vi.fn(async () => ({ missingCryptoState: false, removed: false })),
-);
 const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
   vi.fn(async () => createHostedLocalWorktreeConfig()),
 );
@@ -81,7 +78,6 @@ vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
 vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
-  removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
 }));
 
@@ -129,8 +125,6 @@ describe("hosted-local run CLI", () => {
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
-    removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing
-      .mockResolvedValue({ missingCryptoState: false, removed: false });
     resolveHostedLocalWorktreeConfig.mockResolvedValue(createHostedLocalWorktreeConfig());
     formatHostedLocalWorktreeEnv.mockReturnValue("export MURPH_DEV_DATABASE_URL='[redacted]'\n");
     runDoctorCommand.mockImplementation((command: string, args: readonly string[]) => ({
@@ -266,10 +260,8 @@ describe("hosted-local run CLI", () => {
     }));
   });
 
-  test("leaves a newly created worktree database in place when stack startup fails", async () => {
+  test("leaves a newly created worktree database in place when the foreground stack fails", async () => {
     ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
-    removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing
-      .mockResolvedValueOnce({ missingCryptoState: false, removed: false });
     startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
     const output = createBufferedStdout();
 
@@ -281,30 +273,6 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
-    expect(
-      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
-    ).toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
-    expect(output.text()).not.toContain("left in place");
-  });
-
-  test("drops a newly created worktree database when startup fails before crypto state exists", async () => {
-    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
-    removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing
-      .mockResolvedValueOnce({ missingCryptoState: true, removed: true });
-    startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
-    const output = createBufferedStdout();
-
-    await expect(
-      runHostedLocalCli(["worktree", "up", "feature-a"], {
-        env: {},
-        stderr: output.stdout,
-        stdout: output.stdout,
-      }),
-    ).rejects.toThrow("startup failed");
-
-    expect(
-      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
-    ).toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
     expect(output.text()).not.toContain("left in place");
   });
 
@@ -321,9 +289,6 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
-    expect(
-      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
-    ).not.toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
   });
 

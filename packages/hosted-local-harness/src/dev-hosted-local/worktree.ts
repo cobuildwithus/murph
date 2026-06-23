@@ -50,11 +50,6 @@ export interface HostedLocalWorktreeDatabaseState {
   created: boolean;
 }
 
-export interface HostedLocalWorktreeDatabaseFailureCleanupResult {
-  missingCryptoState: boolean;
-  removed: boolean;
-}
-
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
@@ -248,30 +243,6 @@ export function resolveHostedLocalWorktreeDevConfig(input: {
   return resolveHostedLocalDevConfig(config.env);
 }
 
-export async function removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(
-  config: HostedLocalWorktreeConfig,
-): Promise<HostedLocalWorktreeDatabaseFailureCleanupResult> {
-  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
-    return { missingCryptoState: false, removed: false };
-  }
-  if (!await isHostedLocalWorktreeCryptoStateMissing(config)) {
-    return { missingCryptoState: false, removed: false };
-  }
-
-  const { commonArgs, commonEnv, database } =
-    resolveHostedLocalWorktreeDatabaseCommand(config);
-  const dropResult = spawnSync("dropdb", [
-    ...commonArgs,
-    "--if-exists",
-    database.databaseName,
-  ], {
-    encoding: "utf8",
-    env: commonEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return { missingCryptoState: true, removed: dropResult.status === 0 };
-}
-
 async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
   config: HostedLocalWorktreeConfig,
 ): Promise<void> {
@@ -309,20 +280,6 @@ async function readHostedLocalWorktreeCryptoStateText(
       throw new Error("is missing");
     }
     throw new Error("could not be read");
-  }
-}
-
-async function isHostedLocalWorktreeCryptoStateMissing(
-  config: HostedLocalWorktreeConfig,
-): Promise<boolean> {
-  try {
-    await readFile(
-      path.join(repoRoot, config.paths.cryptoStatePath),
-      "utf8",
-    );
-    return false;
-  } catch (error) {
-    return isNodeError(error) && error.code === "ENOENT";
   }
 }
 

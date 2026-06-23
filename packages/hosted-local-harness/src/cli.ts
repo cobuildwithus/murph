@@ -78,7 +78,6 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
   const {
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
-    removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
     resolveHostedLocalWorktreeConfig,
   } = await import("./dev-hosted-local/worktree.ts");
 
@@ -109,26 +108,11 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
         env: io.env ?? process.env,
         slug,
       });
-      const databaseState = await ensureHostedLocalWorktreeDatabase(config);
-      try {
-        await runUp(["--profile", "worktree"], {
-          ...io,
-          env: config.env,
-        });
-      } catch (error) {
-        if (databaseState.created) {
-          const cleanup =
-            await removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(
-              config,
-            );
-          if (cleanup.missingCryptoState && !cleanup.removed) {
-            (io.stderr ?? process.stderr).write(
-              `Warning: newly created worktree database ${config.databaseName} was left in place; drop it manually before retrying if startup failed before crypto state was written.\n`,
-            );
-          }
-        }
-        throw error;
-      }
+      await ensureHostedLocalWorktreeDatabase(config);
+      await runUp(["--profile", "worktree"], {
+        ...io,
+        env: config.env,
+      });
       return;
     }
     default:

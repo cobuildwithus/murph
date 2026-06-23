@@ -32,7 +32,6 @@ import {
   buildHostedLocalWorktreeConfig,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
-  removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
@@ -457,56 +456,6 @@ describe("hosted-local worktree config", () => {
     await expect(ensureHostedLocalWorktreeDatabase(config)).rejects.toThrow(
       "paired hosted-local crypto state file is incomplete",
     );
-  });
-
-  it("drops a newly created slug database after startup failure only while crypto state is missing", async () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-
-    await expect(
-      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(config),
-    ).resolves.toEqual({
-      missingCryptoState: true,
-      removed: true,
-    });
-
-    expect(worktreeMocks.spawnSync).toHaveBeenCalledWith(
-      "dropdb",
-      expect.arrayContaining([
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "5432",
-        "--username",
-        "postgres",
-        "--if-exists",
-        "murph_dev_feature_a",
-      ]),
-      expect.objectContaining({
-        encoding: "utf8",
-      }),
-    );
-  });
-
-  it("preserves a newly created slug database after startup failure once crypto state exists", async () => {
-    const config = buildHostedLocalWorktreeConfig({
-      env: {},
-      ports,
-      slug: "feature-a",
-    });
-    worktreeMocks.readFile.mockResolvedValueOnce("partial state exists");
-
-    await expect(
-      removeCreatedHostedLocalWorktreeDatabaseAfterStartupFailureIfCryptoStateMissing(config),
-    ).resolves.toEqual({
-      missingCryptoState: false,
-      removed: false,
-    });
-
-    expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
   it("redacts database diagnostics when local database setup fails", async () => {
