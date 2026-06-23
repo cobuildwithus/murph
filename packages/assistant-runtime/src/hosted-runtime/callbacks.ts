@@ -706,7 +706,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         return null;
       }
       const nextAttemptMs = intent.nextAttemptAt ? Date.parse(intent.nextAttemptAt) : Number.NaN;
-      if (!Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()) {
+      if (!Number.isFinite(nextAttemptMs)) {
         return now.toISOString();
       }
       return new Date(nextAttemptMs).toISOString();

@@ -3323,7 +3323,7 @@ function resolveHostedLocalDeviceSyncScheduledWake(
 
   const nextWakeAt = resolveHostedDeviceSyncNextWakeAt({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
-    platformEnv: input.runtime.platformEnv,
+    platform: input.runtime.platform,
     vaultRoot: input.restored.vaultRoot,
   });
   if (!nextWakeAt) {

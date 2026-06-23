@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
@@ -89,6 +94,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  resolveHostedDeviceSyncNextWakeAt,
   runHostedAssistantAutomation,
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncPass,
@@ -1083,6 +1089,104 @@ describe("runHostedAssistantAutomation", () => {
       },
     ),
     ).rejects.toThrow("automation failed");
+  });
+});
+
+describe("resolveHostedDeviceSyncNextWakeAt", () => {
+  it("reads durable store wakes without constructing configured providers", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-sync-wake-read-"));
+    const store = new SqliteDeviceSyncStore(
+      path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+    );
+
+    try {
+      store.upsertAccount({
+        provider: "junction",
+        externalAccountId: "junction-account",
+        displayName: "Junction Account",
+        scopes: ["offline"],
+        tokens: {
+          accessToken: "access-token",
+          accessTokenEncrypted: "enc:access-token",
+        },
+        connectedAt: "2026-04-08T00:00:00.000Z",
+        nextReconcileAt: "2026-04-08T01:00:00.000Z",
+      });
+
+      const wakeAt = resolveHostedDeviceSyncNextWakeAt({
+        deviceSyncConfig: {
+          providerConfigs: {
+            junction: {
+              environment: "sandbox",
+              providerFilter: ["fitbit"],
+              region: "us",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
+        vaultRoot,
+      });
+
+      assert.equal(wakeAt, "2026-04-08T01:00:00.000Z");
+      expect(mocks.readConfiguredJunctionDeviceSyncProviderConfig).not.toHaveBeenCalled();
+      expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).not.toHaveBeenCalled();
+      expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("falls back to a bounded retry when the durable store wake cannot be read", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-device-sync-wake-read-failed-"));
+    const vaultRoot = path.join(tempRoot, "vault-as-file");
+    await writeFile(vaultRoot, "not a directory");
+    const logPort = {
+      write: vi.fn(async (request: HostedRuntimeLogRequest) => ({
+        loggedCount: request.entries.length,
+      })),
+    };
+
+    try {
+      const wakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T00:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({
+          deviceSyncConfig: {
+            providerConfigs: {
+              oura: {
+                clientId: "oura-client",
+                clientSecret: "oura-secret",
+              },
+            },
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "secret_123",
+          },
+          platform: { logPort },
+          vaultRoot,
+        }),
+      );
+
+      assert.equal(wakeAt, "2026-04-08T00:00:30.000Z");
+      expect(logPort.write).toHaveBeenCalledWith({
+        entries: [
+          expect.objectContaining({
+            component: "device-sync",
+            eventCode: "device-sync.wake_projection_failed",
+            level: "warn",
+            phase: "invoke",
+          }),
+        ],
+      });
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 });
 

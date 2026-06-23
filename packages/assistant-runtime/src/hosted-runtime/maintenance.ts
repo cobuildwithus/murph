@@ -4,7 +4,10 @@ import {
 } from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
-import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import {
+  resolveDeviceSyncStoreNextWakeAt,
+  type DeviceSyncService,
+} from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
@@ -1060,22 +1063,34 @@ export async function runHostedDeviceSyncPass(
 
 export function resolveHostedDeviceSyncNextWakeAt(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
-  platformEnv?: Readonly<Record<string, string>>;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   vaultRoot: string;
 }): string | null {
-  const service = createHostedDeviceSyncRuntime({
-    deviceSyncConfig: input.deviceSyncConfig,
-    platformEnv: input.platformEnv ?? {},
-    vaultRoot: input.vaultRoot,
-  });
-  if (!service) {
+  if (!input.deviceSyncConfig) {
     return null;
   }
 
   try {
-    return service.getNextWakeAt();
-  } finally {
-    closeHostedRuntimeDeviceSyncService(service);
+    return resolveDeviceSyncStoreNextWakeAt({
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (input.platform?.logPort) {
+      void writeHostedRuntimeLogBestEffort({
+        entry: {
+          component: "device-sync",
+          eventCode: "device-sync.wake_projection_failed",
+          level: "warn",
+          phase: "invoke",
+          redactedJson: {
+            errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+              ?? "device sync wake projection failed",
+          },
+        },
+        platform: input.platform,
+      });
+    }
+    return resolveHostedDeviceSyncYieldRetryAt();
   }
 }
 

@@ -5339,7 +5339,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const unexpectedRetryBeforeCheckpoint = new Error(
       "unexpected retryable outbox wake before idle checkpoint",
     );
-    const outboxRetryWakeAt = "2026-04-27T00:00:00.000Z";
+    const outboxRetryWakeAt = "2026-04-26T23:59:30.000Z";
     const mailboxItems: HostedMailboxItem[] = [];
     let assistantPhaseCalls = 0;
     let lateConversationInputId: string | null = null;
