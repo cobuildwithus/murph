@@ -106,6 +106,7 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
+  type HostedWorkspaceRunnerHandledDeviceSyncWake,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
@@ -143,6 +144,7 @@ import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
 import {
+  HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   selectHostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
 export {
@@ -1072,7 +1074,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
-    let deviceSyncWorkspaceWakeHandledUntilCheckpoint = false;
+    let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
     const stageDeviceSyncDirtyAcks = (
       records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
     ): void => {
@@ -1094,7 +1096,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const clearStagedDeviceSyncDirtyAcks = (): void => {
       stagedDeviceSyncDirtyAcks = [];
       suppressDirtyPendingFetchUntilCheckpoint = false;
-      deviceSyncWorkspaceWakeHandledUntilCheckpoint = false;
+      deviceSyncWorkspaceWakeHandledUntilCheckpoint = null;
     };
     let browserVaultReplicaRefreshRequested = false;
     const recordBrowserVaultReplicaRefreshIntent = (
@@ -1176,8 +1178,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
-        deviceSyncWorkspaceWakeHandledUntilCheckpoint ||=
-          passResult.assistantPhaseResult?.deviceSyncMaintenanceRan === true;
+        deviceSyncWorkspaceWakeHandledUntilCheckpoint =
+          resolveHandledDeviceSyncWorkspaceWake({
+            current: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+            result: passResult,
+            workspace: passInput.workspace,
+          });
         recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
@@ -2131,6 +2137,31 @@ function normalizeHostedWorkspaceInvocationProjectionWake(
   return {
     nextWakeAt: wake.at,
     nextWakeReason: wake.reason,
+  };
+}
+
+function resolveHandledDeviceSyncWorkspaceWake(input: {
+  current: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
+  result: HostedWorkspaceRunnerResult;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceRunnerHandledDeviceSyncWake | null {
+  if (input.result.assistantPhaseResult?.deviceSyncMaintenanceRan !== true) {
+    return input.current;
+  }
+
+  const nextWakeAt = input.workspace?.nextWakeAt ?? null;
+  if (!nextWakeAt) {
+    return input.current;
+  }
+
+  const nextWakeReason = input.workspace?.nextWakeReason ?? null;
+  if (nextWakeReason !== HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON) {
+    return input.current;
+  }
+
+  return {
+    nextWakeAt,
+    nextWakeReason,
   };
 }
 

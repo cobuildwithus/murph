@@ -2138,6 +2138,7 @@ async function runSystemMailboxMaintenancePhase(input: {
               assertHostedAssistantPhaseLiveness(phaseInput.signal);
               return await runSystemMailboxPostCheckpointPhase({
                 dirtyDeviceSyncMetrics,
+                dirtyDeviceSyncWake,
                 dirtyDeviceActivityAutomation,
                 assistantCronWakeState: systemAssistantCronWakeState,
                 initialProviderCleanupCheckpoint,
@@ -2237,6 +2238,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   deviceSyncFollowUpWake: HostedRuntimeWakeCandidate | null;
   dirtyDeviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics | null;
+  dirtyDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   initialProviderCleanupDue: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -2289,6 +2291,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         statusCallback.nextWakeReason ?? "assistant",
       ),
       backgroundWake,
+      input.dirtyDeviceSyncWake,
       createHostedRuntimeWakeCandidate(
         dirtyPostCheckpointWakeAt,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -2374,6 +2377,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     });
     const baseNextWake = selectHostedRuntimeWakeCandidate([
       backgroundWake,
+      input.dirtyDeviceSyncWake,
       createHostedRuntimeWakeCandidate(
         dirtyPostCheckpointWakeAt,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -2410,6 +2414,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   });
   const dirtyNextWake = selectHostedRuntimeWakeCandidate([
     backgroundWake,
+    input.dirtyDeviceSyncWake,
     createHostedRuntimeWakeCandidate(
       dirtyPostCheckpoint.nextWakeAt,
       HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -3274,7 +3279,11 @@ function resolveSkippedDeviceSyncWake(input: {
     };
   }
 
-  if (input.input.deviceSyncWorkspaceWakeHandled === true) {
+  const handledDeviceSyncWake = input.input.deviceSyncWorkspaceWakeHandled ?? null;
+  if (
+    handledDeviceSyncWake?.nextWakeAt === existingWakeAt
+    && handledDeviceSyncWake.nextWakeReason === existingWakeReason
+  ) {
     return null;
   }
 

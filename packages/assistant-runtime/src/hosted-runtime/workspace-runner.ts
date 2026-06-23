@@ -171,7 +171,7 @@ export interface HostedWorkspaceRunnerPlatform
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
-  deviceSyncWorkspaceWakeHandled?: boolean;
+  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
@@ -179,6 +179,11 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
+}
+
+export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
+  nextWakeAt: string;
+  nextWakeReason: string | null;
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {

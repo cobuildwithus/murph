@@ -2536,7 +2536,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      deviceSyncWorkspaceWakeHandled: true,
+      deviceSyncWorkspaceWakeHandled: {
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      },
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
@@ -2566,6 +2569,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("re-arms a newer due device-sync retry when an earlier wake already ran in the invocation", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      deviceSyncWorkspaceWakeHandled: {
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      },
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:30.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+    });
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
   it("preserves a future skipped device-sync retry after same-invocation maintenance", async () => {
     mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce("2026-04-27T01:00:00.000Z");
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -2579,7 +2628,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      deviceSyncWorkspaceWakeHandled: true,
+      deviceSyncWorkspaceWakeHandled: {
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      },
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
@@ -3849,6 +3901,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: deviceSyncRetryAt,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+  });
+
+  it("preserves a runtime-only device-sync continuation after recording unrelated system mailbox work", async () => {
+    const deviceSyncContinuationAt = "2026-04-27T00:00:30.000Z";
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: false,
+      nextWakeAt: deviceSyncContinuationAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: deviceSyncContinuationAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: deviceSyncContinuationAt,
       nextWakeReason: "device-sync.reconcile",
     }));
   });
@@ -6194,7 +6308,7 @@ describe("hosted runtime log helpers", () => {
 function createPhaseInput(input: {
   assistantInputIds?: string[];
   conversationImportedCount?: number;
-  deviceSyncWorkspaceWakeHandled?: boolean;
+  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   linqDeliveryContext?: {
     directRecipientPhoneNumber: string | null;
