@@ -70,7 +70,7 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   prisma: PrismaClient;
   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
 }): Promise<{ failures: number; sent: number }> {
-  const workspaces = await readDueInboxMediaRetentionSignalWorkspaces({
+  const workspaces = await claimDueInboxMediaRetentionSignalWorkspaces({
     now: input.now,
     prisma: input.prisma,
   });
@@ -116,16 +116,26 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   return { failures, sent };
 }
 
-async function readDueInboxMediaRetentionSignalWorkspaces(input: {
+async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<Array<{ userId: string }>> {
   return await input.prisma.$queryRaw<Array<{ userId: string }>>`
-    SELECT "user_id" AS "userId"
-    FROM "hosted_workspace"
-    WHERE "inbox_media_retention_wake_at" <= ${input.now}
-    ORDER BY "inbox_media_retention_wake_at" ASC, "user_id" ASC
-    LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
+    WITH due AS (
+      SELECT "user_id"
+      FROM "hosted_workspace"
+      WHERE "inbox_media_retention_wake_at" <= ${input.now}
+      ORDER BY
+        "inbox_media_retention_signal_attempted_at" ASC NULLS FIRST,
+        "inbox_media_retention_wake_at" ASC,
+        "user_id" ASC
+      LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
+    )
+    UPDATE "hosted_workspace"
+    SET "inbox_media_retention_signal_attempted_at" = ${input.now}
+    FROM due
+    WHERE "hosted_workspace"."user_id" = due."user_id"
+    RETURNING "hosted_workspace"."user_id" AS "userId"
   `;
 }
 

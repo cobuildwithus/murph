@@ -66,11 +66,17 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(schema).toContain(
       'inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")',
     );
+    expect(schema).toContain(
+      'inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")',
+    );
     expect(retentionWakeMigrationSql).toContain(
       'ALTER TABLE "hosted_workspace"',
     );
     expect(retentionWakeMigrationSql).toContain(
       'ADD COLUMN "inbox_media_retention_wake_at" TIMESTAMP(3)',
+    );
+    expect(retentionWakeMigrationSql).toContain(
+      'ADD COLUMN "inbox_media_retention_signal_attempted_at" TIMESTAMP(3)',
     );
     expect(retentionWakeMigrationSql).toContain(
       'UPDATE "hosted_workspace"',

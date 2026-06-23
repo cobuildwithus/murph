@@ -86,15 +86,21 @@ describe("hosted retention cleanup", () => {
     });
     expect(queryRaw).toHaveBeenCalledTimes(1);
     const dueSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
-    expect(dueSql).toContain('SELECT "user_id" AS "userId"');
+    expect(dueSql).toContain("WITH due AS");
     expect(dueSql).toContain('FROM "hosted_workspace"');
     expect(dueSql).toContain('"inbox_media_retention_wake_at" <=');
+    expect(dueSql).toContain('"inbox_media_retention_signal_attempted_at" ASC NULLS FIRST');
+    expect(dueSql).toContain('UPDATE "hosted_workspace"');
+    expect(dueSql).toContain(
+      'SET "inbox_media_retention_signal_attempted_at" = ?',
+    );
+    expect(dueSql).toContain('RETURNING "hosted_workspace"."user_id" AS "userId"');
     expect(dueSql).toContain(`LIMIT ?`);
-    expect(dueSql).not.toContain("UPDATE");
     expect(dueSql).not.toContain("FOR UPDATE");
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+      now,
     ]);
     expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
       queryRaw.mock.invocationCallOrder[0],
@@ -197,4 +203,89 @@ describe("hosted retention cleanup", () => {
       vi.useRealTimers();
     }
   }, HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS + 1_000);
+
+  it("rotates failed media-retention signal attempts past the oldest batch", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const nextHour = new Date("2026-04-25T13:00:00.000Z");
+    const workspaces = Array.from(
+      { length: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE + 1 },
+      (_, index) => ({
+        attemptedAt: null as Date | null,
+        userId: `member_due_${String(index + 1).padStart(2, "0")}`,
+        wakeAt: now,
+      }),
+    );
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
+    const queryRaw = vi.fn(async (
+      _sql: TemplateStringsArray,
+      dueAt: Date,
+      limit: number,
+      attemptedAt: Date,
+    ) => {
+      const selected = workspaces
+        .filter((workspace) => workspace.wakeAt <= dueAt)
+        .sort((left, right) => {
+          const leftAttemptedAt = left.attemptedAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+          const rightAttemptedAt = right.attemptedAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+          if (leftAttemptedAt !== rightAttemptedAt) {
+            return leftAttemptedAt - rightAttemptedAt;
+          }
+          if (left.wakeAt.getTime() !== right.wakeAt.getTime()) {
+            return left.wakeAt.getTime() - right.wakeAt.getTime();
+          }
+          return left.userId.localeCompare(right.userId);
+        })
+        .slice(0, limit);
+      for (const workspace of selected) {
+        workspace.attemptedAt = attemptedAt;
+      }
+      return selected.map((workspace) => ({ userId: workspace.userId }));
+    });
+    const signalRuntimeRecheck = vi.fn(async (_input: { userId: string }) => {
+      throw new Error("runtime unavailable");
+    });
+    const prisma = {
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedComputerRun: {
+        findMany: hostedComputerRunFindMany,
+      },
+      hostedRuntimeLog: {
+        deleteMany: hostedRuntimeLogDeleteMany,
+      },
+      hostedWebSession: {
+        deleteMany: hostedWebSessionDeleteMany,
+      },
+    };
+
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck,
+    })).resolves.toMatchObject({
+      inboxMediaRetentionRuntimeSignalFailures: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+      inboxMediaRetentionRuntimeSignalsSent: 0,
+    });
+    await expect(runHostedRetentionCleanup({
+      now: nextHour,
+      prisma: prisma as never,
+      signalRuntimeRecheck,
+    })).resolves.toMatchObject({
+      inboxMediaRetentionRuntimeSignalFailures: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+      inboxMediaRetentionRuntimeSignalsSent: 0,
+    });
+
+    const firstRunUserIds = signalRuntimeRecheck.mock.calls
+      .slice(0, HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE)
+      .map(([input]) => input.userId);
+    const secondRunUserIds = signalRuntimeRecheck.mock.calls
+      .slice(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE)
+      .map(([input]) => input.userId);
+    expect(firstRunUserIds).not.toContain("member_due_26");
+    expect(secondRunUserIds).toContain("member_due_26");
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
 });

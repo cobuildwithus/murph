@@ -1119,6 +1119,74 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retention-only processing yields before checkpointing when a foreground wake interrupts maintenance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const createCheckpointSnapshot = vi.fn(async () => {
+      events.push("snapshot:idle_shutdown");
+      return {
+        snapshotRef: createBundleRef({
+          hash: "7".repeat(64),
+          key: "users/bundles/member-synthetic/retention-only-interrupted.bundle.json",
+          size: 512,
+        }),
+      };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      runtimeWakeSignal.notify(new Date("2026-04-26T00:00:01.000Z").getTime());
+
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_retention_only_interrupted",
+              idleCheckpointDelayMs: 1,
+              leaseGeneration: "7",
+              processingMode: "inbox_media_retention",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            createCheckpointSnapshot,
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  inboxMediaRetentionWakeAt: "2026-04-15T00:00:00.000Z",
+                  version: "0",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase() {
+              throw new Error("Retention-only processing must not enter assistant phase.");
+            },
+            vaultRoot,
+          },
+        ),
+        HostedRuntimeCheckpointInterruptedByWakeError,
+      );
+      expect(createCheckpointSnapshot).not.toHaveBeenCalled();
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(events.includes("workspace.checkpoint"), false);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("waits for deferred import enrichment before idle checkpointing dirty runtime state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

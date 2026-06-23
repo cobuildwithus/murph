@@ -2105,6 +2105,12 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     vaultRoot: input.vaultRoot,
     wakeSignal: input.wakeSignal,
   });
+  const pendingWakeNotification = input.wakeSignal?.consumePending() ?? null;
+  if (pendingWakeNotification) {
+    throw new HostedRuntimeCheckpointInterruptedByWakeError({
+      notification: pendingWakeNotification,
+    });
+  }
   const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
     assertRuntimeNotAborted: input.assertRuntimeNotAborted,
     checkpointRequestBuilder: input.checkpointRequestBuilder,
