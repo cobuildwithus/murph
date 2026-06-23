@@ -11,6 +11,7 @@ describe("hosted product feedback contracts", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      topic: "changelog",
     };
     expect(parseHostedRuntimeProductFeedbackRecordRequest({ feedback })).toEqual({
       feedback,
@@ -37,14 +38,117 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: [],
+        topic: "changelog",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "bug_report",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        topic: "integrations",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
         idempotencyKey: "a".repeat(64),
         kind: "feature_request",
-        relatedChangelogItemIds: ["native-message-formatting"],
+        relatedChangelogItemIds: [],
+        topic: "unknown-topic",
       },
     })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        feedbackTags: ["message-formatting"],
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        topic: "messaging",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "native-message-formatting",
+          "native-message-formatting",
+        ],
+        topic: "changelog",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["NativeMessageFormatting"],
+        topic: "changelog",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "one",
+          "two",
+          "three",
+          "four",
+          "five",
+          "six",
+          "seven",
+          "eight",
+        ],
+        topic: "changelog",
+      },
+    })).toThrow();
+  });
+
+  it("supports structured feature requests and old changelog-only payloads", () => {
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "b".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        topic: "integrations",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "b".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        topic: "integrations",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        topic: "performance",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        relatedChangelogItemIds: [],
+        topic: "performance",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "c".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["native-message-formatting"],
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "c".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        topic: "changelog",
+      },
+    });
   });
 });

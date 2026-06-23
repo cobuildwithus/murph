@@ -688,14 +688,37 @@ export interface HostedRuntimeUsageRecordResponse {
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
+  "feature_request",
+  "frustration",
 ] as const;
 
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
+export const HOSTED_PRODUCT_FEEDBACK_TOPICS = [
+  "assistant_quality",
+  "billing",
+  "changelog",
+  "dashboard",
+  "experiments",
+  "integrations",
+  "messaging",
+  "notifications",
+  "onboarding",
+  "performance",
+  "privacy",
+  "settings",
+  "wearables",
+  "other",
+] as const;
+
+export type HostedProductFeedbackTopic =
+  (typeof HOSTED_PRODUCT_FEEDBACK_TOPICS)[number];
+
 export interface HostedRuntimeProductFeedbackRecord {
   idempotencyKey: string;
   kind: HostedProductFeedbackKind;
+  topic: HostedProductFeedbackTopic;
   relatedChangelogItemIds: string[];
 }
 

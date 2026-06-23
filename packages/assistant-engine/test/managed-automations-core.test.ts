@@ -181,6 +181,8 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=7')
     expect(productUpdatesRecord?.instructions).toContain('murph.submit_product_feedback')
+    expect(productUpdatesRecord?.instructions).toContain('another feature in mind')
+    expect(productUpdatesRecord?.instructions).toContain('expresses product frustration')
     expect(productUpdatesRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )

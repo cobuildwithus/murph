@@ -242,6 +242,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('/api/changelog?days=7')
     expect(seed.instructions).toContain('murph.attach_response_media')
     expect(seed.instructions).toContain('murph.submit_product_feedback')
+    expect(seed.instructions).toContain('another feature in mind')
+    expect(seed.instructions).toContain('expresses product frustration')
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date('2026-06-22T12:00:00.000Z'),

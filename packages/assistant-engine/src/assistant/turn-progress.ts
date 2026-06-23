@@ -209,6 +209,7 @@ export function buildAssistantProductFeedbackIdempotencyKey(input: {
       acceptedInputIds: [...input.acceptedInputIds],
       kind: input.feedback.kind,
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
+      topic: input.feedback.topic,
     }))
     .digest('hex')
 }
@@ -219,6 +220,7 @@ function normalizeAssistantProductFeedback(
   return {
     kind: feedback.kind,
     relatedChangelogItemIds: [...new Set(feedback.relatedChangelogItemIds)],
+    topic: feedback.topic,
   }
 }
 

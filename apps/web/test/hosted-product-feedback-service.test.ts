@@ -57,6 +57,7 @@ describe("recordHostedProductFeedback", () => {
         expect.objectContaining({
           memberId: "member_123",
           relatedChangelogItemIdsJson: ["native-message-formatting"],
+          topic: "changelog",
         }),
       ],
       skipDuplicates: true,
@@ -83,8 +84,32 @@ describe("recordHostedProductFeedback", () => {
     expect(second.recorded).toBe(true);
   });
 
+  it("accepts feature requests without changelog ids", async () => {
+    prismaMocks.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await recordHostedProductFeedback({
+      feedback: makeFeedback({
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        topic: "integrations",
+      }),
+      memberId: "member_123",
+    });
+
+    expect(result.recorded).toBe(true);
+    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [
+        expect.objectContaining({
+          kind: "feature_request",
+          relatedChangelogItemIdsJson: [],
+          topic: "integrations",
+        }),
+      ],
+    }));
+  });
+
   it.each([
-    ["empty changelog ids", makeFeedback({ relatedChangelogItemIds: [] })],
+    ["empty changelog ids for shipped interest", makeFeedback({ relatedChangelogItemIds: [] })],
     ["unknown changelog ids", makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] })],
   ])("rejects %s before persistence", async (_label, feedback) => {
     await expect(recordHostedProductFeedback({
@@ -114,12 +139,15 @@ describe("normalizeHostedProductFeedback", () => {
 
 function makeFeedback(input: {
   idempotencyKey?: string;
+  kind?: "feature_interest" | "feature_request" | "frustration";
   relatedChangelogItemIds?: string[];
+  topic?: "changelog" | "integrations";
 } = {}) {
   return {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
-    kind: "feature_interest" as const,
+    kind: input.kind ?? "feature_interest",
     relatedChangelogItemIds:
       input.relatedChangelogItemIds ?? ["native-message-formatting"],
+    topic: input.topic ?? "changelog",
   };
 }

@@ -24,6 +24,7 @@ export async function recordHostedProductFeedback(input: {
         kind: feedback.kind,
         memberId: input.memberId,
         relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
+        topic: feedback.topic,
       },
     ],
     skipDuplicates: true,
@@ -39,9 +40,10 @@ export function normalizeHostedProductFeedback(
   feedback: HostedRuntimeProductFeedbackRecord,
 ): HostedRuntimeProductFeedbackRecord {
   if (
-    feedback.kind !== "feature_interest" ||
-    feedback.relatedChangelogItemIds.length === 0 ||
-    !resolveChangelogCardItems(feedback.relatedChangelogItemIds)
+    (feedback.kind === "feature_interest" &&
+      feedback.relatedChangelogItemIds.length === 0) ||
+    (feedback.relatedChangelogItemIds.length > 0 &&
+      !resolveChangelogCardItems(feedback.relatedChangelogItemIds))
   ) {
     rejectHostedProductFeedback();
   }
@@ -50,6 +52,7 @@ export function normalizeHostedProductFeedback(
     idempotencyKey: feedback.idempotencyKey,
     kind: feedback.kind,
     relatedChangelogItemIds: [...feedback.relatedChangelogItemIds],
+    topic: feedback.topic,
   };
 }
 

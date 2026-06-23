@@ -260,9 +260,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
       '',
       'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
-      'Close by inviting the user to reply with one update they want to try.',
+      'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
-      'On a later user turn, call `murph.submit_product_feedback` only after the user explicitly expresses interest in one or more shipped changelog items. Never infer or submit feedback silently, and do not submit new feature requests.',
+      'On a later user turn, call `murph.submit_product_feedback` after the user explicitly expresses product frustration, asks for a feature, or shows interest in one or more shipped changelog items. Never infer or submit feedback silently. Use only structured kind/topic plus optional changelog item ids; do not include raw conversation text, health details, identifiers, contact details, secrets, provider payloads, or feature prose.',
     ].join('\n'),
   },
 ] satisfies readonly MurphManagedAutomationSeed[]

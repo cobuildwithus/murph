@@ -21,6 +21,7 @@ describe("assistant product feedback", () => {
     const feedback = {
       kind: "feature_interest" as const,
       relatedChangelogItemIds: ["beta", "alpha"],
+      topic: "changelog" as const,
     };
     const first = buildAssistantProductFeedbackIdempotencyKey({
       acceptedInputIds: ["assistant_input_1"],
@@ -74,6 +75,12 @@ describe("assistant product feedback", () => {
     expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
   });
 
+  it("advertises the shipped-interest changelog id requirement in the tool schema", () => {
+    const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
+    expect(schema).toContain('"minItems":1');
+    expect(schema).toContain('"feature_interest"');
+  });
+
   it("parses and records explicit feedback through the turn-scoped capability", async () => {
     const recordProductFeedback = vi.fn(async (
       _feedback: HostedRuntimeProductFeedbackRecord,
@@ -91,6 +98,7 @@ describe("assistant product feedback", () => {
         arguments: {
           kind: "feature_interest",
           relatedChangelogItemIds: ["native-message-formatting"],
+          topic: "changelog",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -101,6 +109,7 @@ describe("assistant product feedback", () => {
       feedback: {
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
+        topic: "changelog",
       },
       kind: "submit-product-feedback",
     });
@@ -126,14 +135,78 @@ describe("assistant product feedback", () => {
         feedback: {
           kind: "feature_interest",
           relatedChangelogItemIds: ["native-message-formatting"],
+          topic: "changelog",
         },
       }),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      topic: "changelog",
     });
     expect(result.rpcResult).toEqual({
       success: true,
       contentItems: [{ type: "inputText", text: "product feedback recorded" }],
     });
+  });
+
+  it("parses generalized feature-request feedback without changelog ids", () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+          topic: "integrations",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+
+    expect(request).toEqual({
+      feedback: {
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        topic: "integrations",
+      },
+      kind: "submit-product-feedback",
+    });
+  });
+
+  it("rejects malformed generalized feedback tool arguments", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_interest",
+          topic: "changelog",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          feedbackTags: ["message-formatting"],
+          kind: "feature_request",
+          topic: "messaging",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+          topic: "unknown-topic",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
   });
 });
