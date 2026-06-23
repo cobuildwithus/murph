@@ -201,6 +201,7 @@ export async function startHostedLocalDevStack(input: {
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
+  assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
@@ -1528,6 +1529,17 @@ async function writePrivateTextFileAtomically(
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => {});
     throw error;
+  }
+}
+
+function assertHostedLocalWorktreeRuntimePreconditions(env: NodeJS.ProcessEnv): void {
+  if (!isHostedLocalWorktreeProfile(env)) {
+    return;
+  }
+  if (isHostedLocalWorkerReuseEnabled(env)) {
+    throw new Error(
+      "MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled for the hosted-local worktree profile.",
+    );
   }
 }
 

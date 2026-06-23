@@ -12,6 +12,7 @@ import {
   resolveHostedLocalE2eScenarios,
 } from "../src/e2e.ts";
 import {
+  listHostedLocalProfiles,
   applyHostedLocalProfile,
   resolveHostedLocalProfile,
 } from "../src/profiles.ts";
@@ -256,7 +257,12 @@ describe("hosted-local harness", () => {
   });
 
   test("keeps the worktree profile interactive while forcing managed Temporal", () => {
+    expect(listHostedLocalProfiles().map((profile) => profile.name)).not.toContain("worktree");
+    expect(() => resolveHostedLocalProfile("worktree")).toThrow(
+      "hosted-local worktree profile is internal",
+    );
     const result = applyHostedLocalProfile({
+      allowInternalWorktreeProfile: true,
       env: {},
       profileName: "worktree",
     });

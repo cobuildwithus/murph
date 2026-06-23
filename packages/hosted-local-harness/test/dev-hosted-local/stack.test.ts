@@ -1035,6 +1035,29 @@ describe("hosted local dev stack", () => {
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
+  it("rejects worktree profile startup when asked to reuse an existing worker", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      webPort: 31001,
+      workerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
+      workerPort: 32001,
+    });
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_REUSE_EXISTING_WORKER: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
+      },
+    })).rejects.toThrow(/MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled/u);
+
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+  });
+
   it("allows E2E isolation when ports, persist dir, and web artifacts are isolated", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");

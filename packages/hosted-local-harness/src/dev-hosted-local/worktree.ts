@@ -50,6 +50,11 @@ export interface HostedLocalWorktreeDatabaseState {
   created: boolean;
 }
 
+export interface HostedLocalWorktreeDatabaseCleanupResult {
+  missingCryptoState: boolean;
+  removed: boolean;
+}
+
 const HOSTED_LOCAL_WORKTREE_PROFILE = "worktree";
 const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 const HOSTED_LOCAL_WORKTREE_DATABASE_PREFIX = "murph_dev_";
@@ -243,6 +248,30 @@ export function resolveHostedLocalWorktreeDevConfig(input: {
   return resolveHostedLocalDevConfig(config.env);
 }
 
+export async function removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(
+  config: HostedLocalWorktreeConfig,
+): Promise<HostedLocalWorktreeDatabaseCleanupResult> {
+  if (isTruthyEnvValue(config.env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV])) {
+    return { missingCryptoState: false, removed: false };
+  }
+  if (!await isHostedLocalWorktreeCryptoStateMissing(config)) {
+    return { missingCryptoState: false, removed: false };
+  }
+
+  const { commonArgs, commonEnv, database } =
+    resolveHostedLocalWorktreeDatabaseCommand(config);
+  const dropResult = spawnSync("dropdb", [
+    ...commonArgs,
+    "--if-exists",
+    database.databaseName,
+  ], {
+    encoding: "utf8",
+    env: commonEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return { missingCryptoState: true, removed: dropResult.status === 0 };
+}
+
 async function assertHostedLocalWorktreeCryptoStatePresentForExistingDatabase(
   config: HostedLocalWorktreeConfig,
 ): Promise<void> {
@@ -280,6 +309,20 @@ async function readHostedLocalWorktreeCryptoStateText(
       throw new Error("is missing");
     }
     throw new Error("could not be read");
+  }
+}
+
+async function isHostedLocalWorktreeCryptoStateMissing(
+  config: HostedLocalWorktreeConfig,
+): Promise<boolean> {
+  try {
+    await readFile(
+      path.join(repoRoot, config.paths.cryptoStatePath),
+      "utf8",
+    );
+    return false;
+  } catch (error) {
+    return isNodeError(error) && error.code === "ENOENT";
   }
 }
 
@@ -363,6 +406,7 @@ function buildHostedLocalWorktreeEnv(input: {
     }),
     MURPH_DEV_MINIO_DATA_DIR: input.paths.minioDataDir,
     MURPH_DEV_MINIO_PORT: String(input.ports.minio),
+    MURPH_DEV_REUSE_EXISTING_WORKER: "0",
     MURPH_DEV_TEMPORAL: "managed",
     MURPH_DEV_TEMPORAL_HOST: "127.0.0.1",
     MURPH_DEV_TEMPORAL_PORT: String(input.ports.temporal),

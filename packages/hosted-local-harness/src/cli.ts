@@ -78,6 +78,7 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
   const {
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
+    removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
     resolveHostedLocalWorktreeConfig,
   } = await import("./dev-hosted-local/worktree.ts");
 
@@ -100,6 +101,8 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
       await runDoctor(["--profile", "worktree", ...rest], {
         ...io,
         env: config.env,
+      }, {
+        allowInternalWorktreeProfile: true,
       });
       return;
     }
@@ -108,10 +111,24 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
         env: io.env ?? process.env,
         slug,
       });
-      await ensureHostedLocalWorktreeDatabase(config);
+      const databaseState = await ensureHostedLocalWorktreeDatabase(config);
       await runUp(["--profile", "worktree"], {
         ...io,
         env: config.env,
+      }, {
+        allowInternalWorktreeProfile: true,
+        onStartupFailure: async () => {
+          if (!databaseState.created) {
+            return;
+          }
+          const cleanup =
+            await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
+          if (cleanup.missingCryptoState && !cleanup.removed) {
+            (io.stderr ?? process.stderr).write(
+              `Warning: newly created worktree database ${config.databaseName} was left in place; drop it manually before retrying if startup failed before crypto state was written.\n`,
+            );
+          }
+        },
       });
       return;
     }
@@ -120,7 +137,14 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
   }
 }
 
-async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+async function runUp(
+  args: readonly string[],
+  io: HostedLocalCliIo,
+  options: {
+    allowInternalWorktreeProfile?: boolean;
+    onStartupFailure?: (error: unknown) => Promise<void>;
+  } = {},
+): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
   if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
     printUpHelp(io.stdout ?? process.stdout);
@@ -129,6 +153,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
   const { startHostedLocalDevStack } = await import("./dev-hosted-local/stack.ts");
 
   const profiled = applyHostedLocalProfile({
+    allowInternalWorktreeProfile: options.allowInternalWorktreeProfile,
     env: io.env ?? process.env,
     profileName: parsed.profileName,
   });
@@ -256,6 +281,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
         await awaitTerminationCleanup();
         return;
       }
+      await options.onStartupFailure?.(error);
       await updateState({ status: "failed" });
       throw error;
     }
@@ -271,6 +297,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
         await awaitTerminationCleanup();
         return;
       }
+      await options.onStartupFailure?.(error);
       await updateState({ status: "failed" });
       throw error;
     }
@@ -419,7 +446,13 @@ async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promis
   }
 }
 
-async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+async function runDoctor(
+  args: readonly string[],
+  io: HostedLocalCliIo,
+  options: {
+    allowInternalWorktreeProfile?: boolean;
+  } = {},
+): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
   const json = parsed.args.includes("--json");
   if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
@@ -430,6 +463,7 @@ async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise
     "./dev-hosted-local/config.ts"
   );
   const profiled = applyHostedLocalProfile({
+    allowInternalWorktreeProfile: options.allowInternalWorktreeProfile,
     env: io.env ?? process.env,
     profileName: parsed.profileName,
   });

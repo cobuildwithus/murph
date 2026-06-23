@@ -164,7 +164,10 @@ describe("hosted-local MinIO sidecar", () => {
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
     const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
-    expect(publishArg).toEqual(expect.stringMatching(/^172\.17\.0\.1:\d+:9000$/u));
+    const expectedPublishHost = process.platform === "linux" ? "172.17.0.1" : "0.0.0.0";
+    expect(publishArg).toEqual(
+      expect.stringMatching(new RegExp(`^${expectedPublishHost.replace(/\./gu, "\\.")}:\\d+:9000$`, "u")),
+    );
     expect(volumeArg).toBe(".tmp/hosted-local-minio-test/minio-r2:/data");
     expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
@@ -186,17 +189,25 @@ describe("hosted-local MinIO sidecar", () => {
         label: "minio",
       }),
     );
-    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
-      "docker",
-      [
-        "network",
-        "inspect",
-        "bridge",
-        "--format",
-        "{{range .IPAM.Config}}{{if .Gateway}}{{.Gateway}}{{end}}{{end}}",
-      ],
-      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
-    );
+    if (process.platform === "linux") {
+      expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+        "docker",
+        [
+          "network",
+          "inspect",
+          "bridge",
+          "--format",
+          "{{range .IPAM.Config}}{{if .Gateway}}{{.Gateway}}{{end}}{{end}}",
+        ],
+        expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
+      );
+    } else {
+      expect(childProcessMocks.spawn).not.toHaveBeenCalledWith(
+        "docker",
+        expect.arrayContaining(["network", "inspect", "bridge"]),
+        expect.anything(),
+      );
+    }
     expect(childProcessMocks.spawn).toHaveBeenCalledWith(
       "docker",
       [
@@ -211,7 +222,11 @@ describe("hosted-local MinIO sidecar", () => {
     );
   });
 
-  it("fails symbolic Docker host aliases when the bridge gateway cannot be resolved", async () => {
+  it("fails symbolic Docker host aliases on Linux when the bridge gateway cannot be resolved", async () => {
+    if (process.platform !== "linux") {
+      expect(process.platform).not.toBe("linux");
+      return;
+    }
     childProcessMocks.spawnResponses = [
       {
         exitCode: 1,
@@ -564,7 +579,9 @@ describe("hosted-local MinIO sidecar", () => {
 
   it("removes the named MinIO container and label-matching stale containers on startup failure", async () => {
     childProcessMocks.spawnResponses = [
-      { stdout: "172.17.0.1\n" },
+      ...(process.platform === "linux" ? [{ stdout: "172.17.0.1\n" }] : []),
+      {},
+      { stdout: "" },
       {},
       { stdout: "" },
       {},

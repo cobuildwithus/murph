@@ -23,6 +23,9 @@ const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
 const formatHostedLocalWorktreeEnv = vi.hoisted(() =>
   vi.fn(() => "export MURPH_DEV_DATABASE_URL='[redacted]'\n"),
 );
+const removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing = vi.hoisted(() =>
+  vi.fn(async () => ({ missingCryptoState: false, removed: false })),
+);
 const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
   vi.fn(async () => createHostedLocalWorktreeConfig()),
 );
@@ -78,6 +81,7 @@ vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
 vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
+  removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
 }));
 
@@ -125,6 +129,8 @@ describe("hosted-local run CLI", () => {
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
     startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
+    removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
+      .mockResolvedValue({ missingCryptoState: false, removed: false });
     resolveHostedLocalWorktreeConfig.mockResolvedValue(createHostedLocalWorktreeConfig());
     formatHostedLocalWorktreeEnv.mockReturnValue("export MURPH_DEV_DATABASE_URL='[redacted]'\n");
     runDoctorCommand.mockImplementation((command: string, args: readonly string[]) => ({
@@ -150,7 +156,7 @@ describe("hosted-local run CLI", () => {
     expect(output.text()).toContain("Run the local hosted Murph harness.");
     expect(output.text()).toContain("hosted-local worktree up <slug>");
     expect(output.text()).toContain("worktree");
-    expect(output.text()).toContain("secondary git worktree");
+    expect(output.text()).not.toMatch(/^worktree\n/mu);
   });
 
   test("prints command-specific help without resolving runtime state", async () => {
@@ -260,8 +266,10 @@ describe("hosted-local run CLI", () => {
     }));
   });
 
-  test("leaves a newly created worktree database in place when the foreground stack fails", async () => {
+  test("drops a newly created worktree database when startup fails before crypto state exists", async () => {
     ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
+      .mockResolvedValueOnce({ missingCryptoState: true, removed: true });
     startHostedLocalDevStack.mockRejectedValueOnce(new Error("startup failed"));
     const output = createBufferedStdout();
 
@@ -273,6 +281,8 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing)
+      .toHaveBeenCalledWith(createHostedLocalWorktreeConfig());
     expect(output.text()).not.toContain("left in place");
   });
 
@@ -289,7 +299,37 @@ describe("hosted-local run CLI", () => {
       }),
     ).rejects.toThrow("startup failed");
 
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing).not.toHaveBeenCalled();
     expect(output.text()).not.toContain("left in place");
+  });
+
+  test("keeps a created worktree database after the foreground stack has been ready", async () => {
+    ensureHostedLocalWorktreeDatabase.mockResolvedValueOnce({ created: true });
+    startHostedLocalDevStack.mockResolvedValueOnce(createHostedLocalStack({
+      exitCode: 1,
+    }));
+    const output = createBufferedStdout();
+
+    await expect(
+      runHostedLocalCli(["worktree", "up", "feature-a"], {
+        env: {},
+        stderr: output.stdout,
+        stdout: output.stdout,
+      }),
+    ).rejects.toThrow("cloudflare exited with code 1");
+
+    expect(removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing).not.toHaveBeenCalled();
+    expect(output.text()).not.toContain("left in place");
+  });
+
+  test("rejects the internal worktree profile through the generic up command", async () => {
+    await expect(
+      runHostedLocalCli(["up", "--profile", "worktree"], {
+        env: {},
+      }),
+    ).rejects.toThrow("hosted-local worktree profile is internal");
+
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
   test("rejects worktree down because it has no ownership-aware lifecycle", async () => {
@@ -499,14 +539,17 @@ describe("hosted-local run CLI", () => {
   });
 });
 
-function createHostedLocalStack(input: { ready?: Promise<void> } = {}) {
+function createHostedLocalStack(input: {
+  exitCode?: number;
+  ready?: Promise<void>;
+} = {}) {
   return {
     kill: vi.fn(),
     ready: input.ready ?? Promise.resolve(),
     stop: vi.fn(async () => {}),
     waitForExit: vi.fn(async () => ({
       child: {
-        exitCode: 0,
+        exitCode: input.exitCode ?? 0,
       },
       name: "cloudflare" as const,
     })),
