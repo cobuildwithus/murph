@@ -2040,7 +2040,6 @@ function mergeHostedWorkspaceInvocationProjection(
     options.replaceWake === true
     && previous.projectedWakeRequiresCheckpoint
     && previous.nextWakeAt !== null
-    && previous.nextWakeReason !== "assistant"
     && next.nextWakeAt === null;
   const selectedWake = preserveCheckpointGatedWake
     ? {
