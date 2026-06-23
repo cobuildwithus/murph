@@ -2071,10 +2071,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     };
   }
 
-  const mediaRetentionProtections =
-    await collectHostedPendingAssistantInputMediaRetentionProtections({
-      vaultRoot: input.vaultRoot,
-    });
   const idleMaintenance = await runHostedIdleCheckpointMaintenance({
     credentialSource: "platform",
     materializeRetentionCandidatePaths: async (storedPaths) => {
@@ -2091,9 +2087,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     memberId: input.input.request.userId,
     model: null,
     pendingWork: false,
-    protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
-    protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
-    protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
     providerName: null,
     recordUsage: null,
     retryInboxMediaRetentionOnShutdown: isHostedInboxMediaRetentionWakeDue({

@@ -17,9 +17,16 @@ import {
   persistCanonicalInboxCapture,
 } from "@murphai/inboxd";
 import {
+  updateAssistantInputProjection,
+} from "@murphai/assistant-engine";
+import {
   readAssistantInputEvent,
+  updateAssistantInputAttachmentEvidence,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine/assistant-automation";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
@@ -128,6 +135,9 @@ import {
 import {
   ensureHostedInboxSidecarReady,
 } from "../src/hosted-runtime/context.ts";
+import {
+  enqueueHostedPendingAssistantInputId,
+} from "../src/hosted-runtime/pending-input-index.ts";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
@@ -865,6 +875,79 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
       assert.ok(audioPath);
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: recordedAt,
+        }],
+        updatedAt: recordedAt,
+        version: 1,
+      });
+      const pendingInput = await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: "pending old media",
+            transcriptText: "pending old media",
+            userMessageContent: [{
+              text: "pending old media",
+              type: "text" as const,
+            }],
+          },
+          conversation: {
+            accountId: "acct_1",
+            actorId: "actor_1",
+            actorIsSelf: false,
+            source: "linq",
+            threadId: "thread-workspace-retention-only",
+            threadIsDirect: true,
+          },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          replyTarget: {
+            channel: "linq",
+            messageId: "msg_workspace_retention_only",
+            threadId: "thread-workspace-retention-only",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_workspace_retention_only",
+            eventId: "evt_workspace_retention_only",
+            itemId: "item_workspace_retention_only",
+            kind: "hosted-mailbox" as const,
+            lane: "conversation" as const,
+            laneSeq: "10",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            payloadSource: "inline" as const,
+            source: "hosted-mailbox" as const,
+            wakeSchema: "murph.hosted-execution-wake.v1",
+          },
+        },
+        vault: vaultRoot,
+      });
+      await updateAssistantInputProjection({
+        inputId: pendingInput.inputId,
+        projection: {
+          captureId: "cap_workspace_retention_only",
+          status: "succeeded",
+        },
+        vault: vaultRoot,
+      });
+      await updateAssistantInputAttachmentEvidence({
+        attachmentEvidence: {
+          attachments: [],
+          optionalInboxCaptureId: "cap_workspace_retention_only",
+          reasonCode: "inbox_projection_unavailable",
+          source: "hosted-inbox-projection",
+          status: "failed",
+          updatedAt: recordedAt,
+        },
+        inputId: pendingInput.inputId,
+        vault: vaultRoot,
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: pendingInput.inputId,
+        vaultRoot,
+      });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({

@@ -4576,7 +4576,19 @@ describe("handleRunnerOutboundRequest", () => {
       legacyDeltaRef.key,
       legacyArtifactKey,
     ]));
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
+      createdAt: expect.stringMatching(/^20/u),
+      kind: "legacy_workspace_snapshot",
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: `legacy-${snapshotId}`,
+      snapshotRef: replacedSnapshotRef,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotOrphanCandidates.get(`legacy-${snapshotId}`)).toMatchObject({
+      kind: "legacy_workspace_snapshot",
+      snapshotId: `legacy-${snapshotId}`,
+      snapshotRef: replacedSnapshotRef,
+    });
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 

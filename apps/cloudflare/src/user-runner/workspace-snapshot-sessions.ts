@@ -2,30 +2,43 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
+  HostedExecutionBundleRef,
+  HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedWorkspaceReadResponse,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  isHostedWorkspaceSnapshotV2Ref,
+  parseHostedExecutionSnapshotRef,
   parseHostedWorkspaceSnapshotV2Ref,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
+  readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
+import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 import type { R2BucketLike } from "../bundle-store.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   parseHostedWorkspaceSnapshotOrphanCandidate,
   parseHostedWorkspaceSnapshotUploadSession,
   type HostedWorkspaceSnapshotOrphanCandidate,
+  type HostedWorkspaceSnapshotLegacyOrphanCandidate,
+  type HostedWorkspaceSnapshotV2OrphanCandidate,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../workspace-snapshot-store.ts";
+import type { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
 import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported } from "./r2-delete.js";
 
-const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
+export const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 
 type WorkspaceSnapshotSessionStateStore = Pick<RunnerStateStore, "bindUser">;
 
@@ -44,10 +57,12 @@ export interface WorkspaceSnapshotSessionService {
   recordOrphanCandidate(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
+  syncOrphanCandidateAlarm(userId: string): Promise<void>;
 }
 
 export function createWorkspaceSnapshotSessionService(input: {
   bucket: R2BucketLike;
+  runnerStoreCache: Pick<RunnerStoreCache, "ensure">;
   state: DurableObjectStateLike;
   stateStore: WorkspaceSnapshotSessionStateStore;
   readHostedWorkspaceFromWeb(userId: string): Promise<HostedWorkspaceReadResponse>;
@@ -96,6 +111,7 @@ export function createWorkspaceSnapshotSessionService(input: {
         workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
         candidate,
       );
+      await service.syncOrphanCandidateAlarm(candidate.userId);
       return candidate;
     },
 
@@ -160,14 +176,27 @@ export function createWorkspaceSnapshotSessionService(input: {
       const workspaceRead = await input.readHostedWorkspaceFromWeb(userId);
       input.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, userId);
       const currentObjectKey = readHostedWorkspaceV2SnapshotObjectKey(workspaceRead.workspace);
+      const currentSnapshotRef = readHostedWorkspaceSnapshotRef(workspaceRead.workspace);
+      const errors: unknown[] = [];
 
       for (const [key, candidate] of eligibleCandidates) {
-        if (candidate.objectKey === currentObjectKey) {
-          await input.state.storage.delete(key);
-          continue;
+        try {
+          await cleanupWorkspaceSnapshotOrphanCandidate({
+            bucket: input.bucket,
+            candidate,
+            currentObjectKey,
+            currentSnapshotRef,
+            key,
+            runnerStoreCache: input.runnerStoreCache,
+            state: input.state,
+          });
+        } catch (error) {
+          errors.push(error);
         }
-        await deleteR2ObjectIfSupported(input.bucket, candidate.objectKey);
-        await input.state.storage.delete(key);
+      }
+      await service.syncOrphanCandidateAlarm(userId);
+      if (errors.length > 0) {
+        throw errors[0];
       }
     },
 
@@ -208,9 +237,194 @@ export function createWorkspaceSnapshotSessionService(input: {
       }
       return { deleted: false };
     },
+
+    async syncOrphanCandidateAlarm(userId) {
+      await syncWorkspaceSnapshotOrphanCandidateAlarm({
+        state: input.state,
+        userId,
+      });
+    },
   };
 
   return service;
+}
+
+export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
+  state: DurableObjectStateLike;
+  userId: string;
+}): Promise<number | null> {
+  if (!input.state.storage.list) {
+    return null;
+  }
+  const candidates = await input.state.storage.list<unknown>({
+    prefix: workspaceSnapshotOrphanCandidateStoragePrefix(),
+  });
+  let nextAtMs: number | null = null;
+  for (const value of candidates.values()) {
+    let candidate: HostedWorkspaceSnapshotOrphanCandidate;
+    try {
+      candidate = parseHostedWorkspaceSnapshotOrphanCandidate(value);
+    } catch {
+      continue;
+    }
+    if (candidate.userId !== input.userId) {
+      continue;
+    }
+    const createdAtMs = Date.parse(candidate.createdAt);
+    if (!Number.isFinite(createdAtMs)) {
+      continue;
+    }
+    const eligibleAtMs = createdAtMs + WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS;
+    nextAtMs = nextAtMs === null
+      ? eligibleAtMs
+      : Math.min(nextAtMs, eligibleAtMs);
+  }
+  return nextAtMs;
+}
+
+async function syncWorkspaceSnapshotOrphanCandidateAlarm(input: {
+  state: DurableObjectStateLike;
+  userId: string;
+}): Promise<void> {
+  const nextAtMs = await readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input);
+  if (nextAtMs === null) {
+    await input.state.storage.deleteAlarm?.();
+    return;
+  }
+  const currentAlarm = await input.state.storage.getAlarm();
+  if (currentAlarm !== null && currentAlarm <= nextAtMs) {
+    return;
+  }
+  await input.state.storage.setAlarm(nextAtMs);
+}
+
+async function cleanupWorkspaceSnapshotOrphanCandidate(input: {
+  bucket: R2BucketLike;
+  candidate: HostedWorkspaceSnapshotOrphanCandidate;
+  currentObjectKey: string | null;
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
+  key: string;
+  runnerStoreCache: Pick<RunnerStoreCache, "ensure">;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  const candidate = input.candidate;
+  if (candidate.kind === "legacy_workspace_snapshot") {
+    await cleanupLegacyWorkspaceSnapshotOrphanCandidate({
+      bucket: input.bucket,
+      candidate,
+      currentSnapshotRef: input.currentSnapshotRef,
+      key: input.key,
+      runnerStoreCache: input.runnerStoreCache,
+      state: input.state,
+    });
+    return;
+  }
+  await cleanupV2WorkspaceSnapshotOrphanCandidate({
+    bucket: input.bucket,
+    candidate,
+    currentObjectKey: input.currentObjectKey,
+    key: input.key,
+    state: input.state,
+  });
+}
+
+async function cleanupV2WorkspaceSnapshotOrphanCandidate(input: {
+  bucket: R2BucketLike;
+  candidate: HostedWorkspaceSnapshotV2OrphanCandidate;
+  currentObjectKey: string | null;
+  key: string;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  if (input.candidate.objectKey === input.currentObjectKey) {
+    await input.state.storage.delete(input.key);
+    return;
+  }
+  await deleteR2ObjectIfSupported(input.bucket, input.candidate.objectKey);
+  await input.state.storage.delete(input.key);
+}
+
+async function cleanupLegacyWorkspaceSnapshotOrphanCandidate(input: {
+  bucket: R2BucketLike;
+  candidate: HostedWorkspaceSnapshotLegacyOrphanCandidate;
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
+  key: string;
+  runnerStoreCache: Pick<RunnerStoreCache, "ensure">;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  if (legacySnapshotRefsShareBundlePayload(input.candidate.snapshotRef, input.currentSnapshotRef)) {
+    await input.state.storage.delete(input.key);
+    return;
+  }
+  const bundleRefs = collectLegacyWorkspaceSnapshotBundleRefs(input.candidate.snapshotRef);
+  if (bundleRefs.length === 0) {
+    await input.state.storage.delete(input.key);
+    return;
+  }
+  const stores = await input.runnerStoreCache.ensure(input.candidate.userId);
+  const garbageCollector = new HostedBundleGarbageCollector(
+    input.bucket,
+    stores.crypto.rootKey,
+    stores.crypto.rootKeyId,
+    stores.crypto.keysById,
+  );
+  await Promise.all(bundleRefs.map(async (previousBundleRef) => {
+    await garbageCollector.cleanupBundleTransition({
+      nextBundleRef: null,
+      previousBundleRef,
+      userId: input.candidate.userId,
+    });
+  }));
+  await input.state.storage.delete(input.key);
+}
+
+function readHostedWorkspaceSnapshotRef(
+  workspace: HostedWorkspaceState | null,
+): HostedExecutionSnapshotRef | null {
+  const snapshotRef = parseHostedExecutionSnapshotRef(
+    workspace?.snapshotRef,
+    "Hosted workspace snapshot orphan cleanup current snapshotRef",
+  );
+  if (!snapshotRef || isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    return null;
+  }
+  return snapshotRef;
+}
+
+function legacySnapshotRefsShareBundlePayload(
+  left: HostedExecutionSnapshotRef,
+  right: HostedExecutionSnapshotRef | null,
+): boolean {
+  if (!right) {
+    return false;
+  }
+  const leftRefs = collectLegacyWorkspaceSnapshotBundleRefs(left);
+  const rightRefs = collectLegacyWorkspaceSnapshotBundleRefs(right);
+  return leftRefs.some((leftRef) =>
+    rightRefs.some((rightRef) =>
+      leftRef.hash === rightRef.hash && leftRef.size === rightRef.size
+    )
+  );
+}
+
+function collectLegacyWorkspaceSnapshotBundleRefs(
+  snapshotRef: HostedExecutionSnapshotRef,
+): HostedExecutionBundleRef[] {
+  const refs: HostedExecutionBundleRef[] = [];
+  const candidates = [
+    readHostedExecutionSnapshotBaseRef(snapshotRef),
+    readHostedExecutionSnapshotHotRef(snapshotRef),
+    readHostedExecutionSnapshotDeltaRef(snapshotRef),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (refs.some((existing) => existing.key === candidate.key)) {
+      continue;
+    }
+    refs.push(candidate);
+  }
+  return refs;
 }
 
 async function readHostedWorkspaceSnapshotOrphanCandidateForCleanup(input: {

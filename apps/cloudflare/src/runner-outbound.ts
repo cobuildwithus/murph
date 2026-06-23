@@ -5,6 +5,7 @@ import type {
   HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
   WorkspaceSnapshotR2BucketLike,
   WorkspaceSnapshotR2ObjectLike,
@@ -1553,9 +1554,10 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
       return;
     }
     try {
-      await recordWorkspaceSnapshotOrphanCandidate({
-        env: input.env,
+      await recordWorkspaceSnapshotOrphanCandidate(input.env, {
+        createdAt: new Date().toISOString(),
         objectKey: replacedSnapshotRef.objectKey,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
         snapshotId: replacedSnapshotRef.snapshotId,
         userId: replacedSnapshotRef.userId,
       });
@@ -1570,6 +1572,18 @@ async function deleteReplacedWorkspaceSnapshotObject(input: {
     return;
   }
 
+  try {
+    await recordWorkspaceSnapshotOrphanCandidate(input.env, {
+      createdAt: new Date().toISOString(),
+      kind: "legacy_workspace_snapshot",
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: `legacy-${input.snapshotRef.snapshotId}`,
+      snapshotRef: replacedSnapshotRef,
+      userId: input.snapshotRef.userId,
+    });
+  } catch {
+    // Direct deletion below can still complete cleanup without a retry record.
+  }
   await deleteReplacedLegacyWorkspaceSnapshotBundles({
     env: input.env,
     environment: input.environment,
@@ -1690,9 +1704,10 @@ async function retireWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<void> {
   if (input.recordOrphanCandidate && input.objectKey) {
-    await recordWorkspaceSnapshotOrphanCandidate({
-      env: input.env,
+    await recordWorkspaceSnapshotOrphanCandidate(input.env, {
+      createdAt: new Date().toISOString(),
       objectKey: input.objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
       snapshotId: input.snapshotId,
       userId: input.userId,
     }).catch(() => undefined);
@@ -1711,23 +1726,15 @@ async function retireWorkspaceSnapshotUploadSession(input: {
   }
 }
 
-async function recordWorkspaceSnapshotOrphanCandidate(input: {
-  env: RunnerOutboundEnvironmentSource;
-  objectKey: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+async function recordWorkspaceSnapshotOrphanCandidate(
+  env: RunnerOutboundEnvironmentSource,
+  candidate: HostedWorkspaceSnapshotOrphanCandidate,
+): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
   if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
     return;
   }
-  await stub.recordHostedWorkspaceSnapshotOrphanCandidate({
-    createdAt: new Date().toISOString(),
-    objectKey: input.objectKey,
-    schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  await stub.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {

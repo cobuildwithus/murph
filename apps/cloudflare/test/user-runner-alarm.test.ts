@@ -2473,6 +2473,34 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceSnapshotOrphanCandidateStorageKey("snapshot_current"),
     )).toBeUndefined();
   });
+
+  it("cleans workspace snapshot orphan candidates from the runner alarm without a later upload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const orphanObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_alarm_orphan.snapshot.enc`;
+    await bucket.put(orphanObjectKey, "orphan-encrypted-snapshot");
+    const { alarms, runner, storageValues } = createRunnerHarness({ bucket });
+
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: orphanObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_alarm_orphan",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toContain("2026-04-26T01:05:00.000Z");
+
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(orphanObjectKey);
+    expect(bucket.objects.has(orphanObjectKey)).toBe(false);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_alarm_orphan"),
+    )).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
 });
 
 function createRunnerHarness(input: {
