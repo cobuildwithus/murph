@@ -7,7 +7,11 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   type HostedCodexAuthAction,
 } from "@murphai/hosted-execution";
-import type { HostedCodexAuthUpdate } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedCodexAuthUpdate,
+  HostedCodexAuthUpdateResponse,
+  HostedCodexAuthUpdateResponseStatus,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
@@ -24,6 +28,7 @@ export type HostedCodexAuthConnectionState =
   | "connecting"
   | "connected"
   | "disconnecting"
+  | "disconnected"
   | "error";
 
 export type HostedCodexAuthConnectionView =
@@ -99,7 +104,7 @@ export async function beginHostedCodexAuthAttempt(input: {
         };
       }
     } else {
-      if (!current) {
+      if (!current || current.state === "disconnected") {
         return {
           attemptId: null,
           mailboxItemId: null,
@@ -178,14 +183,22 @@ export async function markHostedCodexAuthAttemptError(input: {
       state: { in: ["connecting", "disconnecting"] },
     },
   });
-  return result.count === 1;
+  if (result.count === 1) {
+    return true;
+  }
+  return await hostedCodexAuthAttemptIsAlreadyInState({
+    attemptId: input.attemptId,
+    memberId: input.memberId,
+    prisma,
+    states: ["error"],
+  });
 }
 
 export async function applyHostedCodexAuthUpdate(input: {
   memberId: string;
   prisma?: HostedCodexAuthStoreClient;
   update: HostedCodexAuthUpdate;
-}): Promise<{ applied: boolean }> {
+}): Promise<HostedCodexAuthUpdateResponse> {
   const prisma = input.prisma ?? getPrisma();
 
   switch (input.update.phase) {
@@ -201,7 +214,14 @@ export async function applyHostedCodexAuthUpdate(input: {
           state: "connecting",
         },
       });
-      return { applied: result.count === 1 };
+      return result.count === 1
+        ? createHostedCodexAuthUpdateResponse("applied")
+        : await resolveHostedCodexAuthCallbackMiss({
+            alreadyAppliedStates: ["connecting", "connected"],
+            attemptId: input.update.attemptId,
+            memberId: input.memberId,
+            prisma,
+          });
     }
     case "connected": {
       const result = await prisma.hostedCodexAuthConnection.updateMany({
@@ -216,28 +236,98 @@ export async function applyHostedCodexAuthUpdate(input: {
           state: "connecting",
         },
       });
-      return { applied: result.count === 1 };
+      return result.count === 1
+        ? createHostedCodexAuthUpdateResponse("applied")
+        : await resolveHostedCodexAuthCallbackMiss({
+            alreadyAppliedStates: ["connected"],
+            attemptId: input.update.attemptId,
+            memberId: input.memberId,
+            prisma,
+          });
     }
     case "failed": {
-      return {
-        applied: await markHostedCodexAuthAttemptError({
+      const result = await prisma.hostedCodexAuthConnection.updateMany({
+        data: {
+          state: "error",
+          userCode: null,
+          verificationUrl: null,
+        },
+        where: {
           attemptId: input.update.attemptId,
           memberId: input.memberId,
-          prisma,
-        }),
-      };
+          state: { in: ["connecting", "disconnecting"] },
+        },
+      });
+      return result.count === 1
+        ? createHostedCodexAuthUpdateResponse("applied")
+        : await resolveHostedCodexAuthCallbackMiss({
+            alreadyAppliedStates: ["error"],
+            attemptId: input.update.attemptId,
+            memberId: input.memberId,
+            prisma,
+          });
     }
     case "disconnected": {
-      const result = await prisma.hostedCodexAuthConnection.deleteMany({
+      const result = await prisma.hostedCodexAuthConnection.updateMany({
+        data: {
+          state: "disconnected",
+          userCode: null,
+          verificationUrl: null,
+        },
         where: {
           attemptId: input.update.attemptId,
           memberId: input.memberId,
           state: "disconnecting",
         },
       });
-      return { applied: result.count === 1 };
+      return result.count === 1
+        ? createHostedCodexAuthUpdateResponse("applied")
+        : await resolveHostedCodexAuthCallbackMiss({
+            alreadyAppliedStates: ["disconnected"],
+            attemptId: input.update.attemptId,
+            memberId: input.memberId,
+            prisma,
+          });
     }
   }
+}
+
+async function resolveHostedCodexAuthCallbackMiss(input: {
+  alreadyAppliedStates: readonly HostedCodexAuthConnectionState[];
+  attemptId: string;
+  memberId: string;
+  prisma: HostedCodexAuthStoreClient;
+}): Promise<HostedCodexAuthUpdateResponse> {
+  return await hostedCodexAuthAttemptIsAlreadyInState({
+    attemptId: input.attemptId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    states: input.alreadyAppliedStates,
+  })
+    ? createHostedCodexAuthUpdateResponse("already_applied")
+    : createHostedCodexAuthUpdateResponse("superseded");
+}
+
+async function hostedCodexAuthAttemptIsAlreadyInState(input: {
+  attemptId: string;
+  memberId: string;
+  prisma: HostedCodexAuthStoreClient;
+  states: readonly HostedCodexAuthConnectionState[];
+}): Promise<boolean> {
+  const current = await input.prisma.hostedCodexAuthConnection.findUnique({
+    where: { memberId: input.memberId },
+  });
+  return current?.attemptId === input.attemptId
+    && input.states.includes(parseHostedCodexAuthConnectionState(current.state));
+}
+
+function createHostedCodexAuthUpdateResponse(
+  status: HostedCodexAuthUpdateResponseStatus,
+): HostedCodexAuthUpdateResponse {
+  return {
+    applied: status !== "superseded",
+    status,
+  };
 }
 
 function projectHostedCodexAuthConnection(
@@ -269,6 +359,7 @@ function parseHostedCodexAuthConnectionState(value: string): HostedCodexAuthConn
     value === "connecting"
     || value === "connected"
     || value === "disconnecting"
+    || value === "disconnected"
     || value === "error"
   ) {
     return value;

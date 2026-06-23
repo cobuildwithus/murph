@@ -20,6 +20,7 @@ import {
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_LOG_LEVELS,
@@ -82,6 +83,7 @@ import {
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
   type HostedCodexAuthUpdateResponse,
+  type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
@@ -733,12 +735,32 @@ export function parseHostedCodexAuthUpdateResponse(
   const record = requireObject(value, "Hosted Codex auth update response");
   assertAllowedObjectKeys(
     record,
-    new Set(["applied"]),
+    new Set(["applied", "status"]),
     "Hosted Codex auth update response",
   );
+  const applied = requireBoolean(record.applied, "Hosted Codex auth update response applied");
+  const status = record.status === undefined
+    ? applied ? "applied" : "superseded"
+    : parseHostedCodexAuthUpdateResponseStatus(record.status);
+  if ((status === "superseded") === applied) {
+    throw new TypeError("Hosted Codex auth update response status conflicts with applied.");
+  }
   return {
-    applied: requireBoolean(record.applied, "Hosted Codex auth update response applied"),
+    applied,
+    status,
   };
+}
+
+function parseHostedCodexAuthUpdateResponseStatus(
+  value: unknown,
+): HostedCodexAuthUpdateResponseStatus {
+  const status = requireString(value, "Hosted Codex auth update response status");
+  if (HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES.includes(
+    status as HostedCodexAuthUpdateResponseStatus,
+  )) {
+    return status as HostedCodexAuthUpdateResponseStatus;
+  }
+  throw new TypeError("Hosted Codex auth update response status is not supported.");
 }
 
 function parseHostedCodexAuthAttemptId(value: unknown): string {

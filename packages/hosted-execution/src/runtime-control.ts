@@ -725,8 +725,18 @@ export type HostedCodexAuthUpdate =
       phase: "connected" | "disconnected" | "failed";
     };
 
+export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
+  "applied",
+  "already_applied",
+  "superseded",
+] as const;
+
+export type HostedCodexAuthUpdateResponseStatus =
+  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
+
 export interface HostedCodexAuthUpdateResponse {
   applied: boolean;
+  status: HostedCodexAuthUpdateResponseStatus;
 }
 
 export interface HostedRuntimeIssueExportRequest {

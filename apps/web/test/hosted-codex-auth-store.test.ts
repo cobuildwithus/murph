@@ -137,7 +137,7 @@ describe("hosted Codex auth store", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
-  it("applies callback updates only to the active attempt and deletes after disconnect", async () => {
+  it("applies callback updates only to the active attempt and idempotently records terminals", async () => {
     const prisma = createCodexAuthPrismaHarness({
       attemptId: "hca_abcdefghijklmnop",
       memberId: "member_123",
@@ -156,7 +156,10 @@ describe("hosted Codex auth store", () => {
         userCode: "STALE-CODE",
         verificationUrl: "https://auth.openai.com/device",
       },
-    })).resolves.toEqual({ applied: false });
+    })).resolves.toEqual({
+      applied: false,
+      status: "superseded",
+    });
     expect(prisma.getRecord()).toMatchObject({
       attemptId: "hca_abcdefghijklmnop",
       userCode: null,
@@ -172,7 +175,10 @@ describe("hosted Codex auth store", () => {
         userCode: "ABCD-EFGH",
         verificationUrl: "https://auth.openai.com/device",
       },
-    })).resolves.toEqual({ applied: true });
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
     expect(prisma.getRecord()).toMatchObject({
       state: "connecting",
       userCode: "ABCD-EFGH",
@@ -186,7 +192,10 @@ describe("hosted Codex auth store", () => {
         attemptId: "hca_supersededattempt",
         phase: "connected",
       },
-    })).resolves.toEqual({ applied: false });
+    })).resolves.toEqual({
+      applied: false,
+      status: "superseded",
+    });
     await expect(applyHostedCodexAuthUpdate({
       memberId: "member_123",
       prisma: prisma.client,
@@ -194,7 +203,21 @@ describe("hosted Codex auth store", () => {
         attemptId: "hca_abcdefghijklmnop",
         phase: "connected",
       },
-    })).resolves.toEqual({ applied: true });
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_abcdefghijklmnop",
+        phase: "connected",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "already_applied",
+    });
     expect(prisma.getRecord()).toMatchObject({
       state: "connected",
       userCode: null,
@@ -216,7 +239,10 @@ describe("hosted Codex auth store", () => {
         attemptId: "hca_supersededattempt",
         phase: "disconnected",
       },
-    })).resolves.toEqual({ applied: false });
+    })).resolves.toEqual({
+      applied: false,
+      status: "superseded",
+    });
     expect(prisma.getRecord()).toMatchObject({
       attemptId: "hca_disconnectattempt",
       state: "disconnecting",
@@ -229,8 +255,27 @@ describe("hosted Codex auth store", () => {
         attemptId: "hca_disconnectattempt",
         phase: "disconnected",
       },
-    })).resolves.toEqual({ applied: true });
-    expect(prisma.getRecord()).toBeNull();
+    })).resolves.toEqual({
+      applied: true,
+      status: "applied",
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      attemptId: "hca_disconnectattempt",
+      state: "disconnected",
+      userCode: null,
+      verificationUrl: null,
+    });
+    await expect(applyHostedCodexAuthUpdate({
+      memberId: "member_123",
+      prisma: prisma.client,
+      update: {
+        attemptId: "hca_disconnectattempt",
+        phase: "disconnected",
+      },
+    })).resolves.toEqual({
+      applied: true,
+      status: "already_applied",
+    });
     await expect(readHostedCodexAuthConnectionView({
       memberId: "member_123",
       prisma: prisma.client,

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-05
+Last verified: 2026-06-23
 
 ## Decision
 
@@ -290,6 +290,17 @@ dirty webhook freshness is persisted dirty state plus one clean-to-dirty
 periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
 `runtime.device-sync-recovery-requested` control rows remain importable for
 deploy-skew and drain compatibility, but there is no active producer for them.
+
+Hosted Codex auth is system-mailbox runtime-control work, but its terminal
+`connected` and `disconnected` callbacks are not sent before durable workspace
+checkpoint success. The runtime may stream a `device_code` update immediately
+so the settings UI can show the login code, but terminal auth records must run
+through the after-durable-checkpoint effect lane. The follow-up callback is
+idempotent: web returns `applied`, `already_applied`, or `superseded`; only a
+superseded `connected` callback may prune the local managed `auth.json`.
+Disconnect is local-revocation-first: remote app-server logout is best effort,
+local `auth.json` deletion is required, and a local deletion failure keeps the
+system-mailbox item retryable instead of consuming a revocation request.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

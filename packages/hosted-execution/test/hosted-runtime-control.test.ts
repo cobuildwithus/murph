@@ -686,7 +686,19 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedCodexAuthUpdateResponse({ applied: false })).toEqual({
       applied: false,
+      status: "superseded",
     });
+    expect(parseHostedCodexAuthUpdateResponse({
+      applied: true,
+      status: "already_applied",
+    })).toEqual({
+      applied: true,
+      status: "already_applied",
+    });
+    expect(() => parseHostedCodexAuthUpdateResponse({
+      applied: true,
+      status: "superseded",
+    })).toThrow(/conflicts/u);
 
     expect(() => parseHostedCodexAuthUpdate({
       attemptId: "hca_abcdefghijklmnop",

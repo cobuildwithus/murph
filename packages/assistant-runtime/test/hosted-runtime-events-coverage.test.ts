@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -322,6 +325,7 @@ describe("hosted runtime event coverage", () => {
   it("runs Codex auth connect wakes through the runtime-control lane", async () => {
     const update = vi.fn(async () => ({
       applied: true,
+      status: "applied" as const,
     }));
     mocks.executeCodexManagedAccountOperation.mockImplementationOnce(async (input) => {
       await input.onDeviceCode?.({
@@ -372,6 +376,57 @@ describe("hosted runtime event coverage", () => {
         workingDirectory: "/tmp/assistant-runtime-events-coverage",
       }),
     );
+  });
+
+  it("deletes local Codex auth when remote disconnect fails", async () => {
+    const operatorHomeRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-codex-auth-disconnect-"),
+    );
+    const authPath = path.join(operatorHomeRoot, ".codex-hosted", "auth.json");
+    const update = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+    mocks.executeCodexManagedAccountOperation.mockRejectedValueOnce(
+      new Error("synthetic disconnect failure"),
+    );
+    const runtime = createRuntime({
+      codexAuthPort: { update },
+    });
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "disconnect",
+      attemptId: "hca_disconnectattempt",
+      eventId: "runtime-control:codex-auth-disconnect",
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_123",
+    });
+
+    try {
+      await mkdir(path.dirname(authPath), { recursive: true });
+      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
+
+      await expect(
+        executeHostedMailboxEvent({
+          executionContext,
+          operatorHomeRoot,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: "/tmp/assistant-runtime-events-coverage",
+          wake,
+        }),
+      ).resolves.toMatchObject({
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: {
+          attemptId: "hca_disconnectattempt",
+          kind: "codex-auth.updated",
+          phase: "disconnected",
+        },
+      });
+      await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      await rm(operatorHomeRoot, { force: true, recursive: true });
+    }
   });
 
   it("fails closed on unexpected wake kinds", async () => {

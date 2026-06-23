@@ -30,6 +30,13 @@ class HostedCodexAuthAttemptSupersededError extends Error {
   }
 }
 
+class HostedCodexAuthLocalDeleteError extends Error {
+  constructor(cause: unknown) {
+    super("Hosted Codex auth local credential delete failed.", { cause });
+    this.name = "HostedCodexAuthLocalDeleteError";
+  }
+}
+
 export async function executeHostedCodexAuthWake(input: {
   operatorHomeRoot: string | null;
   platform: HostedRuntimePlatform;
@@ -60,7 +67,7 @@ export async function executeHostedCodexAuthWake(input: {
             userCode: deviceCode.userCode,
             verificationUrl: deviceCode.verificationUrl,
           });
-          if (!response.applied) {
+          if (response.status === "superseded") {
             throw new HostedCodexAuthAttemptSupersededError();
           }
         },
@@ -77,14 +84,13 @@ export async function executeHostedCodexAuthWake(input: {
       });
     }
 
-    await executeCodexManagedAccountOperation({
-      action: "disconnect",
-      codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+    await disconnectHostedCodexManagedAccountBestEffort({
       codexHome,
-      env: { ...input.runtimeEnv },
-      workingDirectory: input.vaultRoot,
+      platform: input.platform,
+      runtimeEnv: input.runtimeEnv,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
     });
-    await rm(path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME), { force: true });
     return createNoopMailboxEffect({
       conversationMetrics: null,
       mailboxLane: "runtime-control",
@@ -100,6 +106,9 @@ export async function executeHostedCodexAuthWake(input: {
         conversationMetrics: null,
         mailboxLane: "runtime-control",
       });
+    }
+    if (error instanceof HostedCodexAuthLocalDeleteError) {
+      throw error;
     }
 
     emitHostedExecutionStructuredLog({
@@ -121,5 +130,41 @@ export async function executeHostedCodexAuthWake(input: {
       conversationMetrics: null,
       mailboxLane: "runtime-control",
     });
+  }
+}
+
+async function disconnectHostedCodexManagedAccountBestEffort(input: {
+  codexHome: string;
+  platform: HostedRuntimePlatform;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+  wake: HostedExecutionCodexAuthRequestedWake;
+}): Promise<void> {
+  try {
+    await executeCodexManagedAccountOperation({
+      action: "disconnect",
+      codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+      codexHome: input.codexHome,
+      env: { ...input.runtimeEnv },
+      workingDirectory: input.vaultRoot,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        eventCode: "assistant.codex_auth_disconnect_remote_failed",
+      },
+      error,
+      level: "warn",
+      message: "Hosted Codex account remote disconnect failed; deleting local credential.",
+      phase: "wake.running",
+      wake: input.wake,
+    });
+  }
+
+  try {
+    await rm(path.join(input.codexHome, HOSTED_CODEX_AUTH_FILE_NAME), { force: true });
+  } catch (error) {
+    throw new HostedCodexAuthLocalDeleteError(error);
   }
 }

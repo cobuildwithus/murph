@@ -825,12 +825,12 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         attemptId: input.record.attemptId,
         phase: input.record.phase,
       });
-      if (!response.applied) {
+      if (input.record.phase === "connected" && response.status === "superseded") {
         await removeHostedCodexAuthJson(input.operatorHomeRoot);
       }
       return {
         nextWakeAt: null,
-        recorded: response.applied ? 1 : 0,
+        recorded: response.status === "superseded" ? 0 : 1,
         stillDirty: false,
       };
     }

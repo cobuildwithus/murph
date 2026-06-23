@@ -30,6 +30,7 @@ describe("hosted Codex auth internal callback route", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.applyHostedCodexAuthUpdate.mockResolvedValue({
       applied: true,
+      status: "applied",
     });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
   });
@@ -56,6 +57,7 @@ describe("hosted Codex auth internal callback route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       applied: true,
+      status: "applied",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(request, {
       maxBodyBytes: 4_096,

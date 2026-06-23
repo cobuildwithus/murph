@@ -3511,6 +3511,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       if (url.pathname.endsWith(HOSTED_RUNTIME_CODEX_AUTH_PATH)) {
         return new Response(JSON.stringify({
           applied: true,
+          status: "applied",
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
