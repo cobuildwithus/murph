@@ -876,6 +876,7 @@ function createHostedConversationAssistantInputEvent(input: {
       input.wake,
       identifierBlind,
     ),
+    hostedMailboxItemId: input.item.item.id,
     occurredAt: input.wake.occurredAt,
     receivedAt: input.item.item.createdAt,
     // A durably-consumed item is a replay of an already-handled message: it

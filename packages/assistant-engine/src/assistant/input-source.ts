@@ -39,6 +39,7 @@ export interface AssistantInputEvent {
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
   conversation: AssistantInputConversationRef | null
   cursor: AssistantInputCursor
+  hostedMailboxItemId?: string | null
   inputId: string
   occurredAt: string
   receivedAt: string | null
@@ -220,6 +221,7 @@ export function assistantInputCandidateFromStoredEvent(
       attachmentDescriptors: event.content.attachmentDescriptors,
       conversation: event.conversation,
       cursor: event.cursor,
+      hostedMailboxItemId: event.hostedMailboxItemId ?? null,
       inputId: event.inputId,
       occurredAt: event.occurredAt,
       receivedAt: event.receivedAt,

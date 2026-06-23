@@ -682,8 +682,10 @@ function createCapturelessAssistantInputCandidate(input: {
   mailboxRow?: {
     dedupeKey: string
     eventId: string
+    hostedMailboxItemId?: string
     itemId: string
     laneSeq: string
+    sourceRefItemId?: string
   }
   occurredAt: string
   receivedAt?: string | null
@@ -725,6 +727,9 @@ function createCapturelessAssistantInputCandidate(input: {
         sourceKind: 'hosted-mailbox',
         sourcePosition: `hosted-mailbox:conversation:${input.inputId}`,
       },
+      hostedMailboxItemId: input.mailboxRow?.hostedMailboxItemId ??
+        input.mailboxRow?.itemId ??
+        `item_${input.inputId}`,
       inputId: input.inputId,
       occurredAt: input.occurredAt,
       receivedAt: input.receivedAt ?? null,
@@ -734,7 +739,9 @@ function createCapturelessAssistantInputCandidate(input: {
       sourceRef: {
         dedupeKey: input.mailboxRow?.dedupeKey ?? `dedupe_${input.inputId}`,
         eventId: input.mailboxRow?.eventId ?? `event_${input.inputId}`,
-        itemId: input.mailboxRow?.itemId ?? `item_${input.inputId}`,
+        itemId: input.mailboxRow?.sourceRefItemId ??
+          input.mailboxRow?.itemId ??
+          `item_${input.inputId}`,
         kind: 'hosted-mailbox',
         lane: 'conversation',
         laneSeq: input.mailboxRow?.laneSeq ?? '42',
@@ -6476,6 +6483,14 @@ describe('assistant auto-reply runtime', () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_replay',
       inputId: 'ain_11111111111111111111111111111111',
+      mailboxRow: {
+        dedupeKey: 'dedupe_replay',
+        eventId: 'event_replay',
+        hostedMailboxItemId: 'raw_mailbox_item_replay',
+        itemId: 'raw_mailbox_item_replay',
+        laneSeq: '42',
+        sourceRefItemId: 'blinded_mailbox_item_replay',
+      },
       occurredAt: '2026-04-08T00:07:00.000Z',
       receivedAt: '2026-04-08T00:07:01.000Z',
       replyTarget: {
@@ -6509,8 +6524,8 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
-    const firstKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
-      ?.deliveryIdempotencyKey
+    const firstSend = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    const firstKey = firstSend?.deliveryIdempotencyKey
 
     replyMocks.sendAssistantMessage.mockClear()
     await reply.processAssistantAutoReplyGroup({
@@ -6528,11 +6543,21 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
-    const replayKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
-      ?.deliveryIdempotencyKey
+    const replaySend = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    const replayKey = replaySend?.deliveryIdempotencyKey
 
     expect(firstKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
     expect(replayKey).toBe(firstKey)
+    expect(firstSend?.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+      'raw_mailbox_item_replay',
+    ])
+    expect(replaySend?.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+      'raw_mailbox_item_replay',
+    ])
+    expect(hostedInput.event.sourceRef).toMatchObject({
+      itemId: 'blinded_mailbox_item_replay',
+      kind: 'hosted-mailbox',
+    })
   })
 
   it.each([
@@ -6577,12 +6602,14 @@ describe('assistant auto-reply runtime', () => {
           eventId: 'durable_event_replayed_row_001',
           itemId: 'durable_mailbox_item_replayed_row_001',
           laneSeq: '51',
+          sourceRefItemId: 'blinded_mailbox_item_replayed_row_001',
         },
         {
           dedupeKey: 'durable_dedupe_replayed_row_002',
           eventId: 'durable_event_replayed_row_002',
           itemId: 'durable_mailbox_item_replayed_row_002',
           laneSeq: '52',
+          sourceRefItemId: 'blinded_mailbox_item_replayed_row_002',
         },
       ]
 
@@ -6625,11 +6652,17 @@ describe('assistant auto-reply runtime', () => {
           vault: '/tmp/assistant-automation-vault',
         })
 
-        const key = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
-          ?.deliveryIdempotencyKey
+        const sendInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+        const key = sendInput?.deliveryIdempotencyKey
         if (typeof key !== 'string') {
           throw new Error('expected hosted delivery idempotency key')
         }
+        expect(
+          sendInput?.hostedDeliveryIdempotency?.inboundMailboxItemIds,
+        ).toEqual([
+          'durable_mailbox_item_replayed_row_001',
+          'durable_mailbox_item_replayed_row_002',
+        ])
         return key
       }
 
@@ -6785,6 +6818,13 @@ describe('assistant auto-reply runtime', () => {
     const initialInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_active',
       inputId: 'ain_44444444444444444444444444444444',
+      mailboxRow: {
+        dedupeKey: 'dedupe_active_initial',
+        eventId: 'event_active_initial',
+        itemId: 'raw_mailbox_item_active_initial',
+        laneSeq: '42',
+        sourceRefItemId: 'blinded_mailbox_item_active_initial',
+      },
       occurredAt: '2026-04-08T00:09:00.000Z',
       receivedAt: '2026-04-08T00:09:01.000Z',
       replyTarget: {
@@ -6798,6 +6838,13 @@ describe('assistant auto-reply runtime', () => {
     const lateInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_active',
       inputId: 'ain_55555555555555555555555555555555',
+      mailboxRow: {
+        dedupeKey: 'dedupe_active_late',
+        eventId: 'event_active_late',
+        itemId: 'raw_mailbox_item_active_late',
+        laneSeq: '43',
+        sourceRefItemId: 'blinded_mailbox_item_active_late',
+      },
       occurredAt: '2026-04-08T00:09:10.000Z',
       receivedAt: '2026-04-08T00:09:11.000Z',
       replyTarget: {
@@ -6854,13 +6901,22 @@ describe('assistant auto-reply runtime', () => {
           | { kind: 'no-new-input' }
           | {
               deliveryIdempotencyKey?: string | null
+              hostedDeliveryIdempotency?: {
+                inboundMailboxItemIds?: readonly string[] | null
+              } | null
               kind: 'accepted'
             }
         >
         deliveryIdempotencyKey?: string | null
+        hostedDeliveryIdempotency?: {
+          inboundMailboxItemIds?: readonly string[] | null
+        } | null
       }) => {
         expect(input.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
         expect(input.deliveryIdempotencyKey).not.toBe(replayKey)
+        expect(input.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+          'raw_mailbox_item_active_initial',
+        ])
         const admitted = await input.activeTurnInput?.({
           sessionId: 'session-1',
           turnId: 'turn-1',
@@ -6870,6 +6926,10 @@ describe('assistant auto-reply runtime', () => {
           throw new Error('expected active input admission')
         }
         expect(admitted.deliveryIdempotencyKey).toBe(replayKey)
+        expect(admitted.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+          'raw_mailbox_item_active_initial',
+          'raw_mailbox_item_active_late',
+        ])
         return {
           delivery: {
             channel: 'linq',
