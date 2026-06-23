@@ -48,6 +48,9 @@ export {
   normalizeAssistantInputFileName,
 } from './attachment-file-name.js'
 export {
+  recordHostedMailboxAssistantInputItem,
+} from './hosted-mailbox-input-items.js'
+export {
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,

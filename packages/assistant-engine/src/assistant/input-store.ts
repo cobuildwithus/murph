@@ -379,9 +379,6 @@ const assistantInputEventRecordSchema = z
     content: assistantInputContentSchema,
     conversation: assistantInputConversationRefSchema.nullable().default(null),
     cursor: assistantInputCursorSchema,
-    hostedMailboxItemId: safeNullableAssistantInputTokenSchema(
-      'hostedMailboxItemId',
-    ).optional(),
     idempotencyKey: z
       .string()
       .regex(/^sha256:[0-9a-f]{64}$/u),
@@ -446,7 +443,6 @@ export interface UpsertAssistantInputEventInput {
   occurredAt: string
   receivedAt?: string | null
   replyTarget?: z.input<typeof assistantInputReplyTargetSchema> | null
-  hostedMailboxItemId?: string | null
   sourceMetadata?: z.input<typeof assistantInputSourceMetadataSchema> | null
   sourceRef: AssistantInputSourceRef
 }
@@ -871,7 +867,6 @@ function buildAssistantInputEventRecord(input: {
       sourceKind: sourceRef.kind,
       sourcePosition: assistantInputSourcePosition(sourceRef),
     },
-    hostedMailboxItemId: input.event.hostedMailboxItemId ?? null,
     idempotencyKey: `sha256:${sha256Hex(stableStringify(assistantInputSourceRefIdentity(sourceRef)))}`,
     inputId,
     occurredAt: input.event.occurredAt,

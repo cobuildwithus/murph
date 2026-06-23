@@ -1,5 +1,8 @@
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
+  readHostedMailboxAssistantInputItems,
+} from './hosted-mailbox-input-items.js'
+import {
   listAssistantInputEvents,
   type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
@@ -194,8 +197,18 @@ async function listStoredAssistantInputCandidates(input: {
     }
   }
 
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+    inputIds: selected.map((event) => event.inputId),
+    vault: input.vault,
+  })
+
   return {
-    inputs: selected.map(assistantInputCandidateFromStoredEvent),
+    inputs: selected.map((event) =>
+      assistantInputCandidateFromStoredEventWithHostedMailboxItem({
+        event,
+        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+      }),
+    ),
     nextCursor,
   }
 }
@@ -203,6 +216,17 @@ async function listStoredAssistantInputCandidates(input: {
 export function assistantInputCandidateFromStoredEvent(
   event: AssistantInputEventRecord,
 ): AssistantInputCandidate {
+  return assistantInputCandidateFromStoredEventWithHostedMailboxItem({
+    event,
+    hostedMailboxItemId: null,
+  })
+}
+
+function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
+  event: AssistantInputEventRecord
+  hostedMailboxItemId: string | null
+}): AssistantInputCandidate {
+  const event = input.event
   const captureIds = event.projection.captureId ? [event.projection.captureId] : []
   return {
     acceptedInput: {
@@ -221,7 +245,7 @@ export function assistantInputCandidateFromStoredEvent(
       attachmentDescriptors: event.content.attachmentDescriptors,
       conversation: event.conversation,
       cursor: event.cursor,
-      hostedMailboxItemId: event.hostedMailboxItemId ?? null,
+      hostedMailboxItemId: input.hostedMailboxItemId,
       inputId: event.inputId,
       occurredAt: event.occurredAt,
       receivedAt: event.receivedAt,
