@@ -2,12 +2,17 @@ import type {
   HostedComputerActRequest,
   HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
+import {
+  buildHostedExecutionSafeErrorDetails,
+  normalizeHostedExecutionOperatorMessage,
+} from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { recordHostedRuntimeLog } from "../hosted-workspace/store";
+import { shortHash } from "./ids";
 
 type HostedComputerToolOperation =
   | "act"
@@ -84,13 +89,10 @@ function buildHostedComputerToolFailureRedactedJson(input: {
 
   return {
     computerOperationKind: input.operation,
-    ...readHostedComputerToolActionKind({
+    ...readHostedComputerToolActionDetail({
       action,
       operation: input.operation,
     }),
-    ...(action && "locator" in action && action.locator
-      ? { computerLocatorType: action.locator.by }
-      : {}),
     ...readHostedComputerToolTiming({
       action,
       operation: input.operation,
@@ -98,10 +100,10 @@ function buildHostedComputerToolFailureRedactedJson(input: {
     ...(domainError ? { httpStatus: domainError.httpStatus } : {}),
     ...(domainError ? { retryable: domainError.retryable } : {}),
     ...readHostedComputerToolFailureCategory(details, domainError?.message ?? null),
-    kernelErrorPresent: typeof details.kernelError === "string" && details.kernelError.length > 0,
-    kernelStderrPresent: typeof details.kernelStderr === "string" && details.kernelStderr.length > 0,
-    kernelStdoutPresent: typeof details.kernelStdout === "string" && details.kernelStdout.length > 0,
-    safeErrorMessage: "Hosted computer tool failed.",
+    kernelErrorPresent: details.kernelErrorPresent === true,
+    kernelStderrPresent: details.kernelStderrPresent === true,
+    kernelStdoutPresent: details.kernelStdoutPresent === true,
+    ...readSafeComputerErrorSummary(input.error),
     unknownOutcome: isHostedComputerUnknownOutcomeFailure({
       errorCode: input.errorCode,
       httpStatus: domainError?.httpStatus ?? null,
@@ -109,17 +111,47 @@ function buildHostedComputerToolFailureRedactedJson(input: {
   };
 }
 
-function readHostedComputerToolActionKind(input: {
+function readSafeComputerErrorSummary(error: unknown): HostedRuntimeRedactedJson {
+  const safeMessage = normalizeHostedExecutionOperatorMessage(
+    error instanceof Error ? error.message : String(error),
+  );
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const detail = readSafeComputerErrorDetail(details, "errorDetail");
+  const cause = readSafeComputerErrorDetail(details, "errorCause");
+
+  return {
+    safeErrorMessage: safeMessage,
+    ...(detail && detail !== safeMessage ? { computerErrorDetail: detail } : {}),
+    ...(cause && cause !== safeMessage && cause !== detail
+      ? { computerErrorCause: cause }
+      : {}),
+  };
+}
+
+function readSafeComputerErrorDetail(
+  details: Record<string, unknown> | null,
+  key: "errorCause" | "errorDetail",
+): string | null {
+  const value = details?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : null;
+}
+
+function readHostedComputerToolActionDetail(input: {
   action: HostedComputerToolAction | null;
   operation: HostedComputerToolOperation;
 }): HostedRuntimeRedactedJson {
   if (!input.action) {
     return {};
   }
-  if (input.operation === "os-control") {
+  if (input.operation === "os-control" && "action" in input.action) {
     return { computerOsControlKind: input.action.action };
   }
-  return { browserActionKind: input.action.action };
+  if ("code" in input.action) {
+    return { playwrightCodeHash: shortHash(input.action.code) };
+  }
+  return {};
 }
 
 function readHostedComputerToolTiming(input: {
@@ -131,9 +163,6 @@ function readHostedComputerToolTiming(input: {
   }
   if (input.operation === "os-control") {
     return {};
-  }
-  if (input.action.action === "wait" && "ms" in input.action) {
-    return { waitMs: input.action.ms };
   }
   if ("timeoutMs" in input.action) {
     return { timeoutMs: input.action.timeoutMs };

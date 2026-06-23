@@ -21,6 +21,7 @@ import {
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
+  recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
   type AssistantInputAttachmentEvidence,
@@ -690,6 +691,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
       item: input.item,
       wake: input.wake,
     }),
+    vault: input.vaultRoot,
+  });
+  await recordHostedMailboxAssistantInputItem({
+    inputId: event.inputId,
+    mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
   });
   if (event.projection.status === "not_attempted") {

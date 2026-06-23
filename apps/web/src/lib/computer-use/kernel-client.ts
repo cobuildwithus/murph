@@ -6,8 +6,6 @@ import type {
 import { computerUseError } from "./errors";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
-const KERNEL_PLAYWRIGHT_FAILURE_TEXT_MAX_LENGTH = 8_000;
-const KERNEL_PLAYWRIGHT_FAILURE_MESSAGE_LINE_MAX_LENGTH = 600;
 
 export interface KernelBrowserHandle {
   liveViewUrl: string;
@@ -243,46 +241,23 @@ function buildKernelPlaywrightFailureDetails(response: {
   stdout?: unknown;
 }): Record<string, unknown> {
   return {
-    ...readKernelPlaywrightFailureTextField("kernelError", response.error),
-    ...readKernelPlaywrightFailureTextField("kernelStderr", response.stderr),
-    ...readKernelPlaywrightFailureTextField("kernelStdout", response.stdout),
+    ...readKernelPlaywrightFailurePresenceField("kernelErrorPresent", response.error),
+    ...readKernelPlaywrightFailurePresenceField("kernelStderrPresent", response.stderr),
+    ...readKernelPlaywrightFailurePresenceField("kernelStdoutPresent", response.stdout),
   };
 }
 
-function readKernelPlaywrightFailureTextField(
-  key: "kernelError" | "kernelStderr" | "kernelStdout",
+function readKernelPlaywrightFailurePresenceField(
+  key: "kernelErrorPresent" | "kernelStderrPresent" | "kernelStdoutPresent",
   value: unknown,
-): Record<string, string> {
-  if (typeof value !== "string") {
-    return {};
-  }
-
-  const text = value.trim();
-  if (!text) {
-    return {};
-  }
-
-  return {
-    [key]: text.slice(0, KERNEL_PLAYWRIGHT_FAILURE_TEXT_MAX_LENGTH),
-  };
+): Record<string, boolean> {
+  return typeof value === "string" && value.trim().length > 0
+    ? { [key]: true }
+    : {};
 }
 
-function buildKernelPlaywrightFailureMessage(details: Record<string, unknown>): string {
-  const firstLine = readKernelPlaywrightFailureFirstLine(details.kernelError);
-  return firstLine
-    ? `Computer browser evaluation failed: ${firstLine}`
-    : "Computer browser evaluation failed.";
-}
-
-function readKernelPlaywrightFailureFirstLine(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const firstLine = value.split(/\r?\n/u).find((line) => line.trim().length > 0)?.trim();
-  return firstLine
-    ? firstLine.slice(0, KERNEL_PLAYWRIGHT_FAILURE_MESSAGE_LINE_MAX_LENGTH)
-    : null;
+function buildKernelPlaywrightFailureMessage(_details: Record<string, unknown>): string {
+  return "Computer browser evaluation failed.";
 }
 
 function requireKernelApiKey(source: EnvSource): string {

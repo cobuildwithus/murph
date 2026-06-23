@@ -12,7 +12,10 @@ import {
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import type { AssistantTurnEnvironment } from '../service-contracts.js'
+import type {
+  AssistantHostedDeliveryIdempotencyContext,
+  AssistantTurnEnvironment,
+} from '../service-contracts.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { sanitizeAssistantPortableStateString } from '../redaction.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
@@ -455,6 +458,11 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
         vault: input.vault,
       })
     : null
+  const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+    context,
+    deliveryTarget: decision.deliveryTarget,
+    executionContext: input.executionContext,
+  })
   const result = await executeAssistantAutoReply({
     acceptedTurnInputInitialInputs: buildAutoReplyAcceptedTurnInputItems({
       inputSummaries: context.items.map((item) => item.summary),
@@ -464,11 +472,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
-    deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
-      context,
-      deliveryTarget: decision.deliveryTarget,
-      executionContext: input.executionContext,
-    }),
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
     deliveryTarget: decision.deliveryTarget,
     ...(decision.deliveryMessageReactionsAvailable === null
       ? {}
@@ -1173,54 +1178,93 @@ function createAssistantAutoReplyPrimaryInput(
   }
 }
 
-function createHostedAutoReplyDeliveryIdempotencyKey(input: {
+interface HostedAutoReplyDeliveryIdempotency {
+  deliveryIdempotencyKey: string | null
+  hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
+}
+
+function createHostedAutoReplyDeliveryIdempotency(input: {
   context: AssistantAutoReplyGroupContext
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
-}): string | null {
+}): HostedAutoReplyDeliveryIdempotency {
   const userId = normalizeNullableString(input.executionContext?.hosted?.memberId)
   if (!userId) {
-    return null
+    return {
+      deliveryIdempotencyKey: null,
+      hostedDeliveryIdempotency: null,
+    }
   }
 
   const candidates = autoReplyInputCandidatesFromContext(input.context)
   if (candidates.length === 0) {
-    return null
+    return {
+      deliveryIdempotencyKey: null,
+      hostedDeliveryIdempotency: null,
+    }
   }
 
-  const inboundMailboxItemIds: string[] = []
+  const deliveryKeyMailboxItemIds: string[] = []
+  const hostedMailboxItemIds: string[] = []
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
-      return null
+      return {
+        deliveryIdempotencyKey: null,
+        hostedDeliveryIdempotency: null,
+      }
     }
-    inboundMailboxItemIds.push(candidate.event.sourceRef.itemId)
+    deliveryKeyMailboxItemIds.push(candidate.event.sourceRef.itemId)
+    const hostedMailboxItemId = normalizeNullableString(
+      candidate.event.hostedMailboxItemId ?? null,
+    )
+    if (hostedMailboxItemId) {
+      hostedMailboxItemIds.push(hostedMailboxItemId)
+    }
   }
 
   const channel = normalizeNullableString(input.context.firstItem.summary.source)
   if (!channel) {
-    return null
+    return {
+      deliveryIdempotencyKey: null,
+      hostedDeliveryIdempotency: null,
+    }
   }
 
-  return createHostedDeliveryId({
-    assistantTurnOrdinal: 'auto-reply:1',
+  const assistantTurnOrdinal = 'auto-reply:1'
+  const conversationId = stringifyHostedAutoReplyDeliveryKeyParts([
     channel,
-    conversationId: stringifyHostedAutoReplyDeliveryKeyParts([
+    input.context.firstItem.summary.conversation.source,
+    input.context.firstItem.summary.conversation.accountId,
+    input.context.firstItem.summary.conversation.threadId,
+    input.context.firstItem.summary.conversation.threadIsDirect,
+  ])
+  const recipientKey = stringifyHostedAutoReplyDeliveryKeyParts([
+    channel,
+    input.deliveryTarget,
+    input.context.firstItem.summary.conversation.accountId,
+    input.context.firstItem.summary.conversation.actorId,
+    input.context.firstItem.summary.conversation.threadId,
+  ])
+  const hostedDeliveryIdempotency = hostedMailboxItemIds.length === candidates.length
+    ? {
+        assistantTurnOrdinal,
+        conversationId,
+        inboundMailboxItemIds: hostedMailboxItemIds,
+        recipientKey,
+      }
+    : null
+
+  return {
+    deliveryIdempotencyKey: createHostedDeliveryId({
+      assistantTurnOrdinal,
       channel,
-      input.context.firstItem.summary.conversation.source,
-      input.context.firstItem.summary.conversation.accountId,
-      input.context.firstItem.summary.conversation.threadId,
-      input.context.firstItem.summary.conversation.threadIsDirect,
-    ]),
-    inboundMailboxItemIds,
-    recipientKey: stringifyHostedAutoReplyDeliveryKeyParts([
-      channel,
-      input.deliveryTarget,
-      input.context.firstItem.summary.conversation.accountId,
-      input.context.firstItem.summary.conversation.actorId,
-      input.context.firstItem.summary.conversation.threadId,
-    ]),
-    userId,
-  })
+      conversationId,
+      inboundMailboxItemIds: deliveryKeyMailboxItemIds,
+      recipientKey,
+      userId,
+    }),
+    hostedDeliveryIdempotency,
+  }
 }
 
 function stringifyHostedAutoReplyDeliveryKeyParts(
@@ -1255,6 +1299,7 @@ async function executeAssistantAutoReply(input: {
   inputIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey: string | null
+  hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
   deliveryTarget: string | null
   deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId: string | null
@@ -1314,6 +1359,7 @@ async function executeAssistantAutoReply(input: {
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      hostedDeliveryIdempotency: input.hostedDeliveryIdempotency,
       ...(input.deliveryMessageReactionsAvailable === undefined
         || input.deliveryMessageReactionsAvailable === null
         ? {}
@@ -1599,13 +1645,16 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       },
     })
 
+    const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+      context: finalContext,
+      deliveryTarget:
+        acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
+      executionContext: input.executionContext,
+    })
     const result: AssistantActiveTurnInputAdmissionResult = {
       acceptedInputs,
-      deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
-        context: finalContext,
-        deliveryTarget: acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
-        executionContext: input.executionContext,
-      }),
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
       ...(acceptedInputDeliveryTarget !== null
         ? { deliveryTarget: acceptedInputDeliveryTarget }
         : {}),
@@ -1941,14 +1990,16 @@ function admitCapturelessAssistantInputs(input: {
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
   })
+  const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+    context: nextContext,
+    deliveryTarget: deliveryTarget ?? input.deliveryTarget,
+    executionContext: input.executionContext,
+  })
 
   return {
     acceptedInputs,
-    deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
-      context: nextContext,
-      deliveryTarget: deliveryTarget ?? input.deliveryTarget,
-      executionContext: input.executionContext,
-    }),
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
       : {}),

@@ -6,6 +6,9 @@ import {
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
 import {
+  recordHostedMailboxAssistantInputItem,
+} from '../src/assistant/hosted-mailbox-input-items.ts'
+import {
   createStoreBackedAssistantInputSource,
 } from '../src/assistant/input-source.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -70,6 +73,11 @@ describe('store-backed assistant input source', () => {
         }),
       },
     })
+    await recordHostedMailboxAssistantInputItem({
+      inputId: stored.inputId,
+      mailboxItemId: 'raw_mailbox_item_store',
+      vault: vaultRoot,
+    })
     await updateAssistantInputAttachmentEvidence({
       inputId: stored.inputId,
       vault: vaultRoot,
@@ -108,6 +116,7 @@ describe('store-backed assistant input source', () => {
 
     const result = await source.listInputCandidates({})
 
+    expect(Object.hasOwn(stored, 'hostedMailboxItemId')).toBe(false)
     expect(result.inputs).toHaveLength(1)
     expect(result.inputs[0]).toMatchObject({
       acceptedInput: {
@@ -136,6 +145,7 @@ describe('store-backed assistant input source', () => {
             sizeBytes: 1234,
           },
         ],
+        hostedMailboxItemId: 'raw_mailbox_item_store',
         inputId: stored.inputId,
         source: 'telegram',
         sourceMetadata: {

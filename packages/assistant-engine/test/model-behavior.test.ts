@@ -239,7 +239,19 @@ describe('assistant execution prompt contract', () => {
       'Inspect calendar conflicts in the requested window only when scheduling availability would change the action',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_act` to run one bounded browser action against the current Kernel page',
+      'Use `murph.computer_act` to run bounded Playwright TypeScript/JavaScript against the current Kernel page',
+    )
+    expect(prompt).toContain(
+      'never inspect, return, log, copy, summarize, or transmit browser cookies, storage state',
+    )
+    expect(prompt).toContain(
+      'Do not call Playwright or browser APIs such as `context.cookies()`, `context.storageState()`',
+    )
+    expect(prompt).toContain(
+      'authorization headers, payment details, one-time codes, raw tokens, live-view URLs',
+    )
+    expect(prompt).toContain(
+      '`context.request` for secret transfer, `context.unroute()` to bypass routing, new browser contexts for policy bypass, or Node/network APIs to exfiltrate data',
     )
     expect(prompt).toContain(
       'Use `murph.computer_os_control` only as a fallback when `murph.computer_act` cannot operate the page surface.',
@@ -261,7 +273,10 @@ describe('assistant execution prompt contract', () => {
       'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response when the user still needs context or a handoff URL, and finish without reply when no additional user-visible message is useful.',
     )
     expect(prompt).toContain(
-      'After a later user reply to a computer pause, call `murph.computer_start_run` again and inspect the returned status before acting.',
+      'call `murph.computer_start_run` normally',
+    )
+    expect(prompt).toContain(
+      'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain(

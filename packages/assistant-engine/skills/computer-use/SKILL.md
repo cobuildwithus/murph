@@ -150,8 +150,8 @@ first.
    Inspect the returned status before acting; an `awaiting_user` run is still
    paused.
 2. `murph.computer_observe` reads the current URL, title, and visible text. Use
-   it after starting, reusing, or any action where page state is needed.
-3. `murph.computer_act` runs one bounded browser action against the current page.
+   it after starting, resuming, or any action where page state is needed.
+3. `murph.computer_act` runs bounded Playwright code against the current page.
 4. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
    action when `computer_act` cannot operate the page surface.
 5. `murph.computer_pause_for_user` creates a durable pause for confirmation,
@@ -161,18 +161,16 @@ first.
 
 ## Act primitive
 
-`computer_act` is the default browser action primitive. Pass one action per call:
+`computer_act` is the browser execution primitive. Pass Playwright
+TypeScript/JavaScript in `code`; `page`, `context`, and `browser` are available
+in scope. Keep each call focused on one small browser step or one small
+inspection, and return concise JSON-serializable data when the result matters.
 
 ```json
 {
   "runId": "hcr_...",
   "timeoutMs": 15000,
-  "action": "click",
-  "locator": {
-    "by": "role",
-    "role": "button",
-    "name": "Add to cart"
-  }
+  "code": "await page.getByRole('button', { name: 'Add to cart', exact: true }).click(); return { clicked: true };"
 }
 ```
 
@@ -182,79 +180,34 @@ page. For example:
 ```json
 {
   "runId": "hcr_...",
-  "action": "fill",
-  "locator": {
-    "by": "label",
-    "text": "Email"
-  },
-  "value": "user@example.com"
+  "code": "await page.getByLabel('Email').fill('user@example.com');"
 }
 ```
 
-Use `computer_os_control` only when a locator or Playwright-backed action cannot
-operate the page surface, such as a canvas, native picker, or focus trap. It can
-click, move, drag, scroll, type text, or press keys at the OS level. Do not use
-it for passwords, payment details, one-time codes, raw tokens, or other sensitive
-private input; pause for handoff instead. Observe before and after OS-control
-actions when page state matters.
-
-The service runs the action with server-owned Playwright code, then returns the
-current URL and title. Available actions: `goto`, `click`, `fill`, `type`,
-`select`, `check`, `uncheck`, `press`, `scroll`, `wait`, and `waitFor`.
-
-Use user-facing locators in this order: role/name, label, placeholder, text,
-alt/title, then test id. Do not ask for or expose cookies, local storage,
-passwords, card numbers, raw tokens, hidden DOM values, or other secrets.
-
-Common action shapes:
+Use normal Playwright when the page has duplicate controls or custom widgets.
+For the checkout case with two identical submit buttons, choose explicitly:
 
 ```json
 {
   "runId": "hcr_...",
-  "action": "goto",
-  "url": "https://example.com"
+  "timeoutMs": 25000,
+  "code": "const submit = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); if (await submit.count() < 1) throw new Error('Place order button not found'); await submit.last().click(); return { submitButtons: await submit.count() };"
 }
 ```
 
-```json
-{
-  "runId": "hcr_...",
-  "action": "select",
-  "locator": {
-    "by": "label",
-    "text": "Appointment time"
-  },
-  "value": "9:30 AM"
-}
-```
+Use `computer_os_control` only when Playwright cannot operate the page surface,
+such as a canvas, native picker, or focus trap. It can click, move, drag, scroll,
+type text, or press keys at the OS level. Do not use it for passwords, payment
+details, one-time codes, raw tokens, or other sensitive private input; pause for
+handoff instead. Observe before and after OS-control actions when page state
+matters.
 
-```json
-{
-  "runId": "hcr_...",
-  "action": "press",
-  "key": "Enter"
-}
-```
-
-```json
-{
-  "runId": "hcr_...",
-  "action": "scroll",
-  "deltaY": 900
-}
-```
-
-```json
-{
-  "runId": "hcr_...",
-  "action": "waitFor",
-  "locator": {
-    "by": "text",
-    "text": "Order confirmed"
-  },
-  "state": "visible"
-}
-```
+The service returns the current URL, title, and your returned `result`.
+Do not query or return cookies, local storage, storage state, hidden browser
+credentials, passwords, card numbers, one-time codes, raw tokens, or other
+secrets. Do not disable the host-installed route guard, create alternate
+browser contexts for egress, or use Node/network APIs to bypass browser
+navigation policy. Pause for handoff when sensitive user input is needed.
 
 ## Browser control loop
 
@@ -281,19 +234,21 @@ state before continuing. If refreshing would risk duplicate submission or losing
 important user-entered data, pause for user takeover or finish failed with the
 blocker instead.
 
-## Locator and control tactics
+## Playwright control tactics
 
-- Prefer a unique role/name locator. Use `exact: true` when nearby controls have
-  similar names.
-- Use labels for form fields and checkboxes. Use placeholder or visible text
-  only when the page has no reliable role or label.
-- Use `fill` for ordinary text fields. Use `type` when a masked, autocomplete,
-  search, or reactive control needs keyboard events.
+- Prefer `page.getByRole(..., { name, exact: true })` when it is unique. Use
+  `locator(...).nth(index)`, `.first()`, or `.last()` deliberately when the page
+  has duplicate valid controls.
+- Use labels for form fields and checkboxes. Use placeholder, visible text,
+  test id, or CSS selectors when the page has no reliable role or label.
+- Use `.fill()` for ordinary text fields. Use keyboard input when a masked,
+  autocomplete, search, or reactive control needs key events.
 - For comboboxes, autocomplete, calendars, and menus, fill or click once, then
   use `ArrowDown`, `ArrowUp`, `Enter`, `Tab`, or `Escape` when appropriate.
   Observe the selected value afterward.
-- Prefer `waitFor` on a meaningful confirmation, changed heading, modal, or
-  success state over a blind delay. Keep `wait` short and exceptional.
+- Prefer `locator.waitFor()` on a meaningful confirmation, changed heading,
+  modal, or success state over a blind delay. Keep `page.waitForTimeout()` short
+  and exceptional.
 - Dismiss obstructing cookie or newsletter prompts conservatively. Reject
   optional tracking or marketing when practical; do not opt the user into email,
   SMS, loyalty, or data-sharing programs without authorization.
@@ -418,9 +373,10 @@ clinical decision.
 Pause only when Murph is actually blocked: expired login, CAPTCHA, missing
 payment or identity details, a choice the user has not authorized, sensitive
 entry that needs private takeover, or a page that needs direct user takeover.
-When pausing, use `computer_pause_for_user`; after the user replies, call
-`computer_start_run` again and inspect the returned status before acting. If the
-run is still `awaiting_user`, do not assume the pause resumed.
+When pausing, use `computer_pause_for_user`; after the user replies in a way
+that intentionally continues the paused run, call `computer_start_run` normally,
+then observe before acting. The runtime supplies hidden mailbox proof and
+delivery context and selects the active awaiting run. Do not invent resume ids.
 The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
 reply when direct takeover is needed, or finish without reply when no additional

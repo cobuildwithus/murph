@@ -32,16 +32,13 @@ import {
 } from "../src/bundles.ts";
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-  HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH,
-  HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
-  parseHostedComputerOsControlRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
   readHostedComputerRunOperationRoute,
@@ -664,19 +661,10 @@ describe("hosted execution coverage gaps", () => {
       operation: "pause-for-user",
       runId: "run_abc123",
     });
-    const osControlPath = buildHostedComputerRunOperationPath({
-      operation: "os-control",
-      runId: "run_abc123",
-    });
 
     expect(pausePath).toBe("/api/internal/computer/runs/run_abc123/pause-for-user");
     expect(readHostedComputerRunOperationRoute(pausePath)).toEqual({
       operation: "pause-for-user",
-      runId: "run_abc123",
-    });
-    expect(osControlPath).toBe("/api/internal/computer/runs/run_abc123/os-control");
-    expect(readHostedComputerRunOperationRoute(osControlPath)).toEqual({
-      operation: "os-control",
       runId: "run_abc123",
     });
     expect(isHostedComputerWebControlRequest({
@@ -686,10 +674,6 @@ describe("hosted execution coverage gaps", () => {
     expect(isHostedComputerWebControlRequest({
       method: "POST",
       path: pausePath,
-    })).toBe(true);
-    expect(isHostedComputerWebControlRequest({
-      method: "POST",
-      path: osControlPath,
     })).toBe(true);
     expect(isHostedComputerWebControlRequest({
       method: "GET",
@@ -708,19 +692,21 @@ describe("hosted execution coverage gaps", () => {
       memberScopedProfileRequired: true,
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
+      resumeRunId: "hcr_paused_run",
+      startUrl: "https://example.test/start",
+    })).toThrow(TypeError);
     expect(parseHostedComputerStartRunRequest({
       goal: "Runner goal.",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
-      resumeRunId: null,
       startUrl: null,
     });
     expect(parseHostedComputerStartRunRequest({
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
-      resumeRunId: null,
       startUrl: null,
     });
     expect(parseHostedComputerFinishRunRequest({
@@ -730,53 +716,19 @@ describe("hosted execution coverage gaps", () => {
       outcome: "failed",
     });
 
-    const clickStep = {
-      action: "click" as const,
-      locator: {
-        by: "role" as const,
-        exact: false,
-        name: "Add to cart",
-        role: "button",
-      },
-    };
-    expect(parseHostedComputerActRequest(clickStep)).toEqual({
-      ...clickStep,
+    expect(parseHostedComputerActRequest({
+      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+    })).toEqual({
+      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
       timeoutMs: 15000,
     });
     expect(parseHostedComputerActRequest({
-      ...clickStep,
+      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     })).toEqual({
-      ...clickStep,
+      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerActRequest({
-      action: "goto",
-      timeoutMs: 15000,
-      url: "https://example.com/checkout",
-    })).toEqual({
-      action: "goto",
-      timeoutMs: 15000,
-      url: "https://example.com/checkout",
-    });
-    for (const key of HOSTED_COMPUTER_PRESS_KEYS) {
-      expect(parseHostedComputerActRequest({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      })).toEqual({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      });
-    }
-    for (const key of ["a", "A", "1", "Space", "Control+V", "Meta+V"]) {
-      expect(() => parseHostedComputerActRequest({
-        action: "press",
-        key,
-        timeoutMs: 15000,
-      })).toThrow(/Hosted computer act request is invalid/u);
-    }
     for (const unsafeUrl of [
       "javascript:alert(1)",
       "data:text/html,<h1>owned</h1>",
@@ -796,10 +748,6 @@ describe("hosted execution coverage gaps", () => {
       expect(() => parseHostedComputerStartRunRequest({
         startUrl: unsafeUrl,
       })).toThrow(/Hosted computer start-run request is invalid/u);
-      expect(() => parseHostedComputerActRequest({
-        action: "goto",
-        url: unsafeUrl,
-      })).toThrow(/Hosted computer act request is invalid/u);
     }
     expect(isHostedComputerNavigationUrl("https://example.com/checkout")).toBe(true);
     expect(isHostedComputerNavigationUrl("http://192.168.1.10/router")).toBe(false);
@@ -810,80 +758,15 @@ describe("hosted execution coverage gaps", () => {
       selector: "button[type=submit]",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      action: "click",
-      locator: { by: "css", selector: "button[type=submit]" },
-      timeoutMs: 15000,
+      code: "",
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      steps: [clickStep],
+      code: "x".repeat(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH + 1),
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      action: "fill",
-      locator: { by: "label", text: "Name" },
-      value: "x".repeat(HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH + 1),
-    })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedComputerActRequest({
-      ...clickStep,
+      code: "return true;",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
     })).toThrow(/Hosted computer act request is invalid/u);
-
-    expect(parseHostedComputerOsControlRequest({
-      action: "clickMouse",
-      x: 120,
-      y: 240,
-    })).toEqual({
-      action: "clickMouse",
-      button: "left",
-      clickType: "click",
-      holdKeys: [],
-      numClicks: 1,
-      x: 120,
-      y: 240,
-    });
-    expect(parseHostedComputerOsControlRequest({
-      action: "pressKey",
-      keys: ["Ctrl+a"],
-    })).toEqual({
-      action: "pressKey",
-      durationMs: 0,
-      keys: ["Ctrl+a"],
-    });
-    for (const key of [
-      "Ctrl+c",
-      "Ctrl+v",
-      "Ctrl+x",
-      "Ctrl+t",
-      "Ctrl+w",
-      "Ctrl+Shift+Tab",
-    ]) {
-      expect(() => parseHostedComputerOsControlRequest({
-        action: "pressKey",
-        keys: [key],
-      })).toThrow(/Hosted computer OS control request is invalid/u);
-    }
-    for (const input of [
-      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Tab"] },
-      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Shift+Tab"] },
-      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Page_Up"] },
-      { action: "pressKey", holdKeys: ["Ctrl"], keys: ["Page_Down"] },
-      { action: "pressKey", holdKeys: ["Ctrl", "Shift"], keys: ["Tab"] },
-    ]) {
-      expect(() => parseHostedComputerOsControlRequest(input)).toThrow(
-        /Hosted computer OS control request is invalid/u,
-      );
-    }
-    expect(() => parseHostedComputerOsControlRequest({
-      action: "typeText",
-      delayMs: 0,
-      text: "safe fixture text",
-    })).toThrow(/Hosted computer OS control request is invalid/u);
-    expect(() => parseHostedComputerOsControlRequest({
-      action: "typeText",
-      text: "x".repeat(HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH + 1),
-    })).toThrow(/Hosted computer OS control request is invalid/u);
-    expect(() => parseHostedComputerOsControlRequest({
-      action: "captureScreenshot",
-    })).toThrow(/Hosted computer OS control request is invalid/u);
 
     expect(parseHostedComputerPauseForUserRequest({
       handoffPurpose: "manual_browser_help",
