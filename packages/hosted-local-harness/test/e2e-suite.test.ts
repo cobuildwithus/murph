@@ -97,6 +97,7 @@ describe("hosted-local E2E suite preparation", () => {
           expect.stringMatching(/^hosted-local-e2e-/u),
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: expect.stringMatching(/^e2e-hosted-local-e2e-/u),
+        TEMPORAL_DEV_HEADLESS: "1",
       }),
       label: "Hosted local full-stack e2e suite 1/5",
     }));
@@ -233,6 +234,7 @@ describe("hosted-local E2E suite preparation", () => {
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "fixed-build",
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "custom-dist",
+        TEMPORAL_DEV_HEADLESS: "0",
       },
       prepareRunnerBundle: false,
       scenario: "checkpoint-baseline",
@@ -248,6 +250,7 @@ describe("hosted-local E2E suite preparation", () => {
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "fixed-build",
       NEXT_DIST_DIR_MODE: "smoke",
       NEXT_DIST_DIR_SUFFIX: "custom-dist",
+      TEMPORAL_DEV_HEADLESS: "0",
     }));
   });
 });

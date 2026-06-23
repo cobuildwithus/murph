@@ -243,6 +243,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_CODEX_BRIDGE).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(result.env.TEMPORAL_DEV_HEADLESS).toBe("1");
   });
 
   test("uses auto Temporal for the default interactive hosted-local profile", () => {
@@ -276,6 +277,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_VERCEL_PULL).toBe("1");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(result.env.TEMPORAL_DEV_HEADLESS).toBe("1");
     expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
 
