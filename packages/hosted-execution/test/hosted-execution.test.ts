@@ -35,7 +35,6 @@ import {
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_RUNS_PATH,
-  isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
@@ -729,30 +728,20 @@ describe("hosted execution coverage gaps", () => {
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    for (const unsafeUrl of [
-      "javascript:alert(1)",
-      "data:text/html,<h1>owned</h1>",
-      "file:///etc/passwd",
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "http://10.0.0.5/admin",
-      "http://169.254.169.254/latest/meta-data",
-      "http://[::1]/",
-      "http://[::ffff:169.254.169.254]/latest/meta-data",
-      "http://[::a9fe:a9fe]/latest/meta-data",
-      "http://[64:ff9b::a9fe:a9fe]/latest/meta-data",
-      "http://[2002:a9fe:a9fe::1]/latest/meta-data",
-      "http://[2001:0:4136:e378:8000:63bf:a9fe:a9fe]/latest/meta-data",
-      "mailto:user@example.test",
-    ]) {
-      expect(() => parseHostedComputerStartRunRequest({
-        startUrl: unsafeUrl,
-      })).toThrow(/Hosted computer start-run request is invalid/u);
-    }
-    expect(isHostedComputerNavigationUrl("https://example.com/checkout")).toBe(true);
-    expect(isHostedComputerNavigationUrl("http://192.168.1.10/router")).toBe(false);
-    expect(isHostedComputerNavigationUrl("http://[fd00::1]/")).toBe(false);
-    expect(isHostedComputerNavigationUrl("http://[::ffff:7f00:1]/")).toBe(false);
+    expect(parseHostedComputerStartRunRequest({
+      startUrl: "about:blank",
+    })).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      startUrl: "about:blank",
+    });
+    expect(parseHostedComputerStartRunRequest({
+      startUrl: "http://127.0.0.1:3000",
+    })).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      startUrl: "http://127.0.0.1:3000",
+    });
     expect(() => parseHostedComputerActRequest({
       action: "click",
       selector: "button[type=submit]",

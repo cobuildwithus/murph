@@ -1,9 +1,4 @@
-import { lookup as lookupDns } from "node:dns/promises";
-
 import {
-  isHostedComputerIpLiteral,
-  isHostedComputerNavigationUrl,
-  isHostedComputerPublicIpAddress,
   type HostedComputerActRequest,
   type HostedComputerAwaitingReason,
   type HostedComputerDeliveryContext,
@@ -45,7 +40,6 @@ const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
-type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
@@ -121,7 +115,6 @@ export class ComputerUseService {
   private readonly crypto: ComputerUseCrypto;
   private readonly env: EnvSource;
   private kernel: ComputerKernelClient | null;
-  private readonly navigationDnsLookup: NavigationDnsLookup;
   private readonly now: () => Date;
   private readonly store: ComputerUseStore;
 
@@ -129,14 +122,12 @@ export class ComputerUseService {
     crypto?: ComputerUseCrypto;
     env?: EnvSource;
     kernel?: ComputerKernelClient;
-    navigationDnsLookup?: NavigationDnsLookup;
     now?: () => Date;
     store?: ComputerUseStore;
   } = {}) {
     this.crypto = input.crypto ?? hostedComputerUseCrypto;
     this.env = input.env ?? process.env;
     this.kernel = input.kernel ?? null;
-    this.navigationDnsLookup = input.navigationDnsLookup ?? defaultNavigationDnsLookup;
     this.now = input.now ?? (() => new Date());
     this.store = input.store ?? new PrismaComputerUseStore();
   }
@@ -160,7 +151,7 @@ export class ComputerUseService {
     startUrl: string | null;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
-    const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
+    const startUrl = requireComputerNavigationUrl(input.startUrl);
 
     let activeRun = await store.findActiveRunForMember({
       memberId: input.memberId,
@@ -249,10 +240,9 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
-      await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const initialState = startUrl
-        ? await this.navigateKernelBrowserToPublicUrl({
+        ? await this.navigateKernelBrowserToUrl({
             sessionId: browser.sessionId,
             timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
             url: startUrl,
@@ -1101,7 +1091,7 @@ export class ComputerUseService {
     return readBrowserStateResult(response.result);
   }
 
-  private async navigateKernelBrowserToPublicUrl(input: {
+  private async navigateKernelBrowserToUrl(input: {
     sessionId: string;
     timeoutMs: number;
     url: string;
@@ -1120,55 +1110,6 @@ export class ComputerUseService {
     });
 
     return readBrowserStateResult(response.result);
-  }
-
-  private async installPublicNavigationGuard(sessionId: string): Promise<void> {
-    await this.requireKernel().executePlaywright({
-      code: [
-        buildPlaywrightPublicNavigationGuardCode(),
-        "return true;",
-      ].join("\n"),
-      sessionId,
-      timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
-    });
-  }
-
-  private async requirePublicNavigationUrl(
-    value: string | null | undefined,
-  ): Promise<string | null> {
-    const url = requireComputerNavigationUrl(value);
-    if (!url) {
-      return null;
-    }
-
-    const hostname = new URL(url).hostname;
-    if (isHostedComputerIpLiteral(hostname)) {
-      return url;
-    }
-
-    let records: readonly { address: string }[];
-    try {
-      records = await this.navigationDnsLookup(hostname);
-    } catch {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-        httpStatus: 400,
-        message: "Computer navigation hostname could not be verified as public.",
-      });
-    }
-
-    if (
-      records.length === 0 ||
-      records.some((record) => !isHostedComputerPublicIpAddress(record.address))
-    ) {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-        httpStatus: 400,
-        message: "Computer navigation hostname must resolve only to public addresses.",
-      });
-    }
-
-    return url;
   }
 
   private async checkpointProfileAfterLoginHandoff(
@@ -1227,7 +1168,6 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds,
       });
-      await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const replaceInput: ReplaceRunBrowserInput = {
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
@@ -2015,15 +1955,10 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
   return [
-    buildPlaywrightPublicNavigationGuardCode(),
     "const __murphUserResult = await (async () => {",
     input.code,
     "\n})();",
     "const __murphUrl = page.url();",
-    "if (!(await isMurphPublicNavigationUrl(__murphUrl))) {",
-    "  await page.goto('about:blank').catch(() => {});",
-    "  throw new Error('Unsafe computer navigation target.');",
-    "}",
     "const __murphTitle = await page.title().catch(() => null);",
     "return {",
     "  result: typeof __murphUserResult === 'undefined' ? null : __murphUserResult,",
@@ -2189,17 +2124,11 @@ return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : unde
 }
 
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
     return null;
   }
-  if (!isHostedComputerNavigationUrl(value)) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-      httpStatus: 400,
-      message: "Computer navigation URLs must use public http or https hosts.",
-    });
-  }
-  return value;
+  return trimmed;
 }
 
 function buildComputerNavigationCode(input: {
@@ -2207,110 +2136,14 @@ function buildComputerNavigationCode(input: {
   url: string;
 }): string {
   return [
-    buildPlaywrightPublicNavigationGuardCode(),
     `await page.goto(${JSON.stringify(input.url)}, { waitUntil: 'domcontentloaded', timeout: ${input.timeoutMs} });`,
     "const finalUrl = page.url();",
-    "if (!(await isMurphPublicNavigationUrl(finalUrl))) {",
-    "  await page.goto('about:blank').catch(() => {});",
-    "  throw new Error('Unsafe computer navigation target.');",
-    "}",
     "const title = await page.title().catch(() => null);",
     "let visibleText = '';",
     "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
     `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
     "return { url: finalUrl, title, visibleText };",
   ].join("\n");
-}
-
-function buildPlaywrightPublicNavigationGuardCode(): string {
-  return `
-const normalizeMurphNavigationHostname = (value) => String(value || "")
-  .trim()
-  .toLowerCase()
-  .replace(/^\\[/u, "")
-  .replace(/\\]$/u, "")
-  .replace(/\\.$/u, "");
-const readMurphNavigationIpv4 = (value) => {
-  const parts = String(value).split(".");
-  if (parts.length !== 4) return null;
-  const octets = parts.map((part) => /^\\d{1,3}$/u.test(part) ? Number(part) : NaN);
-  return octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-    ? octets
-    : null;
-};
-const isMurphPublicIpv4 = ([a, b]) =>
-  !(a === 0 || a === 10 || a === 127 || a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 0 || b === 168)) ||
-    (a === 198 && (b === 18 || b === 19 || b === 51)) ||
-    (a === 203 && b === 0));
-const isMurphPublicIpv6 = (value) => {
-  const normalized = String(value).toLowerCase();
-  return !(normalized.startsWith("::") ||
-    normalized.startsWith("64:ff9b:") ||
-    normalized.startsWith("100:") ||
-    normalized.startsWith("2001:0:") ||
-    normalized.startsWith("2001:2:") ||
-    normalized.startsWith("2002:") ||
-    normalized.startsWith("fc") || normalized.startsWith("fd") ||
-    /^fe[89ab][0-9a-f]?:/u.test(normalized) ||
-    normalized.startsWith("ff") ||
-    normalized.startsWith("2001:db8:")) &&
-    /^[0-9a-f:.]+$/u.test(normalized);
-};
-const readMurphMappedIpv4 = (hostname) =>
-  hostname.match(/(?:::ffff:|:)(\\d{1,3}(?:\\.\\d{1,3}){3})$/iu)?.[1] ?? null;
-const isMurphIpLiteral = (hostname) =>
-  Boolean(readMurphNavigationIpv4(hostname) || readMurphMappedIpv4(hostname)) ||
-  hostname.includes(":");
-const isMurphPublicIpAddress = (value) => {
-  const hostname = normalizeMurphNavigationHostname(value);
-  const ipv4 = readMurphNavigationIpv4(readMurphMappedIpv4(hostname) || hostname);
-  if (ipv4) return isMurphPublicIpv4(ipv4);
-  return hostname.includes(":") && isMurphPublicIpv6(hostname);
-};
-const isMurphPublicNavigationHostStatic = (value) => {
-  const hostname = normalizeMurphNavigationHostname(value);
-  if (!hostname) return false;
-  if (isMurphIpLiteral(hostname)) return isMurphPublicIpAddress(hostname);
-  if (hostname === "localhost" || hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") || hostname.endsWith(".internal")) return false;
-  return hostname.includes(".");
-};
-let murphDnsLookup = null;
-try {
-  murphDnsLookup = (await import("node:dns/promises")).lookup;
-} catch {}
-const doesMurphHostnameResolvePublicly = async (hostname) => {
-  if (!murphDnsLookup) return false;
-  const records = await murphDnsLookup(hostname, { all: true, verbatim: true }).catch(() => null);
-  return Array.isArray(records) && records.length > 0 &&
-    records.every((record) => record && isMurphPublicIpAddress(record.address));
-};
-const isMurphPublicNavigationUrl = async (value) => {
-  try {
-    const url = new URL(value);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") ||
-      !isMurphPublicNavigationHostStatic(url.hostname)) {
-      return false;
-    }
-    const hostname = normalizeMurphNavigationHostname(url.hostname);
-    return isMurphIpLiteral(hostname) || await doesMurphHostnameResolvePublicly(hostname);
-  } catch {
-    return false;
-  }
-};
-await page.context().unroute("**/*").catch(() => {});
-await page.context().route("**/*", async (route) => {
-  if (!(await isMurphPublicNavigationUrl(route.request().url()))) {
-    await route.abort("blockedbyclient").catch(() => {});
-    return;
-  }
-  await route.continue().catch(() => {});
-});
-`.trim();
 }
 
 function sanitizeComputerDisplayUrl(value: string | null | undefined): string | null {
@@ -2367,8 +2200,7 @@ function readRequiredBrowserActionStateResult(value: unknown): {
   const state = readOptionalBrowserStateResult(value);
   if (
     !state?.url ||
-    !sanitizeComputerDisplayUrl(state.url) ||
-    !isHostedComputerNavigationUrl(state.url)
+    !sanitizeComputerDisplayUrl(state.url)
   ) {
     throw computerUseError({
       code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
@@ -2586,15 +2418,6 @@ function shouldDeleteDeterministicBrowserName(
     return false;
   }
   return run.expiresAt.getTime() >= now.getTime() - COMPUTER_DETERMINISTIC_BROWSER_ACCOUNT_DELETE_GRACE_MS;
-}
-
-async function defaultNavigationDnsLookup(
-  hostname: string,
-): Promise<readonly { address: string }[]> {
-  return await lookupDns(hostname, {
-    all: true,
-    verbatim: true,
-  });
 }
 
 function normalizeKernelNameSegment(value: string): string {

@@ -12,7 +12,6 @@ import {
   hostedComputerActRequestSchema,
   hostedComputerOsControlRequestSchema,
   hostedComputerPauseForUserRequestSchema,
-  isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
@@ -515,10 +514,9 @@ const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
 
 const computerNavigationUrlSchema = z
   .string()
-  .url()
-  .refine(isHostedComputerNavigationUrl, {
-    message: 'Hosted computer navigation URLs must use http or https.',
-  })
+  .trim()
+  .min(1)
+  .max(4_000)
 
 const computerStartRunArgumentsSchema = z
   .object({
