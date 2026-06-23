@@ -9553,13 +9553,14 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("e2e preserves local device-sync wake after earlier pending assistant retry", async () => {
+  test("e2e preserves yielded device-sync retry after earlier pending assistant retry", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const connectionId = "device_sync_connection_pending_retry";
     const firstNow = "2026-04-27T00:00:00.000Z";
     const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
+    const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
     const followUpWakeAt = "2026-04-27T00:11:00.000Z";
     const idleCheckpointDelayMs = 90_000;
     const shutdownController = new AbortController();
@@ -9595,8 +9596,6 @@ describe("hosted workspace runtime entrypoint", () => {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const firstAssistantRetryObserved = createDeferred<void>();
-      const secondAssistantRetryObserved = createDeferred<void>();
-      const deviceWakeProjected = createDeferred<void>();
       let assistantPassFinishedCount = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -9615,12 +9614,6 @@ describe("hosted workspace runtime entrypoint", () => {
         async write(request: HostedRuntimeLogRequest) {
           for (const entry of request.entries) {
             events.push(`runtime.log:${entry.eventCode}`);
-            if (
-              entry.eventCode === "checkpoint.runtime_residue_deferred"
-              && assistantPassFinishedCount >= 2
-            ) {
-              deviceWakeProjected.resolve();
-            }
             if (entry.eventCode !== "assistant.pass_finished") {
               continue;
             }
@@ -9632,9 +9625,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 vaultRoot,
               });
               firstAssistantRetryObserved.resolve();
-            }
-            if (assistantPassFinishedCount === 2) {
-              secondAssistantRetryObserved.resolve();
             }
           }
           return { loggedCount: request.entries.length };
@@ -9687,11 +9677,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(firstAssistantRetryObserved.promise, 1_000, () => events.join(","));
-      if (assistantPassFinishedCount < 2) {
-        await vi.advanceTimersByTimeAsync(30_000);
-      }
-      await withRealTimeout(secondAssistantRetryObserved.promise, 1_000, () => events.join(","));
-      await withRealTimeout(deviceWakeProjected.promise, 1_000, () => events.join(","));
       assert.equal(checkpointRequests.length, 0);
       shutdownController.abort();
 
@@ -9700,13 +9685,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(checkpoint);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, deviceSyncWakeAt);
-      assert.equal(checkpoint.nextWakeAt, deviceSyncWakeAt);
+      assert.equal(result.nextWakeAt, yieldedRetryWakeAt);
+      assert.equal(checkpoint.nextWakeAt, yieldedRetryWakeAt);
       assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(new Date(deviceSyncWakeAt));
+      vi.setSystemTime(new Date(yieldedRetryWakeAt));
 
       const followUpCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const followUpDeviceSyncPort = createSnapshotDeviceSyncPort({

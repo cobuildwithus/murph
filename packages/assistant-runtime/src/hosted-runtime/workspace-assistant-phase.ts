@@ -1908,7 +1908,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       const dirtyAssistantCronWakeState = await readAssistantCronWakeState();
       return {
         continueAssistantLane: dirtyAssistantCronWakeState.dueNow,
-        deviceSyncMaintenanceRan: true,
+        deviceSyncMaintenanceRan: !dirtyDeviceSyncMetrics.deviceSyncSkipped,
         initialProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
@@ -2126,7 +2126,8 @@ async function runSystemMailboxMaintenancePhase(input: {
       ),
     },
     deviceSyncMaintenanceRan:
-      systemMailboxDeviceSyncRan || dirtyDeviceSyncMetrics !== null,
+      systemMailboxDeviceSyncRan
+      || (dirtyDeviceSyncMetrics !== null && !dirtyDeviceSyncMetrics.deviceSyncSkipped),
   };
 }
 
@@ -3161,7 +3162,7 @@ function resolveSkippedDeviceSyncWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
 }): HostedRuntimeWakeCandidate | null {
-  if (input.deviceSyncMaintenanceRan || input.input.deviceSyncWorkspaceWakeHandled === true) {
+  if (input.deviceSyncMaintenanceRan) {
     return null;
   }
 
@@ -3188,6 +3189,10 @@ function resolveSkippedDeviceSyncWake(input: {
       at: existingWakeAt,
       reason: existingWakeReason,
     };
+  }
+
+  if (input.input.deviceSyncWorkspaceWakeHandled === true) {
+    return null;
   }
 
   if (input.pendingAssistantInputWakeAt || shouldRescheduleSkippedDeviceSyncWake(input.input)) {
