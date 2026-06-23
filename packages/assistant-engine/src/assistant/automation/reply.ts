@@ -102,7 +102,7 @@ import {
 } from './shared.js'
 import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
 
-const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+const SELF_AUTHORED_ECHO_TEXT_FALLBACK_WINDOW_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
@@ -3092,12 +3092,39 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   session: AssistantSession | null
   vault: string
 }): Promise<boolean> {
+  const inputProviderMessageId = readProviderRouteScalar(
+    input.input.replyTarget?.messageId,
+  )
+  const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
+    {
+      deliveryTarget: input.deliveryTarget,
+      input: input.input,
+      vault: input.vault,
+    },
+  )
+  if (
+    inputProviderMessageId !== null &&
+    matchingDeliveries.some((delivery) =>
+      delivery.providerMessageIds.includes(inputProviderMessageId),
+    )
+  ) {
+    return true
+  }
+
   const inputText = normalizeNullableString(input.input.text)
   const inputTime = Date.parse(input.input.occurredAt)
   if (inputText === null || !Number.isFinite(inputTime)) {
     return false
   }
 
+  if (
+    inputProviderMessageId !== null &&
+    matchingDeliveries.some((delivery) => delivery.providerMessageIds.length > 0)
+  ) {
+    return false
+  }
+
+  const textCandidates: AssistantAutoReplyEchoTextCandidate[] = []
   if (input.session !== null) {
     const transcriptEntries = await listAssistantTranscriptEntries(
       input.vault,
@@ -3117,45 +3144,61 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
         continue
       }
 
-      if (isAssistantAutoReplyRecentEchoMatch({
-        inputText,
-        inputTime,
+      textCandidates.push({
         message: entry.text,
         messageTime: entryTime,
-      })) {
-        return true
-      }
+      })
     }
   }
 
-  const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
-    {
-      deliveryTarget: input.deliveryTarget,
-      input: input.input,
-      vault: input.vault,
-    },
+  textCandidates.push(
+    ...matchingDeliveries
+      .filter((delivery) =>
+        inputProviderMessageId === null || delivery.providerMessageIds.length === 0,
+      )
+      .map((delivery) => ({
+        message: delivery.message,
+        messageTime: delivery.sentAtMs,
+      })),
   )
-  return matchingDeliveries.some((delivery) =>
-    isAssistantAutoReplyRecentEchoMatch({
-      inputText,
-      inputTime,
-      message: delivery.message,
-      messageTime: delivery.sentAtMs,
-    }),
-  )
+
+  return isAssistantAutoReplyNearestTextEchoMatch({
+    candidates: textCandidates,
+    inputText,
+    inputTime,
+  })
 }
 
-function isAssistantAutoReplyRecentEchoMatch(input: {
-  inputText: string
-  inputTime: number
+interface AssistantAutoReplyEchoTextCandidate {
   message: string
   messageTime: number
+}
+
+function isAssistantAutoReplyNearestTextEchoMatch(input: {
+  candidates: readonly AssistantAutoReplyEchoTextCandidate[]
+  inputText: string
+  inputTime: number
 }): boolean {
-  return (
-    Math.abs(input.inputTime - input.messageTime) <=
-      SELF_AUTHORED_ECHO_WINDOW_MS &&
-    normalizeComparableText(input.message) === normalizeComparableText(input.inputText)
-  )
+  const nearest = input.candidates.reduce<{
+    deltaMs: number
+    message: string
+  } | null>((best, candidate) => {
+    const deltaMs = Math.abs(input.inputTime - candidate.messageTime)
+    if (
+      deltaMs > SELF_AUTHORED_ECHO_TEXT_FALLBACK_WINDOW_MS ||
+      (best !== null && deltaMs >= best.deltaMs)
+    ) {
+      return best
+    }
+
+    return {
+      deltaMs,
+      message: candidate.message,
+    }
+  }, null)
+
+  return nearest !== null &&
+    normalizeComparableText(nearest.message) === normalizeComparableText(input.inputText)
 }
 
 async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
@@ -3202,9 +3245,17 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
   message: string
+  providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
 }
+
+type AssistantAutoReplyOutboxIntent =
+  Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
+
+type AssistantAutoReplyOutboxDelivery = NonNullable<
+  AssistantAutoReplyOutboxIntent['delivery']
+>
 
 async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
@@ -3228,11 +3279,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       !delivery ||
       delivery.kind === 'message-reaction' ||
       normalizeNullableString(delivery.channel) !== channel ||
-      !assistantAutoReplyOutboxIntentMatchesConversation({
-        conversation: input.input.conversation,
-        intent,
-      }) ||
-      !assistantAutoReplyOutboxDeliveryMatchesTarget({
+      !assistantAutoReplyOutboxMatchesInput({
         conversation: input.input.conversation,
         delivery,
         deliveryTarget,
@@ -3251,6 +3298,9 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return [{
       intentId: intent.intentId,
       message,
+      providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
+        delivery,
+      ),
       sentAtMs,
       sessionId: intent.sessionId,
     }]
@@ -3279,9 +3329,44 @@ async function resolveAssistantAutoReplyExistingSession(input: {
   }
 }
 
+function assistantAutoReplyOutboxMatchesInput(input: {
+  conversation: AssistantInputConversationRef
+  delivery: AssistantAutoReplyOutboxDelivery
+  deliveryTarget: string
+  intent: AssistantAutoReplyOutboxIntent
+}): boolean {
+  if (input.delivery.kind !== 'message') {
+    return false
+  }
+
+  const exactTargetMatch = assistantAutoReplyOutboxDeliveryMatchesExactTarget({
+    delivery: input.delivery,
+    deliveryTarget: input.deliveryTarget,
+  })
+  if (
+    normalizeNullableString(input.delivery.channel) === 'linq' &&
+    exactTargetMatch
+  ) {
+    return true
+  }
+
+  return assistantAutoReplyOutboxIntentMatchesConversation({
+    conversation: input.conversation,
+    intent: input.intent,
+  }) &&
+    (
+      exactTargetMatch ||
+      assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback({
+        conversation: input.conversation,
+        delivery: input.delivery,
+        intent: input.intent,
+      })
+    )
+}
+
 function assistantAutoReplyOutboxIntentMatchesConversation(input: {
   conversation: AssistantInputConversationRef
-  intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
+  intent: AssistantAutoReplyOutboxIntent
 }): boolean {
   const conversation = conversationRefFromAssistantInputConversation(
     input.conversation,
@@ -3300,26 +3385,24 @@ function assistantAutoReplyOutboxIntentMatchesConversation(input: {
     })
 }
 
-function assistantAutoReplyOutboxDeliveryMatchesTarget(input: {
-  conversation: AssistantInputConversationRef
-  delivery: NonNullable<
-    Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]['delivery']
-  >
+function assistantAutoReplyOutboxDeliveryMatchesExactTarget(input: {
+  delivery: AssistantAutoReplyOutboxDelivery
   deliveryTarget: string
-  intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 }): boolean {
   if (input.delivery.kind !== 'message') {
     return false
   }
 
-  if (
-    [input.delivery.target, input.delivery.providerThreadId].some(
-      (candidate) => normalizeNullableString(candidate) === input.deliveryTarget,
-    )
-  ) {
-    return true
-  }
+  return [input.delivery.target, input.delivery.providerThreadId].some(
+    (candidate) => normalizeNullableString(candidate) === input.deliveryTarget,
+  )
+}
 
+function assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback(input: {
+  conversation: AssistantInputConversationRef
+  delivery: AssistantAutoReplyOutboxDelivery
+  intent: AssistantAutoReplyOutboxIntent
+}): boolean {
   const conversation = conversationRefFromAssistantInputConversation(
     input.conversation,
   )
@@ -3330,6 +3413,22 @@ function assistantAutoReplyOutboxDeliveryMatchesTarget(input: {
     threadId !== null &&
     normalizeNullableString(input.intent.threadId) === threadId
   )
+}
+
+function readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
+  delivery: AssistantAutoReplyOutboxDelivery,
+): string[] {
+  if (delivery.kind !== 'message') {
+    return []
+  }
+
+  const ids = [
+    readProviderRouteScalar(delivery.providerMessageId),
+    ...(Array.isArray(delivery.providerMessageIds)
+      ? delivery.providerMessageIds.map((id) => readProviderRouteScalar(id))
+      : []),
+  ].filter((id): id is string => id !== null)
+  return [...new Set(ids)]
 }
 
 function assistantAutoReplyRouteValueMatches(input: {

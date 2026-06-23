@@ -428,6 +428,59 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('telegram reminder')
   })
 
+  it('matches Linq materialized provider threads before cron route fields align', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: null,
+        channel: 'linq',
+        identityId: null,
+        intentId: 'intent-linq-materialized',
+        message: 'participant-bound cron reminder',
+        providerMessageId: 'linq-cron-message-1',
+        providerThreadId: 'raw-linq-chat-1',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+        target: 'raw-linq-chat-1',
+        threadId: null,
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      accountId: 'lid_linq_identity_1',
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-user-reply-1',
+        threadId: 'raw-linq-chat-1',
+      },
+      source: 'linq',
+      text: 'What is this about?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.deliveryTarget).toBe('raw-linq-chat-1')
+    expect(sendInput.turnContext).toContain('participant-bound cron reminder')
+  })
+
   it('matches hosted email history by stable conversation thread when serialized targets rotate', async () => {
     const vault = await createTempVault()
     const outboundTarget = serializeHostedEmailThreadTarget({
@@ -686,6 +739,8 @@ function createOutboxMessage(input: {
   identityId?: string | null
   intentId: string
   message: string
+  providerMessageId?: string | null
+  providerMessageIds?: string[]
   providerThreadId?: string | null
   sentAt: string
   sessionId: string
@@ -709,7 +764,10 @@ function createOutboxMessage(input: {
             idempotencyKey: null,
             kind: 'message',
             messageLength: input.message.length,
-            providerMessageId: null,
+            providerMessageId: input.providerMessageId ?? null,
+            ...(input.providerMessageIds
+              ? { providerMessageIds: input.providerMessageIds }
+              : {}),
             providerThreadId,
             sentAt: input.sentAt,
             target,

@@ -342,6 +342,8 @@ function createSentOutboxIntent(input: {
   identityId?: string | null
   intentId?: string
   message: string
+  providerMessageId?: string | null
+  providerMessageIds?: string[]
   providerThreadId?: string | null
   sentAt: string
   sessionId?: string
@@ -359,7 +361,8 @@ function createSentOutboxIntent(input: {
       idempotencyKey: null,
       kind: 'message',
       messageLength: input.message.length,
-      providerMessageId: null,
+      providerMessageId: input.providerMessageId ?? null,
+      ...(input.providerMessageIds ? { providerMessageIds: input.providerMessageIds } : {}),
       providerThreadId,
       sentAt: input.sentAt,
       target,
@@ -731,6 +734,7 @@ function assistantInputCandidateFromInboxCapture(
 }
 
 function createCapturelessAssistantInputCandidate(input: {
+  actorIsSelf?: boolean
   conversationThreadId?: string | null
   inputId: string
   mailboxRow?: {
@@ -769,7 +773,7 @@ function createCapturelessAssistantInputCandidate(input: {
       conversation: {
         accountId: 'safe_acct_1',
         actorId: 'safe_actor_1',
-        actorIsSelf: false,
+        actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
         threadIsDirect: true,
@@ -5731,7 +5735,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
-  it('skips self-authored echoes that match an older recent assistant transcript entry', async () => {
+  it('replies to self-authored text that only matches an older transcript entry', async () => {
     replyMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -5795,12 +5799,12 @@ describe('assistant auto-reply runtime', () => {
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
       stopScanning: false,
     })
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
   })
 
   it('suppresses self-authored echoes from confirmed cross-session outbox history', async () => {
@@ -5851,6 +5855,73 @@ describe('assistant auto-reply runtime', () => {
       context,
       enabledChannels: ['telegram'],
       inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('suppresses Linq self-authored echoes by provider message id after thread materialization', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        actorId: null,
+        channel: 'linq',
+        identityId: null,
+        message: 'scheduled prompt',
+        providerMessageId: 'linq-assistant-message-1',
+        providerThreadId: 'raw-linq-chat-1',
+        sentAt: '2026-04-08T00:02:01.000Z',
+        sessionId: 'session-automation',
+        target: 'raw-linq-chat-1',
+        threadId: null,
+      }),
+    ])
+    const candidate = createCapturelessAssistantInputCandidate({
+      actorIsSelf: true,
+      conversationThreadId: 'lid_linq_chat_1',
+      inputId: 'ain_linq_echo_1',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-assistant-message-1',
+        threadId: 'raw-linq-chat-1',
+      },
+      source: 'linq',
+      text: 'scheduled prompt',
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(candidate),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
       requestId: null,
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
