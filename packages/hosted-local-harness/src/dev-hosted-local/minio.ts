@@ -517,7 +517,7 @@ async function resolveHostedLocalMinioPublishTarget(
     return {
       controlHost: "127.0.0.1",
       dockerBridgeHost: null,
-      publishHost: "0.0.0.0",
+      publishHost: "127.0.0.1",
     };
   }
 

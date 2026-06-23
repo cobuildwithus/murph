@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
@@ -14,9 +14,6 @@ import {
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import { parsePrivateEcP256Jwk } from "./crypto.ts";
 import { buildHostedRunnerLocalBuildId, parseEnvText } from "./environment.ts";
-import { cleanupHostedLocalMinioBuildContainersBestEffort } from "./minio.ts";
-import { cleanupHostedRunnerContainers } from "./runtime.ts";
-import { terminateKnownHostedLocalProcessResidue } from "./stack.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
 export interface HostedLocalWorktreeConfig {
@@ -276,48 +273,6 @@ export async function removeCreatedHostedLocalWorktreeDatabaseIfUnpaired(
     stdio: ["ignore", "pipe", "pipe"],
   });
   return { removed: dropResult.status === 0, unpaired: true };
-}
-
-export async function stopHostedLocalWorktreeResources(input: {
-  env: NodeJS.ProcessEnv;
-  slug: string;
-}): Promise<void> {
-  const slug = normalizeHostedLocalWorktreeSlug(input.slug);
-  const manifest = await readHostedLocalWorktreeManifest(slug);
-  const config = manifest
-    ? buildHostedLocalWorktreeConfig({
-        env: input.env,
-        ports: manifest.ports,
-        slug,
-      })
-    : await resolveHostedLocalWorktreeConfig({
-        env: input.env,
-        probePorts: false,
-        slug,
-      });
-  const devConfig = resolveHostedLocalDevConfig(config.env);
-  terminateKnownHostedLocalProcessResidue({
-    config: devConfig,
-    owned: {
-      cloudflareWorker: true,
-      healthCommons: false,
-      linqTunnel: true,
-      stripe: true,
-      temporalServer: true,
-      temporalWorker: false,
-      web: true,
-    },
-    signal: "SIGTERM",
-    stripeForwardUrl: `${config.urls.webBaseUrl}/api/hosted-onboarding/stripe/webhook`,
-  });
-  await cleanupHostedRunnerContainers({
-    cwd: repoRoot,
-    env: config.env,
-    ignoreErrors: true,
-    scope: "current-build",
-  });
-  await cleanupHostedLocalMinioBuildContainersBestEffort(config.env, config.buildId);
-  await rm(path.join(repoRoot, config.manifestPath), { force: true });
 }
 
 export function formatHostedLocalWorktreeEnv(

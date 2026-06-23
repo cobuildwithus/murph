@@ -75,12 +75,20 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
     return;
   }
 
+  if (subcommand === "down") {
+    throw new Error(
+      [
+        "hosted-local worktree down is disabled until worktree up records process ownership.",
+        "Stop the foreground `hosted-local worktree up` process directly.",
+      ].join(" "),
+    );
+  }
+
   const {
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
     removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
     resolveHostedLocalWorktreeConfig,
-    stopHostedLocalWorktreeResources,
     writeHostedLocalWorktreeManifest,
   } = await import("./dev-hosted-local/worktree.ts");
 
@@ -129,16 +137,6 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
           }
         }
       }
-      return;
-    }
-    case "down": {
-      await stopHostedLocalWorktreeResources({
-        env: io.env ?? process.env,
-        slug,
-      });
-      (io.stdout ?? process.stdout).write(
-        `Stopped hosted-local worktree resources for ${slug}.\n`,
-      );
       return;
     }
     default:
@@ -576,7 +574,6 @@ function printHelp(stdout: NodeJS.WritableStream): void {
       "  hosted-local worktree up <slug>",
       "  hosted-local worktree doctor <slug> [--json]",
       "  hosted-local worktree env <slug>",
-      "  hosted-local worktree down <slug>",
       "  hosted-local e2e [scenario] [--profile e2e:stub] [--list]",
       "  hosted-local run [--profile dev] -- <command> [args...]",
       "  hosted-local doctor [--profile dev] [--json]",
@@ -607,7 +604,8 @@ function printWorktreeHelp(stdout: NodeJS.WritableStream): void {
       "  hosted-local worktree up <slug>",
       "  hosted-local worktree doctor <slug> [--json]",
       "  hosted-local worktree env <slug>",
-      "  hosted-local worktree down <slug>",
+      "",
+      "Stop the foreground worktree process directly; out-of-band down is disabled until process ownership is recorded.",
       "",
       "Slugs must use lowercase letters, digits, and hyphens.",
       "",

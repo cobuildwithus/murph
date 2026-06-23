@@ -8,8 +8,6 @@ type SpawnSyncResult = {
 };
 
 const worktreeMocks = vi.hoisted(() => ({
-  cleanupHostedLocalMinioBuildContainersBestEffort: vi.fn(async () => {}),
-  cleanupHostedRunnerContainers: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   readFile: vi.fn(async () => {
     const error = new Error("missing") as NodeJS.ErrnoException;
@@ -17,13 +15,11 @@ const worktreeMocks = vi.hoisted(() => ({
     throw error;
   }),
   rename: vi.fn(async () => {}),
-  rm: vi.fn(async () => {}),
   spawnSync: vi.fn<() => SpawnSyncResult>(() => ({
     status: 0,
     stderr: "",
     stdout: "",
   })),
-  terminateKnownHostedLocalProcessResidue: vi.fn(() => {}),
   writeFile: vi.fn(async () => {}),
 }));
 
@@ -35,22 +31,7 @@ vi.mock("node:fs/promises", () => ({
   mkdir: worktreeMocks.mkdir,
   readFile: worktreeMocks.readFile,
   rename: worktreeMocks.rename,
-  rm: worktreeMocks.rm,
   writeFile: worktreeMocks.writeFile,
-}));
-
-vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
-  cleanupHostedLocalMinioBuildContainersBestEffort:
-    worktreeMocks.cleanupHostedLocalMinioBuildContainersBestEffort,
-}));
-
-vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
-  cleanupHostedRunnerContainers: worktreeMocks.cleanupHostedRunnerContainers,
-}));
-
-vi.mock("../../src/dev-hosted-local/stack.ts", () => ({
-  terminateKnownHostedLocalProcessResidue:
-    worktreeMocks.terminateKnownHostedLocalProcessResidue,
 }));
 
 import {
@@ -62,7 +43,6 @@ import {
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
   resolveHostedLocalWorktreeDevConfig,
-  stopHostedLocalWorktreeResources,
   writeHostedLocalWorktreeManifest,
 } from "../../src/dev-hosted-local/worktree.ts";
 
@@ -585,7 +565,7 @@ describe("hosted-local worktree config", () => {
     expect(worktreeMocks.spawnSync).not.toHaveBeenCalled();
   });
 
-  it("resolves the stack config used by worktree down", () => {
+  it("resolves the stack config used by the worktree profile", () => {
     const config = resolveHostedLocalWorktreeDevConfig({
       env: {},
       slug: "feature-a",
@@ -611,93 +591,6 @@ describe("hosted-local worktree config", () => {
         env: {},
         slug: "feature-a",
       }).webPort,
-    );
-  });
-
-  it("stops only slug-scoped process, runner, and MinIO resources", async () => {
-    await stopHostedLocalWorktreeResources({
-      env: {},
-      slug: "feature-a",
-    });
-
-    expect(worktreeMocks.terminateKnownHostedLocalProcessResidue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owned: expect.objectContaining({
-          cloudflareWorker: true,
-          healthCommons: false,
-          linqTunnel: true,
-          stripe: true,
-          web: true,
-          temporalWorker: false,
-        }),
-        signal: "SIGTERM",
-        stripeForwardUrl: expect.stringMatching(
-          /^http:\/\/127\.0\.0\.1:\d+\/api\/hosted-onboarding\/stripe\/webhook$/u,
-        ),
-      }),
-    );
-    expect(worktreeMocks.cleanupHostedRunnerContainers).toHaveBeenCalledWith(
-      expect.objectContaining({
-        env: expect.objectContaining({
-          MURPH_HOSTED_LOCAL_PROFILE: "worktree",
-          NEXT_DIST_DIR_SUFFIX: "feature-a",
-        }),
-        ignoreErrors: true,
-        scope: "current-build",
-      }),
-    );
-    expect(
-      worktreeMocks.cleanupHostedLocalMinioBuildContainersBestEffort,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        MURPH_HOSTED_LOCAL_PROFILE: "worktree",
-      }),
-      "worktree-feature-a",
-    );
-    expect(worktreeMocks.rm).toHaveBeenCalledWith(
-      expect.stringContaining(".tmp/hosted-local-worktrees/feature-a/manifest.json"),
-      { force: true },
-    );
-  });
-
-  it("uses manifest ports when stopping a probed-port worktree", async () => {
-    worktreeMocks.readFile.mockResolvedValueOnce(JSON.stringify({
-      ports: {
-        minio: 9108,
-        temporal: 7308,
-        web: 3108,
-        worker: 8808,
-      },
-      profileName: "worktree",
-      schemaVersion: 1,
-      slug: "feature-a",
-    }));
-
-    await stopHostedLocalWorktreeResources({
-      env: {},
-      slug: "feature-a",
-    });
-
-    expect(worktreeMocks.terminateKnownHostedLocalProcessResidue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        config: expect.objectContaining({
-          temporal: expect.objectContaining({
-            port: 7308,
-          }),
-          webPort: 3108,
-          workerPort: 8808,
-        }),
-        stripeForwardUrl:
-          "http://127.0.0.1:3108/api/hosted-onboarding/stripe/webhook",
-      }),
-    );
-    expect(
-      worktreeMocks.cleanupHostedLocalMinioBuildContainersBestEffort,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        MURPH_DEV_MINIO_PORT: "9108",
-      }),
-      "worktree-feature-a",
     );
   });
 

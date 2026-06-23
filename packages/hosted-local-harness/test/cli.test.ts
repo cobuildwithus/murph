@@ -29,7 +29,6 @@ const removeCreatedHostedLocalWorktreeDatabaseIfUnpaired = vi.hoisted(() =>
 const resolveHostedLocalWorktreeConfig = vi.hoisted(() =>
   vi.fn(async () => createHostedLocalWorktreeConfig()),
 );
-const stopHostedLocalWorktreeResources = vi.hoisted(() => vi.fn(async () => {}));
 const writeHostedLocalWorktreeManifest = vi.hoisted(() => vi.fn(async () => ({})));
 const resolveHostedLocalDevConfig = vi.hoisted(() =>
   vi.fn(() => ({
@@ -85,7 +84,6 @@ vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   formatHostedLocalWorktreeEnv,
   removeCreatedHostedLocalWorktreeDatabaseIfUnpaired,
   resolveHostedLocalWorktreeConfig,
-  stopHostedLocalWorktreeResources,
   writeHostedLocalWorktreeManifest,
 }));
 
@@ -329,19 +327,18 @@ describe("hosted-local run CLI", () => {
     expect(output.text()).not.toContain("left in place");
   });
 
-  test("runs worktree down through slug-scoped cleanup", async () => {
+  test("fails closed instead of guessing worktree process ownership for down", async () => {
     const output = createBufferedStdout();
 
-    await runHostedLocalCli(["worktree", "down", "feature-a"], {
-      env: {},
-      stdout: output.stdout,
-    });
+    await expect(
+      runHostedLocalCli(["worktree", "down", "feature-a"], {
+        env: {},
+        stdout: output.stdout,
+      }),
+    ).rejects.toThrow("worktree down is disabled until worktree up records process ownership");
 
-    expect(stopHostedLocalWorktreeResources).toHaveBeenCalledWith({
-      env: {},
-      slug: "feature-a",
-    });
-    expect(output.text()).toContain("Stopped hosted-local worktree resources for feature-a.");
+    expect(resolveHostedLocalWorktreeConfig).not.toHaveBeenCalled();
+    expect(output.text()).toBe("");
   });
 
   test("rejects unknown worktree subcommands after printing no secrets", async () => {
