@@ -133,8 +133,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
-  runs resume only after a newer hosted `conversation.message` mailbox item for
-  the same member, not from model-supplied confirmation text or tool arguments.
+  runs resume only when the assistant selects the paused run id and `apps/web`
+  verifies a newer hosted `conversation.message` mailbox item for the same
+  member and delivery context; model-supplied confirmation text is not proof.
   `computer_act` runs bounded Playwright code against the current Kernel page;
   manual browser handoff remains available for
   login, CAPTCHA, missing details, or direct user takeover, but is not the
