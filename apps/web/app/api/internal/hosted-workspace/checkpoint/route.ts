@@ -22,6 +22,9 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
   const result = await checkpointHostedWorkspace({
     expectedVersion: body.expectedWorkspaceVersion,
+    ...("inboxMediaRetentionWakeAt" in body
+      ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }
+      : {}),
     reason: body.reason,
     snapshotRef: body.snapshotRef,
     userId,
@@ -36,6 +39,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   await signalFutureWorkspaceWakeBestEffort({
     checkpointed: result.status === "updated",
+    inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
     nextWakeAt: result.workspace.nextWakeAt,
     userId,
   });
@@ -54,6 +58,7 @@ export const POST = withJsonError(async (request: Request) => {
       browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
       checkpointedAt: result.workspace.checkpointedAt,
       createdAt: result.workspace.createdAt,
+      inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
       nextWakeAt: result.workspace.nextWakeAt,
       nextWakeReason: result.workspace.nextWakeReason,
       redactedStatus: result.workspace.redactedStatusJson,
@@ -67,10 +72,17 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function signalFutureWorkspaceWakeBestEffort(input: {
   checkpointed: boolean;
+  inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   userId: string;
 }): Promise<void> {
-  if (!input.checkpointed || !isFutureIsoTimestamp(input.nextWakeAt)) {
+  if (
+    !input.checkpointed
+    || (
+      !isFutureIsoTimestamp(input.nextWakeAt)
+      && !isFutureIsoTimestamp(input.inboxMediaRetentionWakeAt)
+    )
+  ) {
     return;
   }
 

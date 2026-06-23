@@ -1313,6 +1313,7 @@ describe("hosted runtime internal web routes", () => {
       {
         attemptId: "attempt_1",
         expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
         leaseGeneration: "2",
         nextWakeAt: "2026-04-26T00:05:00.000Z",
         nextWakeReason: "mailbox",
@@ -1338,6 +1339,7 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
       nextWakeReason: "mailbox",
       reason: "import",
@@ -2435,6 +2437,7 @@ function buildWorkspaceRecord(
     browserVaultReplicaRef: Record<string, unknown> | null;
     checkpointedAt: string | null;
     createdAt: string;
+    inboxMediaRetentionWakeAt: string | null;
     nextWakeAt: string | null;
     nextWakeReason: string | null;
     redactedStatusJson: Record<string, unknown> | null;
@@ -2448,6 +2451,7 @@ function buildWorkspaceRecord(
     browserVaultReplicaRef: null,
     checkpointedAt: null,
     createdAt: FIXED_NOW,
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: null,

@@ -169,7 +169,11 @@ export async function readHostedRuntimeReconciliationFacts(
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,
         reason: "ai_usage_denied",
-        retryAt: null,
+        retryAt: resolveHostedRuntimeAiBlockedRetryAt({
+          aiRetryAt: null,
+          now,
+          workspace: projectedWorkspace,
+        }),
         workspace: projectedWorkspace,
       });
       emitHostedRuntimeReconciliationFacts({
@@ -185,7 +189,11 @@ export async function readHostedRuntimeReconciliationFacts(
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,
         reason: "ai_usage_gate_unavailable",
-        retryAt: gate.retryAt,
+        retryAt: resolveHostedRuntimeAiBlockedRetryAt({
+          aiRetryAt: gate.retryAt,
+          now,
+          workspace: projectedWorkspace,
+        }),
         workspace: projectedWorkspace,
       });
       emitHostedRuntimeReconciliationFacts({
@@ -249,6 +257,10 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   userId: string;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): Promise<boolean> {
+  if (isHostedRuntimeInboxMediaRetentionWakeDue(input.workspace, input.now)) {
+    return false;
+  }
+
   if (hasHostedFreshConversationMailboxLag({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
@@ -270,6 +282,17 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 
   return isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+}
+
+function resolveHostedRuntimeAiBlockedRetryAt(input: {
+  aiRetryAt: string | null;
+  now: Date;
+  workspace: HostedRuntimeReconciliationFactsWorkspace;
+}): string | null {
+  return earliestHostedRuntimeReconciliationTimestamp([
+    input.aiRetryAt,
+    readHostedRuntimeFutureTimestamp(input.workspace.inboxMediaRetentionWakeAt, input.now),
+  ]);
 }
 
 async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: {
@@ -689,6 +712,9 @@ function emitHostedRuntimeReconciliationFacts(event: {
     usageGateRequired: event.usageGateRequired,
     usageGateStatus: event.usageGateStatus,
     userIdPresent: event.request.userId.length > 0,
+    workspaceInboxMediaRetentionWakeAtPresent:
+      event.facts.workspace?.inboxMediaRetentionWakeAt !== null
+        && event.facts.workspace?.inboxMediaRetentionWakeAt !== undefined,
     workspaceNextWakeAtPresent:
       event.facts.workspace?.nextWakeAt !== null
         && event.facts.workspace?.nextWakeAt !== undefined,
@@ -725,6 +751,39 @@ function isHostedRuntimeWakeDue(value: string | null, now: Date): boolean {
   return timestamp !== null && timestamp <= now.getTime();
 }
 
+function isHostedRuntimeInboxMediaRetentionWakeDue(
+  workspace: HostedRuntimeReconciliationFactsWorkspace,
+  now: Date,
+): boolean {
+  return isHostedRuntimeWakeDue(workspace.inboxMediaRetentionWakeAt, now);
+}
+
+function readHostedRuntimeFutureTimestamp(value: string | null, now: Date): string | null {
+  const timestamp = readHostedRuntimeReconciliationTimestamp(value);
+  if (timestamp === null || timestamp <= now.getTime()) {
+    return null;
+  }
+
+  return value;
+}
+
+function earliestHostedRuntimeReconciliationTimestamp(
+  values: readonly (string | null)[],
+): string | null {
+  let selected: string | null = null;
+  let selectedMs = Number.POSITIVE_INFINITY;
+  for (const value of values) {
+    const timestamp = readHostedRuntimeReconciliationTimestamp(value);
+    if (timestamp === null || timestamp >= selectedMs) {
+      continue;
+    }
+    selected = value;
+    selectedMs = timestamp;
+  }
+
+  return selected;
+}
+
 function readHostedRuntimeReconciliationTimestamp(value: string | null): number | null {
   if (!value) {
     return null;
@@ -739,6 +798,7 @@ function projectHostedRuntimeReconciliationWorkspace(
 ): HostedRuntimeReconciliationFactsWorkspace | null {
   return workspace
     ? {
+        inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
         nextWakeAt: workspace.nextWakeAt,
         nextWakeReason: workspace.nextWakeReason,
         version: workspace.version,

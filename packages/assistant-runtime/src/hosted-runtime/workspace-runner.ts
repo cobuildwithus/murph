@@ -95,6 +95,7 @@ export interface HostedWorkspaceCheckpointMetadata {
 export interface HostedWorkspaceSnapshotCheckpointMetadata {
   attemptId: string;
   expectedWorkspaceVersion: string;
+  inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
@@ -120,6 +121,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
+    inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -408,6 +410,9 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
+    inboxMediaRetentionWakeAt: Object.hasOwn(input.requestInput, "inboxMediaRetentionWakeAt")
+      ? input.requestInput.inboxMediaRetentionWakeAt ?? null
+      : input.metadata.inboxMediaRetentionWakeAt ?? null,
     leaseGeneration: input.metadata.leaseGeneration,
     nextWakeAt: Object.hasOwn(input.requestInput, "nextWakeAt")
       ? input.requestInput.nextWakeAt ?? null

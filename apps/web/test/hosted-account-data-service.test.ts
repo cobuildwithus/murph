@@ -422,6 +422,7 @@ describe("buildHostedDataExport", () => {
         ],
         workspace: {
           browserVaultReplicaRefPresent: true,
+          inboxMediaRetentionWakeAt: "2026-04-27T00:07:00.000Z",
           snapshotRefPresent: true,
         },
       },
@@ -2389,6 +2390,7 @@ async function createHostedAccountDataExportPrisma(input: {
         hostedWorkspace: {
           browserVaultReplicaRef: { opaque: true },
           checkpointedAt: new Date("2026-04-27T00:04:00.000Z"),
+          inboxMediaRetentionWakeAt: new Date("2026-04-27T00:07:00.000Z"),
           nextWakeAt: new Date("2026-04-27T00:05:00.000Z"),
           nextWakeReason: "nudge",
           redactedStatusJson: { private: true },
@@ -2455,6 +2457,7 @@ async function createHostedAccountDataExportPrisma(input: {
         },
         checkpointedAt: new Date("2026-04-27T00:04:00.000Z"),
         createdAt: new Date("2026-04-27T00:04:00.000Z"),
+        inboxMediaRetentionWakeAt: new Date("2026-04-27T00:07:00.000Z"),
         nextWakeAt: new Date("2026-04-27T00:05:00.000Z"),
         nextWakeReason: "nudge",
         redactedStatusJson: { private: true },

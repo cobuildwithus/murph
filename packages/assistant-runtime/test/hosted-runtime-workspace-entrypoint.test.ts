@@ -811,8 +811,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, expectedRetentionWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(
+        checkpointRequests[0]?.inboxMediaRetentionWakeAt,
+        expectedRetentionWakeAt,
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, expectedRetentionWakeAt);
     } finally {
@@ -894,8 +898,7 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
-                nextWakeReason: "inbox_media_retention",
+                inboxMediaRetentionWakeAt: dueWakeAt,
                 version: "0",
               }),
             }),
@@ -911,8 +914,111 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);
       assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, null);
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retention-only processing preserves assistant wake without entering assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const recordedAt = "2026-04-01T00:00:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const persisted = await persistCanonicalInboxCapture({
+        vaultRoot,
+        captureId: "cap_workspace_retention_only",
+        eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V9",
+        storedAt: recordedAt,
+        input: {
+          source: "telegram",
+          externalId: "msg-workspace-retention-only",
+          accountId: "self",
+          thread: {
+            id: "thread-workspace-retention-only",
+            isDirect: true,
+          },
+          actor: {
+            isSelf: false,
+          },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          text: "old media",
+          attachments: [
+            {
+              kind: "audio",
+              mime: "audio/mp4",
+              fileName: "voice.m4a",
+              data: Buffer.from("audio-bytes"),
+            },
+          ],
+          raw: {},
+        },
+      });
+      const audioPath = persisted.stored.attachments[0]?.storedPath ?? "";
+      assert.ok(audioPath);
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_retention_only",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/retention-only.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: dueWakeAt,
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "assistant_due",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Retention-only processing must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      await assert.rejects(stat(path.join(vaultRoot, audioPath)), { code: "ENOENT" });
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, dueWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant_due");
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, null);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, dueWakeAt);
+      assert.equal(result.nextWakeReason, "assistant_due");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -9510,6 +9616,7 @@ function createWorkspacePort(input: {
           workspace: input.checkpointWorkspace
             ? input.checkpointWorkspace(request)
             : createWorkspaceState({
+                inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
                 nextWakeAt: request.nextWakeAt ?? null,
                 nextWakeReason: request.nextWakeReason ?? null,
                 redactedStatus: request.redactedStatus ?? null,
@@ -9629,6 +9736,7 @@ function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): Ho
   return {
     checkpointedAt: TEST_NOW,
     createdAt: TEST_NOW,
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatus: null,
@@ -9988,8 +10096,7 @@ describe("hosted runtime shutdown signal", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
-                nextWakeReason: "inbox_media_retention",
+                inboxMediaRetentionWakeAt: dueWakeAt,
                 version: "0",
               }),
             }),
@@ -10003,8 +10110,9 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, retryWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, retryWakeAt);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, retryWakeAt);
     } finally {
@@ -10022,6 +10130,7 @@ describe("hosted runtime shutdown signal", () => {
     const shutdownController = new AbortController();
     const assistantWakeAt = "2026-04-15T00:01:00.000Z";
     const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const retryWakeAt = "2026-04-15T00:05:00.000Z";
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -10059,8 +10168,7 @@ describe("hosted runtime shutdown signal", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
-                nextWakeReason: "inbox_media_retention",
+                inboxMediaRetentionWakeAt: dueWakeAt,
                 version: "0",
               }),
             }),
@@ -10084,7 +10192,8 @@ describe("hosted runtime shutdown signal", () => {
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, assistantWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, retryWakeAt);
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedAssistantNextWakeAt,
         assistantWakeAt,
@@ -10141,8 +10250,7 @@ describe("hosted runtime shutdown signal", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
-                nextWakeReason: "inbox_media_retention",
+                inboxMediaRetentionWakeAt: dueWakeAt,
                 version: "0",
               }),
             }),
@@ -10150,7 +10258,11 @@ describe("hosted runtime shutdown signal", () => {
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(
-              `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeReason ?? "none"}`,
+              `assistant.phase:${assistantPhaseCalls}:${
+                input.workspace?.inboxMediaRetentionWakeAt
+                  ? "inbox_media_retention"
+                  : input.workspace?.nextWakeReason ?? "none"
+              }`,
             );
             if (assistantPhaseCalls === 1) {
               return {
@@ -10182,11 +10294,16 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1:inbox_media_retention",
-        "assistant.phase:2:assistant",
+        "assistant.phase:2:inbox_media_retention",
       ]);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "inbox_media_retention");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.ok(checkpointRequests[0]?.inboxMediaRetentionWakeAt);
+      assert.ok(
+        Date.parse(checkpointRequests[0]?.inboxMediaRetentionWakeAt ?? "")
+          > Date.parse(projectedWakeAt),
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, projectedWakeAt);
     } finally {

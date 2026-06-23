@@ -194,6 +194,7 @@ describe("hosted orchestration control contracts", () => {
       blocked: null,
       mailboxLag: [],
       workspace: {
+        inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
         redactedStatus: {},
@@ -213,6 +214,17 @@ describe("hosted orchestration control contracts", () => {
     });
     expect(ensureProcessingRequest).not.toHaveProperty("reason");
     expect(ensureProcessingRequest).not.toHaveProperty("source");
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "inbox_media_retention",
+    })).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "inbox_media_retention",
+    });
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "assistant",
+    })).toThrow("Hosted runtime ensure-processing request processingMode is not supported.");
 
     for (const action of [
       "started",
@@ -323,6 +335,7 @@ function createMailboxLag(): HostedMailboxLaneLag[] {
 
 function createWorkspaceProjection(): HostedRuntimeReconciliationFactsWorkspace {
   return {
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     version: "7",

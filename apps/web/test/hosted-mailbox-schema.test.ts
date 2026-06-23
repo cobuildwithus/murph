@@ -22,6 +22,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const retentionWakeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260623060000_hosted_workspace_inbox_media_retention_wake/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -55,6 +62,15 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(schema).toContain('payloadHash             String?               @map("payload_hash")');
     expect(payloadHashMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item" ADD COLUMN "payload_hash" TEXT',
+    );
+    expect(schema).toContain(
+      'inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")',
+    );
+    expect(retentionWakeMigrationSql).toContain(
+      'ALTER TABLE "hosted_workspace"',
+    );
+    expect(retentionWakeMigrationSql).toContain(
+      'ADD COLUMN "inbox_media_retention_wake_at" TIMESTAMP(3)',
     );
   });
 });

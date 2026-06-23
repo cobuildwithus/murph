@@ -27,6 +27,7 @@ describe("readRuntimeReconciliationFacts", () => {
       blocked: null,
       mailboxLag: [],
       workspace: {
+        inboxMediaRetentionWakeAt: null,
         nextWakeAt: "2026-05-20T12:05:00.000Z",
         nextWakeReason: "assistant",
         version: "7",
@@ -65,6 +66,7 @@ describe("readRuntimeReconciliationFacts", () => {
       blocked: null,
       mailboxLag: [],
       workspace: {
+        inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
         redactedStatus: {},

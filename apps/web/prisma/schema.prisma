@@ -699,6 +699,7 @@ model HostedWorkspace {
   browserVaultReplicaRef Json?        @map("browser_vault_replica_ref")
   nextWakeAt             DateTime?    @map("next_wake_at")
   nextWakeReason         String?      @map("next_wake_reason")
+  inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
   createdAt              DateTime     @default(now()) @map("created_at")

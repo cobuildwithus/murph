@@ -368,6 +368,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
       "20260622190000_add_hosted_product_feedback",
+      "20260623060000_hosted_workspace_inbox_media_retention_wake",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');

@@ -34,6 +34,7 @@ export const GET = withJsonError(async (request: Request) => {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,
           checkpointedAt: workspace.checkpointedAt,
           createdAt: workspace.createdAt,
+          inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
           nextWakeAt: workspace.nextWakeAt,
           nextWakeReason: workspace.nextWakeReason,
           redactedStatus: workspace.redactedStatusJson,

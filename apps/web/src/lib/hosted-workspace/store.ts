@@ -180,6 +180,7 @@ export interface HostedWorkspaceRow {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: Date | null;
   nextWakeReason: string | null;
+  inboxMediaRetentionWakeAt: Date | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: Date | null;
   createdAt: Date;
@@ -193,6 +194,7 @@ export interface HostedWorkspaceRecord {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  inboxMediaRetentionWakeAt: string | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: string | null;
   createdAt: string;
@@ -288,6 +290,7 @@ export async function readHostedWorkspace(input: {
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   prisma?: PrismaClient;
@@ -307,6 +310,7 @@ export async function checkpointHostedWorkspace(input: {
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason | string;
@@ -347,6 +351,16 @@ export async function checkpointHostedWorkspaceTx(input: {
 
   if ("nextWakeReason" in input) {
     updateData.nextWakeReason = normalizeNullableString(input.nextWakeReason);
+  }
+
+  if ("inboxMediaRetentionWakeAt" in input) {
+    updateData.inboxMediaRetentionWakeAt =
+      input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
+        ? null
+        : requireDate(
+          input.inboxMediaRetentionWakeAt,
+          "Hosted workspace inboxMediaRetentionWakeAt",
+        );
   }
 
   if ("redactedStatusJson" in input) {
@@ -1041,6 +1055,7 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
     createdAt: record.createdAt.toISOString(),
     nextWakeAt: record.nextWakeAt?.toISOString() ?? null,
     nextWakeReason: record.nextWakeReason,
+    inboxMediaRetentionWakeAt: record.inboxMediaRetentionWakeAt?.toISOString() ?? null,
     redactedStatusJson: record.redactedStatusJson,
     snapshotRef: record.snapshotRef,
     updatedAt: record.updatedAt.toISOString(),

@@ -141,7 +141,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted workspace state",
     deletion: "live-delete",
     export: "metadata-and-counts",
-    note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, and redacted status.",
+    note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, inbox media-retention wake state, and redacted status.",
   },
   {
     slug: "prisma.hosted_computer_run",
@@ -697,6 +697,7 @@ export async function buildHostedDataExport(input: {
         browserVaultReplicaRef: true,
         checkpointedAt: true,
         createdAt: true,
+        inboxMediaRetentionWakeAt: true,
         nextWakeAt: true,
         nextWakeReason: true,
         redactedStatusJson: true,
@@ -1314,6 +1315,7 @@ function projectHostedWorkspaceForExport(workspace: {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   checkpointedAt: Date | null;
   createdAt: Date;
+  inboxMediaRetentionWakeAt: Date | null;
   nextWakeAt: Date | null;
   nextWakeReason: string | null;
   redactedStatusJson: Prisma.JsonValue | null;
@@ -1330,6 +1332,7 @@ function projectHostedWorkspaceForExport(workspace: {
     browserVaultReplicaRefPresent: workspace.browserVaultReplicaRef !== null,
     checkpointedAt: workspace.checkpointedAt,
     createdAt: workspace.createdAt,
+    inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
     nextWakeAt: workspace.nextWakeAt,
     nextWakeReason: workspace.nextWakeReason,
     redactedStatusPresent: workspace.redactedStatusJson !== null,

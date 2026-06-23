@@ -4,6 +4,7 @@ import {
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+  HOSTED_RUNTIME_PROCESSING_MODES,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeEnsureProcessingRequest,
@@ -137,12 +138,17 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
 ): HostedRuntimeReconciliationFactsWorkspace {
   const record = requireObject(value, "Hosted runtime reconciliation facts workspace");
   assertExactKeys(record, "Hosted runtime reconciliation facts workspace", [
+    "inboxMediaRetentionWakeAt",
     "nextWakeAt",
     "nextWakeReason",
     "version",
   ]);
 
   return {
+    inboxMediaRetentionWakeAt: readRequiredNullableIsoTimestamp(
+      record.inboxMediaRetentionWakeAt,
+      "Hosted runtime reconciliation facts workspace inboxMediaRetentionWakeAt",
+    ),
     nextWakeAt: readRequiredNullableIsoTimestamp(
       record.nextWakeAt,
       "Hosted runtime reconciliation facts workspace nextWakeAt",
@@ -164,6 +170,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "orchestrationAttemptId",
+    "processingMode",
   ]);
 
   return {
@@ -171,6 +178,15 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
     ),
+    ...(record.processingMode === undefined
+      ? {}
+      : {
+          processingMode: parseNullableAllowedString(
+            record.processingMode,
+            "Hosted runtime ensure-processing request processingMode",
+            HOSTED_RUNTIME_PROCESSING_MODES,
+          ),
+        }),
   };
 }
 
@@ -345,6 +361,18 @@ function parseAllowedString<T extends string>(
   }
 
   throw new TypeError(`${label} is not supported.`);
+}
+
+function parseNullableAllowedString<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T | null {
+  if (value === null) {
+    return null;
+  }
+
+  return parseAllowedString(value, label, allowed);
 }
 
 function assertExactKeys(

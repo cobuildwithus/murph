@@ -68,8 +68,10 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import type {
+  HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
+  HostedWorkspaceArtifactMaterializer,
 } from "./hosted-runtime/models.ts";
 import type {
   HostedMailboxResolvedImportItem,
@@ -784,6 +786,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const checkpointMetadata = {
       attemptId: input.request.attemptId,
       expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+      inboxMediaRetentionWakeAt: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
       leaseGeneration: input.request.leaseGeneration,
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
@@ -793,6 +796,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       metadata: checkpointMetadata,
     });
     const foregroundWorkspacePort = guardedWorkspacePort;
+    if (input.request.processingMode === "inbox_media_retention") {
+      return await runHostedInboxMediaRetentionOnlyCheckpoint({
+        assertRuntimeNotAborted,
+        checkpointRequestBuilder,
+        expectedUserId: input.request.userId,
+        input,
+        issueExportPort: runtime.platform.issueExportPort ?? null,
+        materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+        runtimeAbortSignal: runtimeAbortController.signal,
+        shutdownSignal: options.shutdownSignal ?? null,
+        vaultRoot: restored.vaultRoot,
+        wakeSignal: null,
+        workspace: workspaceRead.workspace,
+        workspacePort: foregroundWorkspacePort,
+      });
+    }
     const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint() {
@@ -951,6 +970,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
         nowMs: Date.now(),
       });
+      const returnedNextWake = selectEarliestHostedRuntimeWake([
+        {
+          at: nextWake.nextWakeAt,
+          reason: nextWake.nextWakeReason,
+        },
+        {
+          at: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
+          reason: workspaceRead.workspace?.inboxMediaRetentionWakeAt
+            ? "inbox_media_retention"
+            : null,
+        },
+      ]);
 
       if (initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged) {
         emitPhaseLog({
@@ -970,6 +1001,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           expectedUserId: input.request.userId,
           nextWakeAt: nextWake.nextWakeAt,
           nextWakeReason: nextWake.nextWakeReason,
+          inboxMediaRetentionWakeAt: workspaceRead.workspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
           redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
@@ -987,12 +1019,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
         });
+        const checkpointReturnedNextWake = selectEarliestHostedRuntimeWake([
+          {
+            at: checkpoint.workspace.nextWakeAt ?? null,
+            reason: checkpoint.workspace.nextWakeReason ?? null,
+          },
+          {
+            at: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
+            reason: checkpoint.workspace.inboxMediaRetentionWakeAt
+              ? "inbox_media_retention"
+              : null,
+          },
+        ]);
         const invocationResult = {
-          nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+          nextWakeAt: checkpointReturnedNextWake.nextWakeAt,
           redactedStatus: checkpoint.workspace.redactedStatus ?? redactedStatus,
           status: resolveHostedWorkspaceInvocationStatus({
             mailboxBudgetExhausted: mailboxBudgetExhausted(),
-            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+            nextWakeAt: checkpointReturnedNextWake.nextWakeAt,
           }),
         };
         emitPhaseLog({
@@ -1009,11 +1053,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const invocationResult = {
-        nextWakeAt: nextWake.nextWakeAt,
+        nextWakeAt: returnedNextWake.nextWakeAt,
         redactedStatus,
         status: resolveHostedWorkspaceInvocationStatus({
           mailboxBudgetExhausted: mailboxBudgetExhausted(),
-          nextWakeAt: nextWake.nextWakeAt,
+          nextWakeAt: returnedNextWake.nextWakeAt,
         }),
       };
       emitPhaseLog({
@@ -1588,6 +1632,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const idleCheckpointWake = selectHostedIdleCheckpointWake({
           idleMaintenance,
+          previousInboxMediaRetentionWakeAt:
+            accumulatedProjection.inboxMediaRetentionWakeAt,
           projectedWakeAt: accumulatedProjection.nextWakeAt,
           projectedWakeReason: accumulatedProjection.nextWakeReason,
         });
@@ -1600,6 +1646,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             expectedUserId: input.request.userId,
             nextWakeAt: idleCheckpointWake.nextWakeAt,
             nextWakeReason: idleCheckpointWake.nextWakeReason,
+            inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
             issueExportPort: runtime.platform.issueExportPort ?? null,
             redactedStatus: accumulatedProjection.redactedStatus,
             runtimeAbortSignal: runtimeAbortController.signal,
@@ -1695,11 +1742,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             reason: checkpoint.workspace.nextWakeReason ?? null,
           },
           {
+            at: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
+            reason: checkpoint.workspace.inboxMediaRetentionWakeAt
+              ? "inbox_media_retention"
+              : null,
+          },
+          {
             at: durableCheckpointWakeAt,
             reason: durableCheckpointWakeReason,
           },
         ]);
         const checkpointReturnWakePresent = Object.hasOwn(checkpoint.workspace, "nextWakeAt")
+          || checkpoint.workspace.inboxMediaRetentionWakeAt !== null
           || durableCheckpointWakeAt !== null;
         const checkpointDurableWakeReason = readSelectedDurableCheckpointWakeReason({
           durableWakeAt: durableCheckpointWakeAt,
@@ -1760,6 +1814,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       {
         at: projection.nextWakeAt,
         reason: projection.nextWakeReason,
+      },
+      {
+        at: projection.inboxMediaRetentionWakeAt,
+        reason: projection.inboxMediaRetentionWakeAt ? "inbox_media_retention" : null,
       },
       {
         at: durableCheckpointWakeAt,
@@ -1992,6 +2050,98 @@ function buildHostedRuntimePhaseTraceMetadata(
   return details;
 }
 
+async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
+  assertRuntimeNotAborted: () => void;
+  checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  expectedUserId: string;
+  input: HostedAssistantWorkspaceRuntimeJobInput;
+  issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
+  materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
+  runtimeAbortSignal: AbortSignal;
+  shutdownSignal: AbortSignal | null;
+  vaultRoot: string;
+  wakeSignal: RuntimeWakeSignal | null;
+  workspace: HostedWorkspaceState | null;
+  workspacePort: HostedRuntimePlatform["workspacePort"];
+}): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+  if (!input.workspace) {
+    return {
+      nextWakeAt: null,
+      status: "idle",
+    };
+  }
+
+  const mediaRetentionProtections =
+    await collectHostedPendingAssistantInputMediaRetentionProtections({
+      vaultRoot: input.vaultRoot,
+    });
+  const idleMaintenance = await runHostedIdleCheckpointMaintenance({
+    credentialSource: "platform",
+    materializeRetentionCandidatePaths: async (storedPaths) => {
+      const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
+      return {
+        missingStoredPaths: [...materialized.missingArtifactPaths]
+          .map((artifactPath) =>
+            artifactPath.startsWith("vault:")
+              ? artifactPath.slice("vault:".length)
+              : artifactPath
+          ),
+      };
+    },
+    memberId: input.input.request.userId,
+    model: null,
+    pendingWork: false,
+    protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
+    protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
+    protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
+    providerName: null,
+    recordUsage: null,
+    retryInboxMediaRetentionOnShutdown: isHostedInboxMediaRetentionWakeDue({
+      nowMs: Date.now(),
+      workspace: input.workspace,
+    }),
+    resolveAssistantSessionId: null,
+    shutdownSignal: input.shutdownSignal,
+    vaultRoot: input.vaultRoot,
+    wakeSignal: input.wakeSignal,
+  });
+  const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+    assertRuntimeNotAborted: input.assertRuntimeNotAborted,
+    checkpointRequestBuilder: input.checkpointRequestBuilder,
+    expectedUserId: input.expectedUserId,
+    inboxMediaRetentionWakeAt: idleMaintenance.nextWakeAt ?? null,
+    issueExportPort: input.issueExportPort ?? null,
+    nextWakeAt: input.workspace.nextWakeAt ?? null,
+    nextWakeReason: input.workspace.nextWakeReason ?? null,
+    redactedStatus: input.workspace.redactedStatus ?? null,
+    runtimeAbortSignal: input.runtimeAbortSignal,
+    vaultRoot: input.vaultRoot,
+    workspacePort: input.workspacePort,
+  });
+  const nextWake = selectEarliestHostedRuntimeWake([
+    {
+      at: checkpoint.workspace.nextWakeAt ?? null,
+      reason: checkpoint.workspace.nextWakeReason ?? null,
+    },
+    {
+      at: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
+      reason: checkpoint.workspace.inboxMediaRetentionWakeAt
+        ? "inbox_media_retention"
+        : null,
+    },
+  ]);
+
+  return {
+    nextWakeAt: nextWake.nextWakeAt,
+    ...(nextWake.nextWakeReason ? { nextWakeReason: nextWake.nextWakeReason } : {}),
+    redactedStatus: checkpoint.workspace.redactedStatus ?? null,
+    status: resolveHostedWorkspaceInvocationStatus({
+      mailboxBudgetExhausted: false,
+      nextWakeAt: nextWake.nextWakeAt,
+    }),
+  };
+}
+
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -2015,6 +2165,7 @@ function consumePendingHostedRuntimeWake(
 
 interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
+  inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   projectedWakeRequiresCheckpoint: boolean;
@@ -2057,6 +2208,7 @@ function buildHostedWorkspaceInvocationProjection(input: {
 
   return {
     committedWorkspace,
+    inboxMediaRetentionWakeAt: committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: nextWake.nextWakeAt,
     nextWakeReason: nextWake.nextWakeReason,
     projectedWakeRequiresCheckpoint: input.result.projectedWakeRequiresCheckpoint,
@@ -2093,6 +2245,9 @@ function mergeHostedWorkspaceInvocationProjection(
 
   return {
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
+    inboxMediaRetentionWakeAt: next.committedWorkspace
+      ? next.inboxMediaRetentionWakeAt
+      : previous.inboxMediaRetentionWakeAt,
     nextWakeAt: selectedWake.nextWakeAt,
     nextWakeReason: selectedWake.nextWakeReason,
     projectedWakeRequiresCheckpoint: previous.projectedWakeRequiresCheckpoint
@@ -2328,6 +2483,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
+  inboxMediaRetentionWakeAt: string | null;
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
@@ -2343,6 +2499,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
 
   input.assertRuntimeNotAborted();
   const checkpointInput = {
+    inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt,
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
@@ -2898,14 +3055,12 @@ function isHostedInboxMediaRetentionWakeDue(input: {
   nowMs: number;
   workspace: HostedWorkspaceState | null;
 }): boolean {
-  if (
-    input.workspace?.nextWakeReason !== "inbox_media_retention" ||
-    !input.workspace.nextWakeAt
-  ) {
+  const wakeAt = input.workspace?.inboxMediaRetentionWakeAt ?? null;
+  if (!wakeAt) {
     return false;
   }
 
-  const wakeMs = Date.parse(input.workspace.nextWakeAt);
+  const wakeMs = Date.parse(wakeAt);
   return Number.isFinite(wakeMs) && wakeMs <= input.nowMs;
 }
 
@@ -2925,49 +3080,26 @@ function selectEarliestHostedRuntimeWake(
 
 function selectHostedIdleCheckpointWake(input: {
   idleMaintenance: HostedIdleMaintenanceOutcome;
+  previousInboxMediaRetentionWakeAt: string | null;
   projectedWakeAt: string | null;
   projectedWakeReason: string | null;
 }): {
+  inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
 } {
-  const selectedWake = selectEarliestHostedRuntimeWake([
-    {
-      at: input.projectedWakeAt,
-      reason: input.projectedWakeReason,
-    },
-    {
-      at: input.idleMaintenance.nextWakeAt ?? null,
-      reason: input.idleMaintenance.nextWakeReason ?? null,
-    },
-  ]);
+  const preservePreviousRetentionWake =
+    "reason" in input.idleMaintenance
+    && input.idleMaintenance.reason === "shutdown"
+    && !input.idleMaintenance.nextWakeAt;
 
-  if (isShutdownInboxMediaRetentionWake(input.idleMaintenance)) {
-    return {
-      nextWakeAt: selectedWake.nextWakeAt,
-      nextWakeReason: selectedWake.nextWakeAt ? "inbox_media_retention" : null,
-    };
-  }
-
-  return selectedWake;
-}
-
-function isShutdownInboxMediaRetentionWake(
-  outcome: HostedIdleMaintenanceOutcome,
-): outcome is HostedIdleMaintenanceOutcome & {
-  nextWakeAt: string;
-  nextWakeReason: "inbox_media_retention";
-} {
-  if (
-    !("reason" in outcome)
-    || outcome.reason !== "shutdown"
-    || outcome.nextWakeReason !== "inbox_media_retention"
-    || !outcome.nextWakeAt
-  ) {
-    return false;
-  }
-
-  return true;
+  return {
+    inboxMediaRetentionWakeAt: preservePreviousRetentionWake
+      ? input.previousInboxMediaRetentionWakeAt
+      : input.idleMaintenance.nextWakeAt ?? null,
+    nextWakeAt: input.projectedWakeAt,
+    nextWakeReason: input.projectedWakeReason,
+  };
 }
 
 function readHostedWorkspaceDurableCheckpointEffectWake(

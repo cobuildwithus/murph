@@ -165,6 +165,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts).toMatchObject({
       blocked: null,
       workspace: {
+        inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
         version: "4",
@@ -216,6 +217,7 @@ describe("hosted orchestration reconciliation facts", () => {
         usageGateRequired: false,
         usageGateStatus: "not_required",
         userIdPresent: true,
+        workspaceInboxMediaRetentionWakeAtPresent: false,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: true,
@@ -269,6 +271,95 @@ describe("hosted orchestration reconciliation facts", () => {
         userId: MEMBER_ID,
       });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("does not AI-gate a due inbox media retention wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toBeNull();
+    expect(facts.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+    });
+    expect(facts.mailboxLag).toEqual([
+      {
+        importedSeq: "2",
+        lag: "1",
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        importedSeq: "0",
+        lag: "0",
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("keeps a future inbox media retention wake when assistant work is AI-denied", async () => {
+    const retentionWakeAt = "2026-05-20T12:14:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: retentionWakeAt,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildDeniedUsageGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: retentionWakeAt,
+    });
+    expect(facts.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: retentionWakeAt,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
     expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
   });
 
@@ -892,6 +983,7 @@ function buildWorkspaceRecord(overrides: Partial<{
   browserVaultReplicaRef: Record<string, unknown> | null;
   checkpointedAt: string | null;
   createdAt: string;
+  inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   redactedStatusJson: Record<string, unknown> | null;
@@ -904,6 +996,7 @@ function buildWorkspaceRecord(overrides: Partial<{
     browserVaultReplicaRef: null,
     checkpointedAt: FIXED_NOW,
     createdAt: FIXED_NOW,
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: {

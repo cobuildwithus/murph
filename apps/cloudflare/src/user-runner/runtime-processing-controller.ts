@@ -78,6 +78,7 @@ type FreshRuntimeStartPreparation =
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
     orchestrationAttemptId: input.orchestrationAttemptId,
+    ...(input.processingMode ? { processingMode: input.processingMode } : {}),
     userId: input.userId,
   };
 }

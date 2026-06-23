@@ -184,6 +184,27 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(60_000));
   });
 
+  it("waits for a future inbox media retention wake before a later assistant wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(45_000),
+        nextWakeAt: isoAfter(120_000),
+        nextWakeReason: "assistant",
+      }),
+    }));
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000]);
+    expect(continued.state?.lastReconciliationStatus).toBe("idle");
+    expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(45_000));
+  });
+
   it("re-reads reconciliation facts after a workspace wake timer before alarming", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
@@ -218,6 +239,41 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       },
     ]);
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(-1));
+  });
+
+  it("runs due inbox media retention before mailbox or assistant work", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.latestMailboxPointer).toEqual({
+      lane: "conversation",
+      laneSeq: "7",
+      mailboxItemId: "mailbox_item_test",
+    });
+    expect(continued.state?.mailboxSignalCount).toBe(1);
   });
 
   it("drives an alarm when reconciliation facts show a due workspace wake", async () => {
@@ -505,6 +561,7 @@ function workspaceProjection(
   input: Partial<HostedRuntimeReconciliationFactsWorkspace>,
 ): HostedRuntimeReconciliationFactsWorkspace {
   return {
+    inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: input.nextWakeAt ?? null,
     nextWakeReason: input.nextWakeReason ?? null,
     version: input.version ?? null,
