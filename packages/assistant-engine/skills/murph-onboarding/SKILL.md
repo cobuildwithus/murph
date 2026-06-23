@@ -61,7 +61,7 @@ Reject or rewrite a candidate when the only measurable result is whether the use
 Some onboarding questions include easier input or delivery options. These are part of the one lightweight question, not extra questions. Do not drop them for brevity.
 
 - Movement/training: ask one natural question, include the compact examples list, and end the visible message with exactly: "Feel free to send me a voice memo."
-- Current protocols/experiments: this is the default delight moment for one generated onboarding voice memo. When `murph.generate_voice_memo` is available and the user has not asked to avoid voice messages, attach the current protocol/experiment question as a short voice memo and leave the final response text empty. Do not send a separate companion text just to explain the voice memo. If voice memo generation is unavailable, fails, or the user prefers text, ask one natural text question. Keep examples compact in either mode.
+- Current protocols/experiments: this is the default delight moment for one generated onboarding voice memo. When `murph.generate_voice_memo` is available and the user has not asked to avoid voice messages, attach the current protocol/experiment question as a short voice memo and leave the final response text empty. Do not send a separate companion text just to explain the voice memo. This is an explicit product-flow voice preference; do not require the user to ask for voice separately. If voice memo generation is unavailable, fails, or the user prefers text, ask one natural text question. Keep examples compact in either mode.
 - Supplements: mention that they can send a photo of supplement bottles or labels if that is easier.
 
 ## Natural first-run flow

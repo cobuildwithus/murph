@@ -479,6 +479,9 @@ describe('assistant skill assets', () => {
       'Do not send a separate companion text just to explain the voice memo',
     )
     expect(raw).toContain(
+      'This is an explicit product-flow voice preference; do not require the user to ask for voice separately.',
+    )
+    expect(raw).toContain(
       'Prefer sending this question as the one onboarding voice memo described in the current protocols/experiments affordance',
     )
     expect(raw).toContain('Follow the current protocols/experiments affordance')

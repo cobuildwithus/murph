@@ -445,6 +445,9 @@ describe('executeGenerateVoiceMemoTool', () => {
 describe('murph.generate_voice_memo dynamic tool execution', () => {
   it('keeps voice-only replies text-empty in the model-visible contract', () => {
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'when a loaded Murph skill or product flow explicitly asks for a voice memo',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'If the user asks for voice memos only, attach the voice memo and leave the final response text empty.',
     )
   })
