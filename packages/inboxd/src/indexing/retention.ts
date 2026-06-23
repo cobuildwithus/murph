@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 
 import {
   assertContract,
@@ -174,8 +173,8 @@ export async function runInboxMediaRetention(
           continue;
         }
 
-        const integrity = await hashExistingVaultFile(input.vaultRoot, storedPath, input.signal);
-        if (integrity.kind === "missing") {
+        const fileState = await statExistingVaultRegularFile(input.vaultRoot, storedPath, input.signal);
+        if (fileState.kind === "missing") {
           if (alreadyRetained || !input.materializeCandidatePaths) {
             continue;
           }
@@ -185,16 +184,16 @@ export async function runInboxMediaRetention(
           }
           materializeCandidateCount += 1;
         }
-        if (integrity.kind === "invalid") {
+        if (fileState.kind === "invalid") {
           continue;
         }
         candidates.push({
           attachment,
           capture,
-          materialize: integrity.kind === "missing",
+          materialize: fileState.kind === "missing",
           storedPath,
         });
-        if (integrity.kind !== "missing") {
+        if (fileState.kind !== "missing") {
           presentCandidateCount += 1;
         }
       }
@@ -281,12 +280,12 @@ export async function runInboxMediaRetention(
           }
 
           if (!isMissingAfterMaterialization) {
-            const integrity = await hashExistingVaultFile(
+            const fileState = await statExistingVaultRegularFile(
               input.vaultRoot,
               candidate.storedPath,
               input.signal,
             );
-            if (integrity.kind !== "ok") {
+            if (fileState.kind !== "ok") {
               continue;
             }
             if (selectedCandidateCount >= maxAttachments) {
@@ -635,14 +634,14 @@ function resolveFreshAttachmentParseJobProtectionExpiresAt(input: {
   return new Date(protectedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString();
 }
 
-async function hashExistingVaultFile(
+async function statExistingVaultRegularFile(
   vaultRoot: string,
   relativePath: string,
   signal?: AbortSignal | null,
 ): Promise<
   | { kind: "missing" }
   | { kind: "invalid" }
-  | { kind: "ok"; byteSize: number; sha256: string }
+  | { kind: "ok" }
 > {
   throwIfRetentionAborted(signal);
   const resolved = await resolveRetentionVaultPathOnDisk(vaultRoot, relativePath);
@@ -663,11 +662,7 @@ async function hashExistingVaultFile(
     return { kind: "invalid" };
   }
 
-  return {
-    kind: "ok",
-    byteSize: stats.size,
-    sha256: await sha256File(resolved.absolutePath, signal),
-  };
+  return { kind: "ok" };
 }
 
 async function deleteVaultFileIfPresent(
@@ -703,38 +698,6 @@ async function resolveRetentionVaultPathOnDisk(
     }
     throw error;
   }
-}
-
-async function sha256File(absolutePath: string, signal?: AbortSignal | null): Promise<string> {
-  throwIfRetentionAborted(signal);
-  const hash = createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(absolutePath);
-    const cleanup = () => {
-      signal?.removeEventListener("abort", onAbort);
-    };
-    const onAbort = () => {
-      stream.destroy(toRetentionAbortError(signal));
-    };
-    if (signal?.aborted) {
-      cleanup();
-      stream.destroy();
-      reject(toRetentionAbortError(signal));
-      return;
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", (error) => {
-      cleanup();
-      reject(error);
-    });
-    stream.on("end", () => {
-      cleanup();
-      resolve();
-    });
-  });
-  throwIfRetentionAborted(signal);
-  return hash.digest("hex");
 }
 
 function throwIfRetentionAborted(signal: AbortSignal | null | undefined): void {

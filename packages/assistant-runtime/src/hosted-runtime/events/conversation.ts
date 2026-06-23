@@ -159,10 +159,11 @@ async function drainHostedConversationParsers(input: {
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
-    return await logHostedConversationParserSetupFailure({
+    return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
       error,
       platform: input.platform,
+      safeFallbackMessage: "Hosted conversation parser setup failed.",
     });
   }
 
@@ -207,35 +208,20 @@ async function drainHostedConversationParsers(input: {
       parserProcessed: results.length,
     });
   } catch (error) {
-    const errorCode = deriveHostedExecutionErrorCode(error);
-    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        component: "mailbox",
-        errorCode,
-        eventCode: "mailbox.parser_drain_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: Boolean(input.captureId),
-          errorCode,
-          safeErrorMessage:
-            typeof diagnostics?.errorMessage === "string"
-              ? diagnostics.errorMessage
-              : "Hosted conversation parser drain failed.",
-          parserTerminalizedPendingJobs: 0,
-        },
-      },
+    return await logHostedConversationParserRetryFailure({
+      captureId: input.captureId,
+      error,
       platform: input.platform,
+      safeFallbackMessage: "Hosted conversation parser drain failed.",
     });
-    return createHostedConversationParserMetrics();
   }
 }
 
-async function logHostedConversationParserSetupFailure(input: {
+async function logHostedConversationParserRetryFailure(input: {
   captureId: string;
   error: unknown;
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  safeFallbackMessage: string;
 }): Promise<HostedConversationWakeMetrics> {
   const errorCode = deriveHostedExecutionErrorCode(input.error);
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
@@ -256,7 +242,7 @@ async function logHostedConversationParserSetupFailure(input: {
         safeErrorMessage:
           typeof diagnostics?.errorMessage === "string"
             ? diagnostics.errorMessage
-            : "Hosted conversation parser setup failed.",
+            : input.safeFallbackMessage,
       },
     },
     platform: input.platform,
