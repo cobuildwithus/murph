@@ -389,6 +389,10 @@ The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
 reply when direct takeover is needed, or finish without reply when no additional
 user-visible message is useful.
+If the user asks to see or take over the current paused browser screen, call
+`computer_pause_for_user` with `handoffPurpose: "manual_browser_help"` to create
+or refresh the handoff URL. Do not restart the browser task just to get a screen
+link.
 
 The handoff link opens a live view of the browser at its current page; it does
 not navigate. Before pausing for sign-in, payment, card entry, OTP, identity,

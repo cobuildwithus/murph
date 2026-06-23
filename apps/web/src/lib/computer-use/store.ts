@@ -168,6 +168,13 @@ export interface ComputerUseStore {
     runId: string;
     suggestedReply: string | null;
   }): Promise<ComputerRunRecord>;
+  attachAwaitingRunHandoff(input: {
+    awaitingReason: HostedComputerAwaitingReason;
+    expectedPausedAt: Date;
+    newPendingHandoffId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
   replaceAwaitingRunHandoff(input: {
     expectedHandoffUpdatedAt: Date;
     expectedPendingHandoffId: string;
@@ -190,6 +197,8 @@ export interface ComputerUseStore {
   }): Promise<ComputerRunRecord>;
   markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
+    expectedHandoffStatus?: HostedComputerHandoffStatus | null;
+    expectedHandoffUpdatedAt?: Date | null;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -712,6 +721,42 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return mapRun(run);
   }
 
+  async attachAwaitingRunHandoff(input: {
+    awaitingReason: HostedComputerAwaitingReason;
+    expectedPausedAt: Date;
+    newPendingHandoffId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    const updated = await this.prisma.hostedComputerRun.updateMany({
+      data: {
+        pausedAt: input.now,
+        pendingHandoffId: input.newPendingHandoffId,
+      },
+      where: {
+        awaitingReason: input.awaitingReason,
+        expiresAt: { gt: input.now },
+        id: input.runId,
+        kernelSessionId: { not: null },
+        pausedAt: input.expectedPausedAt,
+        pendingHandoffId: null,
+        status: "awaiting_user",
+      },
+    });
+    if (updated.count === 0) {
+      throw staleRunStateConflictError();
+    }
+
+    const run = await this.prisma.hostedComputerRun.findUnique({
+      where: { id: input.runId },
+    });
+    if (!run) {
+      throw computerUseNotFoundError();
+    }
+
+    return mapRun(run);
+  }
+
   async replaceAwaitingRunHandoff(input: {
     expectedHandoffUpdatedAt: Date;
     expectedPendingHandoffId: string;
@@ -750,6 +795,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
+    expectedHandoffStatus?: HostedComputerHandoffStatus | null;
+    expectedHandoffUpdatedAt?: Date | null;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -765,14 +812,19 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         status: "running",
         suggestedReply: null,
       },
-      where: {
-        awaitingReason: input.awaitingReason,
-        id: input.runId,
-        kernelSessionId: { not: null },
-        pausedAt: input.expectedPausedAt,
-        pendingHandoffId: input.expectedPendingHandoffId,
-        status: "awaiting_user",
-      },
+      where: requireAnyHandoffForRunUpdate({
+        expectedHandoffStatus: input.expectedHandoffStatus ?? null,
+        expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
+        expectedPendingHandoffId: input.expectedPendingHandoffId,
+        where: {
+          awaitingReason: input.awaitingReason,
+          id: input.runId,
+          kernelSessionId: { not: null },
+          pausedAt: input.expectedPausedAt,
+          pendingHandoffId: input.expectedPendingHandoffId,
+          status: "awaiting_user",
+        },
+      }),
     });
     if (updated.count === 0) {
       throw staleRunStateConflictError();

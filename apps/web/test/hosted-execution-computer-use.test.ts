@@ -431,6 +431,54 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("mints an inspection handoff for an already-awaiting final confirmation", async () => {
+    const pausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt,
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: pausedAt,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      handoffUrl: expect.stringMatching(
+        /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+      ),
+      status: "awaiting_user",
+      suggestedReply: "yes",
+    });
+    expect(store.run).toMatchObject({
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+    });
+  });
+
   it("rejects pause requests for terminal runs", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -939,6 +987,113 @@ describe("ComputerUseService", () => {
       status: "awaiting_user",
     });
     expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("does not treat manual browser help as optional for login handoffs", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "manual_browser_help",
+      status: "open",
+      updatedAt: now,
+    });
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "login_needed",
+      reused: true,
+      runId: "hcr_run123",
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("resumes final confirmation from chat while an inspection handoff is open", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+    });
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: new Date("2026-06-17T12:02:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:02:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: null,
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
   it("expires an open handoff without deleting the awaiting browser run", async () => {
@@ -4481,6 +4636,49 @@ describe("PrismaComputerUseStore", () => {
     });
   });
 
+  it("fences first awaiting handoff attachment by the observed pause", async () => {
+    const pausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.attachAwaitingRunHandoff({
+      awaitingReason: "final_confirmation",
+      expectedPausedAt: pausedAt,
+      newPendingHandoffId: "hch_handoff123",
+      now,
+      runId: "hcr_run123",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        pausedAt: now,
+        pendingHandoffId: "hch_handoff123",
+      },
+      where: {
+        awaitingReason: "final_confirmation",
+        expiresAt: { gt: now },
+        id: "hcr_run123",
+        kernelSessionId: { not: null },
+        pausedAt,
+        pendingHandoffId: null,
+        status: "awaiting_user",
+      },
+    });
+  });
+
   it("fences resume by the observed pause and pending handoff", async () => {
     const pausedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
@@ -4519,6 +4717,63 @@ describe("PrismaComputerUseStore", () => {
       },
       where: {
         awaitingReason: "login_needed",
+        id: "hcr_run123",
+        kernelSessionId: { not: null },
+        pausedAt,
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+  });
+
+  it("can fence resume by an optional open inspection handoff", async () => {
+    const handoffUpdatedAt = new Date("2026-06-17T12:03:00.000Z");
+    const pausedAt = new Date("2026-06-17T12:02:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      awaitingReason: null,
+      pausedAt: null,
+      pendingHandoffId: null,
+      status: "running",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.markRunRunning({
+      awaitingReason: "final_confirmation",
+      expectedHandoffStatus: "open",
+      expectedHandoffUpdatedAt: handoffUpdatedAt,
+      expectedPausedAt: pausedAt,
+      expectedPendingHandoffId: "hch_handoff123",
+      now,
+      runId: "hcr_run123",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        awaitingMessage: null,
+        awaitingReason: null,
+        metadataJson: Prisma.JsonNull,
+        pausedAt: null,
+        pendingHandoffId: null,
+        status: "running",
+        suggestedReply: null,
+      },
+      where: {
+        awaitingReason: "final_confirmation",
+        handoffs: {
+          some: {
+            id: "hch_handoff123",
+            status: "open",
+            updatedAt: handoffUpdatedAt,
+          },
+        },
         id: "hcr_run123",
         kernelSessionId: { not: null },
         pausedAt,
@@ -5267,6 +5522,33 @@ class FakeComputerUseStore implements ComputerUseStore {
     return this.run;
   }
 
+  async attachAwaitingRunHandoff(
+    input: Parameters<ComputerUseStore["attachAwaitingRunHandoff"]>[0],
+  ): Promise<ComputerRunRecord> {
+    const handoff = this.findStoredHandoff(input.newPendingHandoffId);
+    if (
+      this.run.id !== input.runId ||
+      this.run.status !== "awaiting_user" ||
+      !this.run.kernelSessionId ||
+      this.run.awaitingReason !== input.awaitingReason ||
+      this.run.pendingHandoffId !== null ||
+      !this.run.pausedAt ||
+      this.run.pausedAt.getTime() !== input.expectedPausedAt.getTime() ||
+      this.run.expiresAt <= input.now ||
+      !handoff ||
+      handoff.status !== "open"
+    ) {
+      throw staleRunStateError();
+    }
+    this.run = {
+      ...this.run,
+      pausedAt: input.now,
+      pendingHandoffId: input.newPendingHandoffId,
+      updatedAt: input.now,
+    };
+    return this.run;
+  }
+
   async replaceAwaitingRunHandoff(
     input: Parameters<ComputerUseStore["replaceAwaitingRunHandoff"]>[0],
   ): Promise<ComputerRunRecord> {
@@ -5311,6 +5593,9 @@ class FakeComputerUseStore implements ComputerUseStore {
         updatedAt: input.now,
       };
     }
+    const expectedHandoff = input.expectedPendingHandoffId
+      ? this.findStoredHandoff(input.expectedPendingHandoffId)
+      : null;
     if (
       this.run.id !== input.runId
       || this.run.status !== "awaiting_user"
@@ -5319,6 +5604,14 @@ class FakeComputerUseStore implements ComputerUseStore {
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || !this.run.pausedAt
       || this.run.pausedAt.getTime() !== input.expectedPausedAt.getTime()
+      || (
+        input.expectedHandoffStatus &&
+        expectedHandoff?.status !== input.expectedHandoffStatus
+      )
+      || (
+        input.expectedHandoffUpdatedAt &&
+        expectedHandoff?.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime()
+      )
     ) {
       throw staleRunStateError();
     }
