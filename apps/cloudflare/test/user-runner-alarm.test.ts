@@ -2609,6 +2609,73 @@ describe("HostedUserRunner execution coordination", () => {
     expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
     expect(alarms.at(-1)).toBe("deleted");
   });
+
+  it("keeps retained upload-session cleanup retryable when replaced snapshot deletion fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const replacedObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_replaced_session_retry.snapshot.enc`;
+    const currentObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_current_session_retry.snapshot.enc`;
+    class ReplacedDeleteFailureBucket extends MemoryEncryptedR2Bucket {
+      failReplacedDelete = true;
+
+      override async delete(key: string | string[]): Promise<void> {
+        const keys = Array.isArray(key) ? key : [key];
+        if (this.failReplacedDelete && keys.includes(replacedObjectKey)) {
+          throw new Error("replaced snapshot delete failed");
+        }
+        await super.delete(key);
+      }
+    }
+    const bucket = new ReplacedDeleteFailureBucket();
+    await bucket.put(replacedObjectKey, "replaced-encrypted-snapshot");
+    await bucket.put(currentObjectKey, "current-encrypted-snapshot");
+    const { alarms, flushWaitUntil, runner, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2RefForTest({
+          objectKey: currentObjectKey,
+          snapshotId: "snapshot_current_session_retry",
+        }),
+      }),
+    });
+
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      {
+        ...createWorkspaceSnapshotUploadSessionForTest({
+          objectKey: currentObjectKey,
+          replacedSnapshotRef: createWorkspaceSnapshotV2RefForTest({
+            objectKey: replacedObjectKey,
+            snapshotId: "snapshot_replaced_session_retry",
+          }),
+          snapshotId: "snapshot_current_session_retry",
+        }),
+        createdAt: "2026-04-26T00:00:00.000Z",
+      },
+    );
+    await flushWaitUntil();
+
+    expect(bucket.objects.has(replacedObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toMatchObject({
+      replacedSnapshotRef: expect.objectContaining({
+        objectKey: replacedObjectKey,
+      }),
+      snapshotId: "snapshot_current_session_retry",
+    });
+    expect(alarms).toContain("2026-04-26T01:05:00.000Z");
+    expect(alarms.at(-1)).not.toBe("deleted");
+
+    bucket.failReplacedDelete = false;
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(replacedObjectKey);
+    expect(bucket.objects.has(replacedObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
 });
 
 function createRunnerHarness(input: {
