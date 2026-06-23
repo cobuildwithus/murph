@@ -5336,6 +5336,9 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const unexpectedRetryBeforeCheckpoint = new Error(
+      "unexpected retryable outbox wake before idle checkpoint",
+    );
     const outboxRetryWakeAt = "2026-04-27T00:00:00.000Z";
     const mailboxItems: HostedMailboxItem[] = [];
     let assistantPhaseCalls = 0;
@@ -5443,9 +5446,15 @@ describe("hosted workspace runtime entrypoint", () => {
                 vaultRoot,
               });
             }
+            if (assistantPhaseCalls > 2) {
+              events.push("outbox.retryBeforeCheckpoint");
+              runtimeAbortController.abort(unexpectedRetryBeforeCheckpoint);
+              throw unexpectedRetryBeforeCheckpoint;
+            }
             return {
               checkpointReason: "assistant_runtime_commit" as const,
-              nextWakeAt: null,
+              nextWakeAt: outboxRetryWakeAt,
+              nextWakeReason: "assistant",
               progressed: true,
               redactedStatus: {
                 hostedAssistantProgressed: true,

@@ -2045,7 +2045,10 @@ function mergeHostedWorkspaceInvocationProjection(
     options.replaceWake === true
     && previous.projectedWakeRequiresCheckpoint
     && previous.nextWakeAt !== null
-    && next.nextWakeAt === null;
+    && (
+      next.nextWakeAt === null
+      || hostedWorkspaceInvocationProjectionWakeMatchesNormalized(next, previous)
+    );
   const selectedWake = preserveCheckpointGatedWake
     ? {
         nextWakeAt: previous.nextWakeAt,
@@ -2106,6 +2109,29 @@ function hostedWorkspaceInvocationProjectionWakeMatches(
 ): boolean {
   return selectedWake.nextWakeAt === projection.nextWakeAt
     && selectedWake.nextWakeReason === projection.nextWakeReason;
+}
+
+function hostedWorkspaceInvocationProjectionWakeMatchesNormalized(
+  selectedWake: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): boolean {
+  const normalizedSelected = normalizeHostedWorkspaceInvocationProjectionWake(selectedWake);
+  const normalizedProjection = normalizeHostedWorkspaceInvocationProjectionWake(projection);
+  return normalizedSelected.nextWakeAt === normalizedProjection.nextWakeAt
+    && normalizedSelected.nextWakeReason === normalizedProjection.nextWakeReason;
+}
+
+function normalizeHostedWorkspaceInvocationProjectionWake(
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason"> {
+  const wake = selectHostedRuntimeWakeCandidate([{
+    at: projection.nextWakeAt,
+    reason: projection.nextWakeReason,
+  }]);
+  return {
+    nextWakeAt: wake.at,
+    nextWakeReason: wake.reason,
+  };
 }
 
 function projectHostedWorkspaceWakeForForegroundPass(input: {
