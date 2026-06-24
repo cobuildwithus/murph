@@ -1,23 +1,36 @@
+import type {
+  HostedRuntimeOrchestrationLatencyDiagnostics,
+} from "@murphai/hosted-execution/runtime-control";
+
+export interface RuntimeWakeNotifyInput {
+  notifiedAtEpochMs?: number | null;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+}
+
 export interface RuntimeWakeNotification {
   notifiedAtEpochMs: number;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
 }
 
 export interface RuntimeWakeSignal {
   consumePending(): RuntimeWakeNotification | null;
-  notify(notifiedAtEpochMs?: number): void;
+  notify(input?: number | RuntimeWakeNotifyInput): void;
   wait(signal?: AbortSignal | null): Promise<RuntimeWakeNotification>;
 }
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let pendingNotifyAtEpochMs: number | null = null;
+  let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
   const consumePendingNotification = (): RuntimeWakeNotification => {
     const notification = {
       notifiedAtEpochMs: pendingNotifyAtEpochMs ?? Date.now(),
+      ...(pendingOrchestration ? { orchestration: pendingOrchestration } : {}),
     };
     pendingNotifyAtEpochMs = null;
+    pendingOrchestration = null;
     return notification;
   };
   const flushWaiters = () => {
@@ -43,9 +56,13 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
       pending = false;
       return consumePendingNotification();
     },
-    notify(notifiedAtEpochMs?: number) {
+    notify(input?: number | RuntimeWakeNotifyInput) {
+      const notification = normalizeRuntimeWakeNotifyInput(input);
       if (!pending) {
-        pendingNotifyAtEpochMs = notifiedAtEpochMs ?? Date.now();
+        pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
+        pendingOrchestration = notification.orchestration ?? null;
+      } else if (!pendingOrchestration && notification.orchestration) {
+        pendingOrchestration = notification.orchestration;
       }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {
@@ -88,6 +105,19 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         signal?.addEventListener("abort", abort, { once: true });
       });
     },
+  };
+}
+
+function normalizeRuntimeWakeNotifyInput(
+  input: number | RuntimeWakeNotifyInput | undefined,
+): RuntimeWakeNotification {
+  if (typeof input === "number") {
+    return { notifiedAtEpochMs: input };
+  }
+
+  return {
+    ...(input?.orchestration ? { orchestration: input.orchestration } : {}),
+    notifiedAtEpochMs: input?.notifiedAtEpochMs ?? Date.now(),
   };
 }
 

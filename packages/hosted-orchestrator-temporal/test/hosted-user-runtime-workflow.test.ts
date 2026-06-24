@@ -184,6 +184,27 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(60_000));
   });
 
+  it("waits for a future inbox media retention wake before a later assistant wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(45_000),
+        nextWakeAt: isoAfter(120_000),
+        nextWakeReason: "assistant",
+      }),
+    }));
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000]);
+    expect(continued.state?.lastReconciliationStatus).toBe("idle");
+    expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(45_000));
+  });
+
   it("re-reads reconciliation facts after a workspace wake timer before alarming", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
@@ -218,6 +239,91 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       },
     ]);
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(-1));
+  });
+
+  it("dispatches default processing for mailbox lag even when an inbox media retention wake is also due", async () => {
+    // Retention runs in bounded per-pass batches and re-arms its wake while
+    // hasMoreEligibleAttachments is true, so dispatching retention ahead of
+    // live mailbox/assistant work would starve user-visible traffic for
+    // minutes per batch immediately after the migration backfills the wake
+    // for every existing workspace.
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.mailboxSignalCount).toBe(0);
+  });
+
+  it("dispatches default processing when both default and retention wakes are due with no mailbox lag", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        // Retention wake is older than the default wake, but priority is by
+        // mode (default > retention), not by earliest timestamp.
+        inboxMediaRetentionWakeAt: isoAfter(-60_000),
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("dispatches retention-only when retention is due and no default work is pending", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_test",
+      },
+    ]);
   });
 
   it("drives an alarm when reconciliation facts show a due workspace wake", async () => {
@@ -265,6 +371,69 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastReconciliationBlockedReason).toBe(
       "ai_usage_gate_unavailable",
     );
+  });
+
+  it("runs due inbox media retention before waiting on blocked AI-capable work", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "ai_usage_denied",
+        retryAt: null,
+      },
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
+  });
+
+  it("runs due inbox media retention for inactive members and never dispatches default mode", async () => {
+    // End-to-end regression for inactive members with a due retention wake:
+    // reconciliation returns `user_not_active` blocked facts that still carry
+    // the workspace's retention wake; the workflow must dispatch
+    // `inbox_media_retention` (not default mode) so raw inbox media is
+    // tombstoned within the 14-day retention window.
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_inactive",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_inactive",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
   });
 
   it("records reconciliation read failures and uses retry waits for failures marked non-retryable", async () => {
@@ -505,6 +674,7 @@ function workspaceProjection(
   input: Partial<HostedRuntimeReconciliationFactsWorkspace>,
 ): HostedRuntimeReconciliationFactsWorkspace {
   return {
+    inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: input.nextWakeAt ?? null,
     nextWakeReason: input.nextWakeReason ?? null,
     version: input.version ?? null,

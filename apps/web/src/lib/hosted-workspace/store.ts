@@ -21,6 +21,9 @@ import type {
   HostedRuntimeRedactedValue,
   HostedWorkspaceCheckpointReason,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedExecutionSnapshotRefState,
+} from "@murphai/hosted-execution";
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
@@ -177,6 +180,7 @@ export interface HostedWorkspaceRow {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: Date | null;
   nextWakeReason: string | null;
+  inboxMediaRetentionWakeAt: Date | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: Date | null;
   createdAt: Date;
@@ -190,6 +194,7 @@ export interface HostedWorkspaceRecord {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  inboxMediaRetentionWakeAt: string | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: string | null;
   createdAt: string;
@@ -197,6 +202,7 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
+  replacedSnapshotRef: HostedExecutionSnapshotRefState;
   status: "updated" | "conflict" | "foreground_pending";
   workspace: HostedWorkspaceRecord | null;
 }
@@ -284,6 +290,7 @@ export async function readHostedWorkspace(input: {
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   prisma?: PrismaClient;
@@ -303,6 +310,7 @@ export async function checkpointHostedWorkspace(input: {
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason | string;
@@ -345,6 +353,16 @@ export async function checkpointHostedWorkspaceTx(input: {
     updateData.nextWakeReason = normalizeNullableString(input.nextWakeReason);
   }
 
+  if ("inboxMediaRetentionWakeAt" in input) {
+    updateData.inboxMediaRetentionWakeAt =
+      input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
+        ? null
+        : requireDate(
+          input.inboxMediaRetentionWakeAt,
+          "Hosted workspace inboxMediaRetentionWakeAt",
+        );
+  }
+
   if ("redactedStatusJson" in input) {
     updateData.redactedStatusJson = input.redactedStatusJson === undefined
       ? Prisma.DbNull
@@ -367,6 +385,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     });
     if (!lockedWorkspace || lockedWorkspace.version !== expectedVersion) {
       return {
+        replacedSnapshotRef: null,
         status: "conflict",
         workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
       };
@@ -379,12 +398,25 @@ export async function checkpointHostedWorkspaceTx(input: {
       });
       if (pendingConversationSeq !== null) {
         return {
+          replacedSnapshotRef: null,
           status: "foreground_pending",
           workspace: projectHostedWorkspace(lockedWorkspace),
         };
       }
     }
   }
+
+  const currentWorkspace = await input.tx.hostedWorkspace.findUnique({
+    where: {
+      userId,
+    },
+  });
+  const replacedSnapshotRef = currentWorkspace
+    ? parseHostedExecutionSnapshotRef(
+        currentWorkspace.snapshotRef,
+        "Hosted workspace checkpoint replaced snapshotRef",
+      )
+    : null;
 
   const updated = await input.tx.hostedWorkspace.updateMany({
     data: updateData,
@@ -400,6 +432,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   });
 
   return {
+    replacedSnapshotRef: updated.count === 1 ? replacedSnapshotRef : null,
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };
@@ -1022,6 +1055,7 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
     createdAt: record.createdAt.toISOString(),
     nextWakeAt: record.nextWakeAt?.toISOString() ?? null,
     nextWakeReason: record.nextWakeReason,
+    inboxMediaRetentionWakeAt: record.inboxMediaRetentionWakeAt?.toISOString() ?? null,
     redactedStatusJson: record.redactedStatusJson,
     snapshotRef: record.snapshotRef,
     updatedAt: record.updatedAt.toISOString(),

@@ -506,7 +506,7 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
-    const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
+    const runtimeWakeNotifications: unknown[] = [];
     const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
     const secondPendingWakeAcceptedAtEpochMs = pendingWakeAcceptedAtEpochMs + 1_000;
     const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
@@ -518,9 +518,9 @@ describe("startHostedContainerEntrypoint", () => {
       async (_job, options) => {
         invocationStarted.resolve();
         await allowInvocationReady.promise;
-        options?.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
+        options?.onRuntimeWakeReady?.((notification) => {
           runtimeWakeCount += 1;
-          runtimeWakeNotifiedAtEpochMs.push(notifiedAtEpochMs);
+          runtimeWakeNotifications.push(structuredClone(notification ?? null));
           return true;
         });
         invocationReady.resolve();
@@ -562,6 +562,10 @@ describe("startHostedContainerEntrypoint", () => {
       body: JSON.stringify({
         attemptId: "attempt_evt_runtime_wake_ready",
         leaseGeneration: "1",
+        orchestration: {
+          activeWakeStartedAtEpochMs: 1_777_009_999_950,
+          cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
+        },
         userId: "u1",
       }),
       headers: {
@@ -600,10 +604,18 @@ describe("startHostedContainerEntrypoint", () => {
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(runtimeWakeCount).toBe(3);
-    expect(runtimeWakeNotifiedAtEpochMs).toEqual([
-      pendingWakeAcceptedAtEpochMs,
-      firstWakeAcceptedAtEpochMs,
-      secondWakeAcceptedAtEpochMs,
+    expect(runtimeWakeNotifications).toEqual([
+      {
+        notifiedAtEpochMs: pendingWakeAcceptedAtEpochMs,
+        orchestration: {
+          activeWakeAccepted: true,
+          activeWakeFinishedAtEpochMs: pendingWakeAcceptedAtEpochMs,
+          activeWakeStartedAtEpochMs: 1_777_009_999_950,
+          cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
+        },
+      },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
+      { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);

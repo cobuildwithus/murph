@@ -21,18 +21,27 @@ export interface ComposioConnectedAccount {
 }
 
 export class ComposioConnectedAppsRequestError extends Error {
+  readonly operationName: string | null;
   readonly retryable: boolean | null;
   readonly status: number | null;
+  readonly type: string | null;
 
   constructor(
     message: string,
     status: number | null = null,
-    options: { retryable?: boolean | null } = {},
+    options: {
+      cause?: unknown;
+      operationName?: string | null;
+      retryable?: boolean | null;
+      type?: string | null;
+    } = {},
   ) {
-    super(message);
+    super(message, { cause: options.cause });
     this.name = "ComposioConnectedAppsRequestError";
+    this.operationName = options.operationName ?? null;
     this.retryable = options.retryable ?? null;
     this.status = status;
+    this.type = options.type ?? null;
   }
 }
 
@@ -266,7 +275,10 @@ function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
     throw new ComposioConnectedAppsRequestError(
       "Composio direct tool execution did not succeed.",
       null,
-      { retryable: false },
+      {
+        retryable: false,
+        type: "composio_direct_execute_unsuccessful",
+      },
     );
   }
   return Object.hasOwn(record, "data") ? record.data : {};
@@ -318,9 +330,14 @@ async function requestJson(input: {
       method: input.method,
       signal,
     });
-  } catch {
+  } catch (error) {
     throw new ComposioConnectedAppsRequestError(
       "Composio is temporarily unavailable.",
+      null,
+      {
+        cause: error,
+        type: "composio_transport_error",
+      },
     );
   }
 
@@ -328,6 +345,7 @@ async function requestJson(input: {
     throw new ComposioConnectedAppsRequestError(
       `Composio request failed with status ${response.status}.`,
       response.status,
+      { type: "composio_http_error" },
     );
   }
 
@@ -340,6 +358,10 @@ async function requestJson(input: {
     throw new ComposioConnectedAppsRequestError(
       "Composio returned an invalid JSON response.",
       response.status,
+      {
+        cause: error,
+        type: "composio_invalid_json",
+      },
     );
   }
 }
@@ -350,6 +372,7 @@ async function readBoundedJsonResponse(response: Response): Promise<unknown> {
     throw new ComposioConnectedAppsRequestError(
       "Composio response was too large.",
       response.status,
+      { type: "composio_response_too_large" },
     );
   }
 
@@ -365,6 +388,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
       throw new ComposioConnectedAppsRequestError(
         "Composio response was too large.",
         response.status,
+        { type: "composio_response_too_large" },
       );
     }
     return text;
@@ -388,6 +412,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
         throw new ComposioConnectedAppsRequestError(
           "Composio response was too large.",
           response.status,
+          { type: "composio_response_too_large" },
         );
       }
       chunks.push(value);

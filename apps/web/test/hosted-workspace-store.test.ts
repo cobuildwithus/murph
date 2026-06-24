@@ -2359,6 +2359,7 @@ function buildHostedWorkspaceRow(
     browserVaultReplicaRef: null,
     checkpointedAt: null,
     createdAt: FIXED_NOW,
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: null,

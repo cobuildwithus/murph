@@ -38,16 +38,16 @@ export function buildAttachmentId(captureId: string, ordinal: number): string {
   return `att_${captureId}_${String(ordinal).padStart(2, "0")}`;
 }
 
-export function normalizeStoredAttachments(
+export function normalizeStoredAttachments<T extends StoredAttachment>(
   captureId: string,
-  attachments: ReadonlyArray<StoredAttachment>,
+  attachments: ReadonlyArray<T>,
   context = `stored attachments for capture "${captureId}"`,
-): StoredAttachment[] {
+): T[] {
   if (!Array.isArray(attachments)) {
     throw new TypeError(`Expected canonical attachment array in ${context}.`);
   }
 
-  const normalized: StoredAttachment[] = [];
+  const normalized: T[] = [];
   const seenAttachmentIds = new Set<string>();
   const seenOrdinals = new Set<number>();
 

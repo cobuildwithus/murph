@@ -4,8 +4,13 @@ import {
 import type {
   HostedRuntimeEnsureProcessingRequest,
 } from "@murphai/hosted-execution/orchestration-control";
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -117,9 +122,13 @@ export async function handleRuntimeEnsureProcessingRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
+  const cloudflareRouteReceivedAtEpochMs = Date.now();
   const userId = decodeRouteParam(encodedUserId);
   let ensureRequest: HostedRuntimeEnsureProcessingRequest;
   let commandTimeoutMs: number | null;
+  let orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> = {
+    cloudflareRouteReceivedAtEpochMs,
+  };
   try {
     const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
@@ -128,6 +137,10 @@ export async function handleRuntimeEnsureProcessingRoute(
       requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
+    orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
+      context.request.headers,
+      cloudflareRouteReceivedAtEpochMs,
+    );
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -152,6 +165,7 @@ export async function handleRuntimeEnsureProcessingRoute(
   return json(await stub.ensureRuntimeProcessingForUser({
     ...ensureRequest,
     ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
+    orchestration,
     userId,
   }));
 }
@@ -177,4 +191,34 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
   );
 
   return parsed;
+}
+
+function readRuntimeEnsureProcessingOrchestrationDiagnostics(
+  headers: Headers,
+  cloudflareRouteReceivedAtEpochMs: number,
+): NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> {
+  const temporalActivityStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  );
+  const temporalActivityRequestStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
+  );
+  return {
+    cloudflareRouteReceivedAtEpochMs,
+    ...(temporalActivityStartedAtEpochMs === null ? {} : { temporalActivityStartedAtEpochMs }),
+    ...(temporalActivityRequestStartedAtEpochMs === null ? {} : {
+      temporalActivityRequestStartedAtEpochMs,
+    }),
+  };
+}
+
+function readOptionalEpochMsHeader(headers: Headers, headerName: string): number | null {
+  const raw = headers.get(headerName);
+  if (raw === null || !/^\d+$/u.test(raw.trim())) {
+    return null;
+  }
+  const value = Number(raw.trim());
+  return Number.isSafeInteger(value) ? value : null;
 }

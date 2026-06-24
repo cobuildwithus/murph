@@ -18,6 +18,7 @@ import {
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   buildHostedMailboxPayloadScope,
@@ -30,6 +31,7 @@ import {
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
+  sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -263,6 +265,7 @@ describe("hosted runtime control contracts", () => {
     const workspaceState = {
       checkpointedAt: "2026-04-27T00:00:00.000Z",
       createdAt: "2026-04-27T00:00:00.000Z",
+      inboxMediaRetentionWakeAt: null,
       nextWakeAt: null,
       nextWakeReason: null,
       redactedStatus: null,
@@ -274,6 +277,19 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
+    );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      processingMode: "inbox_media_retention",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      processingMode: "inbox_media_retention",
+    });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      processingMode: "assistant",
+    })).toThrow(
+      "Hosted workspace invocation request processingMode is not supported.",
     );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
@@ -830,6 +846,22 @@ describe("hosted runtime control contracts", () => {
   it("round-trips phaseBreakdown on both latency events and rejects unsafe leaves", () => {
     const stagedBreakdown = {
       schemaVersion: 1,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+        temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        activeWakeStartedAtEpochMs: 1_777_000_000_040,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeAccepted: false,
+        replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacedStaleFence: true,
+        freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+        freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+      },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -853,6 +885,10 @@ describe("hosted runtime control contracts", () => {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
         foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
         foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        foregroundWakeOrdinal: 1,
+        activeRuntimePassOrdinal: 2,
+        activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+        activeRuntimePassForeground: false,
       },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
@@ -933,6 +969,29 @@ describe("hosted runtime control contracts", () => {
       expect("phaseBreakdown" in parsed.event).toBe(false);
     }
 
+    // Orchestration diagnostics are the same metadata-only boundary: epoch-ms
+    // numbers plus explicit booleans only.
+    for (const unsafeOrchestration of [
+      { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
+      { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
+      { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
+      { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
+      { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, orchestration: unsafeOrchestration },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
     // Dispatch is the same trust boundary: unknown sub keys and non-integer or
     // negative epoch leaves must drop the whole breakdown (never partially
     // salvage it) while the staged event itself still parses.
@@ -963,6 +1022,7 @@ describe("hosted runtime control contracts", () => {
       { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
       { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
       { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
+      { activeRuntimePassForeground: 0 }, // boolean leaf must stay boolean
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
         event: {
@@ -1047,6 +1107,10 @@ describe("hosted runtime control contracts", () => {
           runtimeWakeNotifiedAtEpochMs: 999,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
           foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+          foregroundWakeOrdinal: 1,
+          activeRuntimePassOrdinal: 2,
+          activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+          activeRuntimePassForeground: false,
         },
       },
       phases: ["wake"],
@@ -1060,6 +1124,10 @@ describe("hosted runtime control contracts", () => {
           runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
           foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+          foregroundWakeOrdinal: 1,
+          activeRuntimePassOrdinal: 2,
+          activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+          activeRuntimePassForeground: false,
         },
       },
     });
@@ -1071,6 +1139,7 @@ describe("hosted runtime control contracts", () => {
         wake: {
           runtimeWakeNotifiedAtEpochMs: 999,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          activeRuntimePassForeground: true,
         },
       },
       phases: ["wake"],
@@ -1080,6 +1149,30 @@ describe("hosted runtime control contracts", () => {
       changed: false,
       value: merged.value,
     });
+  });
+
+  it("sanitizes orchestration diagnostics with the package-owned phase schema", () => {
+    expect(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER).toBe(
+      "x-hosted-runtime-orchestration-latency",
+    );
+
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      activeWakeAccepted: true,
+      activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      extraLeaf: 1,
+      freshStartRequestedAtEpochMs: -1,
+      replacedStaleFence: "true",
+    })).toEqual({
+      activeWakeAccepted: true,
+      activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeStartedAtEpochMs: 1_777_000_000_100,
+    });
+
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      activeWakeAccepted: "true",
+      freshStartRequestedAtEpochMs: -1,
+    })).toBeNull();
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
@@ -1148,9 +1241,11 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     });
     expect(parseHostedWorkspaceCheckpointResponse({
@@ -1222,11 +1317,13 @@ describe("hosted runtime control contracts", () => {
       attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:05:00.000Z",
       reason: "canonical_runtime_commit",
     })).toEqual({
       attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:05:00.000Z",
       reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
@@ -2020,6 +2117,7 @@ function createWorkspaceState() {
   return {
     checkpointedAt: "2026-04-26T00:00:04.000Z",
     createdAt: "2026-04-26T00:00:00.000Z",
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatus: {

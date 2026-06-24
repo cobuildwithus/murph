@@ -5,6 +5,8 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
+  type AssistantInputCursor,
+  type AssistantInputEventRecord,
   compareAssistantInputCursors,
   createAssistantInputEventId,
   listAssistantInputEvents,
@@ -48,6 +50,24 @@ describe('assistant input event store', () => {
           occurredAt: '2026-04-22T10:00:00.000Z',
           sourceKind: 'inbox-capture',
           sourcePosition: 'inbox-capture:linq:cap_utc',
+        },
+      ),
+    ).toBeLessThan(0)
+    expect(
+      compareAssistantInputCursors(
+        {
+          createdAt: '2026-04-22T11:00:00+01:00',
+          inputId: 'input-offset-same-instant-a',
+          occurredAt: '2026-04-22T11:00:00+01:00',
+          sourceKind: 'inbox-capture',
+          sourcePosition: 'inbox-capture:linq:cap_a',
+        },
+        {
+          createdAt: '2026-04-22T10:00:00.000Z',
+          inputId: 'input-utc-same-instant-b',
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceKind: 'inbox-capture',
+          sourcePosition: 'inbox-capture:linq:cap_b',
         },
       ),
     ).toBeLessThan(0)
@@ -1133,6 +1153,212 @@ describe('assistant input event store', () => {
     ])
   })
 
+  it('does not skip equal-instant cursor timestamps at a page boundary', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-inbox-equal-instant-cursor-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'offset timestamp capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-08T01:00:00+01:00',
+        receivedAt: '2026-04-08T01:00:00+01:00',
+        sourceRef: {
+          captureId: 'cap_a',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'utc timestamp capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-08T00:00:00.000Z',
+        receivedAt: '2026-04-08T00:00:00.000Z',
+        sourceRef: {
+          captureId: 'cap_b',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+
+    await writeAssistantInputEventRecord(vaultRoot, {
+      ...first,
+      cursor: {
+        ...first.cursor,
+        createdAt: null,
+      },
+    })
+    await writeAssistantInputEventRecord(vaultRoot, {
+      ...second,
+      cursor: {
+        ...second.cursor,
+        createdAt: null,
+      },
+    })
+
+    const firstPage = await listAssistantInputEvents({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    const secondPage = await listAssistantInputEvents({
+      afterCursor: firstPage.nextCursor,
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(firstPage.events.map((event) => event.inputId)).toEqual([
+      first.inputId,
+    ])
+    expect(secondPage.events.map((event) => event.inputId)).toEqual([
+      second.inputId,
+    ])
+  })
+
+  it('uses a stable cursor timestamp key for mixed createdAt support', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-mixed-created-at-cursor-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      event: {
+        content: {
+          text: 'A created at 02 occurred at 03',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:03.000Z',
+        receivedAt: '2026-04-22T10:00:03.000Z',
+        sourceRef: {
+          captureId: 'mixed_a',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:03.000Z'),
+      event: {
+        content: {
+          text: 'B created at 03 occurred at 01',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        receivedAt: '2026-04-22T10:00:01.000Z',
+        sourceRef: {
+          captureId: 'mixed_b',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    const third = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:04.000Z'),
+      event: {
+        content: {
+          text: 'L legacy cursor occurred at 02',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:02.000Z',
+        receivedAt: '2026-04-22T10:00:02.000Z',
+        sourceRef: {
+          captureId: 'mixed_c',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    await writeAssistantInputEventRecord(vaultRoot, {
+      ...third,
+      cursor: {
+        ...third.cursor,
+        createdAt: null,
+      },
+    })
+
+    const orderedInputIds: string[] = []
+    let afterCursor: AssistantInputCursor | null = null
+    for (let pageCount = 0; pageCount < 4; pageCount += 1) {
+      const page = await listAssistantInputEvents({
+        afterCursor,
+        limit: 1,
+        vault: vaultRoot,
+      })
+      if (page.events.length === 0) {
+        afterCursor = page.nextCursor
+        break
+      }
+      orderedInputIds.push(page.events[0]!.inputId)
+      afterCursor = page.nextCursor
+    }
+
+    expect(new Set(orderedInputIds).size).toBe(orderedInputIds.length)
+    expect(orderedInputIds).toEqual([
+      first.inputId,
+      third.inputId,
+      second.inputId,
+    ])
+
+    const finalPage = await listAssistantInputEvents({
+      afterCursor,
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(finalPage.events).toEqual([])
+  })
+
   it('uses timestamps before inbox capture ids when listing after a cursor', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-inbox-hash-cursor-',
@@ -1865,6 +2091,25 @@ async function createAssistantInputStoreVault(prefix: string): Promise<{
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
   return context
+}
+
+async function writeAssistantInputEventRecord(
+  vaultRoot: string,
+  record: AssistantInputEventRecord,
+): Promise<void> {
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    resolveAssistantInputEventPath({
+      inputId: record.inputId,
+      paths,
+    }),
+    `${JSON.stringify({
+      schema: 'murph.assistant-input-event.v1',
+      schemaVersion: 1,
+      value: record,
+    })}\n`,
+    { mode: 0o600 },
+  )
 }
 
 function createHostedMailboxEventInput(input: {

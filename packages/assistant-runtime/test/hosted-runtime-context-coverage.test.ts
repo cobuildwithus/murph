@@ -743,11 +743,13 @@ describe("hosted runtime context coverage", () => {
       expect(mocks.createIntegratedInboxServices).toHaveBeenCalledTimes(2);
       expect(mocks.inboxInit).toHaveBeenNthCalledWith(1, {
         rebuild: true,
+        rebuildParserJobs: false,
         requestId: "req_startup_sidecar",
         vault: vaultRoot,
       });
       expect(mocks.inboxInit).toHaveBeenNthCalledWith(2, {
         rebuild: false,
+        rebuildParserJobs: false,
         requestId: "req_projection_sidecar",
         vault: vaultRoot,
       });
@@ -781,6 +783,7 @@ describe("hosted runtime context coverage", () => {
 
       expect(mocks.inboxInit).toHaveBeenCalledWith({
         rebuild: true,
+        rebuildParserJobs: false,
         requestId: "req_projection_without_startup",
         vault: vaultRoot,
       });

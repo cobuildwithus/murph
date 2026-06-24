@@ -30,6 +30,21 @@ interface DragState {
   height: number;
 }
 
+function readStoredOffset(persistKey: string | null): Offset | null {
+  if (!persistKey) return null;
+  try {
+    const raw = window.localStorage.getItem(persistKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Offset>;
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // ignore corrupted storage
+  }
+  return null;
+}
+
 export function ComputerHandoffFloatingIsland({
   handle,
   children,
@@ -73,9 +88,12 @@ export function ComputerHandoffFloatingIsland({
   }, [setOffset]);
 
   useEffect(() => {
-    reclampToViewport();
+    const frame = window.requestAnimationFrame(reclampToViewport);
     window.addEventListener("resize", reclampToViewport);
-    return () => window.removeEventListener("resize", reclampToViewport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", reclampToViewport);
+    };
   }, [reclampToViewport]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {

@@ -1584,6 +1584,7 @@ export const auditRecordSchema = withContractMetadata(
 const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
 const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
 const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
+const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
 export const INBOX_CAPTURE_TEXT_MAX_LENGTH = 20_000;
 
@@ -1644,6 +1645,29 @@ export const inboxCaptureRecordSchema = withContractMetadata(
     .strict(),
   "@murphai/contracts/inbox-capture-record.schema.json",
   "Murph Inbox Capture Record",
+);
+
+export const inboxAttachmentRetentionRecordSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxAttachmentRetention),
+      captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+      attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+      ordinal: integerSchema(1),
+      kind: z.enum(INBOX_RETENTION_ATTACHMENT_KIND_VALUES),
+      mime: boundedString(1, 255).nullable().optional(),
+      fileName: boundedString(1, 255).nullable().optional(),
+      byteSize: integerSchema(0).nullable().optional(),
+      storedPath: patternedString(RELATIVE_PATH_PATTERN),
+      sha256: patternedString(HEX_SHA256_PATTERN),
+      captureOccurredAt: isoDateTimeString(),
+      recordedAt: isoDateTimeString(),
+      purgedAt: isoDateTimeString(),
+      reason: z.literal("inbox_media_retention"),
+    })
+    .strict(),
+  "@murphai/contracts/inbox-attachment-retention-record.schema.json",
+  "Murph Inbox Attachment Retention Record",
 );
 
 
@@ -2847,6 +2871,7 @@ export type MetricSampleRecord = z.infer<typeof metricSampleRecordSchema>;
 export type AuditRecord = z.infer<typeof auditRecordSchema>;
 export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachmentSchema>;
 export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
+export type InboxAttachmentRetentionRecord = z.infer<typeof inboxAttachmentRetentionRecordSchema>;
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;

@@ -1,4 +1,5 @@
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -33,6 +34,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
       commandTimeoutMs?: number;
+      orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;

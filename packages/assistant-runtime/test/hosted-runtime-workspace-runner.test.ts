@@ -271,6 +271,117 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(request.expectedWorkspaceVersion, "2");
   });
 
+  test("snapshot builder mirrors committed wake fields so a follow-up checkpoint cannot resurrect a stale process-start inbox media retention wake", async () => {
+    // Regression for PR 240 round 32: hosted-runtime.ts manually updated
+    // expectedWorkspaceVersion/nextWakeAt/nextWakeReason on checkpointMetadata
+    // after an idle checkpoint, but never inboxMediaRetentionWakeAt. A
+    // subsequent foreground pass (e.g. mailbox/assistant) whose checkpoint
+    // request omitted inboxMediaRetentionWakeAt then fell back to the stale
+    // process-start value via buildHostedWorkspaceSnapshotCheckpointRequest,
+    // overwriting the freshly persisted retention wake and either resurrecting
+    // a due wake or losing the next one.
+    const staleProcessStartWake = "2026-01-01T00:00:00.000Z";
+    const advancedRetentionWake = "2026-05-10T00:00:00.000Z";
+    const advancedNextWake = "2026-05-09T12:00:00.000Z";
+    const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({ snapshotRef: null }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_retention_drift",
+        expectedWorkspaceVersion: "1",
+        inboxMediaRetentionWakeAt: staleProcessStartWake,
+        leaseGeneration: "1",
+        nextWakeAt: staleProcessStartWake,
+        nextWakeReason: "assistant_due",
+      },
+    });
+
+    builder.recordCheckpoint?.({
+      checkpointed: true,
+      workspace: createWorkspaceState({
+        inboxMediaRetentionWakeAt: advancedRetentionWake,
+        nextWakeAt: advancedNextWake,
+        nextWakeReason: "mailbox",
+        version: "2",
+      }),
+    });
+
+    const followUpRequest = await builder.createRequest({
+      reason: "idle_shutdown",
+    });
+
+    assert.equal(followUpRequest.expectedWorkspaceVersion, "2");
+    assert.equal(followUpRequest.inboxMediaRetentionWakeAt, advancedRetentionWake);
+    assert.equal(followUpRequest.nextWakeAt, advancedNextWake);
+    assert.equal(followUpRequest.nextWakeReason, "mailbox");
+  });
+
+  test("snapshot builder clears mirrored retention/wake fields when the committed workspace cleared them", async () => {
+    const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({ snapshotRef: null }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_retention_cleared",
+        expectedWorkspaceVersion: "1",
+        inboxMediaRetentionWakeAt: "2026-01-01T00:00:00.000Z",
+        leaseGeneration: "1",
+        nextWakeAt: "2026-01-01T00:00:00.000Z",
+        nextWakeReason: "assistant_due",
+      },
+    });
+
+    builder.recordCheckpoint?.({
+      checkpointed: true,
+      workspace: createWorkspaceState({
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "2",
+      }),
+    });
+
+    const followUpRequest = await builder.createRequest({
+      reason: "idle_shutdown",
+    });
+
+    assert.equal(followUpRequest.inboxMediaRetentionWakeAt, null);
+    assert.equal(followUpRequest.nextWakeAt, null);
+    assert.equal(followUpRequest.nextWakeReason, null);
+  });
+
+  test("snapshot builder leaves stale metadata in place when a checkpoint is rejected", async () => {
+    const staleProcessStartWake = "2026-01-01T00:00:00.000Z";
+    const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({ snapshotRef: null }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_retention_rejected",
+        expectedWorkspaceVersion: "1",
+        inboxMediaRetentionWakeAt: staleProcessStartWake,
+        leaseGeneration: "1",
+        nextWakeAt: staleProcessStartWake,
+        nextWakeReason: "assistant_due",
+      },
+    });
+
+    builder.recordCheckpoint?.({
+      checkpointed: false,
+      checkpointConflictReason: "workspace_version",
+      workspace: createWorkspaceState({
+        inboxMediaRetentionWakeAt: "2026-09-01T00:00:00.000Z",
+        nextWakeAt: "2026-09-01T00:00:00.000Z",
+        nextWakeReason: "mailbox",
+        version: "99",
+      }),
+    });
+
+    const followUpRequest = await builder.createRequest({
+      reason: "idle_shutdown",
+    });
+
+    assert.equal(followUpRequest.expectedWorkspaceVersion, "1");
+    assert.equal(followUpRequest.inboxMediaRetentionWakeAt, staleProcessStartWake);
+    assert.equal(followUpRequest.nextWakeAt, staleProcessStartWake);
+    assert.equal(followUpRequest.nextWakeReason, "assistant_due");
+  });
+
   test("imports mailbox before the assistant phase and schedules enrichment after the assistant", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
@@ -3098,6 +3209,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_wake_timing",
+        runtimePassDiagnostics: {
+          foreground: false,
+          ordinal: 7,
+          startedAtEpochMs: Date.now(),
+        },
         runtimeWakeSignal,
         async runAssistantPhase() {
           items.push(createMailboxItem({
@@ -3105,7 +3221,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
-          runtimeWakeSignal.notify();
+          runtimeWakeSignal.notify({
+            orchestration: {
+              activeWakeAccepted: true,
+              activeWakeFinishedAtEpochMs: 1_777_000_001_005,
+              activeWakeStartedAtEpochMs: 1_777_000_001_000,
+              userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
+            },
+          });
           await waitForCondition(() => importedSeqs.includes("2"));
           return {
             checkpointReason: "canonical_runtime_commit",
@@ -3118,19 +3241,32 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       const wake = foregroundMilestones.value?.phaseBreakdown?.wake;
+      const orchestration = foregroundMilestones.value?.phaseBreakdown?.orchestration;
+      assert.deepEqual(orchestration, {
+        activeWakeAccepted: true,
+        activeWakeFinishedAtEpochMs: 1_777_000_001_005,
+        activeWakeStartedAtEpochMs: 1_777_000_001_000,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
+      });
       assert.ok(wake);
       const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;
       const foregroundWaitResolvedAtEpochMs = wake.foregroundWaitResolvedAtEpochMs;
       const foregroundImportStartedAtEpochMs = wake.foregroundImportStartedAtEpochMs;
+      const activeRuntimePassStartedAtEpochMs = wake.activeRuntimePassStartedAtEpochMs;
       if (
         typeof runtimeWakeNotifiedAtEpochMs !== "number"
         || typeof foregroundWaitResolvedAtEpochMs !== "number"
         || typeof foregroundImportStartedAtEpochMs !== "number"
+        || typeof activeRuntimePassStartedAtEpochMs !== "number"
       ) {
         throw new Error("Expected numeric foreground wake timing diagnostics.");
       }
       assert.ok(runtimeWakeNotifiedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
       assert.ok(foregroundWaitResolvedAtEpochMs <= foregroundImportStartedAtEpochMs);
+      assert.ok(activeRuntimePassStartedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
+      assert.equal(wake.foregroundWakeOrdinal, 1);
+      assert.equal(wake.activeRuntimePassOrdinal, 7);
+      assert.equal(wake.activeRuntimePassForeground, false);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [

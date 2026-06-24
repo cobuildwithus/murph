@@ -32,6 +32,12 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
   {
+    slug: 'food-journal',
+    name: 'food-journal',
+    triggerHint:
+      'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:

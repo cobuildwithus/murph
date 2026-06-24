@@ -52,6 +52,8 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
+const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
+
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
   metrics: HostedConversationWakeMetrics;
@@ -91,7 +93,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
         { cause: error },
       );
     }
-    const parserProcessed = await drainHostedConversationParsers({
+    const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       parserToolchain: input.runtime.parserToolchain ?? null,
       platform: input.runtime.platform,
@@ -99,10 +101,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
 
-    const metrics: HostedConversationWakeMetrics = {
-      nextWakeAt: null,
-      parserProcessed,
-    };
     return {
       capture: persistedCapture,
       metrics,
@@ -122,20 +120,23 @@ async function drainHostedConversationParsers(input: {
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   vaultRoot: string;
-}): Promise<number> {
-  const pendingJobs = input.runtime.listAttachmentParseJobs({
+}): Promise<HostedConversationWakeMetrics> {
+  const hasPendingJob = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
-    limit: 20,
+    limit: 1,
     state: "pending",
-  });
-  if (!hasPendingHostedConversationMediaParseJob({
-    captureId: input.captureId,
-    pendingJobs,
-    runtime: input.runtime,
-  })) {
-    return 0;
+  }).length > 0;
+  if (
+    !hasPendingJob ||
+    !hasPendingHostedConversationMediaParseJob({
+      captureId: input.captureId,
+      runtime: input.runtime,
+    })
+  ) {
+    return createHostedConversationParserMetrics();
   }
 
+  let parserService: ReturnType<typeof createInboxParserService>;
   try {
     const parserConfig = await createConfiguredParserRegistry({
       ...(input.parserToolchain
@@ -151,12 +152,22 @@ async function drainHostedConversationParsers(input: {
         : {}),
       vaultRoot: input.vaultRoot,
     });
-    const parserService = createInboxParserService({
+    parserService = createInboxParserService({
       ffmpeg: parserConfig.ffmpeg,
       registry: parserConfig.registry,
       runtime: input.runtime,
       vaultRoot: input.vaultRoot,
     });
+  } catch (error) {
+    return await logHostedConversationParserRetryFailure({
+      captureId: input.captureId,
+      error,
+      platform: input.platform,
+      safeFallbackMessage: "Hosted conversation parser setup failed.",
+    });
+  }
+
+  try {
     const results = await parserService.drain({
       captureId: input.captureId,
     });
@@ -193,30 +204,62 @@ async function drainHostedConversationParsers(input: {
         platform: input.platform,
       });
     }
-    return results.length;
-  } catch (error) {
-    const errorCode = deriveHostedExecutionErrorCode(error);
-    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        component: "mailbox",
-        errorCode,
-        eventCode: "mailbox.parser_drain_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: Boolean(input.captureId),
-          errorCode,
-          safeErrorMessage:
-            typeof diagnostics?.errorMessage === "string"
-              ? diagnostics.errorMessage
-              : "Hosted conversation parser drain failed.",
-        },
-      },
-      platform: input.platform,
+    return createHostedConversationParserMetrics({
+      parserProcessed: results.length,
     });
-    return 0;
+  } catch (error) {
+    return await logHostedConversationParserRetryFailure({
+      captureId: input.captureId,
+      error,
+      platform: input.platform,
+      safeFallbackMessage: "Hosted conversation parser drain failed.",
+    });
   }
+}
+
+async function logHostedConversationParserRetryFailure(input: {
+  captureId: string;
+  error: unknown;
+  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  safeFallbackMessage: string;
+}): Promise<HostedConversationWakeMetrics> {
+  const errorCode = deriveHostedExecutionErrorCode(input.error);
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  const nextWakeAt = new Date(Date.now() + HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS)
+    .toISOString();
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "mailbox",
+      errorCode,
+      eventCode: "mailbox.parser_drain_failed",
+      level: "warn",
+      phase: "import",
+      redactedJson: {
+        captureIdPresent: Boolean(input.captureId),
+        errorCode,
+        nextWakeAtPresent: true,
+        parserTerminalizedPendingJobs: 0,
+        safeErrorMessage:
+          typeof diagnostics?.errorMessage === "string"
+            ? diagnostics.errorMessage
+            : input.safeFallbackMessage,
+      },
+    },
+    platform: input.platform,
+  });
+  return createHostedConversationParserMetrics({
+    nextWakeAt,
+  });
+}
+
+function createHostedConversationParserMetrics(input: {
+  nextWakeAt?: string | null;
+  parserProcessed?: number;
+} = {}): HostedConversationWakeMetrics {
+  return {
+    nextWakeAt: input.nextWakeAt ?? null,
+    parserProcessed: input.parserProcessed ?? 0,
+  };
 }
 
 interface HostedParserFailureLogItem {
@@ -249,30 +292,24 @@ function collectHostedParserFailures(input: {
 
 function hasPendingHostedConversationMediaParseJob(input: {
   captureId: string;
-  pendingJobs: ReadonlyArray<{ attachmentId: string }>;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
 }): boolean {
-  if (input.pendingJobs.length === 0) {
-    return false;
-  }
-
   const capture = input.runtime.getCapture(input.captureId);
   if (!capture) {
     return false;
   }
 
-  const mediaAttachmentIds = new Set(
-    capture.attachments
-      .filter((attachment) =>
-        attachment.kind === "audio" || attachment.kind === "video"
-      )
-      .map((attachment) => attachment.attachmentId)
-      .filter((attachmentId): attachmentId is string =>
-        typeof attachmentId === "string" && attachmentId.length > 0
-      ),
-  );
-
-  return input.pendingJobs.some((job) => mediaAttachmentIds.has(job.attachmentId));
+  return capture.attachments.some((attachment) => {
+    if (attachment.kind !== "audio" && attachment.kind !== "video") {
+      return false;
+    }
+    return input.runtime.listAttachmentParseJobs({
+      attachmentId: attachment.attachmentId,
+      captureId: input.captureId,
+      limit: 1,
+      state: "pending",
+    }).length > 0;
+  });
 }
 
 async function normalizeHostedConversationMessageWake(input: {

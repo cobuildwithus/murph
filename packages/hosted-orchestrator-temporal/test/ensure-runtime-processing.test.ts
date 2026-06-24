@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -57,6 +59,10 @@ describe("ensureRuntimeProcessing", () => {
     expect(headers.has("authorization")).toBe(false);
     expect(headers.has(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBe(true);
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
+    expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER))
+      .toMatch(/^\d+$/u);
+    expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER))
+      .toMatch(/^\d+$/u);
     expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe("10000");
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
@@ -135,6 +141,34 @@ describe("ensureRuntimeProcessing", () => {
     expect(cloudflareBody).not.toHaveProperty("reason");
     expect(cloudflareBody).not.toHaveProperty("requiresAiUsageDecision");
     expect(cloudflareBody).not.toHaveProperty("aiUsageAllowDecision");
+  });
+
+  it("passes through retention-only Cloudflare processing mode", async () => {
+    await stubCloudflareEnvironment();
+
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
+      runtimeAttemptId: "runtime_attempt_test",
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(response);
+    }));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "inbox_media_retention",
+      userId: "member_test",
+    })).resolves.toEqual(response);
+
+    expect(observedRequests).toHaveLength(1);
+    expect(JSON.parse(String(observedRequests[0]?.init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "inbox_media_retention",
+    });
   });
 
   it("does not call the web usage-decision endpoint", async () => {

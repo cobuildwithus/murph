@@ -1,9 +1,14 @@
 import path from "node:path";
 
 import {
+  collectEventRawReferencePaths,
   rawImportManifestSchema,
   safeParseContract,
   type ContractSchema,
+  inboxAttachmentRetentionRecordSchema,
+  inboxCaptureRecordSchema,
+  type InboxAttachmentRetentionRecord,
+  type InboxCaptureRecord,
   type RawImportManifest,
   type VaultFamilyId,
   type VaultFrontmatterFamilyDescriptor,
@@ -36,7 +41,7 @@ import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
-import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
+import { normalizeRelativeVaultPath, normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import { safeStatAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
@@ -514,19 +519,13 @@ async function validateJsonlValidationFamily(
   vaultRoot: string,
   family: VaultJsonlValidationFamilyDescriptor,
 ): Promise<ValidationIssue[]> {
+  const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
   return validateJsonlFamily({
     vaultRoot,
     relativeDirectory: family.directory,
     schema: family.validation.schema,
     code: family.validation.issueCode,
-    postValidateRecord: async (record, context) =>
-      validateJsonlRecordAgainstVault({
-        familyId: family.id,
-        index: context.index,
-        record,
-        relativePath: context.relativePath,
-        vaultRoot,
-      }),
+    postValidateRecord,
   });
 }
 
@@ -561,6 +560,19 @@ function resolveJsonlFamilyPostValidator(
         );
     case "events":
       return async (record) => validateEventRecordReferences(vaultRoot, record);
+    case "inboxCaptures":
+      {
+        let retentionIndexPromise: Promise<ReadonlySet<string>> | null = null;
+        const readRetentionIndex = () => {
+          retentionIndexPromise ??= readInboxAttachmentRetentionIndex(vaultRoot);
+          return retentionIndexPromise;
+        };
+        return async (record) => validateInboxCaptureRecordReferences(
+          vaultRoot,
+          record,
+          readRetentionIndex,
+        );
+      }
     default:
       return undefined;
   }
@@ -649,6 +661,112 @@ async function validateExistingVaultFile(
   return [];
 }
 
+function buildInboxAttachmentRetentionIndexKey(input: {
+  attachmentId: string;
+  captureId: string;
+  storedPath: string;
+}): string | null {
+  let normalizedRelativePath: string;
+  try {
+    normalizedRelativePath = normalizeRelativeVaultPath(input.storedPath);
+  } catch {
+    return null;
+  }
+
+  if (!normalizedRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)) {
+    return null;
+  }
+
+  return [
+    input.captureId,
+    input.attachmentId,
+    normalizedRelativePath,
+  ].join("\u0000");
+}
+
+async function readInboxAttachmentRetentionIndex(
+  vaultRoot: string,
+): Promise<ReadonlySet<string>> {
+  const index = new Set<string>();
+
+  const retentionLedgerPaths = await walkVaultFiles(
+    vaultRoot,
+    VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory,
+    { extension: ".jsonl" },
+  );
+  for (const retentionLedgerPath of retentionLedgerPaths) {
+    let records: UnknownRecord[];
+    try {
+      records = await readJsonlRecords({ vaultRoot, relativePath: retentionLedgerPath });
+    } catch {
+      continue;
+    }
+
+    for (const record of records) {
+      const result = safeParseContract<InboxAttachmentRetentionRecord>(
+        inboxAttachmentRetentionRecordSchema,
+        record,
+      );
+      if (
+        result.success &&
+        result.data.reason === "inbox_media_retention"
+      ) {
+        const key = buildInboxAttachmentRetentionIndexKey({
+          attachmentId: result.data.attachmentId,
+          captureId: result.data.captureId,
+          storedPath: result.data.storedPath,
+        });
+        if (key) {
+          index.add(key);
+        }
+      }
+    }
+  }
+
+  return index;
+}
+
+async function validateInboxCaptureRecordReferences(
+  vaultRoot: string,
+  record: UnknownRecord,
+  readRetentionIndex: () => Promise<ReadonlySet<string>>,
+): Promise<ValidationIssue[]> {
+  const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record);
+  if (!result.success) {
+    return [];
+  }
+
+  const capture = result.data;
+  const issues: ValidationIssue[] = [];
+  for (const attachment of capture.attachments) {
+    if (!attachment.storedPath) {
+      continue;
+    }
+
+    const referenceIssues = await validateExistingVaultFile(
+      vaultRoot,
+      attachment.storedPath,
+      "RAW_REFERENCE_MISSING",
+      `Inbox capture attachment "${attachment.storedPath}" is missing.`,
+    );
+    if (referenceIssues.length === 0) {
+      continue;
+    }
+    const retentionKey = buildInboxAttachmentRetentionIndexKey({
+      attachmentId: attachment.attachmentId,
+      captureId: capture.captureId,
+      storedPath: attachment.storedPath,
+    });
+    if (retentionKey && (await readRetentionIndex()).has(retentionKey)) {
+      continue;
+    }
+
+    issues.push(...referenceIssues);
+  }
+
+  return issues;
+}
+
 async function validateAssessmentRecordReferences(
   vaultRoot: string,
   record: UnknownRecord & { rawPath: string },
@@ -676,44 +794,10 @@ async function validateEventRecordReferences(
   vaultRoot: string,
   record: UnknownRecord,
 ): Promise<ValidationIssue[]> {
-  const referencedPaths = new Set<string>();
-
-  if (Array.isArray(record.rawRefs)) {
-    for (const rawRef of record.rawRefs) {
-      if (typeof rawRef === "string") {
-        referencedPaths.add(rawRef);
-      }
-    }
-  }
-
-  const mediaLists = [
-    Array.isArray((record as { media?: unknown }).media)
-      ? ((record as { media: unknown[] }).media)
-      : [],
-    Array.isArray((record as { workout?: { media?: unknown } }).workout?.media)
-      ? (((record as { workout: { media: unknown[] } }).workout.media))
-      : [],
-    Array.isArray((record as { attachments?: unknown }).attachments)
-      ? ((record as { attachments: unknown[] }).attachments)
-      : [],
-  ];
-
-  for (const mediaList of mediaLists) {
-    for (const media of mediaList) {
-      if (
-        media &&
-        typeof media === "object" &&
-        typeof (media as { relativePath?: unknown }).relativePath === "string"
-      ) {
-        referencedPaths.add((media as { relativePath: string }).relativePath);
-      }
-    }
-  }
-
   const issues: ValidationIssue[] = [];
   const manifestDirectories = new Set<string>();
 
-  for (const referencedPath of [...referencedPaths].sort()) {
+  for (const referencedPath of collectEventRawReferencePaths(record)) {
     issues.push(
       ...(await validateExistingVaultFile(
         vaultRoot,

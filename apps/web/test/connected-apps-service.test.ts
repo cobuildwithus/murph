@@ -15,6 +15,7 @@ import {
   executeHostedConnectedAppsRequest,
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 interface MemberRow {
   billingStatus: "active" | "canceled";
@@ -882,7 +883,47 @@ describe("connected-app service", () => {
         operation: "execute" as const,
       },
     });
-    const buildFetch = (directResponse: "unsuccessful" | "throw") =>
+    const expectCalendarCreateFailure = async (
+      directResponse: "http-502" | "throw" | "unsuccessful",
+      expectedDetails: Record<string, unknown>,
+      expectedCauseMessage: string,
+      expectedRootCauseMessage: string | null = null,
+    ) => {
+      const error = await executeHostedConnectedAppsRequest({
+        ...buildRequest(),
+        fetchImpl: buildFetch(directResponse),
+      }).catch((value: unknown) => value);
+      if (!isHostedOnboardingError(error)) {
+        throw new Error("Expected hosted onboarding error.");
+      }
+
+      expect(error).toMatchObject({
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: expectedDetails,
+        httpStatus: 400,
+        retryable: false,
+      });
+      expect(error.cause).toBeInstanceOf(Error);
+      if (!(error.cause instanceof Error)) {
+        throw new Error("Expected hosted error cause.");
+      }
+      expect(error.cause.message).toContain(
+        "ambiguous result",
+      );
+      expect(error.cause.cause).toBeInstanceOf(Error);
+      if (!(error.cause.cause instanceof Error)) {
+        throw new Error("Expected original Composio cause.");
+      }
+      expect(error.cause.cause.message).toContain(expectedCauseMessage);
+      if (expectedRootCauseMessage !== null) {
+        expect(error.cause.cause.cause).toBeInstanceOf(Error);
+        if (!(error.cause.cause.cause instanceof Error)) {
+          throw new Error("Expected root transport cause.");
+        }
+        expect(error.cause.cause.cause.message).toContain(expectedRootCauseMessage);
+      }
+    };
+    const buildFetch = (directResponse: "http-502" | "throw" | "unsuccessful") =>
       vi.fn(async (
         url: string | URL | Request,
       ): Promise<Response> => {
@@ -902,6 +943,9 @@ describe("connected-app service", () => {
           });
         }
         if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+          if (directResponse === "http-502") {
+            return jsonResponse({ error: "upstream unavailable" }, 502);
+          }
           if (directResponse === "throw") {
             throw new Error("socket closed after provider accepted request");
           }
@@ -914,22 +958,32 @@ describe("connected-app service", () => {
         throw new Error(`Unexpected Composio request ${String(url)}`);
       });
 
-    await expect(executeHostedConnectedAppsRequest({
-      ...buildRequest(),
-      fetchImpl: buildFetch("unsuccessful"),
-    })).rejects.toMatchObject({
-      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
-      httpStatus: 400,
-      retryable: false,
-    });
-    await expect(executeHostedConnectedAppsRequest({
-      ...buildRequest(),
-      fetchImpl: buildFetch("throw"),
-    })).rejects.toMatchObject({
-      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
-      httpStatus: 400,
-      retryable: false,
-    });
+    await expectCalendarCreateFailure(
+      "unsuccessful",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        type: "composio_direct_execute_unsuccessful",
+      },
+      "direct tool execution did not succeed",
+    );
+    await expectCalendarCreateFailure(
+      "throw",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        type: "composio_transport_error",
+      },
+      "temporarily unavailable",
+      "socket closed after provider accepted request",
+    );
+    await expectCalendarCreateFailure(
+      "http-502",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        statusCode: 502,
+        type: "composio_http_error",
+      },
+      "failed with status 502",
+    );
   });
 
   it("keeps removed-toolkit grants manageable without making them executable", async () => {

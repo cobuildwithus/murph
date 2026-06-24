@@ -6,6 +6,8 @@ import {
   parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 
@@ -17,6 +19,7 @@ import {
 
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
+  processingMode?: "default" | "inbox_media_retention" | null;
   userId: string;
 }
 
@@ -27,23 +30,30 @@ const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
 export async function ensureRuntimeProcessing(
   request: EnsureRuntimeProcessingInput,
 ): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const activityStartedAtEpochMs = Date.now();
   const parsedRequest = parseEnsureRuntimeProcessingInput(request);
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
+    ...(parsedRequest.processingMode ? { processingMode: parsedRequest.processingMode } : {}),
   });
 
   return observeHostedTemporalActivity({
     activity: "ensureRuntimeProcessing",
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     userId: parsedRequest.userId,
-  }, async () =>
-    await requestHostedOrchestratorJson(
+  }, async () => {
+    const requestStartedAtEpochMs = Date.now();
+    return await requestHostedOrchestratorJson(
       cloudflareEnvironment.cloudflareHostedControlBaseUrl,
       {
         body: JSON.stringify(cloudflareRequest),
         boundUserId: parsedRequest.userId,
         unsignedHeaders: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER]:
+            String(activityStartedAtEpochMs),
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER]:
+            String(requestStartedAtEpochMs),
           [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
             String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
         },
@@ -54,8 +64,8 @@ export async function ensureRuntimeProcessing(
         signing: cloudflareEnvironment.cloudflareHostedControlSigning,
         timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
       },
-    )
-  );
+    );
+  });
 }
 
 function parseEnsureRuntimeProcessingInput(
@@ -68,6 +78,7 @@ function parseEnsureRuntimeProcessingInput(
   const record = value;
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
+    "processingMode",
     "userId",
   ]);
 
@@ -76,11 +87,32 @@ function parseEnsureRuntimeProcessingInput(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
     ),
+    ...(record.processingMode === undefined
+      ? {}
+      : {
+          processingMode: parseNullableProcessingMode(
+            record.processingMode,
+            "Hosted runtime ensure-processing Activity input processingMode",
+          ),
+        }),
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
+}
+
+function parseNullableProcessingMode(
+  value: unknown,
+  label: string,
+): "default" | "inbox_media_retention" | null {
+  if (value === null) {
+    return null;
+  }
+  if (value === "default" || value === "inbox_media_retention") {
+    return value;
+  }
+  throw new TypeError(`${label} is not supported.`);
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {

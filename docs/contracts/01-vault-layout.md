@@ -34,6 +34,7 @@ Status: frozen current contract plus health extension fence
   raw/captures/YYYY/MM/<eventId>/manifest.json
   raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json
   raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>
+  ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl
   raw/measurements/YYYY/MM/<eventId>/<filename>
   raw/measurements/YYYY/MM/<eventId>/manifest.json
   raw/meals/YYYY/MM/<mealId>/<slot>-<filename>
@@ -76,12 +77,13 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Markdown docs remain human-readable and reviewable in place.
 - Non-device raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
 - Each non-device raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
-- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes.
-- Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment bytes.
+- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes. Raw inbox image/audio/video bytes may expire after 14 days when `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records the deleted path, sha256, purge time, reason, and retained parser derivative.
+- Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment metadata. Promotion does not pin the duplicate raw inbox media bytes; explicit durability belongs to the promoted owner path or an active protected reference.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
+- Inbox attachment retention shards use `purgedAt`: `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
 - Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
@@ -115,7 +117,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
 - Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` and do not create `raw/integrations` files or manifest sidecars.
 - Each non-device raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
-- `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars.
+- `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars. Image/audio/video bytes intentionally expired by retention leave the capture record intact and are represented by `ledger/inbox-attachment-retention/**` so readers can surface `retention_expired` instead of corruption.
 - File names are slug-safe ASCII and preserve the original extension.
 
 ## Schema Version Policy

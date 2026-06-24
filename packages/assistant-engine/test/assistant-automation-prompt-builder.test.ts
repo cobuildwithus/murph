@@ -1357,6 +1357,59 @@ describe('prepareAssistantAutoReplyInput', () => {
     )
   })
 
+  it('does not render stale raw lifecycle paths when prepared evidence is missing', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'other',
+        mime: 'application/zip',
+        fileName: 'vault-migration-clean-2026-05-04.zip',
+        byteSize: 4096,
+        storedPath: null,
+        parseState: 'succeeded',
+        routingImage: {
+          eligible: false,
+          reason: 'not-image',
+          mediaType: null,
+          extension: '.zip',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: null,
+            text: 'storedPath: missing',
+            truncated: false,
+          },
+        ],
+        combinedText: 'storedPath: missing',
+      }),
+    ])
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentEvidence: createRawZipAttachmentEvidence({
+            parseState: 'succeeded',
+            rawPath: 'raw/inbox/capture-1/attachments/expired.zip',
+          }),
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('- raw evidence: partial')
+    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('raw/inbox/capture-1/attachments/expired.zip')
+    expect(result.prompt).not.toContain(
+      'Raw attachment file is available at the storedPath above.',
+    )
+  })
+
   it('renders prepared media parser text without raw-file instructions', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({

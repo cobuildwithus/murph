@@ -174,7 +174,12 @@ export async function executeHostedConnectedAppsRequest(input: {
               throw new ComposioConnectedAppsRequestError(
                 "Composio calendar event creation returned an ambiguous result.",
                 error.status,
-                { retryable: false },
+                {
+                  cause: error,
+                  operationName: toolSlug,
+                  retryable: false,
+                  type: error.type ?? "composio_calendar_create_ambiguous",
+                },
               );
             }
             throw error;
@@ -731,11 +736,29 @@ function mapConnectedAppsError(error: unknown): unknown {
   const retryable = error.retryable
     ?? (error.status === null || error.status === 429 || error.status >= 500);
   return hostedOnboardingError({
+    cause: error,
     code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+    details: buildConnectedAppsProviderErrorDetails(error),
     httpStatus: retryable ? 503 : 400,
     message: retryable
       ? "Connected apps are temporarily unavailable."
       : "The connected-app request could not be completed.",
     retryable,
   });
+}
+
+function buildConnectedAppsProviderErrorDetails(
+  error: ComposioConnectedAppsRequestError,
+): Record<string, unknown> | undefined {
+  const details: Record<string, unknown> = {};
+  if (error.operationName) {
+    details.operationName = error.operationName;
+  }
+  if (error.status !== null) {
+    details.statusCode = error.status;
+  }
+  if (error.type) {
+    details.type = error.type;
+  }
+  return Object.keys(details).length > 0 ? details : undefined;
 }

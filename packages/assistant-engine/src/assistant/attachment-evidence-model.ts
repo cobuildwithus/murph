@@ -81,7 +81,11 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle> {
-  const rawPath = normalizeAssistantInputRawArtifactPath(input.attachment.raw?.path ?? null)
+  const rawPath = await resolveAvailableAssistantInputRawArtifactPath({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    rawPath: input.attachment.raw?.path ?? null,
+    vaultRoot: input.vaultRoot,
+  })
   const routingImage = getAttachmentEvidenceRoutingImageEligibility({
     attachment: input.attachment,
     rawPath,
@@ -519,6 +523,30 @@ function normalizeAssistantInputRawArtifactPath(
   candidatePath: string | null | undefined,
 ): string | null {
   return normalizeAssistantRawAttachmentArtifactPath(candidatePath)
+}
+
+async function resolveAvailableAssistantInputRawArtifactPath(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  rawPath: string | null | undefined
+  vaultRoot: string
+}): Promise<string | null> {
+  const rawPath = normalizeAssistantInputRawArtifactPath(input.rawPath)
+  if (!rawPath) {
+    return null
+  }
+
+  try {
+    await input.materializeWorkspaceArtifacts?.([rawPath])
+    const absolutePath = await resolveAssistantVaultPath(
+      input.vaultRoot,
+      rawPath,
+      'file path',
+    )
+    const fileStats = await stat(absolutePath)
+    return fileStats.isFile() ? rawPath : null
+  } catch {
+    return null
+  }
 }
 
 function normalizeAssistantInputDerivedArtifactPath(

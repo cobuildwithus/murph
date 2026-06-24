@@ -541,6 +541,11 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     createConnector({ id: 'email:primary', source: 'email', accountId: 'ada@example.com' }),
   )
 
+  const rebuildRuntimeFromVaultMock = vi.fn(
+    async (input: Parameters<InboxRuntimeModule['rebuildRuntimeFromVault']>[0]) => {
+      assert.equal(input.enqueueParserJobs, true)
+    },
+  )
   const rebuildCount = await rebuildRuntime(
     configPaths as InboxPaths,
     {
@@ -623,7 +628,9 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       createAgentmailApiPollDriver() {
         throw new Error('unused')
       },
-      async rebuildRuntimeFromVault() {},
+      async rebuildRuntimeFromVault(input) {
+        await rebuildRuntimeFromVaultMock(input)
+      },
       async runInboxDaemon() {},
       async runPollConnectorBackfill() {
         throw new Error('unused')
@@ -632,6 +639,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     } as InboxRuntimeModule,
   )
   assert.equal(rebuildCount, 400)
+  assert.equal(rebuildRuntimeFromVaultMock.mock.calls.length, 1)
 
   const idleDaemonState = idleState(configPaths as InboxPaths)
   assert.equal(idleDaemonState.status, 'idle')
