@@ -72,7 +72,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
         rawInput: input.value,
         requestedToolName: input.toolName,
         schemaName: input.schemaName ?? `${input.toolName}.input`,
-        schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema, input.toolName),
+        schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema),
         toolName: input.toolName,
       }),
     }
@@ -80,14 +80,11 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
   return { args: parsed.data, ok: true }
 }
 
-function resolveSchemaRootKeys(
-  schema: z.ZodTypeAny,
-  toolName: string,
-): readonly string[] {
-  if (schema instanceof z.ZodObject) {
-    return Object.keys(schema.shape)
-  }
-  throw new TypeError(
-    `parseDynamicToolArguments requires explicit schemaRootKeys for non-object schemas (${toolName}).`,
-  )
+function resolveSchemaRootKeys(schema: z.ZodTypeAny): readonly string[] {
+  // We only auto-derive for ZodObject; non-object schemas (e.g. discriminated
+  // unions) MUST pass `schemaRootKeys` explicitly at the call site. Returning
+  // an empty list on this path keeps the validation digest emittable even if
+  // a future caller forgets the explicit list — they lose the digest's
+  // root-key hint but still see the underlying validation error.
+  return schema instanceof z.ZodObject ? Object.keys(schema.shape) : []
 }

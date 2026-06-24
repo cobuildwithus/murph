@@ -308,7 +308,7 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
     elevenLabs,
     kind: 'linq',
     generateAndUpload: async (request) => {
-      const label = voiceMemoGenerationLabel(request.generation)
+      const { label } = describeVoiceMemoGeneration(request.generation)
       if (!apiKey) {
         throw new VoiceMemoToolConfigurationError(
           `ELEVENLABS_API_KEY is required for ${label} generation`,
@@ -426,8 +426,3 @@ function describeVoiceMemoGeneration(
   }
 }
 
-function voiceMemoGenerationLabel(
-  generation: AssistantVoiceMemoGeneration,
-): VoiceMemoGenerationLabel {
-  return describeVoiceMemoGeneration(generation).label
-}
