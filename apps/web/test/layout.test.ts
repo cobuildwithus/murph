@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getHostedSidebarAuthSnapshot: vi.fn(async () => ({
     authenticated: false,
     label: null,
+    requiresDashboardRecovery: false,
   })),
 }));
 
