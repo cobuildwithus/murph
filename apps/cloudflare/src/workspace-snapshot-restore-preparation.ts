@@ -36,8 +36,8 @@ export interface HostedWorkspaceSnapshotPreparedRestore {
   snapshotFingerprint: string;
 }
 
-type HostedWorkspaceSnapshotPresignResult =
-  | { ok: true; url: string }
+type HostedWorkspaceSnapshotPreparationStepResult<T> =
+  | { ok: true; value: T }
   | { error: unknown; ok: false };
 
 export async function prepareHostedWorkspaceSnapshotRestore(input: {
@@ -64,26 +64,43 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
     throw new Error("Hosted workspace snapshot wrapped data key root did not match its ref.");
   }
 
-  const dataKeyPromise = (async () => {
-    const rootKey = ref.encryption.rootKeyId === input.crypto.rootKeyId
-      ? input.crypto.rootKey
-      : await input.crypto.resolveKeyById(ref.encryption.rootKeyId);
-    if (!rootKey) {
-      throw new Error("Hosted workspace snapshot root key is unavailable.");
-    }
-
-    const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
-      aad: ref.encryption.aad,
-      rootKey,
-      wrappedDataKey: ref.encryption.wrappedDataKey,
-    });
+  // Historical-root lookup and data-key unwrap are best-effort: a 404 or a
+  // transient control-plane failure here must not clear the runner write fence
+  // for a workspace that the container can warm-restore from its clean
+  // checkpoint marker without ever touching R2 or the unwrap endpoint. Cold
+  // restores still fail closed because the runner's fenced restore path will
+  // re-attempt the same control-plane reads.
+  const dataKeyPromise = (async (): Promise<
+    HostedWorkspaceSnapshotPreparationStepResult<string>
+  > => {
     try {
-      return encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
-    } finally {
-      dataKey.fill(0);
+      const rootKey = ref.encryption.rootKeyId === input.crypto.rootKeyId
+        ? input.crypto.rootKey
+        : await input.crypto.resolveKeyById(ref.encryption.rootKeyId);
+      if (!rootKey) {
+        return {
+          error: new Error("Hosted workspace snapshot root key is unavailable."),
+          ok: false,
+        };
+      }
+
+      const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
+        aad: ref.encryption.aad,
+        rootKey,
+        wrappedDataKey: ref.encryption.wrappedDataKey,
+      });
+      try {
+        return { ok: true, value: encodeHostedWorkspaceSnapshotV2DataKey(dataKey) };
+      } finally {
+        dataKey.fill(0);
+      }
+    } catch (error) {
+      return { error, ok: false };
     }
   })();
-  const presignedGetPromise = (async (): Promise<HostedWorkspaceSnapshotPresignResult> => {
+  const presignedGetPromise = (async (): Promise<
+    HostedWorkspaceSnapshotPreparationStepResult<string>
+  > => {
     try {
       const presignEnvironment = readHostedR2PresignEnvironment(input.configSource);
       const presignedGet = await createHostedR2PresignedGetUrl({
@@ -92,7 +109,7 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
         key: ref.objectKey,
       });
 
-      return { ok: true, url: presignedGet.url };
+      return { ok: true, value: presignedGet.url };
     } catch (error) {
       return { error, ok: false };
     }
@@ -101,14 +118,18 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
     dataKeyPromise,
     presignedGetPromise,
   ]);
+  if (!dataKey.ok) {
+    input.onPreparationUnavailable?.(dataKey.error);
+    return null;
+  }
   if (!presignedGet.ok) {
     input.onPreparationUnavailable?.(presignedGet.error);
     return null;
   }
 
   return {
-    dataKey,
-    getUrl: presignedGet.url,
+    dataKey: dataKey.value,
+    getUrl: presignedGet.value,
     snapshotFingerprint: buildHostedWorkspaceSnapshotV2FingerprintSha256(ref),
   };
 }

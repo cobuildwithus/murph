@@ -141,19 +141,23 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
-  it("keeps crypto validation fail-closed while treating presign acquisition as best effort", async () => {
+  it("keeps ref-binding validation fatal while treating control-plane reads as best effort", async () => {
     const fixture = await createSnapshotFixture();
     try {
-      const onUnavailable = vi.fn();
+      const onPresignUnavailable = vi.fn();
       await expect(prepareHostedWorkspaceSnapshotRestore({
         configSource: {},
         crypto: fixture.cryptoContext,
-        onPreparationUnavailable: onUnavailable,
+        onPreparationUnavailable: onPresignUnavailable,
         userId: TEST_USER_ID,
         workspace: fixture.workspace,
       })).resolves.toBeNull();
-      expect(onUnavailable).toHaveBeenCalledOnce();
+      expect(onPresignUnavailable).toHaveBeenCalledOnce();
 
+      // A snapshot wrapped under a now-rotated root must not clear the runner
+      // write fence: a matching warm-clean marker can warm-restore without ever
+      // resolving the historical key. The fenced cold path still fails closed
+      // because it re-attempts the same control-plane reads under the fence.
       const onMissingRootUnavailable = vi.fn();
       await expect(prepareHostedWorkspaceSnapshotRestore({
         configSource: createPresignConfig(),
@@ -167,8 +171,29 @@ describe("workspace snapshot restore preparation", () => {
         onPreparationUnavailable: onMissingRootUnavailable,
         userId: TEST_USER_ID,
         workspace: fixture.workspace,
-      })).rejects.toThrow("Hosted workspace snapshot root key is unavailable.");
-      expect(onMissingRootUnavailable).not.toHaveBeenCalled();
+      })).resolves.toBeNull();
+      expect(onMissingRootUnavailable).toHaveBeenCalledOnce();
+      expect(onMissingRootUnavailable.mock.calls[0]?.[0]).toMatchObject({
+        message: "Hosted workspace snapshot root key is unavailable.",
+      });
+
+      const onResolveFailureUnavailable = vi.fn();
+      const resolveFailure = new Error("Hosted historical root lookup transient failure.");
+      await expect(prepareHostedWorkspaceSnapshotRestore({
+        configSource: createPresignConfig(),
+        crypto: {
+          ...fixture.cryptoContext,
+          async resolveKeyById() {
+            throw resolveFailure;
+          },
+          rootKeyId: "root_key_missing_from_runtime_context",
+        },
+        onPreparationUnavailable: onResolveFailureUnavailable,
+        userId: TEST_USER_ID,
+        workspace: fixture.workspace,
+      })).resolves.toBeNull();
+      expect(onResolveFailureUnavailable).toHaveBeenCalledOnce();
+      expect(onResolveFailureUnavailable.mock.calls[0]?.[0]).toBe(resolveFailure);
 
       const onFatalUnavailable = vi.fn();
       await expect(prepareHostedWorkspaceSnapshotRestore({
