@@ -576,14 +576,32 @@ describe('assistant consumption lookup guidance', () => {
     )
   })
 
-  it('uses a concise decision rule for identifiable consumed products', () => {
+  it('uses a focus-aware decision rule for consumed products', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For identifiable foods, drinks, generic ingredients such as chicken, spinach, or eggs, packaged food products, menu items, and other non-supplement consumed products',
+      'Do not assume calorie or macro tracking is the purpose of a meal log',
     )
     expect(prompt).toContain(
-      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup or memory-based estimating',
+      'Infer the user\'s focus from context: simple record, symptoms or digestion, energy or appetite, performance, clinician handoff, or explicit calorie/macro tracking',
+    )
+    expect(prompt).toContain(
+      'When meal logging or food-pattern context is central, follow the food-journal skill',
+    )
+    expect(prompt).toContain(
+      'Ask one targeted follow-up only when missing detail materially changes the user\'s chosen focus, safety, or whether the record will be useful',
+    )
+    expect(prompt).toContain(
+      'For explicit calorie, macro, or energy-balance work, performance work where nutrition detail materially affects the question, and clinician handoff where nutrition detail is relevant',
+    )
+    expect(prompt).toContain(
+      'For simple records, symptom or digestion work, food/performance observation where nutrition detail is not needed, intuitive-eating contexts, or number-sensitive users, do not estimate or surface calories or macros unless asked',
+    )
+    expect(prompt).toContain(
+      'When nutrition, ingredients, allergens, or exact product identity materially matters',
+    )
+    expect(prompt).toContain(
+      'use `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup or memory-based estimating',
     )
     expect(prompt).toContain(
       'Use `--generic` for ordinary ingredient or macro-estimate queries where a USDA generic row is preferable',
@@ -592,7 +610,7 @@ describe('assistant consumption lookup guidance', () => {
       'use normal lookup for branded, packaged, menu, UPC, or exact FDC id searches',
     )
     expect(prompt).toContain(
-      'For meals with several ordinary ingredients, batch lookup those ingredient pieces first with `--generic`',
+      'For nutrition estimates across several ordinary ingredients, batch lookup those ingredient pieces first with `--generic`',
     )
     expect(prompt).toContain(
       'then estimate the combined meal from matched rows plus portion assumptions',
@@ -685,23 +703,18 @@ describe('assistant consumption lookup guidance', () => {
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
     )
     expect(prompt).toContain(
-      'When saving a meal and the user provides enough food identity, ingredients, portion hints, package/menu facts, or attachment evidence to form a useful estimate',
+      'When a specific food product is looked up because nutrition, ingredients, allergens, or exact identity matter',
     )
     expect(prompt).toContain(
-      'do not leave nutrition blank just because exact serving weights are missing',
+      'persist the returned label facts instead of re-estimating',
     )
     expect(prompt).toContain(
-      'estimate calories first',
-    )
-    expect(prompt).toContain(
-      'set nutrition provenance to `estimated`',
-    )
-    expect(prompt).toContain(
-      'Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount',
+      'mark provenance as `estimated`',
     )
     expect(prompt).toContain(
       'log what is known, mark estimates and confidence, and do not imply a lookup happened',
     )
+    expect(prompt).not.toContain('estimate calories first')
     expect(prompt).toContain(
       'Use product lookups to make the answer or saved record accurate, not to create visible citation clutter',
     )
@@ -1092,7 +1105,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '324c23f6a91623c901d26569a5e8aff56c73bc19a03071cbe9f051f81b21fbfc',
+      '8f3b61a6a0c7357ad5c781f2dd542d9c3cf573ef832c41b58b8fb21f7dde772a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1549,6 +1562,9 @@ describe('assistant Murph onboarding guidance', () => {
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(prompt).toContain(
+      'For a meal photo, symptom report, or other health-data immediate request, the skip condition applies to visible onboarding questions in that turn',
+    )
+    expect(prompt).toContain(
       'Completion flag guard: once onboarding completion criteria are met, updating the onboarding flag is part of completing onboarding, not optional cleanup',
     )
     expect(prompt).toContain(
@@ -1561,6 +1577,9 @@ describe('assistant Murph onboarding guidance', () => {
       'Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both',
     )
     expect(prompt).toContain(
+      'If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn',
+    )
+    expect(prompt).toContain(
       'If the user clearly declines or skips onboarding',
     )
     expect(prompt).toContain(
@@ -1568,6 +1587,9 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'Skip onboarding advancement when the user explicitly asked for no follow-up',
+    )
+    expect(prompt).toContain(
+      'the current turn is a meal photo, symptom report, or other health-data immediate request that should be handled alone',
     )
     expect(prompt).toContain(
       'These skip conditions suppress visible onboarding questions or follow-up; they do not cancel the internal completion command once completion criteria are already satisfied, but urgent or safety-sensitive response handling comes first.',
