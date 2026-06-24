@@ -885,6 +885,10 @@ describe("hosted runtime control contracts", () => {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
         foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
         foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        foregroundWakeOrdinal: 1,
+        activeRuntimePassOrdinal: 2,
+        activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+        activeRuntimePassForeground: false,
       },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
@@ -1018,6 +1022,7 @@ describe("hosted runtime control contracts", () => {
       { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
       { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
       { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
+      { activeRuntimePassForeground: 0 }, // boolean leaf must stay boolean
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
         event: {
@@ -1102,6 +1107,10 @@ describe("hosted runtime control contracts", () => {
           runtimeWakeNotifiedAtEpochMs: 999,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
           foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+          foregroundWakeOrdinal: 1,
+          activeRuntimePassOrdinal: 2,
+          activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+          activeRuntimePassForeground: false,
         },
       },
       phases: ["wake"],
@@ -1115,6 +1124,10 @@ describe("hosted runtime control contracts", () => {
           runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
           foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+          foregroundWakeOrdinal: 1,
+          activeRuntimePassOrdinal: 2,
+          activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
+          activeRuntimePassForeground: false,
         },
       },
     });
@@ -1126,6 +1139,7 @@ describe("hosted runtime control contracts", () => {
         wake: {
           runtimeWakeNotifiedAtEpochMs: 999,
           foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          activeRuntimePassForeground: true,
         },
       },
       phases: ["wake"],

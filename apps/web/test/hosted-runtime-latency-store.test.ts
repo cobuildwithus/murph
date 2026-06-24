@@ -582,6 +582,10 @@ describe("hosted runtime latency dashboard store", () => {
           runtimeWakeNotifiedAtEpochMs: 999,
           foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
           foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+          foregroundWakeOrdinal: 1,
+          activeRuntimePassOrdinal: 3,
+          activeRuntimePassStartedAtEpochMs: 1_777_000_000_900,
+          activeRuntimePassForeground: false,
         },
       },
       prisma,
@@ -595,6 +599,10 @@ describe("hosted runtime latency dashboard store", () => {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
         foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
         foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+        foregroundWakeOrdinal: 1,
+        activeRuntimePassOrdinal: 3,
+        activeRuntimePassStartedAtEpochMs: 1_777_000_000_900,
+        activeRuntimePassForeground: false,
       },
     });
   });

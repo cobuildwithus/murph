@@ -3209,6 +3209,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_wake_timing",
+        runtimePassDiagnostics: {
+          foreground: false,
+          ordinal: 7,
+          startedAtEpochMs: Date.now(),
+        },
         runtimeWakeSignal,
         async runAssistantPhase() {
           items.push(createMailboxItem({
@@ -3233,15 +3238,21 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;
       const foregroundWaitResolvedAtEpochMs = wake.foregroundWaitResolvedAtEpochMs;
       const foregroundImportStartedAtEpochMs = wake.foregroundImportStartedAtEpochMs;
+      const activeRuntimePassStartedAtEpochMs = wake.activeRuntimePassStartedAtEpochMs;
       if (
         typeof runtimeWakeNotifiedAtEpochMs !== "number"
         || typeof foregroundWaitResolvedAtEpochMs !== "number"
         || typeof foregroundImportStartedAtEpochMs !== "number"
+        || typeof activeRuntimePassStartedAtEpochMs !== "number"
       ) {
         throw new Error("Expected numeric foreground wake timing diagnostics.");
       }
       assert.ok(runtimeWakeNotifiedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
       assert.ok(foregroundWaitResolvedAtEpochMs <= foregroundImportStartedAtEpochMs);
+      assert.ok(activeRuntimePassStartedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
+      assert.equal(wake.foregroundWakeOrdinal, 1);
+      assert.equal(wake.activeRuntimePassOrdinal, 7);
+      assert.equal(wake.activeRuntimePassForeground, false);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [

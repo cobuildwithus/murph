@@ -251,6 +251,12 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   signal?: AbortSignal | null;
 }
 
+export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
+  foreground: boolean;
+  ordinal: number;
+  startedAtEpochMs: number;
+}
+
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
@@ -268,6 +274,7 @@ export interface HostedWorkspaceRunnerInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
@@ -734,7 +741,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
+        foregroundWakeOrdinal: wakeOrdinal,
         foregroundWaitResolvedAtEpochMs: waitResolvedAtEpochMs,
+        runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
       try {
@@ -861,7 +870,9 @@ function hostedWorkspaceRunnerWakeIsImmediate(
 }
 
 function createHostedForegroundMailboxImportLatencyMilestones(input: {
+  foregroundWakeOrdinal: number;
   foregroundWaitResolvedAtEpochMs: number;
+  runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs: number | null;
 }): HostedRuntimeLatencyTraceStagedMilestones {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
@@ -871,6 +882,14 @@ function createHostedForegroundMailboxImportLatencyMilestones(input: {
         ? {}
         : { runtimeWakeNotifiedAtEpochMs: input.runtimeWakeNotifiedAtEpochMs }),
       foregroundWaitResolvedAtEpochMs: input.foregroundWaitResolvedAtEpochMs,
+      foregroundWakeOrdinal: input.foregroundWakeOrdinal,
+      ...(input.runtimePassDiagnostics
+        ? {
+            activeRuntimePassForeground: input.runtimePassDiagnostics.foreground,
+            activeRuntimePassOrdinal: input.runtimePassDiagnostics.ordinal,
+            activeRuntimePassStartedAtEpochMs: input.runtimePassDiagnostics.startedAtEpochMs,
+          }
+        : {}),
     },
   };
 

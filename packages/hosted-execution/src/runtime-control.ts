@@ -845,6 +845,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeWakeNotifiedAtEpochMs?: number;
     foregroundWaitResolvedAtEpochMs?: number;
     foregroundImportStartedAtEpochMs?: number;
+    foregroundWakeOrdinal?: number;
+    activeRuntimePassOrdinal?: number;
+    activeRuntimePassStartedAtEpochMs?: number;
+    activeRuntimePassForeground?: boolean;
   };
   provider?: {
     turnLockWaitMs?: number;
@@ -915,6 +919,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeWakeNotifiedAtEpochMs",
     "foregroundWaitResolvedAtEpochMs",
     "foregroundImportStartedAtEpochMs",
+    "foregroundWakeOrdinal",
+    "activeRuntimePassOrdinal",
+    "activeRuntimePassStartedAtEpochMs",
+    "activeRuntimePassForeground",
   ],
   provider: [
     "turnLockWaitMs",
@@ -929,6 +937,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
     "orchestration.activeWakeAccepted",
     "orchestration.replacedStaleFence",
+    "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
   ] as const;
 

@@ -632,6 +632,18 @@ function createHostedRuntimeWakeInitialImportContext(
   };
 }
 
+function hostedMailboxImportHasForegroundConversationWork(
+  result: HostedMailboxImportCheckpointResult | null | undefined,
+): boolean {
+  return (
+    (result?.importResult.assistantInputIds?.length ?? 0) > 0
+    || (result?.importResult.conversationImportedCount ?? 0) > 0
+    || result?.importResult.blocked.some((item) =>
+      item.retryable && item.lane === "conversation"
+    ) === true
+  );
+}
+
 export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
   readonly actualWorkspaceVersion: string | null;
   readonly expectedWorkspaceVersion: string;
@@ -1309,15 +1321,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       browserVaultReplicaRefreshRequested ||=
         passResult.assistantPhaseResult?.browserVaultReplicaRefreshRequested === true;
     };
+    let runtimePassOrdinal = 0;
     const runForegroundPass = async (passInput: {
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
       requestId: string;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
+      const passOrdinal = runtimePassOrdinal + 1;
+      runtimePassOrdinal = passOrdinal;
+      const passStartedAtEpochMs = Date.now();
+      const passForeground = hostedMailboxImportHasForegroundConversationWork(
+        passInput.initialMailboxImport ?? null,
+      );
       emitPhaseLog({
         details: {
           initialMailboxImportProvided: passInput.initialMailboxImport !== undefined,
+          passForeground,
+          passOrdinal,
           passRequestId: passInput.requestId,
           passWorkspaceVersion: passInput.workspace?.version ?? null,
           workspacePresent: passInput.workspace !== null,
@@ -1346,6 +1367,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 initialMailboxImport: passInput.initialMailboxImport,
                 initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
                 requestId: passInput.requestId,
+                runtimePassDiagnostics: {
+                  foreground: passForeground,
+                  ordinal: passOrdinal,
+                  startedAtEpochMs: passStartedAtEpochMs,
+                },
                 runAssistantPhase: async (phaseInput) => {
                   currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
                     initialMailboxImport: phaseInput.initialMailboxImport,
@@ -1373,6 +1399,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             assistantProgressed: passResult.assistantPhaseResult?.progressed === true,
             latestWorkspacePresent: passResult.latestWorkspace !== null,
             latestWorkspaceVersion: passResult.latestWorkspace?.version ?? null,
+            passForeground,
+            passOrdinal,
             passRequestId: passInput.requestId,
             runtimeStateDirty: passResult.runtimeStateDirty,
           },
@@ -1393,6 +1421,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       } catch (error) {
         emitPhaseLog({
           details: {
+            passForeground,
+            passOrdinal,
             passRequestId: passInput.requestId,
           },
           error,

@@ -1133,6 +1133,10 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(wake, "runtimeWakeNotifiedAtEpochMs", wakeLabel),
       ...requireOptionalNonNegativeInteger(wake, "foregroundWaitResolvedAtEpochMs", wakeLabel),
       ...requireOptionalNonNegativeInteger(wake, "foregroundImportStartedAtEpochMs", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "foregroundWakeOrdinal", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "activeRuntimePassOrdinal", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "activeRuntimePassStartedAtEpochMs", wakeLabel),
+      ...requireOptionalBoolean(wake, "activeRuntimePassForeground", wakeLabel),
     };
   }
 
