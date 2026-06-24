@@ -73,6 +73,97 @@ describe("ComputerUseService", () => {
     expect(store.handoff?.tokenHash).toHaveLength(64);
   });
 
+  it("requires a fresh persisted HTTPS browser domain before creating a managed-login handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://old.example/account",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Target login",
+        url: "https://target.example/login?step=1#ignored",
+        visibleText: "Sign in",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Target login",
+      lastUrl: "https://target.example/login",
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      purpose: "managed_login",
+      status: "open",
+    });
+  });
+
+  it("does not create a managed-login handoff when the fresh browser domain cannot be persisted", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://old.example/account",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      failNextUpdateRunBrowserState: true,
+      run,
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Target login",
+        url: "https://target.example/login",
+        visibleText: "Sign in",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      lastUrl: "https://old.example/account",
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
   it("stores final confirmation as a manual handoff pause", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });

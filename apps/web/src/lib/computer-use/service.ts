@@ -504,7 +504,11 @@ export class ComputerUseService {
       });
     }
 
-    await this.captureBrowserStateBestEffort(run);
+    if (input.handoffPurpose === "managed_login") {
+      await this.captureManagedLoginBrowserDomain(run, store);
+    } else {
+      await this.captureBrowserStateBestEffort(run, store);
+    }
 
     const handoff = input.handoffPurpose
       ? await this.createHandoff({
@@ -1824,10 +1828,13 @@ export class ComputerUseService {
     }
   }
 
-  private async captureBrowserStateBestEffort(run: ComputerRunRecord): Promise<void> {
+  private async captureBrowserStateBestEffort(
+    run: ComputerRunRecord,
+    store: ComputerUseStore = this.store,
+  ): Promise<void> {
     try {
       const state = await this.readBrowserState(run);
-      await this.store.updateRunBrowserState({
+      await store.updateRunBrowserState({
         expectedKernelSessionId: run.kernelSessionId,
         lastTitle: state.title,
         lastUrl: sanitizeComputerDisplayUrl(state.url),
@@ -1835,6 +1842,36 @@ export class ComputerUseService {
       });
     } catch {
       // A user checkpoint must remain durable even if the live browser cannot be observed.
+    }
+  }
+
+  private async captureManagedLoginBrowserDomain(
+    run: ComputerRunRecord,
+    store: ComputerUseStore,
+  ): Promise<void> {
+    let state: {
+      title: string | null;
+      url: string | null;
+      visibleText: string;
+    };
+    try {
+      state = await this.readBrowserState(run);
+    } catch {
+      throw managedLoginUnavailableError();
+    }
+    const lastUrl = sanitizeComputerDisplayUrl(state.url);
+    if (!readManagedLoginDomainFromUrl(lastUrl)) {
+      throw managedLoginUnavailableError();
+    }
+    try {
+      await store.updateRunBrowserState({
+        expectedKernelSessionId: run.kernelSessionId,
+        lastTitle: state.title,
+        lastUrl,
+        runId: run.id,
+      });
+    } catch {
+      throw managedLoginUnavailableError();
     }
   }
 
@@ -2651,11 +2688,15 @@ function isTerminalRunStatus(
 }
 
 function readManagedLoginDomain(run: ComputerRunRecord): string | null {
-  if (!run.lastUrl) {
+  return readManagedLoginDomainFromUrl(run.lastUrl);
+}
+
+function readManagedLoginDomainFromUrl(value: string | null): string | null {
+  if (!value) {
     return null;
   }
   try {
-    const url = new URL(run.lastUrl);
+    const url = new URL(value);
     return url.protocol === "https:" && url.hostname
       ? url.hostname.toLowerCase()
       : null;
