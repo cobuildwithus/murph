@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -24,8 +24,9 @@ import {
   readHostedExecutionSnapshotHotRef,
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedWorkspaceSnapshotV2Ref,
+import {
+  buildHostedWorkspaceSnapshotV2FingerprintSha256,
+  type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   clearHostedAssistantRuntimeHotState,
@@ -484,37 +485,6 @@ function createHostedWorkspaceCleanCheckpointReceiptMarkerFields(
         receiptLogEntryCount: 0,
         receiptLogSha256: null,
       };
-}
-
-function buildHostedWorkspaceSnapshotV2FingerprintSha256(
-  ref: HostedWorkspaceSnapshotV2Ref,
-): string {
-  return createHash("sha256")
-    .update(JSON.stringify({
-      archive: {
-        compression: ref.archive.compression,
-        encryptedByteSize: ref.archive.encryptedByteSize,
-        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
-        fileCount: ref.archive.fileCount,
-        format: ref.archive.format,
-        plaintextArchiveSha256: ref.archive.plaintextArchiveSha256,
-        totalPlainBytes: ref.archive.totalPlainBytes,
-      },
-      createdAt: ref.createdAt,
-      encryption: {
-        aad: ref.encryption.aad,
-        ivBase64: ref.encryption.ivBase64,
-        rootKeyId: ref.encryption.rootKeyId,
-        scheme: ref.encryption.scheme,
-        wrappedDataKey: ref.encryption.wrappedDataKey,
-      },
-      objectKey: ref.objectKey,
-      schema: ref.schema,
-      snapshotId: ref.snapshotId,
-      upload: ref.upload,
-      userId: ref.userId,
-    }))
-    .digest("hex");
 }
 
 async function readHostedWorkspaceCleanCheckpointMarker(
