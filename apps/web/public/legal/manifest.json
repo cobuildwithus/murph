@@ -11,14 +11,14 @@
         "path": "/legal/privacy.pdf",
         "sha256": "1adefb7a4e2418d91c262fd70b5d7f39707aba7e876e13e8b5d706c73caf8442"
       },
-      "lastUpdated": "2026-04-29",
+      "lastUpdated": "2026-06-24",
       "source": "apps/web/legal/privacy-policy.md",
       "title": "Murph Privacy Policy",
-      "version": "2026-04-29",
+      "version": "2026-06-24",
       "versions": [
         {
           "bytes": 78183,
-          "path": "/legal/privacy-2026-04-29.pdf",
+          "path": "/legal/privacy-2026-06-24.pdf",
           "sha256": "1adefb7a4e2418d91c262fd70b5d7f39707aba7e876e13e8b5d706c73caf8442"
         }
       ]

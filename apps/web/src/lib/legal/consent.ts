@@ -12,6 +12,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 
 export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-04-29";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-06-24";
 
 export const HOSTED_CONSENT_DOCUMENTS = [
   {
@@ -24,7 +25,7 @@ export const HOSTED_CONSENT_DOCUMENTS = [
   {
     id: "privacy-policy",
     title: "Murph Privacy Policy",
-    version: HOSTED_LEGAL_DOCUMENT_VERSION,
+    version: HOSTED_PRIVACY_POLICY_VERSION,
     href: "/legal/privacy",
     pdfHref: "/legal/privacy.pdf",
   },

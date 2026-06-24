@@ -142,7 +142,7 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and holds the UI d
       payload: {
         acceptedDocumentVersions: {
           "consumer-health-data-notice": "2026-04-29",
-          "privacy-policy": "2026-04-29",
+          "privacy-policy": "2026-06-24",
         },
         scope: "feature.connected-health-source",
         source: "test-device-sync",
@@ -230,7 +230,7 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
       payload: {
         acceptedDocumentVersions: {
           "health-ai-safety-disclosure": "2026-04-29",
-          "privacy-policy": "2026-04-29",
+          "privacy-policy": "2026-06-24",
           "terms-of-service": "2026-04-29",
         },
         scope: "launch.legal",
@@ -474,7 +474,7 @@ function consentDocument(id: string, title: string, href: string) {
     id: id as HostedConsentStatus["documents"][number]["id"],
     pdfHref: `${href}.pdf`,
     title,
-    version: "2026-04-29",
+    version: id === "privacy-policy" ? "2026-06-24" : "2026-04-29",
   };
 }
 
