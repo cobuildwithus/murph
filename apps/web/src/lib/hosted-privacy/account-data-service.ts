@@ -400,29 +400,6 @@ type DeviceConnectionIdentity = {
   }[];
 };
 
-const HOSTED_DATA_EXPORT_REDACTIONS = [
-  "OAuth access and refresh tokens",
-  "agent session token hashes",
-  "Privy, Stripe, contact, Telegram, and device blind-index lookup keys",
-  "CSRF, browser assertion, internal request, and OAuth state nonces",
-  "active invite codes and recovery-style codes",
-  "arbitrary decoded mailbox payload bodies",
-  "hosted workspace snapshot and browser-replica object keys and bundle hashes",
-  "hosted computer-use live-view URLs, handoff token hashes, Kernel session ids, and Kernel profile names",
-  "encrypted private columns already represented as decrypted user-facing fields",
-  "API key environment variable names",
-] as const;
-
-const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
-  "DeviceOauthSession",
-  "DeviceBrowserAssertionNonce",
-  "HostedWebInternalRequestNonce",
-  "HostedSensitiveActionChallenge",
-  "HostedStripeEvent",
-  "HostedAssistantRuntimeIssue",
-] as const;
-const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
-
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
   "Stripe retains records it is legally required to keep, such as invoices, under its documented processes.",

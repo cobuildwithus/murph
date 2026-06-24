@@ -288,7 +288,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
               Export your vault
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads your account, messaging, wearable, and usage records as JSON.
+              Downloads the current decrypted browser-vault replica that powers your dashboard as JSON.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
