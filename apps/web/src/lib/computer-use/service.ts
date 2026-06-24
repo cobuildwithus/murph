@@ -1055,13 +1055,14 @@ export class ComputerUseService {
       });
     }
 
+    // Handoff purpose is monotonic on refresh: an already-issued manual_browser_help
+    // page holds a live, decrypted browser iframe that cannot be revoked, so we
+    // never substitute a different purpose (e.g. a "view-only" screen_inspection)
+    // for the existing record. Callers that need a different purpose must wait
+    // for the existing handoff to complete or expire.
     const handoff = await this.createHandoff({
       memberId: input.memberId,
-      purpose: resolveRefreshedAwaitingRunHandoffPurpose({
-        existing,
-        requested: input.handoffPurpose,
-        run: input.run,
-      }),
+      purpose: existing.purpose,
       runExpiresAt: input.run.expiresAt,
       runId: input.run.id,
       suggestedReply: existing.suggestedReply,
@@ -2460,28 +2461,6 @@ function isOptionalFinalConfirmationHandoff(
   return run.awaitingReason === "final_confirmation" &&
     handoff.purpose === "screen_inspection" &&
     (handoff.status === "open" || handoff.status === "expired");
-}
-
-function resolveRefreshedAwaitingRunHandoffPurpose(input: {
-  existing: ComputerHandoffRecord;
-  requested: HostedComputerHandoffPurpose;
-  run: ComputerRunRecord;
-}): HostedComputerHandoffPurpose {
-  if (
-    input.run.awaitingReason === "final_confirmation" &&
-    isFinalConfirmationBrowserViewPurpose(input.existing.purpose) &&
-    isFinalConfirmationBrowserViewPurpose(input.requested)
-  ) {
-    return input.requested;
-  }
-
-  return input.existing.purpose;
-}
-
-function isFinalConfirmationBrowserViewPurpose(
-  purpose: HostedComputerHandoffPurpose,
-): boolean {
-  return purpose === "manual_browser_help" || purpose === "screen_inspection";
 }
 
 function isStaleCheckpointingHandoff(
