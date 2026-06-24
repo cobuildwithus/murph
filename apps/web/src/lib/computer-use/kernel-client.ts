@@ -8,6 +8,7 @@ import {
   COMPUTER_BROWSER_VIEWPORTS,
   type ComputerBrowserViewportPreset,
 } from "./viewport";
+import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
 const KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH = 4_000;
@@ -21,6 +22,29 @@ export interface KernelPlaywrightResult {
   result: unknown;
 }
 
+export type KernelManagedAuthFlowStatus =
+  | "IN_PROGRESS"
+  | "SUCCESS"
+  | "FAILED"
+  | "EXPIRED"
+  | "CANCELED";
+
+export interface KernelManagedAuthConnection {
+  browserSessionId: string | null;
+  domain: string;
+  flowExpiresAt: Date | null;
+  flowStatus: KernelManagedAuthFlowStatus | null;
+  hostedUrl: string | null;
+  id: string;
+  profileName: string;
+  status: "AUTHENTICATED" | "NEEDS_AUTH";
+}
+
+export interface KernelManagedAuthLogin {
+  flowExpiresAt: Date;
+  hostedUrl: string;
+}
+
 export interface ComputerKernelClient {
   createBrowser(input: {
     browserName: string;
@@ -29,12 +53,24 @@ export interface ComputerKernelClient {
     timeoutSeconds: number;
   }): Promise<KernelBrowserHandle>;
   deleteBrowserByIdOrName(idOrName: string): Promise<void>;
+  deleteManagedAuthConnection(id: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
   ensureBrowserViewport(input: {
     preset: ComputerBrowserViewportPreset;
     sessionId: string;
   }): Promise<void>;
+  ensureManagedAuthConnection(input: {
+    domain: string;
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection>;
   ensureProfile(name: string): Promise<void>;
+  findManagedAuthConnection(input: {
+    domain: string;
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection | null>;
+  listManagedAuthConnections(input: {
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection[]>;
   executePlaywright(input: {
     code: string;
     sessionId: string;
@@ -44,6 +80,9 @@ export interface ComputerKernelClient {
     action: HostedComputerOsControlRequest;
     sessionId: string;
   }): Promise<void>;
+  startManagedAuthLogin(
+    connectionId: string,
+  ): Promise<KernelManagedAuthLogin>;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -100,6 +139,120 @@ export class KernelComputerClient implements ComputerKernelClient {
         message: "Computer browser viewport update failed.",
         retryable: true,
       });
+    }
+  }
+
+  async findManagedAuthConnection(input: {
+    domain: string;
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection | null> {
+    try {
+      const page = await this.kernel.auth.connections.list({
+        domain: input.domain,
+        limit: 2,
+        profile_name: input.profileName,
+      });
+      if (page.items.length > 1) {
+        throw managedAuthStateInvalidError();
+      }
+      return page.items[0] ? mapManagedAuthConnection(page.items[0]) : null;
+    } catch (error) {
+      if (isComputerUseDomainError(error)) {
+        throw error;
+      }
+      throw managedAuthRequestFailedError();
+    }
+  }
+
+  async listManagedAuthConnections(input: {
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection[]> {
+    try {
+      const connections: KernelManagedAuthConnection[] = [];
+      for await (
+        const connection of this.kernel.auth.connections.list({
+          profile_name: input.profileName,
+        })
+      ) {
+        connections.push(mapManagedAuthConnection(connection));
+      }
+      return connections;
+    } catch (error) {
+      if (isComputerUseDomainError(error)) {
+        throw error;
+      }
+      throw managedAuthRequestFailedError();
+    }
+  }
+
+  async ensureManagedAuthConnection(input: {
+    domain: string;
+    profileName: string;
+  }): Promise<KernelManagedAuthConnection> {
+    let connection = await this.findManagedAuthConnection(input);
+    if (!connection) {
+      try {
+        const created = await this.kernel.auth.connections.create({
+          auto_reauth: true,
+          domain: input.domain,
+          health_checks: true,
+          profile_name: input.profileName,
+          record_session: false,
+          save_credentials: true,
+        });
+        connection = mapManagedAuthConnection(created);
+      } catch {
+        connection = await this.findManagedAuthConnection(input);
+        if (!connection) {
+          throw managedAuthRequestFailedError();
+        }
+      }
+    }
+
+    try {
+      return mapManagedAuthConnection(
+        await this.kernel.auth.connections.update(connection.id, {
+          auto_reauth: true,
+          health_checks: true,
+          record_session: false,
+          save_credentials: true,
+        }),
+      );
+    } catch (error) {
+      if (isComputerUseDomainError(error)) {
+        throw error;
+      }
+      throw managedAuthRequestFailedError();
+    }
+  }
+
+  async startManagedAuthLogin(
+    connectionId: string,
+  ): Promise<KernelManagedAuthLogin> {
+    try {
+      const login = await this.kernel.auth.connections.login(connectionId, {
+        record_session: false,
+      });
+      return {
+        flowExpiresAt: requireKernelDate(login.flow_expires_at),
+        hostedUrl: requireKernelHostedAuthUrl(login.hosted_url),
+      };
+    } catch (error) {
+      if (isComputerUseDomainError(error)) {
+        throw error;
+      }
+      throw managedAuthRequestFailedError();
+    }
+  }
+
+  async deleteManagedAuthConnection(id: string): Promise<void> {
+    try {
+      await this.kernel.auth.connections.delete(id);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        return;
+      }
+      throw managedAuthRequestFailedError();
     }
   }
 
@@ -255,6 +408,101 @@ export class KernelComputerClient implements ComputerKernelClient {
       throw error;
     }
   }
+}
+
+function mapManagedAuthConnection(input: {
+  browser_session_id?: string | null;
+  domain: string;
+  flow_expires_at?: string | null;
+  flow_status?: KernelManagedAuthFlowStatus | null;
+  hosted_url?: string | null;
+  id: string;
+  profile_name: string;
+  status: "AUTHENTICATED" | "NEEDS_AUTH";
+}): KernelManagedAuthConnection {
+  if (!input.id.trim() || !input.domain.trim() || !input.profile_name.trim()) {
+    throw managedAuthStateInvalidError();
+  }
+
+  return {
+    browserSessionId: normalizeNullableString(input.browser_session_id),
+    domain: input.domain.trim().toLowerCase(),
+    flowExpiresAt: readKernelDate(input.flow_expires_at),
+    flowStatus: input.flow_status ?? null,
+    hostedUrl: readKernelHostedAuthUrl(input.hosted_url),
+    id: input.id,
+    profileName: input.profile_name,
+    status: input.status,
+  };
+}
+
+function requireKernelDate(value: string): Date {
+  const date = readKernelDate(value);
+  if (!date) {
+    throw managedAuthStateInvalidError();
+  }
+  return date;
+}
+
+function readKernelDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function requireKernelHostedAuthUrl(value: string): string {
+  const url = readKernelHostedAuthUrl(value);
+  if (!url) {
+    throw managedAuthStateInvalidError();
+  }
+  return url;
+}
+
+function readKernelHostedAuthUrl(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return isAllowedKernelManagedAuthHostedUrl({ url }) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNullableString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function managedAuthRequestFailedError(): Error {
+  return computerUseError({
+    code: "HOSTED_COMPUTER_MANAGED_AUTH_FAILED",
+    httpStatus: 502,
+    message: "Kernel managed authentication failed.",
+    retryable: true,
+  });
+}
+
+function managedAuthStateInvalidError(): Error {
+  return computerUseError({
+    code: "HOSTED_COMPUTER_MANAGED_AUTH_INVALID",
+    httpStatus: 502,
+    message: "Kernel returned invalid managed authentication state.",
+    retryable: true,
+  });
+}
+
+function isComputerUseDomainError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      typeof error.code === "string" &&
+      error.code.startsWith("HOSTED_COMPUTER_"),
+  );
 }
 
 function kernelHoldKeys(

@@ -387,7 +387,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         anyOf: [
           {
             type: 'string',
-            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help'],
+            enum: ['managed_login', 'login', 'payment', 'card', 'captcha', 'manual_browser_help'],
           },
           { type: 'null' },
         ],

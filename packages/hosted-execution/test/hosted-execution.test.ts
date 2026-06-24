@@ -758,6 +758,16 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/Hosted computer act request is invalid/u);
 
     expect(parseHostedComputerPauseForUserRequest({
+      handoffPurpose: "managed_login",
+      reason: "login_needed",
+      suggestedReply: "done",
+    })).toEqual({
+      handoffPurpose: "managed_login",
+      pauseDeliveryContext: null,
+      reason: "login_needed",
+      suggestedReply: "done",
+    });
+    expect(parseHostedComputerPauseForUserRequest({
       handoffPurpose: "manual_browser_help",
       reason: "final_confirmation",
       suggestedReply: "done",

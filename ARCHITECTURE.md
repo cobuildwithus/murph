@@ -6,6 +6,20 @@ Last verified: 2026-06-22
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection, and one generic result-size bound rather than provider-specific tool or result adapters.
 
+## Hosted Computer Authentication
+
+`apps/web` owns both Kernel login transports behind the existing durable
+computer handoff. The agent selects `managed_login` for Kernel Hosted UI and a
+durable profile/domain auth connection, or `login` for the existing Live View
+takeover. Managed Auth connection ids and flow state remain Kernel-owned and
+are rediscovered from the member's deterministic profile plus the
+server-observed domain; Murph does not duplicate them in Postgres. A
+checkpointing handoff serializes profile-writer transfer between the normal
+task browser and the Managed Auth browser. Saved credentials, health checks,
+and automatic reauthentication are enabled for managed connections, session
+recording is disabled, and account deletion removes connections before the
+profile.
+
 ## Module Map
 
 Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. All other `packages/*` entries remain workspace-private owner packages. When a public package still needs one of those private workspace packages at runtime, the release flow bundles that private dependency into the public tarball instead of publishing it as a standalone npm package.
