@@ -501,6 +501,10 @@ export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-timeout-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-activity-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-request-started-at-ms";
 
 export function assertHostedRuntimeProcessingTimeoutMs(
   value: number,

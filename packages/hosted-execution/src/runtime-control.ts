@@ -882,6 +882,25 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
+  // Control-plane orchestration stamps before the runner-container DO starts
+  // dispatch. These are epoch-ms values from different hosts, so they are for
+  // coarse span splitting only, not strict clock-order assertions.
+  orchestration?: {
+    temporalActivityStartedAtEpochMs?: number;
+    temporalActivityRequestStartedAtEpochMs?: number;
+    cloudflareRouteReceivedAtEpochMs?: number;
+    userRunnerEnsureStartedAtEpochMs?: number;
+    activeWakeStartedAtEpochMs?: number;
+    activeWakeFinishedAtEpochMs?: number;
+    activeWakeAccepted?: boolean;
+    replacementFenceClearedAtEpochMs?: number;
+    replacedStaleFence?: boolean;
+    freshStartRequestedAtEpochMs?: number;
+    freshStartFenceBoundAtEpochMs?: number;
+    freshStartContainerReadyAtEpochMs?: number;
+    freshStartInvocationPreparedAtEpochMs?: number;
+    freshStartInvocationAcceptedAtEpochMs?: number;
+  };
   // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
   // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
   // containerEnsureReadyStartedAtEpochMs immediately before ensureContainerReady,
@@ -915,6 +934,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeWakeNotifiedAtEpochMs?: number;
     foregroundWaitResolvedAtEpochMs?: number;
     foregroundImportStartedAtEpochMs?: number;
+    foregroundWakeOrdinal?: number;
+    activeRuntimePassOrdinal?: number;
+    activeRuntimePassStartedAtEpochMs?: number;
+    activeRuntimePassForeground?: boolean;
   };
   provider?: {
     turnLockWaitMs?: number;
@@ -926,6 +949,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
 }
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
+  "orchestration",
   "dispatch",
   "restore",
   "boot",
@@ -945,6 +969,22 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
   readonly string[]
 > = {
+  orchestration: [
+    "temporalActivityStartedAtEpochMs",
+    "temporalActivityRequestStartedAtEpochMs",
+    "cloudflareRouteReceivedAtEpochMs",
+    "userRunnerEnsureStartedAtEpochMs",
+    "activeWakeStartedAtEpochMs",
+    "activeWakeFinishedAtEpochMs",
+    "activeWakeAccepted",
+    "replacementFenceClearedAtEpochMs",
+    "replacedStaleFence",
+    "freshStartRequestedAtEpochMs",
+    "freshStartFenceBoundAtEpochMs",
+    "freshStartContainerReadyAtEpochMs",
+    "freshStartInvocationPreparedAtEpochMs",
+    "freshStartInvocationAcceptedAtEpochMs",
+  ],
   dispatch: [
     "invokeReceivedAtEpochMs",
     "containerEnsureReadyStartedAtEpochMs",
@@ -968,6 +1008,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeWakeNotifiedAtEpochMs",
     "foregroundWaitResolvedAtEpochMs",
     "foregroundImportStartedAtEpochMs",
+    "foregroundWakeOrdinal",
+    "activeRuntimePassOrdinal",
+    "activeRuntimePassStartedAtEpochMs",
+    "activeRuntimePassForeground",
   ],
   provider: [
     "turnLockWaitMs",
@@ -979,9 +1023,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 } as const;
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
-  ["boot.restoreWasCold"] as const;
+  [
+    "orchestration.activeWakeAccepted",
+    "orchestration.replacedStaleFence",
+    "wake.activeRuntimePassForeground",
+    "boot.restoreWasCold",
+  ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
+  HostedRuntimeLatencyPhaseBreakdown["orchestration"]
+>;
+
+export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
+  "x-hosted-runtime-orchestration-latency";
 
 export type HostedRuntimeLatencyPhaseBreakdownJson = {
   [key: string]:
@@ -1002,6 +1057,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
   ReadonlySet<string>
 > = {
+  orchestration: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.orchestration),
   dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
@@ -1012,6 +1068,28 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
 );
+
+export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
+  value: unknown,
+): HostedRuntimeOrchestrationLatencyDiagnostics | null {
+  if (!isHostedRuntimeLatencyPhaseBreakdownRecord(value)) {
+    return null;
+  }
+
+  const diagnostics: Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf> = {};
+  for (const [leafKey, leaf] of Object.entries(value)) {
+    if (
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.orchestration.has(leafKey)
+      && isHostedRuntimeLatencyPhaseBreakdownLeafSafe("orchestration", leafKey, leaf)
+    ) {
+      diagnostics[leafKey] = leaf;
+    }
+  }
+
+  return Object.keys(diagnostics).length > 0
+    ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
+    : null;
+}
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale

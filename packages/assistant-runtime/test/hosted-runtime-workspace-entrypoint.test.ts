@@ -2166,6 +2166,10 @@ describe("hosted workspace runtime entrypoint", () => {
           latencyMilestones: {
             phaseBreakdown: {
               schemaVersion: 1,
+              orchestration: {
+                freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
+                freshStartRequestedAtEpochMs: 1_776_999_999_900,
+              },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
                 containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -2199,6 +2203,10 @@ describe("hosted workspace runtime entrypoint", () => {
         expect.objectContaining({
           phaseBreakdown: expect.objectContaining({
             schemaVersion: 1,
+            orchestration: {
+              freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
+              freshStartRequestedAtEpochMs: 1_776_999_999_900,
+            },
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,
               containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -3269,6 +3277,10 @@ describe("hosted workspace runtime entrypoint", () => {
           latencyMilestones: {
             phaseBreakdown: {
               schemaVersion: 1,
+              orchestration: {
+                freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
+                freshStartRequestedAtEpochMs: 1_776_999_999_900,
+              },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
                 containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -3328,6 +3340,10 @@ describe("hosted workspace runtime entrypoint", () => {
           workspaceRestoreDoneAt: expect.any(String),
         }),
       ]);
+      expect(
+        (idleWakeImportContextMilestones[0] as { phaseBreakdown?: Record<string, unknown> })
+          .phaseBreakdown,
+      ).not.toHaveProperty("orchestration");
     } finally {
       await removeTempRoot(vaultRoot);
     }

@@ -20,6 +20,8 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeOrchestrationLatencyDiagnostics,
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -63,13 +65,23 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
   "hf-home",
 ] as const;
 
+type HostedWorkspaceInvocationRuntimeWakeInput =
+  | number
+  | {
+      notifiedAtEpochMs?: number | null;
+      orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+    };
+
 export interface HostedWorkspaceInvocationOptions {
   dispatch?: {
     invokeReceivedAtEpochMs?: number;
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
-  onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
+  onRuntimeWakeReady?: (
+    sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
+  ) => void;
+  orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   runnerJobAcceptedAt?: string | null;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
@@ -134,11 +146,11 @@ export async function runHostedWorkspaceInvocation(
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   let acceptingRuntimeWakes = true;
-  options.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
+  options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
     if (!acceptingRuntimeWakes) {
       return false;
     }
-    runtimeWakeSignal.notify(notifiedAtEpochMs);
+    runtimeWakeSignal.notify(wakeInput);
     return true;
   });
 
@@ -191,20 +203,27 @@ export async function runHostedWorkspaceInvocation(
       timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
     });
 
-    const hasNodeStartup = options.nodeStartupMs !== null && options.nodeStartupMs !== undefined;
+    const nodeStartupMs = options.nodeStartupMs;
+    const hasNodeStartup = nodeStartupMs !== null && nodeStartupMs !== undefined;
     const hasDispatch = options.dispatch !== null
       && options.dispatch !== undefined
       && Object.keys(options.dispatch).length > 0;
+    const hasOrchestration = options.orchestration !== null
+      && options.orchestration !== undefined
+      && Object.keys(options.orchestration).length > 0;
     const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
       ...(options.runnerJobAcceptedAt
         ? { runnerJobAcceptedAt: options.runnerJobAcceptedAt }
         : {}),
-      ...(hasNodeStartup || hasDispatch
+      ...(hasNodeStartup || hasDispatch || hasOrchestration
         ? {
             phaseBreakdown: {
               schemaVersion: 1,
+              ...(hasOrchestration ? { orchestration: { ...options.orchestration } } : {}),
               ...(hasDispatch ? { dispatch: { ...options.dispatch } } : {}),
-              ...(hasNodeStartup ? { boot: { nodeStartupMs: options.nodeStartupMs as number } } : {}),
+              ...(nodeStartupMs === null || nodeStartupMs === undefined
+                ? {}
+                : { boot: { nodeStartupMs } }),
             },
           }
         : {}),

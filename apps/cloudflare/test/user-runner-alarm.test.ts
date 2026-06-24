@@ -1373,7 +1373,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("sends a payloadless wake behind an active write fence without starting another container run", async () => {
+  it("sends activation diagnostics behind an active write fence without starting another container run", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -1414,6 +1414,10 @@ describe("HostedUserRunner execution coordination", () => {
       activeRuntime: {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
+        orchestration: {
+          activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+          userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+        },
         processingMode: "default",
         userId: TEST_USER_ID,
       },
@@ -1835,6 +1839,10 @@ describe("HostedUserRunner execution coordination", () => {
       activeRuntime: {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
+        orchestration: {
+          activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:31.000Z"),
+          userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:31.000Z"),
+        },
         processingMode: "inbox_media_retention",
         userId: TEST_USER_ID,
       },
@@ -2490,6 +2498,10 @@ describe("HostedUserRunner execution coordination", () => {
       activeRuntime: {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
+        orchestration: {
+          activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+          userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+        },
         processingMode: "default",
         userId: TEST_USER_ID,
       },

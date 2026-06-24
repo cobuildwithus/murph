@@ -67,8 +67,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.93
-        version: 0.5.93(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        specifier: ^0.5.94
+        version: 0.5.94(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -1261,8 +1261,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.93':
-    resolution: {integrity: sha512-nSiqfGFE3i2UBBgSx67qrDjAJiszS1sdbW2Eh3bdO8nBlNMnl9LINszJspanXCUNjHENA61oy1Lr1MzWTrgBqw==}
+  '@cobuild/review-gpt@0.5.94':
+    resolution: {integrity: sha512-4JZkW9+YP//THOFkuqwTkmLfSsgVMzO7IQ9eu8SYx9RPc4LPrB2nLzF0E45P7hXzTX7oncVt5WKzaE9UPRFNnQ==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -10396,7 +10396,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.93(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.94(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.10
