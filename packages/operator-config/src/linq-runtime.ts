@@ -37,7 +37,7 @@ const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
 const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
 const LINQ_MAX_MESSAGE_PARTS = 100
-const LINQ_MAX_URL_MEDIA_PARTS = 40
+const LINQ_MAX_MEDIA_PARTS = 40
 const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
   'code',
   'detail',
@@ -174,9 +174,13 @@ export function resolveLinqWebhookSecret(env: NodeJS.ProcessEnv): string | null 
   return normalizeNullableString(env.LINQ_WEBHOOK_SECRET)
 }
 
-export interface LinqMessageMediaInput {
-  url: string
-}
+export type LinqMessageMediaInput =
+  | {
+      attachmentId: string
+    }
+  | {
+      url: string
+    }
 
 export async function probeLinqApi(
   dependencies: {
@@ -262,7 +266,7 @@ export async function sendLinqChatMessage(
 
 export async function createLinqAttachmentUpload(
   input: {
-    contentType: 'audio/mpeg'
+    contentType: string
     filename: string
     sizeBytes: number
   },
@@ -1402,6 +1406,10 @@ function buildLinqMessageBody(input: {
           value: string
         }
       | {
+          attachment_id: string
+          type: 'media'
+        }
+      | {
           type: 'media'
           url: string
         }
@@ -1454,23 +1462,47 @@ function buildLinqMessageBody(input: {
   }
 }
 
-function normalizeLinqMediaList(values: readonly LinqMessageMediaInput[]): Array<{
-  type: 'media'
-  url: string
-}> {
+function normalizeLinqMediaList(
+  values: readonly LinqMessageMediaInput[],
+): Array<
+  | {
+      attachment_id: string
+      type: 'media'
+    }
+  | {
+      type: 'media'
+      url: string
+    }
+> {
   const parts = values
-    .map((value) => ({
-      type: 'media' as const,
-      url: normalizeLinqHttpsUrl(value.url),
-    }))
-    .filter((value, index, array) =>
-      array.findIndex((candidate) => candidate.url === value.url) === index,
-    )
+    .map((value) => {
+      if ('attachmentId' in value) {
+        return {
+          attachment_id: normalizeRequiredString(value.attachmentId, 'attachment id'),
+          type: 'media' as const,
+        }
+      }
 
-  if (parts.length > LINQ_MAX_URL_MEDIA_PARTS) {
+      return {
+        type: 'media' as const,
+        url: normalizeLinqHttpsUrl(value.url),
+      }
+    })
+    .filter((value, index, array) => {
+      const identity = 'attachment_id' in value
+        ? `attachment:${value.attachment_id}`
+        : `url:${value.url}`
+      return array.findIndex((candidate) => (
+        'attachment_id' in candidate
+          ? `attachment:${candidate.attachment_id}`
+          : `url:${candidate.url}`
+      ) === identity) === index
+    })
+
+  if (parts.length > LINQ_MAX_MEDIA_PARTS) {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
-      `Linq messages may contain at most ${LINQ_MAX_URL_MEDIA_PARTS} URL media parts.`,
+      `Linq messages may contain at most ${LINQ_MAX_MEDIA_PARTS} media parts.`,
     )
   }
 

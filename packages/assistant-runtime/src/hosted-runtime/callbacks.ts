@@ -16,8 +16,14 @@ import {
   type HostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
+import type {
+  HostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
 import {
+  applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
+  buildAssistantVaultFileSendApprovalRequest,
+  deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
@@ -25,10 +31,14 @@ import {
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
   readAssistantAutomationState,
+  readAssistantOutboxIntent,
+  readAssistantVaultFileMedia,
+  readVerifiedAssistantVaultFileBytes,
   sendTelegramMessage,
   sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
+  saveAssistantOutboxIntentIfUnchanged,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
@@ -40,6 +50,7 @@ import {
 import type {
   AssistantDeliveryError,
   AssistantOutboxIntent,
+  AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   setTelegramMessageReaction,
@@ -54,6 +65,7 @@ import type {
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import type {
+  HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
 import {
@@ -102,6 +114,7 @@ interface HostedAssistantDeliveryBoundaryFields {
 }
 
 export interface CollectHostedAssistantDeliverySideEffectsInput {
+  actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
@@ -116,7 +129,21 @@ export async function collectHostedAssistantDeliverySideEffects(
     vaultRoot: input.vaultRoot,
   };
   const now = new Date();
-  const intents = await listAssistantOutboxIntents(request.vaultRoot);
+  const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
+  const intents: AssistantOutboxIntent[] = [];
+  const approvalBlockedIntentIds = new Set<string>();
+  for (const intent of storedIntents) {
+    const reconciliation = await reconcileHostedAssistantVaultFileApproval({
+      actionApprovalPort: input.actionApprovalPort ?? null,
+      intent,
+      now,
+      vaultRoot: request.vaultRoot,
+    });
+    intents.push(reconciliation.intent);
+    if (reconciliation.blocked) {
+      approvalBlockedIntentIds.add(reconciliation.intent.intentId);
+    }
+  }
   const preferredIntentOrder = new Map(
     request.preferredIntentIds.map((intentId, index) => [intentId, index] as const),
   );
@@ -124,6 +151,9 @@ export async function collectHostedAssistantDeliverySideEffects(
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
+    if (approvalBlockedIntentIds.has(intent.intentId)) {
+      continue;
+    }
     let sendingWakeAt: string | null = null;
     if (intent.status === "sending") {
       sendingWakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
@@ -215,6 +245,109 @@ export async function collectHostedAssistantDeliverySideEffects(
   ];
 
   return effects;
+}
+
+async function reconcileHostedAssistantVaultFileApproval(input: {
+  actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  intent: AssistantOutboxIntent;
+  now: Date;
+  vaultRoot: string;
+}): Promise<{ blocked: boolean; intent: AssistantOutboxIntent }> {
+  let file: ReturnType<typeof readAssistantVaultFileMedia>;
+  try {
+    file = readAssistantVaultFileMedia(input.intent);
+  } catch (error) {
+    const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      error,
+      intentId: input.intent.intentId,
+      status: "failed",
+      vault: input.vaultRoot,
+    });
+    return {
+      blocked: true,
+      intent: failed ?? input.intent,
+    };
+  }
+  if (!file) {
+    return { blocked: false, intent: input.intent };
+  }
+  if (
+    input.intent.status === "sent"
+    || input.intent.status === "failed"
+    || input.intent.status === "abandoned"
+  ) {
+    return { blocked: false, intent: input.intent };
+  }
+
+  if (!input.actionApprovalPort) {
+    const deferred = deferAssistantVaultFileApprovalCheck({
+      intent: input.intent,
+      now: input.now,
+    });
+    return {
+      blocked: true,
+      intent: await persistHostedAssistantVaultFileApprovalState({
+        current: input.intent,
+        next: deferred,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  }
+
+  let approval: HostedActionApprovalResult;
+  try {
+    approval = await input.actionApprovalPort.request(
+      buildAssistantVaultFileSendApprovalRequest(input.intent),
+    );
+  } catch {
+    const deferred = deferAssistantVaultFileApprovalCheck({
+      intent: input.intent,
+      now: input.now,
+    });
+    return {
+      blocked: true,
+      intent: await persistHostedAssistantVaultFileApprovalState({
+        current: input.intent,
+        next: deferred,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  }
+
+  const reconciled = applyAssistantVaultFileSendApprovalResult({
+    approval,
+    intent: input.intent,
+    now: input.now,
+  });
+  const persisted = await persistHostedAssistantVaultFileApprovalState({
+    current: input.intent,
+    next: reconciled,
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    blocked:
+      approval.status !== "approved"
+      || persisted.status === "awaiting_approval",
+    intent: persisted,
+  };
+}
+
+async function persistHostedAssistantVaultFileApprovalState(input: {
+  current: AssistantOutboxIntent;
+  next: AssistantOutboxIntent;
+  vaultRoot: string;
+}): Promise<AssistantOutboxIntent> {
+  if (input.next === input.current) {
+    return input.current;
+  }
+
+  return await saveAssistantOutboxIntentIfUnchanged({
+    expectedDedupeKey: input.current.dedupeKey,
+    expectedStatus: input.current.status,
+    expectedUpdatedAt: input.current.updatedAt,
+    intent: input.next,
+    vault: input.vaultRoot,
+  });
 }
 
 async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply(input: {
@@ -702,6 +835,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
   now: Date,
 ): string | null {
   switch (intent.status) {
+    case "awaiting_approval":
     case "pending":
     case "retryable": {
       if (
@@ -905,6 +1039,7 @@ function createHostedAssistantEmailSendDependency(input: {
 }
 
 export async function drainHostedPreparedAssistantDeliveries(input: {
+  actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -980,6 +1115,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         input.allowPreparedSending === true
         && preparedDispatch !== null;
       outcome = await deliverHostedPreparedAssistantDelivery({
+        actionApprovalPort: input.actionApprovalPort ?? null,
         wake: input.wake,
         effectsPort: input.effectsPort,
         allowPreparedSending: ownsPreparedDispatch,
@@ -1105,6 +1241,7 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {
+  actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
@@ -1238,7 +1375,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           ...(input.signal ? { signal: input.signal } : {}),
         },
         sendLinq: createHostedAssistantLinqSendDependency({
+          actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
+          intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContext: input.wake
             ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
@@ -1248,6 +1388,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           },
           providerFetch: input.providerFetch,
           signal: input.signal,
+          vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
@@ -1498,12 +1639,16 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
 }
 
 function createHostedAssistantLinqSendDependency(input: {
+  actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  expectedDedupeKey?: string | null;
+  intentId?: string | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   signal: AbortSignal | null;
+  vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
@@ -1525,6 +1670,13 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
+    const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
+      actionApprovalPort: input.actionApprovalPort ?? null,
+      expectedDedupeKey: input.expectedDedupeKey ?? null,
+      intentId: input.intentId ?? null,
+      media: request.media ?? [],
+      vaultRoot: input.vaultRoot ?? null,
+    });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
       directRecipientPhoneNumber,
@@ -1535,10 +1687,139 @@ function createHostedAssistantLinqSendDependency(input: {
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
-    }, dependencies);
+    }, {
+      ...dependencies,
+      ...(verifiedVaultFiles.size > 0
+        ? {
+            loadVaultFile: async (media) => {
+              const bytes = verifiedVaultFiles.get(
+                buildHostedVaultFileMediaIdentity(media),
+              );
+              if (!bytes) {
+                throw new VaultCliError(
+                  "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+                  "The prepared vault file no longer matches the approved action.",
+                );
+              }
+              return bytes;
+            },
+          }
+        : {}),
+    });
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
+}
+
+async function preloadApprovedHostedAssistantVaultFiles(input: {
+  actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  expectedDedupeKey: string | null;
+  intentId: string | null;
+  media: readonly AssistantResponseMedia[];
+  vaultRoot: string | null;
+}): Promise<Map<string, Uint8Array>> {
+  const vaultFiles = input.media.filter(
+    (media) => media.kind === "vault_file",
+  );
+  if (vaultFiles.length === 0) {
+    return new Map();
+  }
+  if (
+    vaultFiles.length !== 1
+    || input.media.length !== 1
+    || !input.actionApprovalPort
+    || !input.expectedDedupeKey
+    || !input.intentId
+    || !input.vaultRoot
+  ) {
+    throw createRetryableHostedVaultFileError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
+      "Secure approval could not be verified before vault-file delivery.",
+    );
+  }
+
+  const intent = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    input.intentId,
+  );
+  if (!intent || intent.dedupeKey !== input.expectedDedupeKey) {
+    throw new VaultCliError(
+      "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      "The prepared vault-file delivery no longer matches its outbox action.",
+    );
+  }
+  const persistedFile = readAssistantVaultFileMedia(intent);
+  if (
+    !persistedFile
+    || buildHostedVaultFileMediaIdentity(persistedFile)
+      !== buildHostedVaultFileMediaIdentity(vaultFiles[0]!)
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      "The prepared vault file no longer matches its persisted outbox action.",
+    );
+  }
+
+  let approval: HostedActionApprovalResult;
+  try {
+    approval = await input.actionApprovalPort.request(
+      buildAssistantVaultFileSendApprovalRequest(intent),
+    );
+  } catch {
+    throw createRetryableHostedVaultFileError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
+      "Secure approval could not be verified before vault-file delivery.",
+    );
+  }
+  if (approval.status === "pending") {
+    throw createRetryableHostedVaultFileError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_PENDING",
+      "Vault-file delivery is still awaiting secure approval.",
+    );
+  }
+  if (approval.status !== "approved") {
+    throw new VaultCliError(
+      approval.status === "denied"
+        ? "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"
+        : "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED",
+      approval.status === "denied"
+        ? "Vault-file delivery was denied."
+        : "Vault-file delivery approval expired.",
+    );
+  }
+
+  const bytes = await readVerifiedAssistantVaultFileBytes({
+    file: persistedFile,
+    vaultRoot: input.vaultRoot,
+  });
+  return new Map([
+    [buildHostedVaultFileMediaIdentity(persistedFile), bytes],
+  ]);
+}
+
+function buildHostedVaultFileMediaIdentity(input: {
+  contentType: string;
+  filename: string;
+  ref: string;
+  sha256: string;
+  sizeBytes: number;
+}): string {
+  return JSON.stringify([
+    input.ref,
+    input.sha256,
+    input.filename,
+    input.contentType,
+    input.sizeBytes,
+  ]);
+}
+
+function createRetryableHostedVaultFileError(
+  code: string,
+  message: string,
+): VaultCliError & { retryable: true } {
+  return Object.assign(new VaultCliError(code, message), {
+    retryable: true as const,
+  });
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
