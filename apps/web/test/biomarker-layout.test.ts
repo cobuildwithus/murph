@@ -114,7 +114,11 @@ test("keeps active members on the dashboard", async () => {
 
   const markup = renderToStaticMarkup(
     await DashboardLayout({
-      children: createElement("div", { "data-active-dashboard": "true" }, "dashboard"),
+      children: createElement(
+        "div",
+        { "data-active-dashboard": "true" },
+        "dashboard",
+      ),
     }),
   );
 
@@ -124,18 +128,28 @@ test("keeps active members on the dashboard", async () => {
 });
 
 test.each([
-  ["past_due", null],
-  ["not_started", new Date("2026-06-24T00:00:00.000Z")],
+  {
+    billingStatus: "past_due",
+    suspendedAt: null,
+  },
+  {
+    billingStatus: "not_started",
+    suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
+  },
 ])(
-  "does not send blocked %s members into checkout recovery",
-  async (billingStatus, suspendedAt) => {
+  "does not send blocked $billingStatus members into checkout recovery",
+  async ({ billingStatus, suspendedAt }) => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce(
       createAuthenticatedPageAuth(billingStatus, suspendedAt),
     );
 
     const markup = renderToStaticMarkup(
       await DashboardLayout({
-        children: createElement("div", { "data-blocked-dashboard": "true" }, "dashboard"),
+        children: createElement(
+          "div",
+          { "data-blocked-dashboard": "true" },
+          "dashboard",
+        ),
       }),
     );
 
