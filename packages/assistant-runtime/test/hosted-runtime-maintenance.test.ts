@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import {
+  restoreHostedExecutionContext,
+  snapshotHostedExecutionContext,
+} from "@murphai/runtime-state/node";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
@@ -89,12 +98,16 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  resolveHostedDeviceSyncNextWakeAt,
   runHostedAssistantAutomation,
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
+import {
+  readHostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 
 function createMaintenanceDeviceSyncPortStub() {
   return {
@@ -140,6 +153,35 @@ const DEVICE_SYNC_CONFIG = {
   publicBaseUrl: "https://device-sync.example.test",
   secret: "secret_123",
 } as const;
+const FIXED_MAINTENANCE_VAULT_ROOT = "/tmp/vault-root";
+const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
+
+async function readDenseRawRetentionMailboxItem(vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT) {
+  const state = await readHostedSystemMailboxState(vaultRoot);
+  return state.pending.find((item) =>
+    item.mailboxDedupeKey === DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY
+    && item.status === "pending"
+  ) ?? null;
+}
+
+async function expectDenseRawRetentionMailboxWakeAt(
+  nextWakeAt: string | null,
+  vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT,
+): Promise<void> {
+  const item = await readDenseRawRetentionMailboxItem(vaultRoot);
+  if (!nextWakeAt) {
+    assert.equal(item, null);
+    return;
+  }
+
+  assert.ok(item);
+  assert.equal(item.nextAttemptAt, nextWakeAt);
+  assert.equal(item.routeAction, "run-device-sync-wake");
+  if (item.wake.kind !== "device-sync.wake") {
+    assert.fail(`expected device-sync.wake, got ${item.wake.kind}`);
+  }
+  assert.equal(item.wake.reason, "reconcile_due");
+}
 
 function createHostedAutomationRuntime(input: {
   deviceSync?: HostedTimerRuntime["resolvedConfig"]["deviceSync"];
@@ -171,8 +213,12 @@ function createHostedAutomationRuntime(input: {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
+    force: true,
+    recursive: true,
+  });
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
@@ -1086,6 +1132,104 @@ describe("runHostedAssistantAutomation", () => {
   });
 });
 
+describe("resolveHostedDeviceSyncNextWakeAt", () => {
+  it("reads durable store wakes without constructing configured providers", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-sync-wake-read-"));
+    const store = new SqliteDeviceSyncStore(
+      path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+    );
+
+    try {
+      store.upsertAccount({
+        provider: "junction",
+        externalAccountId: "junction-account",
+        displayName: "Junction Account",
+        scopes: ["offline"],
+        tokens: {
+          accessToken: "access-token",
+          accessTokenEncrypted: "enc:access-token",
+        },
+        connectedAt: "2026-04-08T00:00:00.000Z",
+        nextReconcileAt: "2026-04-08T01:00:00.000Z",
+      });
+
+      const wakeAt = resolveHostedDeviceSyncNextWakeAt({
+        deviceSyncConfig: {
+          providerConfigs: {
+            junction: {
+              environment: "sandbox",
+              providerFilter: ["fitbit"],
+              region: "us",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
+        vaultRoot,
+      });
+
+      assert.equal(wakeAt, "2026-04-08T01:00:00.000Z");
+      expect(mocks.readConfiguredJunctionDeviceSyncProviderConfig).not.toHaveBeenCalled();
+      expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).not.toHaveBeenCalled();
+      expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("falls back to a bounded retry when the durable store wake cannot be read", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-device-sync-wake-read-failed-"));
+    const vaultRoot = path.join(tempRoot, "vault-as-file");
+    await writeFile(vaultRoot, "not a directory");
+    const logPort = {
+      write: vi.fn(async (request: HostedRuntimeLogRequest) => ({
+        loggedCount: request.entries.length,
+      })),
+    };
+
+    try {
+      const wakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T00:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({
+          deviceSyncConfig: {
+            providerConfigs: {
+              oura: {
+                clientId: "oura-client",
+                clientSecret: "oura-secret",
+              },
+            },
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "secret_123",
+          },
+          platform: { logPort },
+          vaultRoot,
+        }),
+      );
+
+      assert.equal(wakeAt, "2026-04-08T00:00:30.000Z");
+      expect(logPort.write).toHaveBeenCalledWith({
+        entries: [
+          expect.objectContaining({
+            component: "device-sync",
+            eventCode: "device-sync.wake_projection_failed",
+            level: "warn",
+            phase: "invoke",
+          }),
+        ],
+      });
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+});
+
 describe("runHostedDeviceSyncPass", () => {
   it("skips device sync entirely when no providers are configured", async () => {
     mocks.createDeviceSyncRegistry.mockReturnValue({
@@ -1273,6 +1417,7 @@ describe("runHostedDeviceSyncPass", () => {
         skipped: true,
       });
       expect(service.runSchedulerOnce).not.toHaveBeenCalled();
+      await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
       expect(close).toHaveBeenCalledTimes(1);
     });
   });
@@ -1634,6 +1779,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 2,
       skipped: false,
     });
+    await expectDenseRawRetentionMailboxWakeAt(null);
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
@@ -1710,11 +1856,144 @@ describe("runHostedDeviceSyncPass", () => {
     );
 
     assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
       vaultRoot: "/tmp/vault-root",
     }));
+  });
+
+  it("keeps dense raw retention continuation across a hosted snapshot restore", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-dense-retention-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const operatorHomeRoot = path.join(parentRoot, "operator-home");
+    const restoredWorkspaceRoot = path.join(parentRoot, "restored");
+
+    try {
+      await mkdir(operatorHomeRoot, { recursive: true });
+      const close = vi.fn();
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+        close,
+        drainWorker: vi.fn(async () => 0),
+        getNextWakeAt: () => null,
+        listJobFailureDiagnostics: vi.fn(() => []),
+        runSchedulerOnce: vi.fn(async () => undefined),
+      });
+      mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
+        bytesAfter: 1_000,
+        bytesBefore: 10_000,
+        bytesFreed: 9_000,
+        compactedReceiptCount: 0,
+        denseRawBytesAfter: 1_000,
+        denseRawBytesBefore: 10_000,
+        denseRawBytesFreed: 9_000,
+        hasMore: true,
+        mutated: true,
+        skippedCount: 0,
+        tombstonedCanonicalArtifactCount: 0,
+        tombstonedDenseRawArtifactCount: 25,
+        touchedPaths: ["raw/integrations/wearable-provider/2026/04/import/01.json"],
+      });
+
+      const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+        runHostedDeviceSyncPass(
+          {
+            eventId: "evt_device_sync_dense_raw_retention_snapshot",
+            kind: "runtime.timer",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+          vaultRoot,
+          DEVICE_SYNC_CONFIG,
+          createMaintenanceDeviceSyncPortStub(),
+          45_000,
+        )
+      );
+      assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
+      await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z", vaultRoot);
+
+      const snapshot = await snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      });
+      const restored = await restoreHostedExecutionContext({
+        bundle: snapshot.bundle,
+        workspaceRoot: restoredWorkspaceRoot,
+      });
+
+      await expectDenseRawRetentionMailboxWakeAt(
+        "2026-04-08T00:00:30.000Z",
+        restored.vaultRoot,
+      );
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("keeps the prearmed dense raw retention continuation when yielding after retention reports more work", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    let shouldYieldNow = false;
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce,
+    });
+    mocks.pruneWearableDenseRawTimeseries.mockImplementationOnce(async () => {
+      shouldYieldNow = true;
+      return {
+        bytesAfter: 1_000,
+        bytesBefore: 10_000,
+        bytesFreed: 9_000,
+        compactedReceiptCount: 0,
+        denseRawBytesAfter: 1_000,
+        denseRawBytesBefore: 10_000,
+        denseRawBytesFreed: 9_000,
+        hasMore: true,
+        mutated: true,
+        skippedCount: 0,
+        tombstonedCanonicalArtifactCount: 0,
+        tombstonedDenseRawArtifactCount: 25,
+        touchedPaths: ["raw/integrations/wearable-provider/2026/04/import/01.json"],
+      };
+    });
+
+    const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_device_sync_dense_raw_retention_more_yield",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          shouldYield: () => shouldYieldNow,
+        },
+      )
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: true,
+    });
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
   });
 
   it("does not start dense raw retention when the maintenance deadline is exhausted", async () => {
@@ -1752,6 +2031,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: false,
     });
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
   });
@@ -1807,6 +2087,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 1,
       skipped: false,
     });
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     assert.equal(logRequests.length, 1);
     const entry = logRequests[0]?.entries[0];
@@ -1950,6 +2231,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(runSchedulerOnce).not.toHaveBeenCalled();
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

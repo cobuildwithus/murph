@@ -4,7 +4,10 @@ import {
 } from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
-import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import {
+  resolveDeviceSyncStoreNextWakeAt,
+  type DeviceSyncService,
+} from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
@@ -80,6 +83,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import {
+  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+} from "./system-mailbox-state.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -926,6 +932,12 @@ export async function runHostedDeviceSyncPass(
   let processedJobs = 0;
 
   try {
+    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+      userId: wake.userId,
+      vaultRoot,
+    });
+
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
@@ -1033,11 +1045,17 @@ export async function runHostedDeviceSyncPass(
       state: syncState,
     });
 
+    const denseRawRetentionWakeAt = denseRawRetention.hasMore
+      ? resolveHostedDeviceSyncYieldRetryAt()
+      : null;
+    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      nextWakeAt: denseRawRetentionWakeAt,
+      userId: wake.userId,
+      vaultRoot,
+    });
+
     return {
-      nextWakeAt: earliestHostedMaintenanceWakeAt(
-        service.getNextWakeAt(),
-        denseRawRetention.hasMore ? resolveHostedDeviceSyncYieldRetryAt() : null,
-      ),
+      nextWakeAt: earliestHostedMaintenanceWakeAt(service.getNextWakeAt(), denseRawRetentionWakeAt),
       postCheckpointRecord,
       processedJobs,
       skipped: false,
@@ -1055,6 +1073,39 @@ export async function runHostedDeviceSyncPass(
     throw error;
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
+  }
+}
+
+export function resolveHostedDeviceSyncNextWakeAt(input: {
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  vaultRoot: string;
+}): string | null {
+  if (!input.deviceSyncConfig) {
+    return null;
+  }
+
+  try {
+    return resolveDeviceSyncStoreNextWakeAt({
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (input.platform?.logPort) {
+      void writeHostedRuntimeLogBestEffort({
+        entry: {
+          component: "device-sync",
+          eventCode: "device-sync.wake_projection_failed",
+          level: "warn",
+          phase: "invoke",
+          redactedJson: {
+            errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+              ?? "device sync wake projection failed",
+          },
+        },
+        platform: input.platform,
+      });
+    }
+    return resolveHostedDeviceSyncYieldRetryAt();
   }
 }
 
