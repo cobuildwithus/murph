@@ -7,6 +7,7 @@ import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons
 import type { ProtocolTabExperiment } from "@/src/components/experiments/experiment-detail/protocol-tab";
 
 const mocks = vi.hoisted(() => ({
+  getHostedDashboardPageAuthSnapshot: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -41,6 +42,10 @@ vi.mock("@/src/components/experiments/experiment-detail/protocol-tab", () => ({
   },
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedDashboardPageAuthSnapshot,
+}));
+
 vi.mock("../app/(dashboard)/experiments/[experimentId]/active-run-summary-client", () => ({
   ActiveRunSummaryClient() {
     return null;
@@ -63,6 +68,12 @@ import ExperimentDetailPage, {
 
 describe("experiment page projections", () => {
   beforeEach(() => {
+    mocks.getHostedDashboardPageAuthSnapshot.mockReset();
+    mocks.getHostedDashboardPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: null,
+      session: null,
+    });
     mocks.notFound.mockClear();
     mocks.protocolTab.mockClear();
   });

@@ -98,6 +98,7 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
@@ -162,6 +163,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+test("HomePage stops before page loaders when dashboard auth redirects", async () => {
+  mocks.getHostedPageAuthSnapshot.mockRejectedValueOnce(new Error("NEXT_REDIRECT:/join"));
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  await assert.rejects(async () => {
+    await HomePage();
+  }, /NEXT_REDIRECT:\/join/);
+  assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
+  assert.equal(mocks.readHostedMemberStripeBillingRef.mock.calls.length, 0);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+  assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
 });
 
 test("HomePage hides the connect devices card when device sync is already active", async () => {

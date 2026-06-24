@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { redirect } from "next/navigation";
 
 import type { HostedAppSession } from "./app-session";
 import { type HostedMemberCoreState } from "./hosted-member-store";
@@ -42,6 +43,27 @@ export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapsho
   return resolveHostedPageAuthSnapshot();
 }
 
+export async function getHostedDashboardPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
+  const auth = await getHostedPageAuthSnapshot();
+  redirectHostedDashboardCheckoutIfNeeded(auth);
+  return auth;
+}
+
+export function redirectHostedDashboardCheckoutIfNeeded(
+  auth: HostedPageAuthSnapshot,
+): void {
+  const member = auth.authenticatedMember;
+  if (
+    member
+    && deriveHostedPostVerificationStage({
+      billingStatus: member.billingStatus,
+      suspendedAt: member.suspendedAt,
+    }) === "checkout"
+  ) {
+    redirect("/join");
+  }
+}
+
 const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {
   const session = await getHostedAppSessionForPublicPageAuth();
 
@@ -52,10 +74,6 @@ const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAu
   return {
     authenticated: true,
     label: null,
-    requiresDashboardRecovery: deriveHostedPostVerificationStage({
-      billingStatus: session.member.billingStatus,
-      suspendedAt: session.member.suspendedAt,
-    }) === "checkout",
   };
 });
 

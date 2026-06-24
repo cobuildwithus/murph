@@ -1,7 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import Image from "next/image";
 
-import { DashboardOnboardingRecoveryRedirect } from "@/src/components/dashboard/dashboard-onboarding-recovery";
 import { Sidebar } from "@/src/components/dashboard/sidebar";
 import {
   SidebarChatWithMurphAction,
@@ -24,11 +23,6 @@ export function DashboardShell({
   padded?: boolean;
   sidebarAuth?: HostedSidebarAuthSnapshot;
 }) {
-  const requiresDashboardRecovery = sidebarAuth?.requiresDashboardRecovery === true;
-  const recoveryRedirect = (
-    <DashboardOnboardingRecoveryRedirect enabled={requiresDashboardRecovery} />
-  );
-
   return (
     <SidebarProvider>
       <Sidebar
@@ -60,7 +54,7 @@ export function DashboardShell({
             padded && "px-4 py-8 md:px-14 md:py-10",
           )}
         >
-          {requiresDashboardRecovery ? recoveryRedirect : children}
+          {children}
         </main>
       </SidebarInset>
     </SidebarProvider>
