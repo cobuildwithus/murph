@@ -352,6 +352,40 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits).toEqual([]);
   });
 
+  it("runs due inbox media retention for inactive members and never dispatches default mode", async () => {
+    // End-to-end regression for inactive members with a due retention wake:
+    // reconciliation returns `user_not_active` blocked facts that still carry
+    // the workspace's retention wake; the workflow must dispatch
+    // `inbox_media_retention` (not default mode) so raw inbox media is
+    // tombstoned within the 14-day retention window.
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_inactive",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "inbox_media_retention",
+        userId: "member_inactive",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
+  });
+
   it("records reconciliation read failures and uses retry waits for failures marked non-retryable", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(async () => {

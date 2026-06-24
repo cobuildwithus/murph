@@ -1568,17 +1568,37 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("rejects workspace reads for inactive members", async () => {
+  it("serves workspace reads for inactive members so the mode-aware runtime owner can run due inbox media retention", async () => {
+    // Admission policy is owned by `runtime-reconciliation-facts` and the
+    // Temporal runtime workflow: inactive members are confined to
+    // `inbox_media_retention` dispatch. Repeating the active-entitlement
+    // check on this route would also block the retention run, leaving raw
+    // inbox media past the 14-day retention window.
     mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
       billingStatus: "canceled",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+      version: "7",
     }));
 
     const response = await workspaceRoute.GET(new Request(
       "https://example.test/api/internal/hosted-workspace",
     ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
 
-    expect(response.status).toBe(403);
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(payload.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+      userId: "member_routes_1",
+      version: "7",
+    });
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    // The route no longer consults member entitlement; that owner lives in
+    // reconciliation/runtime invocation.
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("accepts old runner checkpoint payloads without browser-vault replica refs", async () => {
