@@ -9,6 +9,7 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  createLinqAttachmentUpload,
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
@@ -16,6 +17,7 @@ import {
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
+  uploadLinqAttachmentBytes,
 } from '@murphai/operator-config/linq-runtime'
 import {
   generateElevenLabsVoiceMemoAudio,
@@ -465,7 +467,10 @@ export async function sendLinqMessage(
   }
 
   const target = input.target.trim()
-  const media = normalizeLinqMessageMedia(input.media ?? [])
+  const media = await prepareLinqMessageMedia(
+    input.media ?? [],
+    dependencies,
+  )
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
@@ -525,21 +530,59 @@ export async function sendLinqMessage(
   }
 }
 
-function normalizeLinqMessageMedia(
+async function prepareLinqMessageMedia(
   media: readonly AssistantResponseMedia[],
-): Array<{ url: string }> {
-  return media.map((item) => {
-    if (item.kind !== 'image') {
+  dependencies: LinqRuntimeDependencies,
+): Promise<Array<{ attachmentId: string } | { url: string }>> {
+  const prepared: Array<{ attachmentId: string } | { url: string }> = []
+  for (const item of media) {
+    if (item.kind === 'image') {
+      prepared.push({ url: item.url })
+      continue
+    }
+
+    if (item.kind !== 'vault_file') {
       throw new VaultCliError(
         'ASSISTANT_LINQ_MEDIA_KIND_UNSUPPORTED',
-        'Standard iMessage delivery only supports image media parts.',
+        'Standard iMessage delivery only supports image and approved vault-file media parts.',
       )
     }
 
-    return {
-      url: item.url,
+    if (!dependencies.loadVaultFile) {
+      throw new VaultCliError(
+        'ASSISTANT_VAULT_FILE_LOADER_REQUIRED',
+        'Vault-file delivery requires a trusted vault-file loader.',
+      )
     }
-  })
+
+    const bytes = await dependencies.loadVaultFile(item)
+    const upload = await createLinqAttachmentUpload(
+      {
+        contentType: item.contentType,
+        filename: item.filename,
+        sizeBytes: item.sizeBytes,
+      },
+      {
+        env: dependencies.env,
+        fetchImplementation: dependencies.fetchImplementation,
+        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+      },
+    )
+    await uploadLinqAttachmentBytes(
+      {
+        bytes,
+        requiredHeaders: upload.requiredHeaders,
+        uploadUrl: upload.uploadUrl,
+      },
+      {
+        fetchImplementation: dependencies.fetchImplementation,
+        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+      },
+    )
+    prepared.push({ attachmentId: upload.attachmentId })
+  }
+
+  return prepared
 }
 
 export async function sendLinqVoiceMemoMessage(

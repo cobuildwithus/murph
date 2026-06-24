@@ -17,6 +17,10 @@ import {
 import type { ConversationRef } from '../conversation-ref.js'
 
 type AssistantImageResponseMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
+type AssistantVaultFileResponseMedia = Extract<
+  AssistantResponseMedia,
+  { kind: 'vault_file' }
+>
 
 export interface AssistantChannelActivityHandle {
   stop: () => Promise<void>
@@ -36,6 +40,9 @@ export interface EmailRuntimeDependencies {
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
+  loadVaultFile?: (
+    media: AssistantVaultFileResponseMedia,
+  ) => Promise<Uint8Array>
   refreshMs?: number
   signal?: AbortSignal
 }

@@ -41,6 +41,8 @@ import {
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+  resolveAssistantCurrentAudienceDeliveryFields,
+  resolveAssistantHostedDeliveryIdempotency,
   supportsAssistantCurrentAudienceMessageReaction,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
@@ -108,6 +110,10 @@ import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
+import {
+  buildAssistantVaultFileApprovalMessage,
+  requestAssistantVaultFileSend,
+} from './vault-file-send.js'
 import type {
   AssistantAcceptedTurnInputJournal,
   AssistantAcceptedTurnInputItemInput,
@@ -558,6 +564,40 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
           : null
+        const sendRequiredUserMessage = async (
+          text: string,
+        ): Promise<AssistantProgressDeliveryResult> =>
+          progressDelivery
+            ? await progressDelivery.send(text, {
+                required: true,
+                source: 'model',
+              })
+            : requiredUserMessageDeliveryAvailable && hostedExecutionContext
+              ? await sendHostedRequiredUserMessage({
+                  dependencies:
+                    hostedExecutionContext.progressDeliveryDependencies,
+                  getDeliveryContext: () => ({
+                    messageInput: currentInput,
+                    session: currentSession,
+                  }),
+                  sharedPlan,
+                  text,
+                  turnId: currentUserTurn.turnId,
+                })
+              : {
+                  kind: 'failed',
+                  source: 'model',
+                }
+        const currentDeliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+          input: currentInput,
+          session: currentSession,
+          sharedPlan,
+        })
+        const vaultFileSendAvailable =
+          input.deliverResponse === true
+          && requiredUserMessageDeliveryAvailable
+          && hostedExecutionContext?.actionApprovalPort != null
+          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               connectedApps: hostedExecutionContext.connectedApps ?? null,
@@ -568,28 +608,69 @@ export async function sendAssistantMessageLocal(
               }),
               messageInput: input,
               requiredUserMessageDeliveryAvailable,
-              sendRequiredUserMessage: async (text) =>
-                progressDelivery
-                  ? await progressDelivery.send(text, {
-                      required: true,
-                      source: 'model',
-                    })
-                  : requiredUserMessageDeliveryAvailable
-                    ? await sendHostedRequiredUserMessage({
-                        dependencies:
-                          hostedExecutionContext.progressDeliveryDependencies,
-                        getDeliveryContext: () => ({
-                          messageInput: currentInput,
-                          session: currentSession,
-                        }),
+              sendRequiredUserMessage,
+              ...(vaultFileSendAvailable && hostedExecutionContext.actionApprovalPort
+                ? {
+                    sendVaultFile: async (ref: string) => {
+                      const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+                        input: currentInput,
+                        session: currentSession,
                         sharedPlan,
-                        text,
-                        turnId: currentUserTurn.turnId,
                       })
-                  : {
-                      kind: 'failed',
-                      source: 'model',
+                      if (deliveryFields.channel?.trim().toLowerCase() !== 'linq') {
+                        throw new VaultCliError(
+                          'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
+                          'Vault files can only be sent to the current iMessage conversation.',
+                        )
+                      }
+                      const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+                        audience: sharedPlan.conversationPolicy.audience,
+                        channel: deliveryFields.channel,
+                        deliveryFields,
+                        input: currentInput,
+                        session: currentSession,
+                      })
+                      const result = await requestAssistantVaultFileSend({
+                        actionApprovalPort: hostedExecutionContext.actionApprovalPort,
+                        actorId: deliveryFields.actorId,
+                        bindingDelivery: deliveryFields.bindingDelivery,
+                        channel: deliveryFields.channel,
+                        deliveryIdempotencyKey:
+                          hostedDelivery.deliveryIdempotencyKey ?? `${currentSession.sessionId}:${currentUserTurn.turnId}`,
+                        deliverySource: deliveryFields.deliverySource,
+                        explicitTarget: deliveryFields.explicitTarget,
+                        identityId: deliveryFields.identityId,
+                        ref,
+                        replyToMessageId: deliveryFields.replyToMessageId,
+                        sessionId: currentSession.sessionId,
+                        threadId: deliveryFields.threadId,
+                        threadIsDirect: deliveryFields.threadIsDirect,
+                        turnId: currentUserTurn.turnId,
+                        turnTrigger: currentInput.turnTrigger ?? null,
+                        vault: currentInput.vault,
+                      })
+                      if (result.status === 'pending') {
+                        const delivery = await sendRequiredUserMessage(
+                          buildAssistantVaultFileApprovalMessage({
+                            approvalUrl: result.approvalUrl,
+                            expiresAt: result.expiresAt,
+                            filename: result.filename,
+                          }),
+                        )
+                        if (delivery.kind === 'failed') {
+                          throw new VaultCliError(
+                            'ASSISTANT_VAULT_FILE_APPROVAL_LINK_DELIVERY_FAILED',
+                            'The secure approval link could not be delivered.',
+                          )
+                        }
+                      }
+                      return {
+                        filename: result.filename,
+                        status: result.status,
+                      }
                     },
+                  }
+                : {}),
               session: resolved.session,
             })
           : null
