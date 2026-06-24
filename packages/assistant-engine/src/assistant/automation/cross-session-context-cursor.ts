@@ -17,7 +17,12 @@ export interface AssistantAutoReplyCrossSessionContextCursor {
   sentAtMs: number
 }
 
-interface AssistantAutoReplyCrossSessionContextCursorRecord {
+export interface AssistantAutoReplyCrossSessionContextCursorRoute {
+  channel: string
+  key: string
+}
+
+export interface AssistantAutoReplyCrossSessionContextCursorRecord {
   latestInjectedDelivery: AssistantAutoReplyCrossSessionContextCursor
   routeKey: string
   schema: typeof ASSISTANT_AUTO_REPLY_CROSS_SESSION_CONTEXT_CURSOR_SCHEMA
@@ -25,12 +30,11 @@ interface AssistantAutoReplyCrossSessionContextCursorRecord {
 }
 
 export async function readAssistantAutoReplyCrossSessionContextCursor(input: {
-  channel: string
-  deliveryTarget: string
+  route: AssistantAutoReplyCrossSessionContextCursorRoute
   vault: string
 }): Promise<AssistantAutoReplyCrossSessionContextCursor | null> {
-  const routeKey = hashAssistantAutoReplyCrossSessionContextRoute(input)
-  const record = await readAssistantAutoReplyCrossSessionContextCursorRecord(
+  const routeKey = hashAssistantAutoReplyCrossSessionContextRoute(input.route)
+  const record = await readAssistantAutoReplyCrossSessionContextCursorRecordAtPath(
     resolveAssistantAutoReplyCrossSessionContextCursorPath({
       routeKey,
       vault: input.vault,
@@ -40,21 +44,20 @@ export async function readAssistantAutoReplyCrossSessionContextCursor(input: {
 }
 
 export async function writeAssistantAutoReplyCrossSessionContextCursor(input: {
-  channel: string
-  deliveryTarget: string
   intentId: string
   recordedAt?: string
+  route: AssistantAutoReplyCrossSessionContextCursorRoute
   sentAtMs: number
   vault: string
 }): Promise<void> {
-  const routeKey = hashAssistantAutoReplyCrossSessionContextRoute(input)
+  const routeKey = hashAssistantAutoReplyCrossSessionContextRoute(input.route)
 
   await withAssistantRuntimeWriteLock(input.vault, async () => {
     const filePath = resolveAssistantAutoReplyCrossSessionContextCursorPath({
       routeKey,
       vault: input.vault,
     })
-    const existing = await readAssistantAutoReplyCrossSessionContextCursorRecord(
+    const existing = await readAssistantAutoReplyCrossSessionContextCursorRecordAtPath(
       filePath,
     )
     const next = {
@@ -91,7 +94,7 @@ export function compareAssistantAutoReplyCrossSessionContextCursorOrder(
     : left.sentAtMs - right.sentAtMs
 }
 
-async function readAssistantAutoReplyCrossSessionContextCursorRecord(
+export async function readAssistantAutoReplyCrossSessionContextCursorRecordAtPath(
   filePath: string,
 ): Promise<AssistantAutoReplyCrossSessionContextCursorRecord | null> {
   try {
@@ -107,26 +110,35 @@ async function readAssistantAutoReplyCrossSessionContextCursorRecord(
   }
 }
 
+export function resolveAssistantAutoReplyCrossSessionContextCursorDirectory(input: {
+  assistantStateRoot: string
+}): string {
+  return path.join(
+    input.assistantStateRoot,
+    'auto-reply',
+    'cross-session-context',
+  )
+}
+
 function resolveAssistantAutoReplyCrossSessionContextCursorPath(input: {
   routeKey: string
   vault: string
 }): string {
   return path.join(
-    resolveAssistantStatePaths(input.vault).assistantStateRoot,
-    'auto-reply',
-    'cross-session-context',
+    resolveAssistantAutoReplyCrossSessionContextCursorDirectory(
+      resolveAssistantStatePaths(input.vault),
+    ),
     `${input.routeKey.slice('sha256:'.length)}.json`,
   )
 }
 
-function hashAssistantAutoReplyCrossSessionContextRoute(input: {
-  channel: string
-  deliveryTarget: string
-}): string {
+function hashAssistantAutoReplyCrossSessionContextRoute(
+  route: AssistantAutoReplyCrossSessionContextCursorRoute,
+): string {
   return `sha256:${createHash('sha256')
     .update(JSON.stringify({
-      channel: input.channel,
-      deliveryTarget: input.deliveryTarget,
+      channel: route.channel,
+      key: route.key,
     }))
     .digest('hex')}`
 }

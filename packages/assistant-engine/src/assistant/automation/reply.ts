@@ -58,6 +58,7 @@ import {
   readAssistantAutoReplyCrossSessionContextCursor,
   writeAssistantAutoReplyCrossSessionContextCursor,
   type AssistantAutoReplyCrossSessionContextCursor,
+  type AssistantAutoReplyCrossSessionContextCursorRoute,
 } from './cross-session-context-cursor.js'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
@@ -157,8 +158,7 @@ interface AssistantAutoReplyReplyDecision {
 
 interface AssistantAutoReplySelectedCrossSessionContext
   extends AssistantAutoReplyCrossSessionContextCursor {
-  channel: string
-  deliveryTarget: string
+  route: AssistantAutoReplyCrossSessionContextCursorRoute
 }
 
 interface AssistantAutoReplyPrimaryInput {
@@ -1145,9 +1145,8 @@ async function evaluateAssistantAutoReplyGroup(input: {
     crossSessionContext: latestCrossSessionDelivery === null
       ? null
       : {
-          channel: latestCrossSessionDelivery.channel,
-          deliveryTarget: latestCrossSessionDelivery.deliveryTarget,
           intentId: latestCrossSessionDelivery.intentId,
+          route: latestCrossSessionDelivery.cursorRoute,
           sentAtMs: latestCrossSessionDelivery.sentAtMs,
         },
     kind: 'reply',
@@ -1493,9 +1492,8 @@ async function writeAssistantAutoReplyCrossSessionContextCursorIfNeeded(input: {
   // Do not retry a provider turn that already completed just because this
   // supporting local marker could not be written.
   await writeAssistantAutoReplyCrossSessionContextCursor({
-    channel: input.crossSessionContext.channel,
-    deliveryTarget: input.crossSessionContext.deliveryTarget,
     intentId: input.crossSessionContext.intentId,
+    route: input.crossSessionContext.route,
     sentAtMs: input.crossSessionContext.sentAtMs,
     vault: input.vault,
   }).catch(() => undefined)
@@ -3250,7 +3248,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   input: AssistantAutoReplyPrimaryInput
   session: AssistantSession | null
   vault: string
-}): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
+}): Promise<AssistantAutoReplyResolvedCrossSessionDelivery | null> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
   const inputTime = Date.parse(input.input.occurredAt)
@@ -3258,10 +3256,14 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     return null
   }
 
+  const cursorRoute = resolveAssistantAutoReplyCrossSessionContextCursorRoute({
+    channel,
+    conversation: input.input.conversation,
+    deliveryTarget,
+  })
   const latestInjectedDelivery =
     await readAssistantAutoReplyCrossSessionContextCursor({
-      channel,
-      deliveryTarget,
+      route: cursorRoute,
       vault: input.vault,
     })
   const matchingDeliveries = (
@@ -3283,7 +3285,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     return null
   }
 
-  return matchingDeliveries
+  const selected = matchingDeliveries
     .filter((delivery) =>
       (input.session === null || delivery.sessionId !== input.session.sessionId) &&
       (
@@ -3295,11 +3297,38 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       ),
     )
     .at(-1) ?? null
+  return selected === null ? null : { ...selected, cursorRoute }
+}
+
+function resolveAssistantAutoReplyCrossSessionContextCursorRoute(input: {
+  channel: string
+  conversation: AssistantInputConversationRef
+  deliveryTarget: string
+}): AssistantAutoReplyCrossSessionContextCursorRoute {
+  const conversation = conversationRefFromAssistantInputConversation(
+    input.conversation,
+  )
+  const threadId = normalizeNullableString(conversation.threadId)
+  if (input.channel === 'email' && threadId) {
+    const identityId = normalizeNullableString(conversation.identityId) ?? ''
+    return {
+      channel: input.channel,
+      key: `${input.channel}\0${identityId}\0thread:${threadId}`,
+    }
+  }
+
+  return {
+    channel: input.channel,
+    key: `${input.channel}\0${input.deliveryTarget}`,
+  }
+}
+
+interface AssistantAutoReplyResolvedCrossSessionDelivery
+  extends AssistantAutoReplyMatchingOutboxDelivery {
+  cursorRoute: AssistantAutoReplyCrossSessionContextCursorRoute
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
-  channel: string
-  deliveryTarget: string
   intentId: string
   message: string
   providerMessageIds: string[]
@@ -3353,8 +3382,6 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     }
 
     return [{
-      channel,
-      deliveryTarget,
       intentId: intent.intentId,
       message,
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(

@@ -17,6 +17,11 @@ import {
   readAssistantAutoReplyReceiptMetadata,
 } from './automation/auto-reply-retry.js'
 import {
+  readAssistantAutoReplyCrossSessionContextCursorRecordAtPath,
+  resolveAssistantAutoReplyCrossSessionContextCursorDirectory,
+  type AssistantAutoReplyCrossSessionContextCursorRecord,
+} from './automation/cross-session-context-cursor.js'
+import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
 } from './automation/evidence.js'
@@ -41,6 +46,7 @@ const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export interface AssistantRuntimeResiduePruneResult {
   acceptedTurnInputJournalsPruned: number
+  autoReplyCrossSessionContextCursorsPruned: number
   autoReplyEvidenceFilesPruned: number
   autoReplyEvidenceGroupsPruned: number
   autoReplyIntentProvenancePruned: number
@@ -72,6 +78,9 @@ interface EvidenceGroup {
 }
 
 interface AssistantRuntimeResidueInventory {
+  crossSessionContextCursors: Inventory<
+    PersistedRecord<AssistantAutoReplyCrossSessionContextCursorRecord>
+  >
   evidence: Inventory<EvidenceFile>
   inputEvents: Inventory<PersistedRecord<AssistantInputEventRecord>>
   journals: Inventory<PersistedRecord<AssistantAcceptedTurnInputJournal>>
@@ -81,6 +90,7 @@ interface AssistantRuntimeResidueInventory {
 }
 
 interface AssistantRuntimeResiduePrunePlan {
+  crossSessionContextCursorPaths: string[]
   evidenceGroups: EvidenceGroup[]
   inputEventPaths: string[]
   journalPaths: string[]
@@ -142,9 +152,15 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   for (const filePath of plan.provenancePaths) {
     await removeAssistantStateFile(filePath)
   }
+  for (const filePath of plan.crossSessionContextCursorPaths) {
+    await removeAssistantStateFile(filePath)
+  }
 
   await Promise.all([
     removeAssistantStateDirectoryIfEmpty(directories.acceptedTurnInputs),
+    removeAssistantStateDirectoryIfEmpty(
+      directories.crossSessionContextCursors,
+    ),
     removeAssistantStateDirectoryIfEmpty(directories.evidence),
     removeAssistantStateDirectoryIfEmpty(directories.inputEvents),
     removeAssistantStateDirectoryIfEmpty(directories.provenance),
@@ -152,6 +168,8 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
 
   return {
     acceptedTurnInputJournalsPruned: plan.journalPaths.length,
+    autoReplyCrossSessionContextCursorsPruned:
+      plan.crossSessionContextCursorPaths.length,
     autoReplyEvidenceFilesPruned: evidenceFilesPruned,
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
     autoReplyIntentProvenancePruned: plan.provenancePaths.length,
@@ -347,8 +365,18 @@ function planAssistantRuntimeResiduePrune(input: {
           .filter(({ record }) => !allOutboxIntentIds.has(record.intentId))
           .map(({ filePath }) => filePath)
       : []
+  const crossSessionContextCursorPaths =
+    input.inventory.outbox.trusted &&
+    input.inventory.crossSessionContextCursors.trusted
+      ? input.inventory.crossSessionContextCursors.records
+          .filter(({ record }) =>
+            !allOutboxIntentIds.has(record.latestInjectedDelivery.intentId),
+          )
+          .map(({ filePath }) => filePath)
+      : []
 
   return {
+    crossSessionContextCursorPaths,
     evidenceGroups: prunableEvidenceGroups,
     inputEventPaths: [...inputEventPaths],
     journalPaths,
@@ -506,23 +534,34 @@ async function readAssistantRuntimeResidueInventory(input: {
   paths: AssistantStatePaths
   vault: string
 }): Promise<AssistantRuntimeResidueInventory> {
-  const [evidence, inputEvents, journals, outbox, provenance, receipts] =
-    await Promise.all([
-      readEvidenceInventory(input.directories.evidence, input.vault),
-      readInputEventInventory(input.directories.inputEvents, input.paths),
-      readJsonInventory(
-        input.directories.acceptedTurnInputs,
-        (value) => assistantAcceptedTurnInputJournalSchema.parse(value),
-      ),
-      readOutboxInventory(input.paths.outboxDirectory, input.vault),
-      readProvenanceInventory(input.directories.provenance, input.vault),
-      readJsonInventory(
-        input.paths.turnsDirectory,
-        (value) => assistantTurnReceiptSchema.parse(value),
-      ),
-    ])
+  const [
+    crossSessionContextCursors,
+    evidence,
+    inputEvents,
+    journals,
+    outbox,
+    provenance,
+    receipts,
+  ] = await Promise.all([
+    readCrossSessionContextCursorInventory(
+      input.directories.crossSessionContextCursors,
+    ),
+    readEvidenceInventory(input.directories.evidence, input.vault),
+    readInputEventInventory(input.directories.inputEvents, input.paths),
+    readJsonInventory(
+      input.directories.acceptedTurnInputs,
+      (value) => assistantAcceptedTurnInputJournalSchema.parse(value),
+    ),
+    readOutboxInventory(input.paths.outboxDirectory, input.vault),
+    readProvenanceInventory(input.directories.provenance, input.vault),
+    readJsonInventory(
+      input.paths.turnsDirectory,
+      (value) => assistantTurnReceiptSchema.parse(value),
+    ),
+  ])
 
   return {
+    crossSessionContextCursors,
     evidence,
     inputEvents,
     journals,
@@ -530,6 +569,44 @@ async function readAssistantRuntimeResidueInventory(input: {
     provenance,
     receipts,
   }
+}
+
+async function readCrossSessionContextCursorInventory(
+  directory: string,
+): Promise<
+  Inventory<PersistedRecord<AssistantAutoReplyCrossSessionContextCursorRecord>>
+> {
+  const records: Array<
+    PersistedRecord<AssistantAutoReplyCrossSessionContextCursorRecord>
+  > = []
+  let trusted = true
+
+  for (const entry of await readDirectoryEntries(directory)) {
+    if (!entry.name.endsWith('.json')) {
+      continue
+    }
+    if (!entry.isFile()) {
+      trusted = false
+      continue
+    }
+
+    const filePath = path.join(directory, entry.name)
+    try {
+      const record =
+        await readAssistantAutoReplyCrossSessionContextCursorRecordAtPath(
+          filePath,
+        )
+      if (!record) {
+        trusted = false
+        continue
+      }
+      records.push({ filePath, record })
+    } catch {
+      trusted = false
+    }
+  }
+
+  return { records, trusted }
 }
 
 async function readEvidenceInventory(
@@ -726,6 +803,8 @@ async function readJsonInventory<T>(
 function resolveAssistantRuntimeResidueDirectories(paths: AssistantStatePaths) {
   return {
     acceptedTurnInputs: path.join(paths.stateDirectory, 'accepted-turn-inputs'),
+    crossSessionContextCursors:
+      resolveAssistantAutoReplyCrossSessionContextCursorDirectory(paths),
     evidence: path.join(paths.assistantStateRoot, 'auto-reply', 'evidence'),
     inputEvents: resolveAssistantInputEventsDirectory(paths),
     provenance: path.join(

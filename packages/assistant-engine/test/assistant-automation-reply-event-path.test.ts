@@ -74,6 +74,20 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 const AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY =
   'autoReplyCrossSessionContextIntentId'
 
+function createEmailCrossSessionCursorRoute(input?: {
+  identityId?: string | null
+  threadId?: string
+}) {
+  const identityId = input?.identityId === undefined
+    ? 'identity-1'
+    : input.identityId ?? ''
+  const threadId = input?.threadId ?? 'thread-1'
+  return {
+    channel: 'email',
+    key: `email\0${identityId}\0thread:${threadId}`,
+  }
+}
+
 beforeEach(() => {
   replyEventPathMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
   replyEventPathMocks.listAssistantTranscriptEntries
@@ -341,8 +355,7 @@ describe('assistant auto-reply event-first path', () => {
         'intent-cross-session',
     }))
     await expect(readAssistantAutoReplyCrossSessionContextCursor({
-      channel: 'email',
-      deliveryTarget: 'thread-1',
+      route: createEmailCrossSessionCursorRoute(),
       vault,
     })).resolves.toEqual({
       intentId: 'intent-cross-session',
@@ -555,6 +568,16 @@ describe('assistant auto-reply event-first path', () => {
       subject: 'Thread context',
       to: ['assistant@example.test'],
     })
+    const nextInboundTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<next-reply-email-message@example.test>',
+      references: [
+        '<root-email-message@example.test>',
+        '<sent-email-message@example.test>',
+        '<reply-email-message@example.test>',
+      ],
+      subject: 'Thread context',
+      to: ['assistant@example.test'],
+    })
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -599,14 +622,43 @@ describe('assistant auto-reply event-first path', () => {
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput.deliveryTarget).toBe(inboundTarget)
     expect(sendInput.turnContext).toContain('serialized target context')
+
+    replyEventPathMocks.sendAssistantMessage.mockClear()
+    const nextCandidate = createAssistantInputCandidate({
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-04-08T00:11:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'email',
+        messageId: '<next-reply-email-message@example.test>',
+        threadId: nextInboundTarget,
+      },
+      source: 'email',
+      text: 'Following up again',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(nextCandidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const nextSendInput =
+      replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(nextSendInput.deliveryTarget).toBe(nextInboundTarget)
+    expect(nextSendInput).not.toHaveProperty('turnContext')
   })
 
   it('does not repeat cross-session context after the route cursor records it', async () => {
     const vault = await createTempVault()
     await writeAssistantAutoReplyCrossSessionContextCursor({
-      channel: 'email',
-      deliveryTarget: 'thread-1',
       intentId: 'intent-already-seen',
+      route: createEmailCrossSessionCursorRoute(),
       sentAtMs: Date.parse('2026-04-08T00:05:00.000Z'),
       vault,
     })
@@ -656,9 +708,8 @@ describe('assistant auto-reply event-first path', () => {
   it('uses cursor context suppression in hosted queue-only mode without terminal receipt fallback', async () => {
     const vault = await createTempVault()
     await writeAssistantAutoReplyCrossSessionContextCursor({
-      channel: 'email',
-      deliveryTarget: 'thread-1',
       intentId: 'intent-queue-context',
+      route: createEmailCrossSessionCursorRoute(),
       sentAtMs: Date.parse('2026-04-08T00:05:00.000Z'),
       vault,
     })
