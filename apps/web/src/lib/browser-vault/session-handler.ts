@@ -40,6 +40,7 @@ export function createBrowserVaultSessionRoute(input: {
     prisma: PrismaClient;
   }) => Promise<void>;
   requireActiveAccess: boolean;
+  requireFreshReplica?: boolean;
 }) {
   return withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
@@ -64,13 +65,41 @@ export function createBrowserVaultSessionRoute(input: {
       body.knownReplicaRef ?? null,
       "Browser vault session request knownReplicaRef",
     );
-    await input.authorize?.({ auth, body, prisma });
     const [workspace, deviceSyncImportPending] = await Promise.all([
       readHostedWorkspace({ userId: auth.member.id }),
       new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
         auth.member.id,
       ).catch(() => false),
     ]);
+
+    if (input.requireFreshReplica) {
+      const candidateReplicaRef = parseHostedBrowserVaultReplicaRef(
+        workspace?.browserVaultReplicaRef ?? null,
+        "Hosted browser vault session workspace replica ref",
+      );
+      const candidateFreshness = assessBrowserVaultReplicaFreshness({
+        now: new Date().toISOString(),
+        replicaRef: candidateReplicaRef,
+      });
+      const isFresh =
+        candidateReplicaRef !== null
+        && candidateFreshness.freshness === "fresh"
+        && !candidateFreshness.shouldRefresh
+        && !deviceSyncImportPending;
+      if (!isFresh) {
+        scheduleAfterResponseOrFireAndForget(() =>
+          scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
+        );
+        throw hostedOnboardingError({
+          code: "BROWSER_VAULT_SESSION_NOT_FRESH",
+          httpStatus: 409,
+          message: "Your vault is still being prepared. Try the export again in a moment.",
+          retryable: true,
+        });
+      }
+    }
+
+    await input.authorize?.({ auth, body, prisma });
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       workspace?.browserVaultReplicaRef ?? null,
       "Hosted browser vault session workspace replica ref",

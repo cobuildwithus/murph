@@ -432,6 +432,10 @@ function formatVaultExportError(error: unknown): string {
     return error.message;
   }
 
+  if (/BROWSER_VAULT_SESSION_NOT_FRESH/u.test(error.message)) {
+    return "Your vault is still being prepared. Try the export again in a moment.";
+  }
+
   if (/HTTP 401/u.test(error.message)) {
     return "Your session expired. Refresh and try again.";
   }

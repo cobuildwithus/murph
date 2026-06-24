@@ -220,7 +220,25 @@ describe("browser vault session route", () => {
 
   it("uses authenticated privacy access, not active billing access, for Settings vault export sessions", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
 
     const response = await settingsVaultExportSessionRoute.POST(
@@ -252,13 +270,32 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
       privyUserId: "privy-user-123",
     });
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses Settings vault export sessions before consuming the challenge when the replica is not fresh", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
-      encryptedReplica: null,
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
+      error: {
+        code: "BROWSER_VAULT_SESSION_NOT_FRESH",
+        retryable: true,
+      },
     });
   });
 

@@ -20,4 +20,5 @@ export const POST = createBrowserVaultSessionRoute({
     });
   },
   requireActiveAccess: false,
+  requireFreshReplica: true,
 });
