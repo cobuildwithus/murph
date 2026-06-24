@@ -11,6 +11,8 @@ import { ComputerHandoffActiveView } from "@/src/components/computer-use/compute
 
 import { renderClientComponent } from "./render-client-component";
 
+const DONE_ENDPOINT = "/api/computer/handoff/handoff-token/done";
+
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -25,16 +27,12 @@ afterEach(async () => {
   }
 });
 
-test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
-  let resolveFetch!: (response: Response) => void;
-  const fetchPromise = new Promise<Response>((resolve) => {
-    resolveFetch = resolve;
-  });
-  vi.mocked(fetch).mockReturnValue(fetchPromise);
+test("ComputerHandoffActiveView renders the live view iframe immediately", async () => {
+  vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
-  const { button, cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read; clipboard-write",
       liveViewUrl: "https://browser.example.test/live",
     }),
@@ -50,13 +48,33 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
     "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals",
   );
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
+test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
+  let resolveDone!: (response: Response) => void;
+  const donePromise = new Promise<Response>((resolve) => {
+    resolveDone = resolve;
+  });
+  vi.mocked(fetch).mockReturnValue(donePromise);
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: DONE_ENDPOINT,
+      iframeAllow: "clipboard-read",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe);
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   await flushReact();
 
-  expect(fetch).toHaveBeenCalledWith("/api/computer/handoff/handoff-token/done", {
+  expect(fetch).toHaveBeenCalledWith(DONE_ENDPOINT, {
     method: "POST",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
@@ -68,11 +86,11 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(container.querySelector("iframe")).toBe(iframe);
 
   await act(async () => {
-    resolveFetch(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
+    resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
       headers: { "content-type": "application/json" },
       status: 200,
     }));
-    await fetchPromise;
+    await donePromise;
     await flushMicrotasks();
   });
 
@@ -205,7 +223,7 @@ test.each([
 
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read",
       liveViewUrl: "https://browser.example.test/live",
     }),

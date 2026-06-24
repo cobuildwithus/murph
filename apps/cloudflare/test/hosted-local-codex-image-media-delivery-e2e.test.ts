@@ -135,6 +135,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
+      connectedAppsAvailable: true,
     });
   }, 300_000);
 });
