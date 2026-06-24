@@ -25,8 +25,8 @@ import {
 } from "@murphai/core";
 import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
-const INBOX_MEDIA_RETENTION_DAYS = 14;
-const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+export const INBOX_MEDIA_RETENTION_DAYS = 14;
+export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
 const RETAINABLE_INBOX_MEDIA_KINDS = new Set<InboxCaptureAttachmentRecord["kind"]>([

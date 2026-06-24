@@ -22,7 +22,7 @@ import {
 import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const idleMaintenanceMock = vi.hoisted(() => vi.fn());
 vi.mock("../src/hosted-runtime/idle-maintenance.ts", async (importOriginal) => {
@@ -43,7 +43,9 @@ import {
 } from "../src/hosted-runtime/pending-input-index.ts";
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
-const CAPTURE_RECORDED_AT = "2026-04-01T00:00:00.000Z";
+// Within 14 days of TEST_NOW so the round-36 pending-input age cap does not
+// drop the protection that this test is meant to assert is forwarded.
+const CAPTURE_RECORDED_AT = "2026-04-20T00:00:00.000Z";
 const TEST_USER_ID = "member_retention_protected";
 
 beforeEach(() => {
@@ -53,6 +55,16 @@ beforeEach(() => {
     reason: "pending_work",
     threadContextTokensBefore: null,
   });
+  // Pin clock inside the 14-day retention window from CAPTURE_RECORDED_AT so
+  // the round-36 age cap on pending-input protections (added to prevent stuck
+  // inputs from pinning media past the privacy window) does not drop the
+  // protection that this test asserts is forwarded.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(TEST_NOW));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("runHostedPendingInputProtectedIdleMaintenance", () => {

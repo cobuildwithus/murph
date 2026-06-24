@@ -1049,8 +1049,14 @@ describe("hosted workspace runtime entrypoint", () => {
         inputId: pendingInput.inputId,
         vaultRoot,
       });
+      // Pin the protection-collection clock inside the 14-day window from
+      // recordedAt — the round-36 age cap drops protection for inputs older
+      // than the retention window, but the test's purpose is to demonstrate
+      // the protection IS collected when the input is fresh; the broader
+      // wipe-vs-retention interaction is what the surrounding flow exercises.
       assert.deepEqual(
         await collectHostedPendingAssistantInputMediaRetentionProtections({
+          now: "2026-04-10T00:00:00.000Z",
           vaultRoot,
         }),
         {

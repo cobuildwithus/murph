@@ -15,6 +15,7 @@ import {
   readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
+import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd";
 import {
   readVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
@@ -79,6 +80,7 @@ export async function readExistingHostedPendingAssistantInputIds(input: {
 }
 
 export async function collectHostedPendingAssistantInputMediaRetentionProtections(input: {
+  now?: Date | string;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputMediaRetentionProtections> {
   const inputIds = await compactHostedPendingAssistantInputIds({
@@ -87,6 +89,8 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
   const protectedAttachmentIds = new Set<string>();
   const protectedCaptureIds = new Set<string>();
   const protectedStoredPaths = new Set<string>();
+  const protectionCutoffMs =
+    resolveCollectionNowMs(input.now) - INBOX_MEDIA_RETENTION_WINDOW_MS;
 
   for (const inputId of inputIds) {
     const event = await readAssistantInputEvent({
@@ -94,6 +98,19 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
       vault: input.vaultRoot,
     });
     if (!event) {
+      continue;
+    }
+
+    // A pending assistant input must not pin its referenced raw media past
+    // the 14-day inbox-media retention window. Without this cap, an input
+    // that never produces terminal evidence — AI-denied user who never
+    // upgrades, a churned account, a transient failure that never recovers
+    // — would silently extend retention forever. Use the same window
+    // constant as the retention sweep so the two cannot drift.
+    if (isHostedPendingAssistantInputOlderThanRetention({
+      cutoffMs: protectionCutoffMs,
+      event,
+    })) {
       continue;
     }
 
@@ -125,6 +142,35 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
     protectedCaptureIds: [...protectedCaptureIds].sort(),
     protectedStoredPaths: [...protectedStoredPaths].sort(),
   };
+}
+
+function isHostedPendingAssistantInputOlderThanRetention(input: {
+  cutoffMs: number;
+  event: AssistantInputEventRecord;
+}): boolean {
+  // Prefer receivedAt — when the system became responsible for the input —
+  // and fall back to occurredAt for older records that pre-date receivedAt.
+  // Missing/invalid timestamps fail closed (protection drops) so a corrupt
+  // record can never silently extend privacy retention.
+  const timestamp = input.event.receivedAt ?? input.event.occurredAt;
+  const timestampMs = Date.parse(timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return true;
+  }
+  return timestampMs <= input.cutoffMs;
+}
+
+function resolveCollectionNowMs(value: Date | string | undefined): number {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Date.now();
 }
 
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
