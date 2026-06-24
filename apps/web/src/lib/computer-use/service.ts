@@ -27,6 +27,7 @@ import {
   type ComputerRunRecord,
   type ComputerUseStore,
 } from "./store";
+import type { ComputerBrowserViewportPreset } from "./viewport";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
@@ -691,6 +692,38 @@ export class ComputerUseService {
       purpose: handoff.purpose,
       suggestedReply: handoff.suggestedReply,
     };
+  }
+
+  async ensureHandoffViewport(input: {
+    memberId: string;
+    preset: ComputerBrowserViewportPreset;
+    token: string;
+  }): Promise<void> {
+    await this.store.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    const handoff = await this.store.requireHandoffByTokenHash({
+      tokenHash: sha256Hex(input.token),
+    });
+
+    assertHandoffOwnedByMember(handoff, input.memberId);
+    assertOpenFreshHandoff(handoff, this.now());
+
+    const run = await this.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: handoff.runId,
+    });
+    if (run.status !== "awaiting_user" || run.pendingHandoffId !== handoff.id) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
+        message: "Computer handoff is no longer open.",
+      });
+    }
+
+    await this.requireKernel().ensureBrowserViewport({
+      preset: input.preset,
+      sessionId: requireKernelSessionId(run),
+    });
   }
 
   async completeHandoff(input: {

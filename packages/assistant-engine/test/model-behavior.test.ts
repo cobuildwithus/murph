@@ -295,6 +295,18 @@ describe('assistant execution prompt contract', () => {
       'A successful `murph.computer_pause_for_user` call stores the checkpoint and may return a `handoffUrl`; it does not send a user-visible message. Use the normal final response when the user still needs context or a handoff URL, and finish without reply when no additional user-visible message is useful.',
     )
     expect(prompt).toContain(
+      'first navigate the browser to the exact form, page, or modal the user must complete',
+    )
+    expect(prompt).toContain(
+      'The returned `handoffUrl` is bound to a single pause/checkpoint.',
+    )
+    expect(prompt).toContain(
+      'call `murph.computer_pause_for_user` again with the appropriate `handoffPurpose` and include the NEW `handoffUrl` in the reply. Do not tell the user to reopen an earlier link.',
+    )
+    expect(prompt).toContain(
+      'lead the new handoff with a one-line reassurance that this should be a one-time setup',
+    )
+    expect(prompt).toContain(
       'say the handoff link is secure or private, tell the user not to send passwords or card details in chat',
     )
     expect(prompt).toContain(
@@ -304,12 +316,16 @@ describe('assistant execution prompt contract', () => {
       'Do not imply Murph stores raw credentials or card numbers.',
     )
     expect(prompt).toContain(
+      'For repeat action tasks such as reordering supplements or products, booking or rescheduling with a known provider, or using a known portal, run `vault-cli memory show` when saved preferences could materially change the site, product, provider, delivery, or scheduling choice.',
+    )
+    expect(prompt).toContain(
       'call `murph.computer_start_run` normally',
     )
     expect(prompt).toContain(
       'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
+    expect(prompt).toContain('standing instruction')
     expect(prompt).toContain(
       'Do not create a memory record for routine success',
     )
@@ -1156,13 +1172,19 @@ Execution context:
       'If the exact Murph welcome is visible in this same thread and the user\'s latest message is a short acceptance',
     )
     expect(prompt).toContain(
-      'no broad vault resume check is needed, and the next step is the name/context question unless the visible thread already answers it.',
+      'no broad vault resume check is needed, and the next step is the name plus optional age/gender question unless the visible thread already answers it.',
     )
     expect(prompt).toContain(
-      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded resume check before sending the onboarding welcome or asking the next onboarding question',
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make the bounded resume check defined by the onboarding skill before sending the onboarding welcome or asking the next onboarding question',
     )
     expect(prompt).toContain(
-      'Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+      'run `vault-cli assistant onboarding resume-context --format json`',
+    )
+    expect(prompt).toContain(
+      'Treat saved facts from that snapshot as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+    )
+    expect(prompt).toContain(
+      'Do not fan this resume check out into separate setup-surface commands unless the resume-context command is unavailable or returns an error for the specific surface you still need.',
     )
     expect(prompt).toContain(
       'If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.',

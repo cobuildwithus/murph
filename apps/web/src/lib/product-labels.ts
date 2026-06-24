@@ -223,6 +223,7 @@ export function createProductLabelsQueries(
   options: {
     brandScoping?: boolean;
     genericSearch?: ProductLabelGenericSearchOptions;
+    weakQueryTokens?: readonly string[];
   } = {},
 ): ProductLabelsQueries {
   const tableSql = productLabelsTableSql(table);
@@ -234,6 +235,11 @@ export function createProductLabelsQueries(
   // name.
   const brandScoping = options.brandScoping ?? false;
   const genericSearchDataOrigins = options.genericSearch?.dataOrigins ?? null;
+  const weakQueryTokens = new Set(
+    (options.weakQueryTokens ?? [])
+      .map((token) => normalizeProductLabelSearchPhrase(token))
+      .filter((token) => token.length > 0 && !token.includes(" ")),
+  );
   let brandIndexCache: ProductLabelBrandIndexCache | null = null;
 
   async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
@@ -344,6 +350,7 @@ export function createProductLabelsQueries(
 
     async search(input) {
       const q = input.q.trim();
+      const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
       const genericOnly =
         input.genericOnly === true && genericSearchDataOrigins !== null;
 
@@ -357,8 +364,9 @@ export function createProductLabelsQueries(
         if (brandScopes.length > 0) {
           const rows = await searchBrandScopedProductLabels(client, tableSql, {
             ...input,
-            q,
             brandScopes,
+            productQ: buildBrandScopedProductLabelQuery(searchQ, brandScopes),
+            q: searchQ,
           });
 
           return await attachProductContaminantSummaries(client, tableSql, rows);
@@ -371,7 +379,7 @@ export function createProductLabelsQueries(
           genericOnly && genericSearchDataOrigins
             ? genericSearchDataOrigins
             : null,
-        q,
+        q: searchQ,
       });
 
       return await attachProductContaminantSummaries(client, tableSql, rows);
@@ -1118,7 +1126,7 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
-            strict_word_similarity(name, query.raw_q) AS name_similarity,
+            strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
               WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
               ELSE 0
@@ -1146,7 +1154,7 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             0::real AS search_rank,
-            strict_word_similarity(name, query.raw_q) AS name_similarity,
+            strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
               WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
               ELSE 0
@@ -1245,6 +1253,7 @@ async function searchBrandScopedProductLabels(
     includeOffMarket: boolean;
     limit: number;
     q: string;
+    productQ: string;
   },
 ): Promise<ProductLabelSearchRow[]> {
   const { rows } = await client.query<ProductLabelSearchRow>(
@@ -1252,7 +1261,7 @@ async function searchBrandScopedProductLabels(
     WITH query AS (
       SELECT
         $1::text AS raw_q,
-        btrim(regexp_replace(replace(lower($1::text), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_q,
+        $5::text AS product_q,
         websearch_to_tsquery('simple', $1) AS tsq
     ),
     brand_candidates AS MATERIALIZED (
@@ -1268,8 +1277,7 @@ async function searchBrandScopedProductLabels(
         label,
         data_origin_priority,
         search_text,
-        btrim(regexp_replace(replace(lower(name), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_name,
-        btrim(regexp_replace(replace(lower(brand), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_brand
+        btrim(regexp_replace(replace(lower(name), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_name
       FROM ${tableSql}
       WHERE
         brand = ANY($4::text[])
@@ -1280,9 +1288,8 @@ async function searchBrandScopedProductLabels(
       SELECT
         brand_candidates.*,
         query.raw_q,
-        query.normalized_q,
         query.tsq,
-        btrim(replace(' ' || normalized_q || ' ', ' ' || normalized_brand || ' ', ' ')) AS product_q
+        query.product_q
       FROM brand_candidates, query
     ),
     product_scored AS (
@@ -1293,8 +1300,8 @@ async function searchBrandScopedProductLabels(
           ELSE ts_rank_cd(to_tsvector('simple', search_text), websearch_to_tsquery('simple', product_q))
         END AS search_rank,
         CASE
-          WHEN product_q = '' THEN strict_word_similarity(name, raw_q)
-          ELSE strict_word_similarity(name, product_q)
+          WHEN product_q = '' THEN strict_word_similarity(raw_q, name)
+          ELSE strict_word_similarity(product_q, name)
         END AS name_similarity,
         CASE
           WHEN strpos(' ' || product_q || ' ', ' ' || normalized_name || ' ') > 0 THEN 1
@@ -1308,7 +1315,7 @@ async function searchBrandScopedProductLabels(
           WHEN product_q = '' THEN 1
           WHEN strpos(normalized_name, product_q) > 0 THEN 1
           WHEN strpos(product_q, normalized_name) > 0 THEN 1
-          WHEN strict_word_similarity(name, product_q) >= 0.55 THEN 1
+          WHEN strict_word_similarity(product_q, name) >= 0.55 THEN 1
           WHEN similarity(name, product_q) >= 0.30 THEN 1
           ELSE 0
         END AS product_identity_match
@@ -1358,6 +1365,7 @@ async function searchBrandScopedProductLabels(
       input.includeOffMarket,
       input.limit,
       input.brandScopes.map((scope) => scope.brand),
+      input.productQ,
     ],
   );
 
@@ -1409,12 +1417,22 @@ function findProductLabelBrandScopes(
   }
 
   const matches = brandIndex
-    .filter((entry) => containsNormalizedPhrase(normalizedQ, entry.normalizedBrand))
+    .filter(
+      (entry) =>
+        containsNormalizedPhrase(normalizedQ, entry.normalizedBrand) ||
+        containsNormalizedTokenPermutation(normalizedQ, entry.normalizedBrand),
+    )
     .sort(
       (left, right) =>
         right.normalizedBrand.length - left.normalizedBrand.length ||
         left.brand.localeCompare(right.brand),
     );
+
+  const reorderedMatches = matches.filter(
+    (entry) =>
+      !containsNormalizedPhrase(normalizedQ, entry.normalizedBrand) &&
+      containsNormalizedTokenPermutation(normalizedQ, entry.normalizedBrand),
+  );
 
   const directScopes = matches.filter((entry) => {
     const isSingleWordBrand = !entry.normalizedBrand.includes(" ");
@@ -1451,7 +1469,22 @@ function findProductLabelBrandScopes(
             !hasLongerContainingBrandMatch(matches, entry),
         )
       : [];
-  const scopedDirectMatches = [...directScopes, ...ambiguousSingleWordScopes];
+  const lineScopeRoots = [...directScopes, ...ambiguousSingleWordScopes];
+  const lineScopeRootSet = new Set(lineScopeRoots.map((entry) => entry.brand));
+
+  // When a multiword catalog brand is typed in a different token order, also
+  // include a shorter catalog parent that appears in that alias. This lets an
+  // official parent-brand row compete with a source-specific alias without
+  // broadening ordinary exact brand searches to every substring brand.
+  const reorderedParentScopes = matches.filter(
+    (entry) =>
+      !lineScopeRootSet.has(entry.brand) &&
+      reorderedMatches.some((scope) =>
+        scope.normalizedBrand.startsWith(`${entry.normalizedBrand} `),
+      ),
+  );
+
+  const scopedDirectMatches = [...lineScopeRoots, ...reorderedParentScopes];
 
   // Queries often name the parent brand while products are stored under a
   // sub-brand line (e.g. "Garden of Life Organics ..." rows live under
@@ -1463,7 +1496,7 @@ function findProductLabelBrandScopes(
     .filter(
       (entry) =>
         !scopedBrands.has(entry.brand) &&
-        scopedDirectMatches.some((scope) =>
+        lineScopeRoots.some((scope) =>
           entry.normalizedBrand.startsWith(`${scope.normalizedBrand} `),
         ),
     )
@@ -1523,8 +1556,101 @@ function countQueryTokenOverlap(
   return count;
 }
 
+function buildBrandScopedProductLabelQuery(
+  q: string,
+  brandScopes: ProductLabelBrandIndexEntry[],
+): string {
+  const normalizedQ = normalizeProductLabelSearchPhrase(q);
+
+  if (!normalizedQ) {
+    return "";
+  }
+
+  const queryTokenList = normalizedQ.split(" ");
+  const queryTokens = new Set(queryTokenList);
+  const bestScope = [...brandScopes].sort(
+    (left, right) =>
+      countQueryTokenOverlap(right, queryTokens) -
+        countQueryTokenOverlap(left, queryTokens) ||
+      right.normalizedBrand.length - left.normalizedBrand.length ||
+      left.brand.localeCompare(right.brand),
+  )[0];
+
+  if (!bestScope) {
+    return normalizedQ;
+  }
+
+  const brandTokens = new Set(bestScope.normalizedBrand.split(" "));
+
+  return queryTokenList
+    .filter((token) => !brandTokens.has(token))
+    .join(" ");
+}
+
+function removeWeakProductLabelQueryTokens(
+  q: string,
+  weakQueryTokens: ReadonlySet<string>,
+): string {
+  if (weakQueryTokens.size === 0) {
+    return q;
+  }
+
+  const normalizedQ = normalizeProductLabelSearchPhrase(q);
+
+  if (!normalizedQ) {
+    return q;
+  }
+
+  const queryTokens = normalizedQ.split(" ");
+  const strongQueryTokens = queryTokens.filter(
+    (token) => !weakQueryTokens.has(token),
+  );
+
+  if (
+    strongQueryTokens.length === 0 ||
+    strongQueryTokens.length === queryTokens.length
+  ) {
+    return q;
+  }
+
+  return strongQueryTokens.join(" ");
+}
+
 function containsNormalizedPhrase(haystack: string, needle: string): boolean {
   return needle.length > 0 && ` ${haystack} `.includes(` ${needle} `);
+}
+
+function containsNormalizedTokenPermutation(
+  haystack: string,
+  needle: string,
+): boolean {
+  const needleTokens = needle.split(" ");
+
+  // Two-word permutations collide too easily with product and ingredient
+  // phrases; reserve this alias fallback for more specific brand identities.
+  if (needleTokens.length < 3) {
+    return false;
+  }
+
+  const haystackTokens = haystack.split(" ");
+  const needleSignature = [...needleTokens].sort().join("\u0000");
+
+  for (
+    let index = 0;
+    index <= haystackTokens.length - needleTokens.length;
+    index += 1
+  ) {
+    const windowSignature = haystackTokens
+      .slice(index, index + needleTokens.length)
+      .sort()
+      .join("\u0000");
+
+    if (windowSignature === needleSignature) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function containsNormalizedEdgePhrase(haystack: string, needle: string): boolean {
