@@ -1719,12 +1719,12 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("uses active-user-fence proof for tokenless Linq provider egress", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+  it("does not use active-user-fence proof for tokenless Linq provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
-      userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Linq should require provider-token proof when authority headers are absent.");
+    });
     const env = createInterceptEnv({
       LINQ_API_TOKEN: "linq-worker-secret",
       readActiveRuntimeUserFence: async () => ({
@@ -1749,19 +1749,113 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "member_123--v-version_1" },
     );
 
-    expect(response.status).toBe(200);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "linq",
-          providerRequestAuthorized: true,
-          writeFenceValidationMode: "active_user_fence",
+          providerRequestAuthorized: false,
+          writeFenceValidationMode: "provider_egress_token",
+          writeFenceValidationRejectReason: "provider_egress_token_missing",
         }),
         message: "Hosted runner provider egress completed.",
       }),
+    );
+  });
+
+  async function expectTokenlessDeliveryProviderRejected(
+    request: Request,
+    envOverrides: Record<string, unknown>,
+  ): Promise<void> {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error(
+        "Delivery providers must require provider-token proof when authority headers are absent.",
+      );
+    });
+    const env = createInterceptEnv({
+      ...envOverrides,
+      readActiveRuntimeUserFence: async () => ({
+        active: true,
+        attemptId: "attempt-1",
+        leaseGeneration: "1",
+        userId: "member_123",
+      }),
+      validateActiveRuntimeWriteFence,
+    });
+    env.CF_VERSION_METADATA = { id: "version_1" };
+
+    const response = await hostedRunnerIntercept(
+      request,
+      env,
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  }
+
+  it("does not use active-user-fence proof for tokenless Telegram provider egress", async () => {
+    await expectTokenlessDeliveryProviderRejected(
+      new Request(
+        `https://api.telegram.org/bot${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/sendMessage`,
+        {
+          body: JSON.stringify({ chat_id: "1", text: "spoof" }),
+          headers: {
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      { TELEGRAM_BOT_TOKEN: "telegram-worker-secret" },
+    );
+  });
+
+  it("does not use active-user-fence proof for tokenless WhatsApp provider egress", async () => {
+    await expectTokenlessDeliveryProviderRejected(
+      new Request(
+        `https://graph.facebook.com/v22.0/${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/messages`,
+        {
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: "1",
+            text: { body: "spoof" },
+          }),
+          headers: {
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+            authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      {
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_id",
+      },
+    );
+  });
+
+  it("does not use active-user-fence proof for tokenless ElevenLabs provider egress", async () => {
+    await expectTokenlessDeliveryProviderRejected(
+      new Request(
+        "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        {
+          body: JSON.stringify({ text: "spoof", model_id: "eleven_turbo_v2_5" }),
+          headers: {
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+            "content-type": "application/json; charset=utf-8",
+            "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      { ELEVENLABS_API_KEY: "elevenlabs-worker-secret" },
     );
   });
 
