@@ -160,6 +160,7 @@ async function readDenseRawRetentionMailboxItem(vaultRoot = FIXED_MAINTENANCE_VA
   const state = await readHostedSystemMailboxState(vaultRoot);
   return state.pending.find((item) =>
     item.mailboxDedupeKey === DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY
+    && item.status === "pending"
   ) ?? null;
 }
 

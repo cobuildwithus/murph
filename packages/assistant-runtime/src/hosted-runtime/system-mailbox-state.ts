@@ -38,7 +38,7 @@ const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
 const HOSTED_SYSTEM_MAILBOX_STATE_LABEL = "hosted system mailbox state";
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS = HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT;
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS = 500;
-const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID =
+const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID_PREFIX =
   "system_mailbox_item_device_sync_dense_raw_retention";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
   "device-sync.wake:dense-raw-retention";
@@ -163,16 +163,14 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
   vaultRoot: string;
 }): Promise<void> {
   if (!input.nextWakeAt) {
-    await removeHostedSystemMailboxPendingItem({
-      itemId: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID,
-      vaultRoot: input.vaultRoot,
-    });
+    await removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(input.vaultRoot);
     return;
   }
 
   const occurredAt = (input.now ?? (() => new Date().toISOString()))();
+  const itemId = resolveHostedDeviceSyncDenseRawRetentionMailboxItemId(input.nextWakeAt);
   const wake: HostedExecutionSystemWake = {
-    eventId: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY,
+    eventId: itemId,
     kind: "device-sync.wake",
     occurredAt,
     reason: "reconcile_due",
@@ -180,7 +178,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
   };
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
-    itemId: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID,
+    itemId,
     lastAttemptAt: null,
     lastErrorCode: null,
     lastErrorMessage: null,
@@ -194,10 +192,37 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     wake,
   };
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: state.pending.some((item) => item.itemId === nextItem.itemId)
-      ? state.pending.map((item) => item.itemId === nextItem.itemId ? nextItem : item)
-      : [...state.pending, nextItem],
+    pending: [
+      ...state.pending.filter((item) =>
+        !isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+      ),
+      nextItem,
+    ],
   }));
+}
+
+async function removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(
+  vaultRoot: string,
+): Promise<void> {
+  await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+    pending: state.pending.filter((item) =>
+      !isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+    ),
+  }));
+}
+
+function resolveHostedDeviceSyncDenseRawRetentionMailboxItemId(nextWakeAt: string): string {
+  return `${HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID_PREFIX}_${
+    Buffer.from(nextWakeAt, "utf8").toString("base64url")
+  }`;
+}
+
+function isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.status === "pending"
+    && item.routeAction === "run-device-sync-wake"
+    && item.mailboxDedupeKey === HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY;
 }
 
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
