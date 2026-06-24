@@ -4,6 +4,7 @@ import { CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import type {
   HostedActionApprovalDecisionResponse,
@@ -15,6 +16,9 @@ import { cn } from "@/src/lib/utils";
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 type Submission = "approving" | "denying" | "returning" | null;
+
+const APPROVAL_CAVEAT =
+  "This approval is bound to this exact request. Murph must ask again if the action changes.";
 
 export function ActionApprovalCard({
   approval,
@@ -76,69 +80,58 @@ export function ActionApprovalCard({
   const busy = submission !== null;
   const primaryLabel = authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
+  const surfacedError = error ?? authorization.setup.error;
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-8 text-foreground sm:px-6">
-      <section className="mx-auto flex min-h-[78vh] max-w-xl flex-col justify-center">
-        <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-background">
-            <ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />
-          </span>
-          <p className="mt-6 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-            Secure approval
-          </p>
-          <h1 className="mt-3 font-serif text-3xl leading-tight text-balance">
-            {approval.presentation.title}
-          </h1>
-          <p className="mt-4 break-words text-sm leading-6 text-muted-foreground text-pretty">
-            {approval.presentation.body}
-          </p>
+    <ActionApprovalScreen
+      badgeIcon={ShieldCheck}
+      body={
+        <p className="break-words text-sm leading-6 text-muted-foreground text-pretty">
+          {approval.presentation.body}
+        </p>
+      }
+      caveat={APPROVAL_CAVEAT}
+      title={approval.presentation.title}
+    >
+      {surfacedError ? (
+        <p className="mt-5 text-sm text-destructive" role="alert">
+          {surfacedError}
+        </p>
+      ) : null}
 
-          <p className="mt-5 text-xs leading-5 text-muted-foreground">
-            This approval is bound to this exact request. Murph must ask again if the action changes.
-          </p>
+      <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+        <Button
+          className="w-full sm:w-auto"
+          disabled={busy}
+          onClick={approve}
+          size="lg"
+          type="button"
+        >
+          <CheckCircle2 aria-hidden="true" />
+          {primaryLabel}
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
+          disabled={busy}
+          onClick={deny}
+          size="lg"
+          type="button"
+          variant="outline"
+        >
+          <XCircle aria-hidden="true" />
+          {submission === "denying" ? "Denying…" : "Deny"}
+        </Button>
+      </div>
 
-          {error || authorization.setup.error ? (
-            <p className="mt-5 text-sm text-destructive" role="alert">
-              {error ?? authorization.setup.error}
-            </p>
-          ) : null}
-
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-            <Button
-              className="w-full sm:w-auto"
-              disabled={busy}
-              onClick={approve}
-              size="lg"
-              type="button"
-            >
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              {primaryLabel}
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              disabled={busy}
-              onClick={deny}
-              size="lg"
-              type="button"
-              variant="outline"
-            >
-              <XCircle className="h-4 w-4" aria-hidden="true" />
-              {submission === "denying" ? "Denying…" : "Deny"}
-            </Button>
-          </div>
-
-          {submission === "returning" && redirectTo ? (
-            <a
-              className={cn(buttonVariants({ size: "lg", variant: "outline" }), "mt-4 w-full sm:w-auto")}
-              href={redirectTo}
-            >
-              Return to Murph
-            </a>
-          ) : null}
-        </div>
-      </section>
-    </main>
+      {submission === "returning" && redirectTo ? (
+        <a
+          className={cn(buttonVariants({ size: "lg", variant: "outline" }), "mt-4 w-full sm:w-auto")}
+          href={redirectTo}
+        >
+          Return to Murph
+        </a>
+      ) : null}
+    </ActionApprovalScreen>
   );
 }
 

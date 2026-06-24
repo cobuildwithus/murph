@@ -1,7 +1,8 @@
-import { CheckCircle2, Clock3, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, ShieldAlert, XCircle, type LucideIcon } from "lucide-react";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
+import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
 import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -63,80 +64,67 @@ async function ActionApprovalTerminalState({
   const contactOptions = await resolveHostedMurphContactOptions({
     message: { body: content.replyBody },
   });
-  const Icon = content.icon;
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-8 text-foreground sm:px-6">
-      <section className="mx-auto flex min-h-[78vh] max-w-xl flex-col justify-center">
-        <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <Icon className={content.iconClassName} aria-hidden="true" />
-          <p className="mt-6 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-            Secure approval
-          </p>
-          <h1 className="mt-3 font-serif text-3xl leading-tight text-balance">
-            {content.title}
-          </h1>
-          <p className="mt-4 text-sm leading-6 text-muted-foreground text-pretty">
-            {content.description}
-          </p>
-
-          {contactOptions.length > 0 ? (
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              {contactOptions.map((option) => (
-                <MurphContactLink
-                  actionLabel="Return to Murph"
-                  className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-auto")}
-                  key={`${option.kind}:${option.href}`}
-                  option={option}
-                >
-                  Return in {option.label}
-                </MurphContactLink>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-7 border-t border-border pt-5">
-              <p className="text-sm text-muted-foreground">
-                Return to your Murph thread and reply with:
-              </p>
-              <p className="mt-3 break-words font-mono text-sm text-foreground">
-                {content.replyBody}
-              </p>
-            </div>
-          )}
+    <ActionApprovalScreen
+      badgeIcon={content.icon}
+      badgeTone={status === "approved" ? "primary" : "muted"}
+      body={content.description}
+      title={content.title}
+    >
+      {contactOptions.length > 0 ? (
+        <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          {contactOptions.map((option) => (
+            <MurphContactLink
+              actionLabel="Return to Murph"
+              className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-auto")}
+              key={`${option.kind}:${option.href}`}
+              option={option}
+            >
+              Return in {option.label}
+            </MurphContactLink>
+          ))}
         </div>
-      </section>
-    </main>
+      ) : (
+        <div className="mt-7">
+          <p className="text-sm text-muted-foreground">
+            Return to your Murph thread and reply with:
+          </p>
+          <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
+            {content.replyBody}
+          </p>
+        </div>
+      )}
+    </ActionApprovalScreen>
   );
 }
 
 function ActionApprovalUnavailableState() {
   return (
-    <main className="min-h-dvh bg-background px-4 py-8 text-foreground sm:px-6">
-      <section className="mx-auto flex min-h-[78vh] max-w-xl flex-col justify-center">
-        <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <ShieldAlert className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-          <p className="mt-6 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-            Secure approval
-          </p>
-          <h1 className="mt-3 font-serif text-3xl leading-tight text-balance">
-            This link is unavailable
-          </h1>
-          <p className="mt-4 text-sm leading-6 text-muted-foreground text-pretty">
-            It may belong to another Murph account or no longer exist. Return to Murph and request a new approval link.
-          </p>
-        </div>
-      </section>
-    </main>
+    <ActionApprovalScreen
+      badgeIcon={ShieldAlert}
+      badgeTone="muted"
+      body="It may belong to another Murph account or no longer exist. Return to Murph and request a new approval link."
+      title="This link is unavailable"
+    />
   );
 }
 
-function terminalContent(status: Exclude<HostedActionApprovalStatus, "pending">) {
+interface TerminalContent {
+  description: string;
+  icon: LucideIcon;
+  replyBody: string;
+  title: string;
+}
+
+function terminalContent(
+  status: Exclude<HostedActionApprovalStatus, "pending">,
+): TerminalContent {
   switch (status) {
     case "approved":
       return {
         description: "The exact action is approved. Return to Murph to continue.",
         icon: CheckCircle2,
-        iconClassName: "h-8 w-8 text-primary",
         replyBody: "I approved the secure request.",
         title: "Approved",
       };
@@ -144,7 +132,6 @@ function terminalContent(status: Exclude<HostedActionApprovalStatus, "pending">)
       return {
         description: "Murph will not continue with this action.",
         icon: XCircle,
-        iconClassName: "h-8 w-8 text-muted-foreground",
         replyBody: "I denied the secure request.",
         title: "Denied",
       };
@@ -152,7 +139,6 @@ function terminalContent(status: Exclude<HostedActionApprovalStatus, "pending">)
       return {
         description: "Murph cannot continue from this link. Request a new secure approval.",
         icon: Clock3,
-        iconClassName: "h-8 w-8 text-muted-foreground",
         replyBody: "The secure approval request expired. Please send a new one.",
         title: "This request expired",
       };
