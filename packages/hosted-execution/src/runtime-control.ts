@@ -713,6 +713,32 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export type HostedCodexAuthUpdate =
+  | {
+      attemptId: string;
+      phase: "device_code";
+      userCode: string;
+      verificationUrl: string;
+    }
+  | {
+      attemptId: string;
+      phase: "connected" | "disconnected" | "failed";
+    };
+
+export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
+  "applied",
+  "already_applied",
+  "superseded",
+] as const;
+
+export type HostedCodexAuthUpdateResponseStatus =
+  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
+
+export interface HostedCodexAuthUpdateResponse {
+  applied: boolean;
+  status: HostedCodexAuthUpdateResponseStatus;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }

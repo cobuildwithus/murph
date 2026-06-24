@@ -4,9 +4,14 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
+import type {
+  HostedWorkspaceSnapshotPreparedRestore,
+} from "../workspace-snapshot-restore-preparation.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
+import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
+import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
@@ -31,6 +36,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
@@ -80,6 +86,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,
+            preparedSnapshotRestore: input.preparedSnapshotRestore ?? null,
             timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),
@@ -105,10 +112,26 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ),
         }
       : {}),
-    connectedAppsAvailable: transport !== null,
+    ...(transport
+      ? {
+          connectedApps: createHostedWebConnectedAppsPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+        }
+      : {}),
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
     ...(transport
       ? {
+          codexAuthPort: createHostedRuntimeCodexAuthPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
           logPort: createHostedWebRuntimeLogPort({
             boundUserId: input.boundUserId,
             fetchImpl,

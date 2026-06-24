@@ -386,7 +386,15 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         anyOf: [
           {
             type: 'string',
-            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help', 'screen_inspection'],
+            enum: [
+              'managed_login',
+              'login',
+              'payment',
+              'card',
+              'captcha',
+              'manual_browser_help',
+              'screen_inspection',
+            ],
           },
           { type: 'null' },
         ],
@@ -1096,7 +1104,6 @@ function currentHostedMailboxItemId(
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
-  connectedAppsAvailable?: boolean | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -1225,13 +1232,20 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'connected-apps-manage':
     case 'connected-apps-search':
-    case 'connected-apps-execute':
+    case 'connected-apps-execute': {
+      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      if (!connectedApps) {
+        return toolTextResult(
+          false,
+          'connected apps are unavailable without hosted connected-app transport',
+        )
+      }
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
-        available: input.connectedAppsAvailable === true,
-        fetchImpl: input.fetchImpl,
+        connectedApps,
         request: input.request,
       })
+    }
     case 'computer-start-run': {
       return await executeHostedComputerStartRunTool({
         abortSignal: input.abortSignal ?? null,

@@ -128,6 +128,10 @@ describe("hostedRuntimeMailboxEntryNeedsAiUsageGate", () => {
       lane: "system",
     })).toBe(true);
     expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
+      kind: "runtime.maintenance-requested",
+      lane: "system",
+    })).toBe(false);
+    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
       kind: "runtime.browser-vault-refresh-requested",
       lane: "system",
     })).toBe(false);
@@ -206,7 +210,7 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [],
       items: [buildHostedMailboxAiUsageGateItem({
-        kind: "runtime.browser-vault-refresh-requested",
+        kind: "runtime.maintenance-requested",
         lane: "system",
         laneSeq: "1",
       })],

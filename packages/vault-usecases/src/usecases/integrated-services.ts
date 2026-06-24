@@ -456,6 +456,17 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
+    async repairIntegrationIngests(input) {
+      const { vault } = input
+      const core = await loadCoreRuntime()
+      return core.runIntegrationIngestMigration({
+        vaultRoot: vault,
+        apply: input.apply,
+        finalize: input.finalize,
+        maxBundles: input.maxBundles,
+        maxBytes: input.maxBytes,
+      })
+    },
     async repairWearableStorage(input) {
       const { vault } = input
       const core = await loadCoreRuntime()

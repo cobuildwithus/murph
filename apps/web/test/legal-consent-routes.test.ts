@@ -112,7 +112,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-04-29",
-            "privacy-policy": "2026-04-29",
+            "privacy-policy": "2026-06-24",
             "terms-of-service": "2026-04-29",
           },
           scope: "launch.legal",
@@ -131,7 +131,7 @@ describe("legal consent routes", () => {
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
         "health-ai-safety-disclosure": "2026-04-29",
-        "privacy-policy": "2026-04-29",
+        "privacy-policy": "2026-06-24",
         "terms-of-service": "2026-04-29",
       },
       memberId: "member_123",
@@ -188,7 +188,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-04-29",
-            "privacy-policy": "2026-04-29",
+            "privacy-policy": "2026-06-24",
             "terms-of-service": "2026-04-29",
           },
           scope: "launch.legal",
@@ -218,7 +218,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-01-01",
-            "privacy-policy": "2026-04-29",
+            "privacy-policy": "2026-06-24",
             "terms-of-service": "2026-04-29",
           },
           scope: "launch.legal",
@@ -254,7 +254,7 @@ describe("legal consent routes", () => {
           acceptedDocumentVersions: {
             "consumer-health-data-notice": "2026-04-29",
             "health-ai-safety-disclosure": "2026-04-29",
-            "privacy-policy": "2026-04-29",
+            "privacy-policy": "2026-06-24",
           },
           scope: "feature.health-ai",
           source: "settings",
@@ -272,7 +272,7 @@ describe("legal consent routes", () => {
       acceptedDocumentVersions: {
         "consumer-health-data-notice": "2026-04-29",
         "health-ai-safety-disclosure": "2026-04-29",
-        "privacy-policy": "2026-04-29",
+        "privacy-policy": "2026-06-24",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,

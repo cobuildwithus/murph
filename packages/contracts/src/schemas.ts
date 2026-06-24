@@ -29,6 +29,9 @@ import {
   workoutImportPayloadSchema as workoutImportPayloadContract,
 } from "./zod.ts";
 import {
+  integrationIngestRecordSchema as integrationIngestRecordContract,
+} from "./integration-ingest.ts";
+import {
   conditionImportPayloadSchema as conditionImportPayloadContract,
 } from "./shares.ts";
 import {
@@ -65,6 +68,7 @@ function withDependentRequired(
 
 export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
+export const integrationIngestRecordSchema = toJsonSchema(integrationIngestRecordContract);
 export const conditionImportPayloadSchema = toInputJsonSchema(conditionImportPayloadContract);
 export const bloodTestImportPayloadSchema = toInputJsonSchema(bloodTestImportPayloadContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
@@ -104,6 +108,7 @@ export const schemaCatalog = Object.freeze({
   "blood-test-import-payload": bloodTestImportPayloadSchema,
   "condition-import-payload": conditionImportPayloadSchema,
   "event-record": eventRecordSchema,
+  "integration-ingest-record": integrationIngestRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
   "metric-sample-record": metricSampleRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,

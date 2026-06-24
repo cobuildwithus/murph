@@ -12,6 +12,11 @@ import {
 import { resolveHostedLocalProfile } from "../profiles.ts";
 
 export const MURPH_HOSTED_LOCAL_CODEX_HOME_ENV = "MURPH_HOSTED_LOCAL_CODEX_HOME";
+// Opt-in escape hatch for hosted-local dev when the Codex subscription is
+// exhausted or unavailable: bypass the ChatGPT-mode seed and let the runner's
+// API-key model provider config bill `OPENAI_API_KEY` for assistant turns
+// instead. Off by default so dev never silently re-routes to the API key.
+export const MURPH_DEV_USE_OPENAI_API_KEY_ENV = "MURPH_DEV_USE_OPENAI_API_KEY";
 
 const DEFAULT_HOSTED_LOCAL_CODEX_HOME_DIR_NAME = ".codex";
 const CODEX_AUTH_FILE_NAME = "auth.json";
@@ -39,13 +44,28 @@ const REFRESH_REQUEST_TIMEOUT_MS = 30_000;
 // Interactive dev/debug profiles run hosted Codex on the local ChatGPT
 // subscription; test-mode profiles and NODE_ENV=test lanes (e2e, harness
 // tests, the e2e Codex override) keep API-key config and never read the host
-// Codex home.
+// Codex home. The useOpenaiApiKey override is an explicit dev escape hatch
+// (MURPH_DEV_USE_OPENAI_API_KEY) for when the local Codex subscription is
+// exhausted or unavailable.
 export function shouldSeedHostedLocalCodexSubscriptionAuth(input: {
   nodeEnv: string | undefined;
   profileName: string | undefined;
+  useOpenaiApiKey: boolean;
 }): boolean {
+  if (input.useOpenaiApiKey) {
+    return false;
+  }
   return input.nodeEnv?.trim() !== "test"
     && resolveHostedLocalProfile(input.profileName).mode !== "test";
+}
+
+// Parses MURPH_DEV_USE_OPENAI_API_KEY truthiness. Accepts "1" and "true"
+// (case-insensitive); anything else is off, including the empty string.
+export function isHostedLocalUseOpenaiApiKey(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const value = env[MURPH_DEV_USE_OPENAI_API_KEY_ENV]?.trim().toLowerCase();
+  return value === "1" || value === "true";
 }
 
 export function resolveHostedLocalCodexHome(

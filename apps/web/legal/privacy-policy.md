@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** April 29, 2026
+**Last Updated:** June 24, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -75,6 +75,7 @@ If you connect devices, accounts, or communication channels, we may collect:
 - connection and authorization metadata;
 - provider account identifiers or privacy-preserving lookup values;
 - token or credential-related metadata;
+- website login credentials and reusable authentication connection state processed by our hosted browser provider when you choose a managed sign-in;
 - connection status, sync timestamps, webhook traces, and reconciliation or error metadata; and
 - minimal routing or message metadata needed to operate the integration.
 

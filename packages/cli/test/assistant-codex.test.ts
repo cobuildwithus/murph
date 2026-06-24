@@ -24,13 +24,35 @@ vi.mock('node:child_process', async () => {
 
 import {
   buildCodexAppServerArgs,
-  executeCodexAppServerTurn,
+  executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   extractCodexTraceUpdates,
+  resolveMurphDynamicTools,
   resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
+  type CodexAppServerTurnInput,
 } from '@murphai/assistant-engine/assistant-codex'
 
 const cleanupPaths: string[] = []
+
+function executeCodexAppServerTurn(
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+  },
+) {
+  return executeCodexAppServerTurnUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
+}
 
 beforeEach(() => {
   codexMocks.spawn.mockReset()

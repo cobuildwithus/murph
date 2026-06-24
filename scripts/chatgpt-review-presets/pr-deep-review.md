@@ -6,6 +6,8 @@ Find only issues that are worth changing before merge because they are likely to
 Architecture priority:
 Default to deletion and radical simplicity. Before accepting any new code, abstraction, dependency, service, configuration, state, or process, challenge whether it solves a real current problem. Prefer the smallest architecture with the fewest moving parts, concepts, branches, and hidden behaviors. Report complexity only when the PR introduces or preserves structure that can be removed now without losing required behavior.
 
+Treat the PR's stated intent as the requirement, not its current runtime state. Code that the diff temporarily disables, gates, fail-closes, scrubs, or stubs while wiring is in progress is not evidence the functionality should be deleted — propose deletion only when the same intended behavior can be preserved with materially less code. If the disabled state itself blocks the PR's stated goal, report that as a Critical/High correctness finding, not as a complexity collapse.
+
 Use the connected GitHub repository to read:
 
 - the full PR diff

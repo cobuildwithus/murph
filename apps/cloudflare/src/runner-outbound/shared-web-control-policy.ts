@@ -15,6 +15,7 @@ import {
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_CONSUME_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
@@ -41,6 +42,7 @@ const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
 export type HostedRunnerWebControlOperation =
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
+  | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
   | "device_sync_connect_link"
@@ -75,6 +77,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
+  [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_MAILBOX_CONSUME_PATH, "mailbox_consume"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],

@@ -160,6 +160,9 @@
       "@murphai/runtime-state/assistant-ids": [
         "packages/runtime-state/src/assistant-ids.ts"
       ],
+      "@murphai/runtime-state/hosted-codex-subscription-auth": [
+        "packages/runtime-state/src/hosted-codex-subscription-auth.ts"
+      ],
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],

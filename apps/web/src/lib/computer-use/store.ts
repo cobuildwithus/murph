@@ -1339,6 +1339,7 @@ function readAwaitingReason(
 
 function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
   switch (value) {
+    case "managed_login":
     case "login":
     case "payment":
     case "card":

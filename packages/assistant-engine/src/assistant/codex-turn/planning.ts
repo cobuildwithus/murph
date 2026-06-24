@@ -81,13 +81,17 @@ import { normalizeNullableString } from '../shared.js'
 import {
   supportsAssistantCurrentAudienceMessageReaction,
 } from '../delivery-service.js'
-import { resolveMurphDynamicTools } from '../../assistant-codex/dynamic-tools.js'
+import {
+  resolveMurphDynamicTools,
+  type MurphDynamicTool,
+} from '../../assistant-codex/dynamic-tools.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
+  dynamicTools: readonly MurphDynamicTool[]
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
@@ -532,8 +536,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     computerToolsAvailable:
       input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.progressDelivery != null,
-    connectedAppsAvailable:
-      input.executionContext?.hosted?.connectedAppsAvailable === true,
+    connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
@@ -618,6 +621,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantCliContract: actualAssistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
+    dynamicTools,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages

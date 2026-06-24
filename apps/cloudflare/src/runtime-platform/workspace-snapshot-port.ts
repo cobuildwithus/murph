@@ -29,6 +29,10 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "../workspace-snapshot-store.ts";
 import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
+import {
+  requireHostedWorkspaceSnapshotPreparedRestoreForRef,
+  type HostedWorkspaceSnapshotPreparedRestore,
+} from "../workspace-snapshot-restore-preparation.ts";
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   buildHostedWorkspaceSnapshotRestoreLogDetails,
@@ -49,6 +53,7 @@ import {
 export function createCloudflareWorkspaceSnapshotPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
+  preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
@@ -243,47 +248,71 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         step: "size_guard",
       });
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
-      const dataKeyUnwrapStartedAt = Date.now();
-      const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-        details: restoreLogDetails,
-        run: async () => await unwrapWorkspaceSnapshotDataKey({
-          aad: request.ref.encryption.aad,
-          fetchImpl: input.fetchImpl,
-          rootKeyId: request.ref.encryption.rootKeyId,
-          signal: request.signal ?? null,
-          timeoutMs: input.timeoutMs,
-          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          wrappedDataKey: request.ref.encryption.wrappedDataKey,
-        }),
-        step: "data_key_unwrap",
-      });
-      timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
 
-      const presignGetStartedAt = Date.now();
-      const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-        details: restoreLogDetails,
-        run: async () => {
-          const result = await presignWorkspaceSnapshotGet({
+      let dataKey: string;
+      let presignedGet: { expiresAtMs: number; getUrl: string };
+      if (input.preparedSnapshotRestore) {
+        const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
+          prepared: input.preparedSnapshotRestore,
+          ref: request.ref,
+        });
+        dataKey = prepared.dataKey;
+        presignedGet = {
+          expiresAtMs: prepared.expiresAtMs,
+          getUrl: prepared.getUrl,
+        };
+        timing.dataKeyUnwrapMs = 0;
+        timing.presignGetMs = 0;
+      } else {
+        const dataKeyUnwrapStartedAt = Date.now();
+        const dataKeyPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+          details: restoreLogDetails,
+          run: async () => await unwrapWorkspaceSnapshotDataKey({
+            aad: request.ref.encryption.aad,
             fetchImpl: input.fetchImpl,
-            objectKey: request.ref.objectKey,
-            ref: request.ref,
+            rootKeyId: request.ref.encryption.rootKeyId,
             signal: request.signal ?? null,
-            snapshotId: request.ref.snapshotId,
             timeoutMs: input.timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          });
-          const expiresAtMs = Date.parse(result.expiresAt);
-          if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-            throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-          }
-          return {
-            ...result,
-            expiresAtMs,
-          };
-        },
-        step: "presign_get",
-      });
-      timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+            wrappedDataKey: request.ref.encryption.wrappedDataKey,
+          }),
+          step: "data_key_unwrap",
+        }).finally(() => {
+          timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
+        });
+
+        const presignGetStartedAt = Date.now();
+        const presignedGetPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+          details: restoreLogDetails,
+          run: async () => {
+            const result = await presignWorkspaceSnapshotGet({
+              fetchImpl: input.fetchImpl,
+              objectKey: request.ref.objectKey,
+              ref: request.ref,
+              signal: request.signal ?? null,
+              snapshotId: request.ref.snapshotId,
+              timeoutMs: input.timeoutMs,
+              workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            });
+            const expiresAtMs = Date.parse(result.expiresAt);
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+              throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+            }
+            return {
+              ...result,
+              expiresAtMs,
+            };
+          },
+          step: "presign_get",
+        }).finally(() => {
+          timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+        });
+
+        [dataKey, presignedGet] = await Promise.all([
+          dataKeyPromise,
+          presignedGetPromise,
+        ]);
+      }
 
       const objectFetchStartedAt = Date.now();
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({

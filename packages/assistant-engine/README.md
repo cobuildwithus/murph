@@ -43,35 +43,20 @@ abort cleanup, malformed output, off-turn output, process failure, or idle
 explicit shutdown stops or poisons the warm process before a later turn can
 reuse it.
 
-## Adding a new dynamic tool gate
+## Dynamic tool contracts
 
-When you add a new tool (or capability flag that gates one) to `MURPH_DYNAMIC_TOOLS`
-in `src/assistant-codex/dynamic-tools.ts`, the gate value has to travel the full
-provider input chain. Every hop is explicit field enumeration, not a spread, so
-a missing line silently defaults the gate to `false` and the tool disappears
-from the registered tool list without any type error.
+Route planning is the single owner of the dynamic tool contract. It resolves the
+exact tool array once, fingerprints that array, and stores it on
+`AssistantRouteTurnPlan.dynamicTools`. Provider conversion forwards the complete
+turn object, and Codex sends that same array in `thread/start`; downstream layers
+must not rebuild it from copied gate booleans.
 
-Touch all of these when adding a gate field:
+Runtime authority remains independent of advertisement. Hosted transports are
+typed services on `AssistantHostedToolContext`, and each tool checks that service
+again when invoked. Adding a tool therefore requires only:
 
-1. `src/assistant/providers/types.ts` — add to `AssistantProviderTurnInput` and
-   `AssistantProviderTurnExecutionInput`.
-2. `src/assistant/codex-runtime.ts` — forward in both
-   `executeCodexAssistantTurnFromInput` and `executeCodexAssistantTurnAttemptFromInput`
-   (they re-enumerate fields into the execution input).
-3. `src/assistant/providers/codex-cli.ts` — set on `baseAppServerInput`.
-4. `src/assistant-codex.ts` — add to `CodexAppServerTurnInput`.
-5. `src/assistant-codex/app-server-requests.ts` — read in `resolveCodexAppServerDynamicTools`.
-6. `src/assistant-codex/dynamic-tools.ts` — gate the new tool in `resolveMurphDynamicTools`
-   AND dispatch in `executeMurphDynamicToolRequest`.
-7. `src/assistant/codex-turn-runner.ts` and `src/assistant/codex-turn/planning.ts` —
-   read from `executionContext.hosted` and pass through.
-8. `src/assistant/execution-context.ts` — preserve the field through
-   `normalizeAssistantExecutionContext`.
+1. defining and dispatching the tool in `src/assistant-codex/dynamic-tools.ts`;
+2. exposing any required typed service through `AssistantHostedToolContext`; and
+3. including the tool in the planning-time `resolveMurphDynamicTools` call.
 
-If the gate originates outside the assistant engine, also update
-`packages/assistant-runtime/src/hosted-runtime/platform.ts` (`HostedRuntimePlatform`),
-`packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts`
-(executionContext build), and the cloudflare runtime factory in
-`apps/cloudflare/src/runtime-platform/platform-factory.ts`. Confirm end-to-end by
-asking the assistant to list tools whose name starts with the new prefix; a missing
-hop never throws — the tool just silently disappears.
+Do not add per-tool availability booleans to provider or app-server inputs.

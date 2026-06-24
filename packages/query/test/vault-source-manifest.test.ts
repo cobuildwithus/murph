@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 
 import { afterEach, test } from "vitest";
 
-import { VAULT_LAYOUT } from "@murphai/contracts";
+import { CURRENT_VAULT_FORMAT_VERSION, VAULT_LAYOUT } from "@murphai/contracts";
 
 import {
   hashCanonicalQuerySources,
@@ -40,7 +40,7 @@ afterEach(async () => {
 test("listCanonicalSourceManifest uses shared vault family inclusion rules", async () => {
   const vaultRoot = await createTempVaultRoot();
 
-  await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, '{"formatVersion":1}\n');
+  await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, `{"formatVersion":${CURRENT_VAULT_FORMAT_VERSION}}\n`);
   await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "---\ntitle: Core\n---\n# Core\n");
   await writeVaultFile(
     vaultRoot,
@@ -66,6 +66,11 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     vaultRoot,
     path.posix.join(VAULT_LAYOUT.auditDirectory, "2026", "2026-04.jsonl"),
     '{"id":"aud_1"}\n',
+  );
+  await writeVaultFile(
+    vaultRoot,
+    path.posix.join(VAULT_LAYOUT.integrationIngestLedgerDirectory, "2026", "2026-04.jsonl"),
+    '{"id":"xfm_1"}\n',
   );
 
   await writeVaultFile(
@@ -116,13 +121,17 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     relativePaths.includes(path.posix.join(VAULT_LAYOUT.rawInboxDirectory, "email", "capture", "envelope.json")),
     false,
   );
+  assert.equal(
+    relativePaths.includes(path.posix.join(VAULT_LAYOUT.integrationIngestLedgerDirectory, "2026", "2026-04.jsonl")),
+    false,
+  );
 });
 
 test("hashCanonicalQuerySources is stable across mtimes and ignores non-query files", async () => {
   const vaultRoot = await createTempVaultRoot();
   const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
   const automationPath = path.posix.join(VAULT_LAYOUT.automationsDirectory, "daily.md");
-  await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, '{"formatVersion":1}\n');
+  await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, `{"formatVersion":${CURRENT_VAULT_FORMAT_VERSION}}\n`);
   await writeVaultFile(vaultRoot, experimentPath, "---\ntitle: Trial\n---\n# Trial\n");
 
   const initial = await hashCanonicalQuerySources(vaultRoot);
@@ -163,6 +172,10 @@ test("isCanonicalQuerySourcePath matches the shared source families", () => {
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "events.jsonl")),
     true,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.integrationIngestLedgerDirectory, "2026", "ingests.jsonl")),
+    false,
   );
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.automationsDirectory, "daily.md")),

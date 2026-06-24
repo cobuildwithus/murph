@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
-  createExaResearchScoutPublishedWindow,
+  clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_CATEGORY,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
@@ -42,6 +42,8 @@ describe("Exa research scout contracts", () => {
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
       numResults: 4,
       profile: VALID_INPUT.profile,
+      since: VALID_INPUT.since,
+      until: VALID_INPUT.until,
     });
   });
 
@@ -93,12 +95,58 @@ describe("Exa research scout contracts", () => {
     })).toBeNull();
   });
 
-  it("derives the default recent publication window without caller data", () => {
-    expect(createExaResearchScoutPublishedWindow(
-      new Date("2026-06-17T12:34:56.789Z"),
-    )).toEqual({
-      since: "2026-04-18T12:34:56.789Z",
-      until: "2026-06-17T12:34:56.789Z",
+  describe("clampExaResearchScoutPublishedWindow", () => {
+    const now = new Date("2026-06-17T12:34:56.789Z");
+
+    it("preserves a well-formed caller window", () => {
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2026-04-25T00:00:00.000Z",
+        until: "2026-06-17T00:00:00.000Z",
+      })).toEqual({
+        since: "2026-04-25T00:00:00.000Z",
+        until: "2026-06-17T00:00:00.000Z",
+      });
+    });
+
+    it("preserves arbitrarily wide caller windows; the model decides scope", () => {
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2010-01-01T00:00:00.000Z",
+        until: "2026-06-17T00:00:00.000Z",
+      })).toEqual({
+        since: "2010-01-01T00:00:00.000Z",
+        until: "2026-06-17T00:00:00.000Z",
+      });
+    });
+
+    it("rejects until-in-the-future beyond clock skew", () => {
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-17T13:34:56.789Z",
+      })).toBeNull();
+    });
+
+    it("rejects since >= until", () => {
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2026-06-17T00:00:00.000Z",
+        until: "2026-06-17T00:00:00.000Z",
+      })).toBeNull();
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2026-06-17T00:00:00.001Z",
+        until: "2026-06-17T00:00:00.000Z",
+      })).toBeNull();
+    });
+
+    it("rejects non-canonical ISO timestamps", () => {
+      expect(clampExaResearchScoutPublishedWindow({
+        now,
+        since: "2026-06-17",
+        until: "2026-06-17T00:00:00.000Z",
+      })).toBeNull();
     });
   });
 });

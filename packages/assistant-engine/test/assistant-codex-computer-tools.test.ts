@@ -59,6 +59,7 @@ describe("murph computer dynamic tools", () => {
     );
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
+    expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
     const startTool = computerTools.find((tool) =>
       tool.name === "computer_start_run"
     );

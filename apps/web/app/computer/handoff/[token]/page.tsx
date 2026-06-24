@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock3 } from "lucide-react";
+import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
@@ -17,10 +18,15 @@ const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
 
 export default async function ComputerHandoffPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams?: Promise<{ managed?: string | string[] }>;
 }) {
   const { token } = await params;
+  const managedState = readManagedHandoffState(
+    await (searchParams ?? Promise.resolve({})),
+  );
   const session = await readHandoffSessionOrAuthState();
   if (!session) {
     return <ComputerHandoffAuthRequiredState />;
@@ -32,12 +38,46 @@ export default async function ComputerHandoffPage({
     token,
   });
 
+  const managedEndpoint =
+    `/api/computer/handoff/${encodeURIComponent(token)}/managed-login`;
+
+  if (state.kind === "managed_login") {
+    if (managedState !== "retry" && managedState !== "waiting") {
+      redirect(managedEndpoint);
+    }
+    const isRetry = managedState === "retry";
+    return (
+      <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
+        <section className="mx-auto flex min-h-[70vh] max-w-2xl flex-col justify-center">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <Clock3 className="mb-4 h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <h1 className="font-serif text-3xl text-balance">
+              {isRetry ? "Secure sign-in could not start" : "Finishing secure sign-in"}
+            </h1>
+            <p className="mt-4 text-sm text-muted-foreground text-pretty">
+              {isRetry
+                ? "Try again. If the site still cannot connect, return to Murph and ask for browser takeover."
+                : "Kernel is still finishing this sign-in. Check again in a moment."}
+            </p>
+            <a
+              href={managedEndpoint}
+              className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex")}
+            >
+              {isRetry ? "Try again" : "Check again"}
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (
     state.kind === "completed" ||
     state.kind === "checkpointing" ||
     state.kind === "expired"
   ) {
     const isCompleted = state.kind === "completed";
+    const canSendDoneReply = isCompleted;
     const Icon = isCompleted ? CheckCircle2 : Clock3;
     const title = isCompleted
       ? "All set"
@@ -52,7 +92,7 @@ export default async function ComputerHandoffPage({
       : state.kind === "checkpointing"
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
         : "Return to Murph and ask for a new link.";
-    const contactOptions = isCompleted
+    const contactOptions = canSendDoneReply
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
         })
@@ -81,7 +121,7 @@ export default async function ComputerHandoffPage({
                   </MurphContactLink>
                 ))}
               </div>
-            ) : isCompleted ? (
+            ) : canSendDoneReply ? (
               <div className="mt-6 border-t border-border pt-4">
                 <p className="text-sm text-muted-foreground">
                   Return to your Murph thread and reply with:
@@ -143,6 +183,18 @@ export default async function ComputerHandoffPage({
       />
     </main>
   );
+}
+
+function readManagedHandoffState(
+  searchParams: { managed?: string | string[] },
+): "retry" | "waiting" | null {
+  const value = Array.isArray(searchParams.managed)
+    ? searchParams.managed[0]
+    : searchParams.managed;
+  return value === "retry" ||
+      value === "waiting"
+    ? value
+    : null;
 }
 
 async function readHandoffSessionOrAuthState() {

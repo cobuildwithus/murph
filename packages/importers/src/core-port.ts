@@ -84,7 +84,7 @@ export interface DeviceEventPayload {
   note?: string;
   tags?: string[];
   links?: DeviceEventLinkPayload[];
-  rawArtifactRoles?: string[];
+  evidenceRoles?: string[];
   externalRef?: DeviceExternalRefPayload;
   dataOrigin?: DeviceDataOrigin;
   fields?: Record<string, unknown>;
@@ -113,7 +113,7 @@ export interface DeviceSamplePayload {
   sample: DeviceSampleValuePayload;
 }
 
-export interface DeviceRawArtifactPayload {
+export interface DeviceEvidencePartPayload {
   role: string;
   fileName: string;
   mediaType?: string;
@@ -130,7 +130,8 @@ export interface DeviceBatchImportPayload {
   dataOrigin?: DeviceDataOrigin;
   events?: DeviceEventPayload[];
   samples?: DeviceSamplePayload[];
-  rawArtifacts?: DeviceRawArtifactPayload[];
+  evidenceParts?: DeviceEvidencePartPayload[];
+  ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
 

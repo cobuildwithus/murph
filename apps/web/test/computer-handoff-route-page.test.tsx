@@ -10,6 +10,7 @@ import { createRouteContext } from "./route-test-helpers";
 const mocks = vi.hoisted(() => {
   const service = {
     completeHandoff: vi.fn(),
+    continueManagedLoginHandoff: vi.fn(),
     ensureHandoffViewport: vi.fn(),
     readHandoffPageState: vi.fn(),
   };
@@ -19,12 +20,19 @@ const mocks = vi.hoisted(() => {
     getHostedMurphContactContext: vi.fn(),
     headers: vi.fn(),
     requireActiveHostedAppSession: vi.fn(),
+    redirect: vi.fn((url: string) => {
+      throw Object.assign(new Error("NEXT_REDIRECT"), { url });
+    }),
     requireActiveHostedAppSessionFromRequest: vi.fn(),
     service,
   };
 });
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
+}));
 
 vi.mock("next/headers", () => ({
   headers: mocks.headers,
@@ -47,17 +55,24 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
 type ComputerHandoffDoneRouteModule = typeof import(
   "../app/api/computer/handoff/[token]/done/route"
 );
+type ComputerManagedLoginRouteModule = typeof import(
+  "../app/api/computer/handoff/[token]/managed-login/route"
+);
 type ComputerHandoffPageModule = typeof import(
   "../app/computer/handoff/[token]/page"
 );
 
 let computerHandoffDoneRoute: ComputerHandoffDoneRouteModule;
+let computerManagedLoginRoute: ComputerManagedLoginRouteModule;
 let computerHandoffPage: ComputerHandoffPageModule;
 
 describe("computer handoff route and page", () => {
   beforeAll(async () => {
     computerHandoffDoneRoute = await import(
       "../app/api/computer/handoff/[token]/done/route"
+    );
+    computerManagedLoginRoute = await import(
+      "../app/api/computer/handoff/[token]/managed-login/route"
     );
     computerHandoffPage = await import("../app/computer/handoff/[token]/page");
   });
@@ -68,6 +83,10 @@ describe("computer handoff route and page", () => {
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue(createSession());
     mocks.service.completeHandoff.mockResolvedValue({
       suggestedReply: "private suggested reply",
+    });
+    mocks.service.continueManagedLoginHandoff.mockResolvedValue({
+      kind: "redirect",
+      url: "https://auth.onkernel.com/login/test",
     });
     mocks.service.ensureHandoffViewport.mockResolvedValue(undefined);
     mocks.service.readHandoffPageState.mockResolvedValue({
@@ -166,6 +185,63 @@ describe("computer handoff route and page", () => {
     expect(response.status).toBe(200);
     expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
+  });
+
+  it("redirects managed-login handoffs without rendering the Live View", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "managed_login",
+      suggestedReply: "Done",
+    });
+
+    await expect(computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    })).rejects.toMatchObject({
+      url: "/api/computer/handoff/handoff-token/managed-login",
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "/api/computer/handoff/handoff-token/managed-login",
+    );
+  });
+
+  it("launches Kernel Hosted UI through the managed-login controller", async () => {
+    const response = await computerManagedLoginRoute.GET(
+      new Request(
+        "https://join.example.test/api/computer/handoff/handoff-token/managed-login",
+      ),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://auth.onkernel.com/login/test",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mocks.service.continueManagedLoginHandoff).toHaveBeenCalledWith({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
+  });
+
+  it("returns completed managed login callbacks to the handoff page", async () => {
+    mocks.service.continueManagedLoginHandoff.mockResolvedValueOnce({
+      kind: "completed",
+    });
+
+    const response = await computerManagedLoginRoute.GET(
+      new Request(
+        "https://join.example.test/api/computer/handoff/handoff-token/managed-login?code=spoofed",
+      ),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/computer/handoff/handoff-token",
+    );
+    expect(mocks.service.continueManagedLoginHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
       token: "handoff-token",
     });
