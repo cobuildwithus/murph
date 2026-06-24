@@ -229,7 +229,7 @@ function findDoneButton(container: HTMLElement): HTMLButtonElement | null {
 }
 
 async function click(
-  window: Window,
+  window: Window & typeof globalThis,
   button: HTMLButtonElement | null,
 ): Promise<void> {
   assert.ok(button);
