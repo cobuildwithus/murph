@@ -1092,7 +1092,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '497817a526503c9d6bcf1c25a5b4ccb1aa8fd0970285c46ce7eee068da5d4f05',
+      '324c23f6a91623c901d26569a5e8aff56c73bc19a03071cbe9f051f81b21fbfc',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1295,6 +1295,24 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'For broad or ambiguous requests, run `vault-cli commons protocol explore <query> --format json`',
+    )
+  })
+
+  it('includes post-action follow-through guidance for completed real-world actions', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Post-action follow-through:')
+    expect(prompt).toContain(
+      "When Murph has reliable evidence that a user-authorized real-world action succeeded",
+    )
+    expect(prompt).toContain('Then offer one concrete next step.')
+    expect(prompt).toContain('Make at most one proactive offer per completed action.')
+    expect(prompt).toContain('Do not re-offer after the user declines.')
+    expect(prompt).toContain(
+      'A clear "yes" to a concrete offer counts as confirmation for that exact follow-up',
+    )
+    expect(prompt).toContain(
+      'For supplements and other health products, keep the follow-up observational',
     )
   })
 
