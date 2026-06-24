@@ -19,6 +19,8 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/browser-vault";
 
+import type { SensitiveActionAuthorization } from "@/src/lib/sensitive-actions/shared";
+
 import { browserVaultReplicaRefsMatch } from "./ref";
 
 export type BrowserVaultFreshness = "fresh" | "stale";
@@ -43,6 +45,7 @@ export type BrowserVaultSessionLoadResult =
     });
 
 export interface LoadBrowserVaultReplicaInput {
+  authorization?: SensitiveActionAuthorization;
   emptyOnUnauthorized?: boolean;
   endpoint?: string;
   fetchImpl?: typeof fetch;
@@ -53,6 +56,7 @@ export interface LoadBrowserVaultReplicaInput {
 const textDecoder = new TextDecoder();
 
 export async function loadBrowserVaultReplica({
+  authorization,
   emptyOnUnauthorized = true,
   endpoint = "/api/browser-vault/session",
   fetchImpl = fetch,
@@ -67,6 +71,7 @@ export async function loadBrowserVaultReplica({
   const response = await fetchImpl(endpoint, {
     body: JSON.stringify({
       acceptStaleReplica: true,
+      ...(authorization ? { authorization } : {}),
       browserPublicKeyJwk: publicKeyJwk,
       knownReplicaRef,
     }),

@@ -815,6 +815,7 @@ describe('Codex model catalog', () => {
           sessionContext: undefined,
           systemPrompt: null,
           turnContextPrompt: null,
+          voiceMemoDeliveryChannel: scenario.expectedChannel,
           workingDirectory: '/work',
         } satisfies AssistantRouteTurnPlan,
         session,

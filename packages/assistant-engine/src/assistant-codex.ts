@@ -3092,7 +3092,8 @@ async function runCodexAppServerTurnOnProcess(
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
       voiceMemoRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo'
+        dynamicToolRequest.kind === 'generate-voice-memo' ||
+        dynamicToolRequest.kind === 'generate-song'
           ? input.voiceMemoRuntime ?? null
           : null,
     }).then(async (result) => {
@@ -3989,6 +3990,7 @@ function isSerializedDynamicToolRequest(
 ): boolean {
   return request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
+    request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)

@@ -3,6 +3,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedSensitiveActionChallenge: [
+    'tokenHash String @id @map("token_hash")',
+    'memberId String @map("member_id")',
+    "kind String",
+    'bindingHash String @map("binding_hash")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'expiresAt DateTime @map("expires_at")',
+  ],
   HostedConnectedAppConnectIntent: [
     'claimHash String @id @map("claim_hash")',
     'memberId String @map("member_id")',
@@ -26,6 +34,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
@@ -335,6 +344,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const sensitiveActionChallengeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260624090000_hosted_sensitive_action_challenge/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -387,6 +403,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260623170000_generalize_hosted_product_feedback",
       "20260623193000_hosted_product_feedback_summary",
       "20260624000000_clear_hosted_codex_auth_connected",
+      "20260624090000_hosted_sensitive_action_challenge",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -409,6 +426,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
     expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
     expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");
+    expect(sensitiveActionChallengeMigrationSql).toContain(
+      'CREATE TABLE "hosted_sensitive_action_challenge"',
+    );
+    expect(sensitiveActionChallengeMigrationSql).toContain(
+      'PRIMARY KEY ("token_hash")',
+    );
+    expect(sensitiveActionChallengeMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(sensitiveActionChallengeMigrationSql).not.toContain("signature");
+    expect(sensitiveActionChallengeMigrationSql).not.toContain("wallet_address");
+    expect(sensitiveActionChallengeMigrationSql).not.toContain("approved_at");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',
@@ -836,7 +865,7 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|Member\w*))\s+\{/gmu)]
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|Member\w*|SensitiveActionChallenge))\s+\{/gmu)]
     .map((match) => match[1]);
 }
 

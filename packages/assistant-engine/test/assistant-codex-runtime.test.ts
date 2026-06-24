@@ -1157,17 +1157,16 @@ describe('assistant codex runtime', () => {
         {
           filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
           kind: 'voice_memo',
-          mimeType: 'audio/mpeg',
-          modelId: 'eleven_multilingual_v2',
-          source: 'elevenlabs',
-          transcript: 'Voice-only reply.',
-          transportRefs: {
-            telegram: {
-              sendMode: 'generate_at_delivery',
+          transport: {
+            generation: {
+              kind: 'elevenlabs_speech',
+              modelId: 'eleven_multilingual_v2',
+              outputFormat: 'mp3_44100_128',
+              text: 'Voice-only reply.',
+              voiceId: 'voice_murph',
             },
+            kind: 'telegram_generation',
           },
-          url: null,
-          voiceId: 'voice_murph',
         },
       ],
     })

@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto'
 
-import type {
-  AssistantResponseMedia,
+import {
+  assistantVoiceMemoMusicModelId,
+  assistantVoiceMemoMusicOutputFormat,
+  assistantVoiceMemoSpeechOutputFormat,
+  type AssistantResponseMedia,
+  type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  generateElevenLabsSpeech,
+  generateElevenLabsVoiceMemoAudio,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
   resolveElevenLabsVoiceId,
@@ -23,6 +27,12 @@ import { normalizeNullableString } from '../assistant/shared.js'
 export interface GenerateVoiceMemoToolArgs {
   text: string
   voiceId: string | null
+}
+
+export interface GenerateSongToolArgs {
+  durationSeconds: number
+  instrumental: boolean
+  prompt: string
 }
 
 export interface GenerateVoiceMemoToolResult {
@@ -48,15 +58,11 @@ export type VoiceMemoToolRuntime =
       elevenLabs: VoiceMemoElevenLabsRuntimeConfig
       generateAndUpload(input: {
         filenameBase: string
-        modelId: string
+        generation: AssistantVoiceMemoGeneration
         signal?: AbortSignal | null
-        text: string
-        voiceId: string
       }): Promise<{
         attachmentId: string
-        contentType: 'audio/mpeg'
         filename: string
-        sizeBytes: number
       }>
       kind: 'linq'
     }
@@ -69,26 +75,22 @@ export async function executeGenerateVoiceMemoTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
+  const mediaConflict = rejectIfResponseMediaConflicts(
+    input.currentResponseMedia ?? [],
+    'voice memo',
+  )
+  if (mediaConflict) {
+    return mediaConflict
+  }
+
   const runtime = input.runtime ?? null
   if (!runtime) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'voice memo generation is only available for deliverable iMessage or Telegram replies',
-    }
+    return unavailableVoiceMemoResult('voice memo')
   }
 
-  if ((input.currentResponseMedia ?? []).length > 0) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'voice memo generation cannot be combined with other response media',
-    }
-  }
-
-  if (!runtime.elevenLabs.apiKeyAvailable) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
-    }
+  const preflight = validateElevenLabsApiKeyPrecondition(runtime, 'voice memo')
+  if (preflight) {
+    return preflight
   }
 
   const voiceId =
@@ -109,53 +111,100 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  if (runtime.kind === 'telegram') {
-    const filename = `voice-memo-${randomUUID()}.mp3`
+  return await executeGeneratedVoiceMemo({
+    filenameBase: `voice-memo-${randomUUID()}`,
+    generation: {
+      kind: 'elevenlabs_speech',
+      modelId,
+      outputFormat: assistantVoiceMemoSpeechOutputFormat,
+      text: input.args.text,
+      voiceId,
+    },
+    runtime,
+    signal: input.abortSignal ?? null,
+  })
+}
+
+export async function executeGenerateSongTool(input: {
+  abortSignal?: AbortSignal | null
+  args: GenerateSongToolArgs
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  runtime?: VoiceMemoToolRuntime | null
+}): Promise<GenerateVoiceMemoToolResult> {
+  const mediaConflict = rejectIfResponseMediaConflicts(
+    input.currentResponseMedia ?? [],
+    'song',
+  )
+  if (mediaConflict) {
+    return mediaConflict
+  }
+
+  const runtime = input.runtime ?? null
+  if (!runtime) {
+    return unavailableVoiceMemoResult('song')
+  }
+
+  const preflight = validateElevenLabsApiKeyPrecondition(runtime, 'song')
+  if (preflight) {
+    return preflight
+  }
+
+  return await executeGeneratedVoiceMemo({
+    filenameBase: `song-${randomUUID()}`,
+    generation: {
+      durationMs: input.args.durationSeconds * 1_000,
+      forceInstrumental: input.args.instrumental,
+      kind: 'elevenlabs_music',
+      modelId: assistantVoiceMemoMusicModelId,
+      outputFormat: assistantVoiceMemoMusicOutputFormat,
+      prompt: input.args.prompt,
+    },
+    runtime,
+    signal: input.abortSignal ?? null,
+  })
+}
+
+async function executeGeneratedVoiceMemo(input: {
+  filenameBase: string
+  generation: AssistantVoiceMemoGeneration
+  runtime: VoiceMemoToolRuntime
+  signal: AbortSignal | null
+}): Promise<GenerateVoiceMemoToolResult> {
+  const { label, transcript } = describeVoiceMemoGeneration(input.generation)
+  const filename = `${input.filenameBase}.mp3`
+  if (input.runtime.kind === 'telegram') {
     return {
       responseMedia: [
         {
           kind: 'voice_memo',
-          url: null,
-          mimeType: 'audio/mpeg',
           filename,
-          sizeBytes: null,
-          transcript: input.args.text,
-          source: 'elevenlabs',
-          voiceId,
-          modelId,
-          transportRefs: {
-            telegram: {
-              sendMode: 'generate_at_delivery',
-            },
+          transcript,
+          transport: {
+            generation: input.generation,
+            kind: 'telegram_generation',
           },
         },
       ],
       rpcSuccess: true,
-      rpcText: 'generated voice memo attached to the final response',
+      rpcText: `generated ${label} attached to the final response`,
     }
   }
 
-  const filenameBase = `voice-memo-${randomUUID()}`
-  let upload: Awaited<ReturnType<typeof runtime.generateAndUpload>>
+  let upload: Awaited<ReturnType<typeof input.runtime.generateAndUpload>>
   try {
-    upload = await runtime.generateAndUpload({
-      filenameBase,
-      modelId,
-      signal: input.abortSignal ?? null,
-      text: input.args.text,
-      voiceId,
+    upload = await input.runtime.generateAndUpload({
+      filenameBase: input.filenameBase,
+      generation: input.generation,
+      signal: input.signal,
     })
   } catch (error) {
     if (isAbortError(error)) {
       throw error
     }
-    if (error instanceof VoiceMemoToolConfigurationError) {
-      return {
-        rpcSuccess: false,
-        rpcText: error.rpcText,
-      }
-    }
-    if (error instanceof VoiceMemoToolGenerationError) {
+    if (
+      error instanceof VoiceMemoToolConfigurationError ||
+      error instanceof VoiceMemoToolGenerationError
+    ) {
       return {
         rpcSuccess: false,
         rpcText: error.rpcText,
@@ -163,7 +212,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
     return {
       rpcSuccess: false,
-      rpcText: 'voice memo generated but Linq attachment upload failed',
+      rpcText: `${label} generated but Linq attachment upload failed`,
     }
   }
 
@@ -171,23 +220,53 @@ export async function executeGenerateVoiceMemoTool(input: {
     responseMedia: [
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: upload.contentType,
         filename: upload.filename,
-        sizeBytes: upload.sizeBytes,
-        transcript: input.args.text,
-        source: 'elevenlabs',
-        voiceId,
-        modelId,
-        transportRefs: {
-          linq: {
-            attachmentId: upload.attachmentId,
-          },
+        transcript,
+        transport: {
+          attachmentId: upload.attachmentId,
+          kind: 'linq_attachment',
         },
       },
     ],
     rpcSuccess: true,
-    rpcText: 'generated voice memo attached to the final response',
+    rpcText: `generated ${label} attached to the final response`,
+  }
+}
+
+type VoiceMemoGenerationLabel = 'song' | 'voice memo'
+
+function rejectIfResponseMediaConflicts(
+  currentResponseMedia: readonly AssistantResponseMedia[],
+  label: VoiceMemoGenerationLabel,
+): GenerateVoiceMemoToolResult | null {
+  if (currentResponseMedia.length === 0) {
+    return null
+  }
+  return {
+    rpcSuccess: false,
+    rpcText: `${label} generation cannot be combined with other response media`,
+  }
+}
+
+function validateElevenLabsApiKeyPrecondition(
+  runtime: VoiceMemoToolRuntime,
+  label: VoiceMemoGenerationLabel,
+): GenerateVoiceMemoToolResult | null {
+  if (!runtime.elevenLabs.apiKeyAvailable) {
+    return {
+      rpcSuccess: false,
+      rpcText: `ELEVENLABS_API_KEY is required for ${label} generation`,
+    }
+  }
+  return null
+}
+
+function unavailableVoiceMemoResult(
+  label: VoiceMemoGenerationLabel,
+): GenerateVoiceMemoToolResult {
+  return {
+    rpcSuccess: false,
+    rpcText: `${label} generation is only available for deliverable iMessage or Telegram replies`,
   }
 }
 
@@ -229,50 +308,49 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
     elevenLabs,
     kind: 'linq',
     generateAndUpload: async (request) => {
+      const { label } = describeVoiceMemoGeneration(request.generation)
       if (!apiKey) {
         throw new VoiceMemoToolConfigurationError(
-          'ELEVENLABS_API_KEY is required for voice memo generation',
+          `ELEVENLABS_API_KEY is required for ${label} generation`,
         )
       }
       const linqApiToken = resolveLinqApiToken(input.env)
       if (!linqApiToken) {
         throw new VoiceMemoToolConfigurationError(
-          'LINQ_API_TOKEN is required for voice memo attachment upload',
+          `LINQ_API_TOKEN is required for ${label} attachment upload`,
         )
       }
 
-      let speech: Awaited<ReturnType<typeof generateElevenLabsSpeech>>
+      let audio: Awaited<ReturnType<typeof generateElevenLabsVoiceMemoAudio>>
       try {
-        speech = await generateElevenLabsSpeech({
+        audio = await generateElevenLabsVoiceMemoAudio({
           apiKey,
           fetchImplementation,
-          modelId: request.modelId,
+          generation: request.generation,
           signal: request.signal ?? undefined,
-          text: request.text,
-          voiceId: request.voiceId,
         })
       } catch (error) {
         if (isAbortError(error)) {
           throw error
         }
-        throw new VoiceMemoToolGenerationError('voice memo generation failed')
+        throw new VoiceMemoToolGenerationError(`${label} generation failed`)
       }
 
       if (
-        speech.bytes.byteLength === 0 ||
-        speech.bytes.byteLength > MAX_VOICE_MEMO_BYTES
+        audio.bytes.byteLength === 0 ||
+        audio.bytes.byteLength > MAX_VOICE_MEMO_BYTES
       ) {
         throw new VoiceMemoToolGenerationError(
-          'voice memo generation returned invalid audio data',
+          `${label} generation returned invalid audio data`,
         )
       }
 
-      const linqFilename = `${request.filenameBase}.${speech.filenameExtension}`
+      const linqFilename = `${request.filenameBase}.${audio.filenameExtension}`
       const upload = await createLinqAttachmentUpload(
         {
-          contentType: speech.contentType,
+          contentType: audio.contentType,
           filename: linqFilename,
-          sizeBytes: speech.bytes.byteLength,
+          sizeBytes: audio.bytes.byteLength,
         },
         {
           env: input.env,
@@ -282,7 +360,7 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
       )
       await uploadLinqAttachmentBytes(
         {
-          bytes: speech.bytes,
+          bytes: audio.bytes,
           requiredHeaders: upload.requiredHeaders,
           uploadUrl: upload.uploadUrl,
         },
@@ -294,9 +372,7 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
 
       return {
         attachmentId: upload.attachmentId,
-        contentType: speech.contentType,
         filename: linqFilename,
-        sizeBytes: speech.bytes.byteLength,
       }
     },
   }
@@ -338,3 +414,15 @@ function createStringFetchAdapter(fetchImpl: typeof fetch) {
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
+
+function describeVoiceMemoGeneration(
+  generation: AssistantVoiceMemoGeneration,
+): { label: VoiceMemoGenerationLabel; transcript: string | null } {
+  switch (generation.kind) {
+    case 'elevenlabs_speech':
+      return { label: 'voice memo', transcript: generation.text }
+    case 'elevenlabs_music':
+      return { label: 'song', transcript: null }
+  }
+}
+
