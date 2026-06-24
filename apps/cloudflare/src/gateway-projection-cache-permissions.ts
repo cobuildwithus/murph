@@ -1,4 +1,5 @@
 import {
+  compareGatewayTimestampsAscending,
   gatewayPermissionRequestSchema,
   gatewayProjectionSnapshotSchema,
   type GatewayPermissionRequest,
@@ -29,7 +30,7 @@ export function mergeGatewayPermissionOverrides(
       return permission;
     }
 
-    if (override.resolvedAt.localeCompare(generatedAt) > 0) {
+    if (compareGatewayTimestampsAscending(override.resolvedAt, generatedAt) > 0) {
       generatedAt = override.resolvedAt;
     }
 

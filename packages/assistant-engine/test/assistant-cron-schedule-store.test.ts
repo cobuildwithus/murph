@@ -423,14 +423,14 @@ describe('assistant cron store filesystem edges', () => {
   it('appends and reads cron runs in reverse started-at order', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-runs-append-')
     const older = createCronRun({
-      finishedAt: '2026-04-08T08:01:00.000Z',
+      finishedAt: '2026-04-08T00:31:00+01:00',
       runId: 'cronrun_alpha_old',
-      startedAt: '2026-04-08T08:00:00.000Z',
+      startedAt: '2026-04-08T00:30:00+01:00',
     })
     const newer = createCronRun({
-      finishedAt: '2026-04-08T09:01:00.000Z',
+      finishedAt: '2026-04-08T00:01:00.000Z',
       runId: 'cronrun_alpha_new',
-      startedAt: '2026-04-08T09:00:00.000Z',
+      startedAt: '2026-04-08T00:00:00.000Z',
       trigger: 'manual',
     })
 

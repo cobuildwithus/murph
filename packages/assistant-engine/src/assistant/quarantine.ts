@@ -9,6 +9,7 @@ import {
   type AssistantQuarantineSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  compareAssistantTimestampsAscending,
   ensureAssistantStateDirectory,
   errorMessage,
   isMissingFileError,
@@ -132,7 +133,7 @@ export async function listAssistantQuarantineEntriesAtPaths(
 
   return entries
     .sort((left, right) =>
-      right.quarantinedAt.localeCompare(left.quarantinedAt),
+      compareAssistantTimestampsAscending(right.quarantinedAt, left.quarantinedAt),
     )
     .slice(0, normalizeRecentLimit(input?.limit))
 }

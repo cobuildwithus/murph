@@ -68,6 +68,49 @@ export function resolveTimestamp(now?: Date): string {
   return (now ?? new Date()).toISOString()
 }
 
+export function compareAssistantTimestampsAscending(
+  left: string,
+  right: string,
+): number {
+  if (left === right) {
+    return 0
+  }
+
+  const leftMs = Date.parse(left)
+  const rightMs = Date.parse(right)
+  const leftValid = Number.isFinite(leftMs)
+  const rightValid = Number.isFinite(rightMs)
+
+  if (leftValid && rightValid) {
+    if (leftMs === rightMs) {
+      return 0
+    }
+    return leftMs < rightMs ? -1 : 1
+  }
+
+  if (leftValid !== rightValid) {
+    return leftValid ? -1 : 1
+  }
+
+  return left.localeCompare(right)
+}
+
+export function compareAssistantNullableTimestampsAscending(
+  left: string | null,
+  right: string | null,
+): number {
+  if (left === right) {
+    return 0
+  }
+  if (left === null) {
+    return 1
+  }
+  if (right === null) {
+    return -1
+  }
+  return compareAssistantTimestampsAscending(left, right)
+}
+
 export function isMissingFileError(error: unknown): boolean {
   return Boolean(
     error &&

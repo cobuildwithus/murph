@@ -270,13 +270,13 @@ describe('assistant turns', () => {
     })
 
     await appendAssistantTurnReceiptEvent({
-      at: '2026-04-08T02:05:00.000Z',
+      at: '2026-04-08T03:00:00.000Z',
       kind: 'provider.attempt.succeeded',
       turnId: 'turn-a',
       vault: vaultRoot,
     })
     await appendAssistantTurnReceiptEvent({
-      at: '2026-04-08T02:03:00.000Z',
+      at: '2026-04-08T03:30:00+01:00',
       kind: 'provider.attempt.succeeded',
       turnId: 'turn-b',
       vault: vaultRoot,

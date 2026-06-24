@@ -291,7 +291,7 @@ test('assistant backend targets trim config input and strip sensitive headers be
     modelProvider: null,
     oss: true,
     profile: 'default',
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: 'workspace-write',
   })
 
