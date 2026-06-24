@@ -1,7 +1,7 @@
 "use client";
 
 import { track } from "@vercel/analytics";
-import { ArrowUpRight, CheckCircle2, Keyboard, Monitor } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
@@ -26,7 +26,6 @@ export function ComputerHandoffActiveView({
   liveViewUrl,
 }: ComputerHandoffActiveViewProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
-  const [focusEnabled, setFocusEnabled] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const successAnchorRef = useRef<HTMLAnchorElement>(null);
   const phaseRef = useRef(phase);
@@ -52,14 +51,6 @@ export function ComputerHandoffActiveView({
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
-
-  const onEnableFocus = () => {
-    iframeRef.current?.focus();
-    if (!focusEnabled) {
-      setFocusEnabled(true);
-      track("live_view_focus_enabled");
-    }
-  };
 
   const onDone = async () => {
     setPhase({ kind: "saving" });
@@ -95,6 +86,7 @@ export function ComputerHandoffActiveView({
         ref={iframeRef}
         allow={iframeAllow}
         className="block h-dvh w-full border-0 bg-foreground"
+        onLoad={() => iframeRef.current?.focus()}
         referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
         src={liveViewUrl}
@@ -126,18 +118,6 @@ export function ComputerHandoffActiveView({
             >
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               Done
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="lg"
-              onClick={onEnableFocus}
-              disabled={phase.kind !== "idle"}
-              aria-label="Enable keyboard and paste in the private page"
-              aria-pressed={focusEnabled}
-            >
-              <Keyboard className="h-4 w-4" aria-hidden="true" />
-              {focusEnabled ? "Keyboard ready" : "Enable keyboard"}
             </Button>
           </div>
         </ComputerHandoffFloatingIsland>
