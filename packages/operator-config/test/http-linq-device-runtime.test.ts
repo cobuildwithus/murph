@@ -354,7 +354,7 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   })
 })
 
-test('linq runtime converts markdown emphasis to iMessage text decorations', async () => {
+test('linq runtime converts supported text styles to iMessage text decorations', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom',
     LINQ_API_TOKEN: 'linq-token',
@@ -381,7 +381,7 @@ test('linq runtime converts markdown emphasis to iMessage text decorations', asy
   await sendLinqChatMessage(
     {
       chatId: 'chat-123',
-      message: '  This is **bold** and _short aside_. ~~gone~~ Keep durable/home/*/rollout-*.jsonl intact.  ',
+      message: '  This is **bold**, *italic*, _short aside_, ~~gone~~, and ++underlined++. Keep durable/home/*/rollout-*.jsonl intact.  ',
     },
     { env, fetchImplementation },
   )
@@ -397,16 +397,24 @@ test('linq runtime converts markdown emphasis to iMessage text decorations', asy
               style: 'bold',
             },
             {
-              range: [17, 28],
+              range: [14, 20],
               style: 'italic',
             },
             {
-              range: [30, 34],
+              range: [22, 33],
+              style: 'italic',
+            },
+            {
+              range: [35, 39],
               style: 'strikethrough',
+            },
+            {
+              range: [45, 55],
+              style: 'underline',
             },
           ],
           type: 'text',
-          value: 'This is bold and short aside. gone Keep durable/home/*/rollout-*.jsonl intact.',
+          value: 'This is bold, italic, short aside, gone, and underlined. Keep durable/home/*/rollout-*.jsonl intact.',
         },
       ],
     },
