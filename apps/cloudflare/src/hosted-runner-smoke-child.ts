@@ -700,6 +700,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   vaultWriteProofCount: number;
 }> {
   const child = spawn("codex", ["app-server"], {
+    cwd: input.vaultRoot,
     detached: process.platform !== "win32",
     env: {
       ...process.env,
@@ -854,7 +855,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     const result = readCodexCommandExecResult(message.result);
     if (result.exitCode !== 0) {
       throw new Error(
-        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")} stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`,
       );
     }
 
@@ -944,6 +945,7 @@ function findExecutable(name) {
   return "";
 }
 const proof = {
+  cwdRebound: process.cwd() === expectedVaultRoot,
   murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY || process.env.VERCEL_AI_API_KEY),
   python3PathBytes: Buffer.byteLength(findExecutable("python3"), "utf8"),
@@ -981,6 +983,10 @@ function parseCodexEnvironmentProbe(
 
   if (record.vaultRootInherited !== true) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
+  }
+
+  if (record.cwdRebound !== true) {
+    throw new Error("Codex app-server shell env probe did not execute from the restored vault root.");
   }
 
   if (record.providerCredentialPresent === true) {

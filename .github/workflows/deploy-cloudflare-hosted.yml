@@ -28,16 +28,6 @@ on:
         options:
           - gradual
           - immediate
-      runner_idle_ttl_ms:
-        description: Optional runner container idle TTL override in milliseconds
-        required: false
-        default: ""
-        type: string
-      hosted_email_send_binding:
-        description: Render the optional native hosted-email send binding
-        required: true
-        default: true
-        type: boolean
       live_model_turn:
         description: Run one real gpt-5.4-nano turn in the deployed container smoke
         required: true
@@ -62,7 +52,7 @@ jobs:
   codex-cache-prefix-gate:
     name: Codex cache-prefix E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -170,7 +160,7 @@ jobs:
   linq-delivery-gate:
     name: Linq delivery E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -278,7 +268,7 @@ jobs:
   linq-scheduled-reminder-gate:
     name: Linq scheduled reminder E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -386,7 +376,7 @@ jobs:
   cloudflare-runner-smoke-gate:
     name: Cloudflare verify and runner smoke gate
     if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1
@@ -518,7 +508,7 @@ jobs:
   codex-auth-deploy-guard:
     name: Hosted Codex auth deploy guard
     if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -569,7 +559,7 @@ jobs:
       - immediate-build-prep-gate
       - codex-auth-deploy-guard
     if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker && needs.codex-auth-deploy-guard.result == 'success') || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-auth-deploy-guard.result == 'success' && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
     concurrency:
@@ -587,7 +577,6 @@ jobs:
       CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.CF_DEFAULT_ALARM_DELAY_MS }}
       CF_LOG_HEAD_SAMPLING_RATE: ${{ vars.CF_LOG_HEAD_SAMPLING_RATE }}
       CF_MAX_EVENT_ATTEMPTS: ${{ vars.CF_MAX_EVENT_ATTEMPTS }}
-      CF_HOSTED_EMAIL_SEND_BINDING_ENABLED: ${{ inputs.hosted_email_send_binding }}
       CF_PUBLIC_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       CF_RETRY_DELAY_MS: ${{ vars.CF_RETRY_DELAY_MS }}
       CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.CF_RUNNER_COMMIT_TIMEOUT_MS }}
@@ -603,7 +592,7 @@ jobs:
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}
       HOSTED_CRYPTO_ENV: ${{ vars.HOSTED_CRYPTO_ENV }}
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram,whatsapp' }}
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT || 'production' }}
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME }}
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG }}
@@ -1066,7 +1055,6 @@ jobs:
           DEPLOY_SUMMARY_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           DEPLOY_SUMMARY_ENVIRONMENT: ${{ inputs.environment }}
           DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}
-          DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || 'environment default' }}
           DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}
         run: |
           {
@@ -1075,7 +1063,7 @@ jobs:
             printf -- '- Environment: `%s`\n' "${DEPLOY_SUMMARY_ENVIRONMENT}"
             printf -- '- Deploy strategy: `%s`\n' "direct"
             printf -- '- Container rollout: `%s`\n' "${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}"
-            printf -- '- Runner idle TTL override: `%s`\n' "${DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS}"
+            printf -- '- Runner idle TTL: `%s`\n' "${HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:-environment default}"
             printf -- '- Worker name: `%s`\n' "${CF_WORKER_NAME}"
             printf -- '- Worker URL: `%s`\n' "${CF_PUBLIC_BASE_URL:-not-set}"
             printf -- '- Container instance type: `%s`\n' "${CF_CONTAINER_INSTANCE_TYPE}"

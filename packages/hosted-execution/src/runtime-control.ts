@@ -1285,6 +1285,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  "device-sync.wake_projection_failed",
   // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",
   "device-sync.reconnect_notice_duplicate",

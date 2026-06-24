@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
+  resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   runHostedAssistantAutomationLane: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
@@ -95,6 +96,8 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+  resolveHostedSystemMailboxNextWakeCandidate:
+    mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
 }));
 
@@ -139,6 +142,13 @@ beforeEach(() => {
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
+  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {
+    const at = await mocks.resolveHostedSystemMailboxNextWakeAt();
+    return {
+      at,
+      reason: at ? "assistant" : null,
+    };
+  });
   mocks.runHostedAssistantAutomationLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,

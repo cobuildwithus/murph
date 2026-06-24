@@ -31,6 +31,7 @@ export type HostedComputerAwaitingReason =
   (typeof HOSTED_COMPUTER_AWAITING_REASONS)[number];
 
 export const HOSTED_COMPUTER_HANDOFF_PURPOSES = [
+  "managed_login",
   "login",
   "payment",
   "card",

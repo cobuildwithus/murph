@@ -369,30 +369,6 @@ describe("hosted deploy automation helpers", () => {
     }
   });
 
-  it("can omit the optional hosted email send binding for deploy tokens without that permission", () => {
-    const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_HOSTED_EMAIL_SEND_BINDING_ENABLED: "false",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
-    });
-    const config = buildHostedWranglerDeployConfig(environment) as {
-      send_email?: unknown;
-      vars: Record<string, string>;
-    };
-
-    expect(config).not.toHaveProperty("send_email");
-    expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
-    expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
-    expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
-    expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
-  });
-
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -534,7 +510,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram,whatsapp' }}",
-      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
+      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
       "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
@@ -548,10 +524,9 @@ describe("hosted deploy automation helpers", () => {
       "DEPLOY_SUMMARY_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "DEPLOY_SUMMARY_ENVIRONMENT: ${{ inputs.environment }}",
       "DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}",
-      "DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || 'environment default' }}",
       "DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}",
       "printf -- '- Container rollout: `%s`\\n' \"${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}\"",
-      "printf -- '- Runner idle TTL override: `%s`\\n' \"${DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS}\"",
+      "printf -- '- Runner idle TTL: `%s`\\n' \"${HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:-environment default}\"",
       "printf -- '- Smoke user id: `%s`\\n' \"${DEPLOY_SUMMARY_SMOKE_USER_ID}\"",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
@@ -560,8 +535,6 @@ describe("hosted deploy automation helpers", () => {
       "name: Codex cache-prefix E2E gate",
       "skip_predeploy_e2e:",
       "description: Skip predeploy hosted-local E2E gates",
-      "runner_idle_ttl_ms:",
-      "description: Optional runner container idle TTL override in milliseconds",
       "if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}",
@@ -586,7 +559,6 @@ describe("hosted deploy automation helpers", () => {
       "--publish 5432:5432",
       "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
       "name: Stop Postgres",
-      "runs-on: ubuntu-24.04",
       "uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6",
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
@@ -750,12 +722,11 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(1);
+    ]).toHaveLength(7);
     expect(workflow).toContain(
       "name: Immediate deploy build prep\n    if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}\n    runs-on: blacksmith-4vcpu-ubuntu-2404",
     );
-    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(6);
-    expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
+    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(0);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
     ]).toHaveLength(3);
@@ -848,7 +819,7 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
-  it("keeps the immediate deploy script on the default runner idle TTL", async () => {
+  it("keeps the immediate deploy script aligned with normal deploy defaults", async () => {
     const packageJson = JSON.parse(
       await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
     ) as { scripts?: Record<string, string> };
@@ -859,8 +830,10 @@ describe("hosted deploy automation helpers", () => {
       ),
     );
 
-    expect(workflowInputs.get("runner_idle_ttl_ms")).toBe("300000");
-    expect(immediateDeployScript).not.toContain("runner_idle_ttl_ms=43200000");
+    expect(workflowInputs.get("container_rollout")).toBe("immediate");
+    expect(workflowInputs.get("skip_predeploy_e2e")).toBe("true");
+    expect(workflowInputs.has("runner_idle_ttl_ms")).toBe(false);
+    expect(workflowInputs.has("hosted_email_send_binding")).toBe(false);
   });
 
   it("passes explicit runner env profiles through to worker vars", () => {

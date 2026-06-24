@@ -73,6 +73,132 @@ describe("ComputerUseService", () => {
     expect(store.handoff?.tokenHash).toHaveLength(64);
   });
 
+  it("requires a fresh persisted HTTPS browser domain before creating a managed-login handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://old.example/account",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Target login",
+        url: "https://target.example/login?step=1#ignored",
+        visibleText: "Sign in",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Target login",
+      lastUrl: "https://target.example/login",
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      purpose: "managed_login",
+      status: "open",
+    });
+  });
+
+  it("does not create a managed-login handoff when the fresh browser domain cannot be persisted", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://old.example/account",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      failNextUpdateRunBrowserState: true,
+      run,
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Target login",
+        url: "https://target.example/login",
+        visibleText: "Sign in",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      lastUrl: "https://old.example/account",
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
+  it("rejects managed-login handoffs for non-login pause reasons before creating a handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://checkout.example/pay",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "payment_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_LOGIN_NEEDED",
+      retryable: true,
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
   it("stores final confirmation as a manual handoff pause", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
@@ -173,6 +299,70 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toMatchObject({
       id: "hch_handoff124",
       status: "open",
+    });
+  });
+
+  it("reattaches Live View when refreshing a browserless managed-login handoff as login", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      id: "hch_handoff123",
+      purpose: "managed_login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        profileName: "murph-test-member",
+        saveChanges: true,
+      }),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      purpose: "managed_login",
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "login",
+      status: "open",
+      suggestedReply: "done",
     });
   });
 
@@ -3180,6 +3370,7 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
       "kernel-session-2",
     ]);
     expect(kernel.deletedProfileNames).toEqual([]);
@@ -3223,7 +3414,10 @@ describe("ComputerUseService", () => {
       completedAt: now,
       status: "completed",
     });
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.deletedSessionIds).toEqual([
+      "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
+    ]);
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
@@ -3308,7 +3502,10 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({ suggestedReply: "done" });
 
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.deletedSessionIds).toEqual([
+      "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
+    ]);
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(store.handoff).toMatchObject({
       completedAt: now,
@@ -3356,6 +3553,7 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
       "kernel-session-2",
     ]);
   });
@@ -3473,6 +3671,7 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
       "kernel-session-2",
     ]);
     expect(store.handoff).toMatchObject({
@@ -3515,6 +3714,7 @@ describe("ComputerUseService", () => {
     })).rejects.toThrow("Stale run state.");
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
       "kernel-session-2",
     ]);
     expect(store.handoff).toMatchObject({
@@ -3559,6 +3759,7 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
       "kernel-session-2",
     ]);
     expect(store.handoff).toMatchObject({
@@ -3901,10 +4102,13 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
   });
 
   it("deletes each unique stored Kernel profile during account deletion cleanup", async () => {
@@ -3949,10 +4153,11 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
       "kernel-profile-shared",
       "kernel-profile-distinct",
     ]);
@@ -4010,12 +4215,15 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "running",
@@ -4065,13 +4273,16 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
   });
 
   it("deletes pre-existing terminal browserless deterministic browsers during account deletion cleanup", async () => {
@@ -4096,12 +4307,15 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "failed",
@@ -4131,10 +4345,13 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
   });
 
   it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
@@ -4166,12 +4383,15 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      "kernel-profile-member",
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "awaiting_user",
@@ -4235,42 +4455,13 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
   });
 
-  it("does not require Kernel cleanup when the member has no computer-use runs", async () => {
+  it("deletes the deterministic Kernel profile even when no run rows remain", async () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
         memberId: "member_with_runs",
       }),
     });
-    const createBrowser = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const deleteBrowserByIdOrName = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const deleteProfile = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const ensureBrowserViewport = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const ensureProfile = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const executePlaywright = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const osControl = vi.fn(async () => {
-      throw new Error("Kernel should not be called.");
-    });
-    const kernel: ComputerKernelClient = {
-      createBrowser,
-      deleteBrowserByIdOrName,
-      deleteProfile,
-      ensureBrowserViewport,
-      ensureProfile,
-      executePlaywright,
-      osControl,
-    };
+    const kernel = createFakeKernel();
     const service = new ComputerUseService({
       env: {
         HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
@@ -4284,14 +4475,11 @@ describe("ComputerUseService", () => {
       memberId: "member_without_runs",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 0,
+      profilesDeleted: 1,
     });
-    expect(createBrowser).not.toHaveBeenCalled();
-    expect(deleteBrowserByIdOrName).not.toHaveBeenCalled();
-    expect(deleteProfile).not.toHaveBeenCalled();
-    expect(ensureBrowserViewport).not.toHaveBeenCalled();
-    expect(ensureProfile).not.toHaveBeenCalled();
-    expect(executePlaywright).not.toHaveBeenCalled();
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toHaveLength(1);
+    expect(kernel.deletedProfileNames[0]).toMatch(/^murph-test-/u);
   });
 });
 
@@ -5743,6 +5931,31 @@ function createFakeKernel(input: {
       }
       input.onDeleteBrowserByIdOrName?.(sessionId);
     },
+    async deleteManagedAuthConnection() {},
+    async ensureManagedAuthConnection(managedInput) {
+      return {
+        browserSessionId: null,
+        domain: managedInput.domain,
+        flowExpiresAt: null,
+        flowStatus: null,
+        hostedUrl: null,
+        id: "managed-auth-1",
+        profileName: managedInput.profileName,
+        status: "NEEDS_AUTH" as const,
+      };
+    },
+    async findManagedAuthConnection() {
+      return null;
+    },
+    async listManagedAuthConnections() {
+      return [];
+    },
+    async startManagedAuthLogin() {
+      return {
+        flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+        hostedUrl: "https://auth.onkernel.com/login/test",
+      };
+    },
     async deleteProfile(name: string) {
       this.deletedProfileNames.push(name);
     },
@@ -5781,6 +5994,14 @@ function createFakeCrypto(input: {
       return encryptInput.value ?? null;
     },
   };
+}
+
+function deterministicRunBrowserNameMatcher() {
+  return expect.stringMatching(/^murph-browser-hcr_run123-[0-9a-f]{24}$/u);
+}
+
+function deterministicProfileNameMatcher() {
+  return expect.stringMatching(/^murph-test-[0-9a-f]{24}$/u);
 }
 
 function staleRunStateError(): Error {

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA =
   "murph.hosted-workspace-snapshot.v2" as const;
 export const HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA =
@@ -60,6 +62,37 @@ export interface HostedWorkspaceSnapshotV2Ref {
   snapshotId: string;
   upload: typeof HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND;
   userId: string;
+}
+
+export function buildHostedWorkspaceSnapshotV2FingerprintSha256(
+  ref: HostedWorkspaceSnapshotV2Ref,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      archive: {
+        compression: ref.archive.compression,
+        encryptedByteSize: ref.archive.encryptedByteSize,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        fileCount: ref.archive.fileCount,
+        format: ref.archive.format,
+        plaintextArchiveSha256: ref.archive.plaintextArchiveSha256,
+        totalPlainBytes: ref.archive.totalPlainBytes,
+      },
+      createdAt: ref.createdAt,
+      encryption: {
+        aad: ref.encryption.aad,
+        ivBase64: ref.encryption.ivBase64,
+        rootKeyId: ref.encryption.rootKeyId,
+        scheme: ref.encryption.scheme,
+        wrappedDataKey: ref.encryption.wrappedDataKey,
+      },
+      objectKey: ref.objectKey,
+      schema: ref.schema,
+      snapshotId: ref.snapshotId,
+      upload: ref.upload,
+      userId: ref.userId,
+    }))
+    .digest("hex");
 }
 
 export interface HostedWorkspaceSnapshotV2DataKeyWrap {

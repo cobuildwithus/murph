@@ -82,7 +82,7 @@
     "verify:workspace-package-cycles": "node scripts/check-workspace-package-cycles.mjs",
     "build:test-runtime:prepared": "node scripts/build-test-runtime-prepared.mjs",
     "cf:deploy": "gh workflow run .github/workflows/deploy-cloudflare-hosted.yml --ref main -f environment=production -f sync_worker_secrets=true -f deploy_worker=true",
-    "cf:deploy:immediate": "gh workflow run .github/workflows/deploy-cloudflare-hosted.yml --ref main -f environment=production -f sync_worker_secrets=true -f deploy_worker=true -f container_rollout=immediate -f runner_idle_ttl_ms=300000 -f hosted_email_send_binding=false -f skip_predeploy_e2e=true"
+    "cf:deploy:immediate": "gh workflow run .github/workflows/deploy-cloudflare-hosted.yml --ref main -f environment=production -f sync_worker_secrets=true -f deploy_worker=true -f container_rollout=immediate -f skip_predeploy_e2e=true"
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
