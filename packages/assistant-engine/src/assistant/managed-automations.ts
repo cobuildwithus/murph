@@ -381,16 +381,20 @@ export async function applyMurphManagedAutomations(
 
     // Seed has changed. Reconcile in place. A one-shot whose desired
     // occurrence already passed cannot fire at the new time, but if the
-    // legacy stored occurrence is still in the future, keep firing at the
-    // legacy time so the user still gets the moment with the new content.
-    // Archive only when neither the new desired nor the legacy stored
-    // occurrence can still fire.
+    // legacy stored occurrence is also a one-shot still in the future,
+    // keep firing at the legacy time so the user still gets the moment
+    // with the new content. Archive only when neither the new desired nor
+    // a legacy one-shot occurrence can still fire. A recurring legacy
+    // schedule (cron/every/dailyLocal) under one-shot instructions would
+    // fire the final-review repeatedly, so it must be replaced with the
+    // new desired schedule (and archived if that is itself stale).
     const newDesiredStale = isStaleOneShotSchedule(seed.schedule, now)
-    const existingStillFires =
+    const legacyOneShotStillFires =
+      existing.schedule.kind === 'at' &&
       !isStaleOneShotSchedule(existing.schedule, now)
     let reconciledSchedule: MurphManagedAutomationSchedule = seed.schedule
     let reconciledStatus: AutomationStatus = existing.status
-    if (newDesiredStale && existingStillFires) {
+    if (newDesiredStale && legacyOneShotStillFires) {
       reconciledSchedule = existing.schedule as MurphManagedAutomationSchedule
     } else if (newDesiredStale) {
       reconciledStatus = 'archived'

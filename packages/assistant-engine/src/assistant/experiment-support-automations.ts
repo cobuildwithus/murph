@@ -29,7 +29,8 @@ const FIRST_PROGRESS_DAY = 4
 const LIFECYCLE_FIRE_HOUR_LOCAL = 9
 const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as const
 const FINAL_RESULTS_TAGS = ['experiment', 'final-results', 'progress-card'] as const
-const EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX = 'experiment-final-results-'
+const AUTOMATION_ID_PREFIX = 'automation_'
+const EXPERIMENT_ID_PREFIX = 'exp_'
 
 export async function buildExperimentLifecycleSeeds(
   input: BuildExperimentLifecycleSeedsInput,
@@ -182,45 +183,49 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
  * backoff retries the one-shot — the LLM cannot trigger a cron failure on
  * its own (skip and send_message both mark the run successful and consume
  * the at-occurrence).
+ *
+ * Routing is keyed on the immutable automation ID, not the mutable slug, so
+ * a user-edited slug cannot silently bypass persistence. The seed builder
+ * mints final-results automation IDs by stripping the `exp_` prefix from the
+ * experiment ID, so the reverse mapping uniquely identifies the experiment.
  */
 export async function runExperimentLifecycleOutcomePrecondition(input: {
-  automationSlug: string | null | undefined
+  automationId: string
   tags: readonly string[]
   vault: string
 }): Promise<void> {
-  if (!isExperimentFinalResultsAutomation(input.tags, input.automationSlug)) {
+  if (!isExperimentFinalResultsAutomation(input.tags)) {
     return
   }
-  const experimentSlug = extractExperimentFinalResultsSlug(input.automationSlug ?? '')
-  if (!experimentSlug) {
+  const experimentLookup = experimentLookupForFinalResultsAutomationId(
+    input.automationId,
+  )
+  if (!experimentLookup) {
     return
   }
   const services = createIntegratedVaultServices()
   await services.core.writeExperimentOutcome({
     vault: input.vault,
-    lookup: experimentSlug,
+    lookup: experimentLookup,
     requestId: null,
   })
 }
 
-function isExperimentFinalResultsAutomation(
-  tags: readonly string[],
-  automationSlug: string | null | undefined,
-): boolean {
-  return (
-    tags.includes('experiment') &&
-    tags.includes('final-results') &&
-    typeof automationSlug === 'string' &&
-    automationSlug.startsWith(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX)
-  )
+function isExperimentFinalResultsAutomation(tags: readonly string[]): boolean {
+  return tags.includes('experiment') && tags.includes('final-results')
 }
 
-function extractExperimentFinalResultsSlug(automationSlug: string): string | null {
-  if (!automationSlug.startsWith(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX)) {
+function experimentLookupForFinalResultsAutomationId(
+  automationId: string,
+): string | null {
+  if (!automationId.startsWith(AUTOMATION_ID_PREFIX)) {
     return null
   }
-  const slug = automationSlug.slice(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX.length)
-  return slug.length > 0 ? slug : null
+  const body = automationId.slice(AUTOMATION_ID_PREFIX.length)
+  if (body.length === 0) {
+    return null
+  }
+  return `${EXPERIMENT_ID_PREFIX}${body}`
 }
 
 function experimentProgressAutomationId(experimentId: string): string {
@@ -232,9 +237,16 @@ function experimentProgressAutomationId(experimentId: string): string {
   return `automation_${body}`
 }
 
-/** Preserve the original final-results automation id for existing runs. */
+/**
+ * Preserve the original final-results automation id for existing runs.
+ *
+ * The mapping is invertible: stripping `automation_` and prepending `exp_`
+ * recovers the original experiment id. The precondition relies on that
+ * invariant, so the two prefixes must stay paired (see
+ * experimentLookupForFinalResultsAutomationId).
+ */
 function experimentFinalResultsAutomationId(experimentId: string): string {
-  return `automation_${experimentId.replace(/^exp_/u, '')}`
+  return `${AUTOMATION_ID_PREFIX}${experimentId.replace(/^exp_/u, '')}`
 }
 
 function lifecycleFireTimestamp(localDate: string, timeZone: string): string {

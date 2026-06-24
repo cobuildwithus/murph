@@ -1122,6 +1122,48 @@ describe('applyMurphManagedAutomations', () => {
       })
   })
 
+  it('does not preserve a recurring legacy schedule when the new one-shot is stale (would otherwise fire the final review repeatedly)', async () => {
+    // Regression guard: only an `at` legacy schedule earns the migration
+    // preserve. A `cron`/`every`/`dailyLocal` legacy schedule would fire
+    // one-shot instructions on every recurrence, so reconcile must archive.
+    const recurringLegacy: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'cron', expression: '0 15 * * *' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(recurringLegacy.automationId, recurringLegacy)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: recurringLegacy.automationId,
+      slug: recurringLegacy.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After the new desired one-shot's expiry window — a recurring legacy
+      // schedule would otherwise be retained and fire repeatedly.
+      now: new Date('2026-04-29T08:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(recurringLegacy.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        status: 'archived',
+      })
+  })
+
   it('archives an existing one-shot only when both the new and the legacy occurrence have expired', async () => {
     const previousFinal: StoredAutomationRecord = {
       automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',

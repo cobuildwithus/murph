@@ -356,8 +356,10 @@ export async function executeClaimedAssistantCronJob(input: {
           input.job.kind === 'canonical' &&
           input.job.source.kind === 'automation'
         ) {
+          // Route on the immutable automationId so a user-edited slug cannot
+          // silently bypass the precondition.
           await runExperimentLifecycleOutcomePrecondition({
-            automationSlug: input.job.source.slug,
+            automationId: input.job.source.automationId,
             tags: input.job.source.tags,
             vault: input.vault,
           })

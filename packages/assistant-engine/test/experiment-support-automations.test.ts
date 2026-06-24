@@ -231,15 +231,36 @@ it('prefers the per-run schedule timezone over the vault timezone', async () => 
 it('persists the deterministic outcome before the final-results notification turn', async () => {
   vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
 
+  // Reverse the seed builder's ULID-based mapping
+  // (`experimentFinalResultsAutomationId`) so the precondition looks up the
+  // experiment via its stable id rather than the mutable automation slug.
   await runExperimentLifecycleOutcomePrecondition({
-    automationSlug: 'experiment-final-results-sauna-rhr',
+    automationId: 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144',
     tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results', 'progress-card'],
     vault: '/tmp/lifecycle-precondition/vault',
   })
 
   expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
     vault: '/tmp/lifecycle-precondition/vault',
-    lookup: 'sauna-rhr',
+    lookup: 'exp_X3GPAWV2CCHNCYHAAJ4CE2M144',
+    requestId: null,
+  })
+})
+
+it('still persists the outcome when the managed automation slug has been user-edited', async () => {
+  // Regression guard: the reconciler intentionally preserves user-edited
+  // slugs, so the precondition must route on the immutable automationId.
+  vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
+
+  await runExperimentLifecycleOutcomePrecondition({
+    automationId: 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: 'exp_X3GPAWV2CCHNCYHAAJ4CE2M144',
     requestId: null,
   })
 })
@@ -250,7 +271,7 @@ it('propagates outcome-write failures so the cron records a failure and retries'
     .mockRejectedValue(new Error('outcome write failed'))
 
   await expect(runExperimentLifecycleOutcomePrecondition({
-    automationSlug: 'experiment-final-results-sauna-rhr',
+    automationId: 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144',
     tags: ['experiment', 'final-results'],
     vault: '/tmp/lifecycle-precondition/vault',
   })).rejects.toThrow('outcome write failed')
@@ -260,12 +281,12 @@ it('is a no-op for automations that are not final-results lifecycle cron jobs', 
   vaultServicesMocks.writeExperimentOutcome.mockReset()
 
   await runExperimentLifecycleOutcomePrecondition({
-    automationSlug: 'experiment-progress-sauna-rhr-day-4',
+    automationId: 'automation_PROGRESSAUTOMATIONIDHASH00',
     tags: ['experiment', 'progress-card', 'milestone'],
     vault: '/tmp/lifecycle-precondition/vault',
   })
   await runExperimentLifecycleOutcomePrecondition({
-    automationSlug: 'weekly-health-digest',
+    automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY',
     tags: ['assistant', 'scheduled', 'murph-managed'],
     vault: '/tmp/lifecycle-precondition/vault',
   })
