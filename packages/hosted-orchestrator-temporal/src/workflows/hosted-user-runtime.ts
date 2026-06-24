@@ -363,14 +363,14 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: false,
-          processingMode: "inbox_media_retention",
-        });
-        continue;
-      }
-
+      // Priority on the unblocked branch: user-visible work (mailbox lag or
+      // a due default wake) always wins over retention. Retention runs in
+      // bounded per-pass batches and re-arms inboxMediaRetentionWakeAt while
+      // hasMoreEligibleAttachments is true, so dispatching it ahead of live
+      // work would starve mailbox/assistant turns for minutes per batch
+      // immediately after the migration backfills CURRENT_TIMESTAMP.
+      // Inactive/AI-denied users still purge media via the blocked branch
+      // above where retention is the only admissible mode.
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
@@ -380,19 +380,26 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       clearMailboxPointer(state);
 
-      const nextWakeAt = selectEarliestHostedRuntimeWorkflowWakeAt([
-        facts.workspace?.nextWakeAt ?? null,
-        inboxMediaRetentionWakeAt,
-      ]);
-      if (isDueTimestamp(nextWakeAt, runtime.nowMs())) {
+      const defaultNextWakeAt = facts.workspace?.nextWakeAt ?? null;
+      if (isDueTimestamp(defaultNextWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
-          processingMode: nextWakeAt === inboxMediaRetentionWakeAt
-            ? "inbox_media_retention"
-            : null,
         });
         continue;
       }
+
+      if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: false,
+          processingMode: "inbox_media_retention",
+        });
+        continue;
+      }
+
+      const nextWakeAt = selectEarliestHostedRuntimeWorkflowWakeAt([
+        defaultNextWakeAt,
+        inboxMediaRetentionWakeAt,
+      ]);
 
       if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
         await continueAsNewWithCurrentState();

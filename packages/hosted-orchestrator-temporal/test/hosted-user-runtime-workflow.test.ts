@@ -241,7 +241,12 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(-1));
   });
 
-  it("runs due inbox media retention before mailbox work", async () => {
+  it("dispatches default processing for mailbox lag even when an inbox media retention wake is also due", async () => {
+    // Retention runs in bounded per-pass batches and re-arms its wake while
+    // hasMoreEligibleAttachments is true, so dispatching retention ahead of
+    // live mailbox/assistant work would starve user-visible traffic for
+    // minutes per batch immediately after the migration backfills the wake
+    // for every existing workspace.
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
       mailboxLag: [mailboxLag({ lane: "conversation" })],
@@ -264,16 +269,61 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.mailboxSignalCount).toBe(0);
+  });
+
+  it("dispatches default processing when both default and retention wakes are due with no mailbox lag", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        // Retention wake is older than the default wake, but priority is by
+        // mode (default > retention), not by earliest timestamp.
+        inboxMediaRetentionWakeAt: isoAfter(-60_000),
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("dispatches retention-only when retention is due and no default work is pending", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        inboxMediaRetentionWakeAt: isoAfter(-1),
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
         processingMode: "inbox_media_retention",
         userId: "member_test",
       },
     ]);
-    expect(continued.state?.latestMailboxPointer).toEqual({
-      lane: "conversation",
-      laneSeq: "7",
-      mailboxItemId: "mailbox_item_test",
-    });
-    expect(continued.state?.mailboxSignalCount).toBe(1);
   });
 
   it("drives an alarm when reconciliation facts show a due workspace wake", async () => {
