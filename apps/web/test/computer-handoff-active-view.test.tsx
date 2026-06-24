@@ -70,7 +70,30 @@ test("ComputerHandoffActiveView starts takeover with one click", async () => {
   expect(iframe.getAttribute("aria-hidden")).toBe("false");
   expect(iframe.getAttribute("tabindex")).toBe("0");
   expect(findDoneButton(container)).toBeTruthy();
+  expect(findFocusButton(container)).toBeTruthy();
   expect(track).toHaveBeenCalledWith("live_view_focus_enabled");
+});
+
+test("ComputerHandoffActiveView can refocus the live view after takeover", async () => {
+  const { cleanup, container, window } = await renderHandoff();
+  cleanupRender = cleanup;
+
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe);
+  const iframeFocus = vi.fn();
+  (iframe as unknown as { focus: (options?: FocusOptions) => void }).focus = iframeFocus;
+
+  await click(window, findTakeoverButton(container));
+  await click(window, findFocusButton(container));
+  await click(window, findFocusButton(container));
+
+  expect(iframeFocus).toHaveBeenCalledTimes(3);
+  expect(iframeFocus).toHaveBeenNthCalledWith(1, { preventScroll: true });
+  expect(iframeFocus).toHaveBeenNthCalledWith(2, { preventScroll: true });
+  expect(iframeFocus).toHaveBeenNthCalledWith(3, { preventScroll: true });
+  expect(
+    vi.mocked(track).mock.calls.filter(([name]) => name === "live_view_focus_enabled"),
+  ).toHaveLength(1);
 });
 
 test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
@@ -225,6 +248,12 @@ function findTakeoverButton(container: HTMLElement): HTMLButtonElement | null {
 function findDoneButton(container: HTMLElement): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(
     'button[aria-label="Finish this step and return to Murph"]',
+  );
+}
+
+function findFocusButton(container: HTMLElement): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Focus the private browser for keyboard and paste"]',
   );
 }
 

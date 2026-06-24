@@ -1,7 +1,7 @@
 "use client";
 
 import { track } from "@vercel/analytics";
-import { ArrowUpRight, CheckCircle2, Monitor } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Keyboard, Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
@@ -31,6 +31,7 @@ export function ComputerHandoffActiveView({
   const successAnchorRef = useRef<HTMLAnchorElement>(null);
   const phaseRef = useRef(phase);
   const terminalRef = useRef(false);
+  const focusReportedRef = useRef(false);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -53,10 +54,17 @@ export function ComputerHandoffActiveView({
     return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
 
-  const onTakeOver = () => {
+  const focusLiveView = () => {
     iframeRef.current?.focus({ preventScroll: true });
+    if (!focusReportedRef.current) {
+      focusReportedRef.current = true;
+      track("live_view_focus_enabled");
+    }
+  };
+
+  const onTakeOver = () => {
+    focusLiveView();
     setTakeoverStarted(true);
-    track("live_view_focus_enabled");
   };
 
   const onDone = async () => {
@@ -166,6 +174,17 @@ export function ComputerHandoffActiveView({
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                 Done
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon-lg"
+                className="size-11 rounded-2xl"
+                onClick={focusLiveView}
+                aria-label="Focus the private browser for keyboard and paste"
+                title="Focus browser"
+              >
+                <Keyboard className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
           </ComputerHandoffFloatingIsland>
