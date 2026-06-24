@@ -176,13 +176,23 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
   ].join('\n')
 }
 
+export type ExperimentLifecyclePreconditionResult =
+  | { kind: 'continue' }
+  | { kind: 'skip'; reason: string }
+
 /**
- * Persist the deterministic outcome for an experiment final-results cron job
- * before the LLM notification turn runs. Throws on persistence failure so the
- * surrounding cron executor records the run as failed and the existing
- * backoff retries the one-shot — the LLM cannot trigger a cron failure on
- * its own (skip and send_message both mark the run successful and consume
- * the at-occurrence).
+ * Single deterministic fire-time gate for experiment final-results cron jobs.
+ *
+ * Reads canonical experiment state once. When the run is no longer eligible
+ * for a final review (status changed, opted out, etc.), returns `skip` so
+ * the cron consumes the at-occurrence as skipped — no outcome write, no LLM
+ * invocation, no retry. When the run is eligible, persists the deterministic
+ * outcome before the LLM notification turn so a transient storage failure
+ * throws (→ retryable cron failure) rather than being swallowed by an LLM
+ * skip that would consume the one-shot.
+ *
+ * Returns `continue` for non-final-results automations so the caller can run
+ * its normal notification flow unchanged.
  *
  * Routing is keyed on the immutable automation ID, not the mutable slug, so
  * a user-edited slug cannot silently bypass persistence. The seed builder
@@ -193,22 +203,44 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
   automationId: string
   tags: readonly string[]
   vault: string
-}): Promise<void> {
+}): Promise<ExperimentLifecyclePreconditionResult> {
   if (!isExperimentFinalResultsAutomation(input.tags)) {
-    return
+    return { kind: 'continue' }
   }
   const experimentLookup = experimentLookupForFinalResultsAutomationId(
     input.automationId,
   )
   if (!experimentLookup) {
-    return
+    return { kind: 'continue' }
   }
+
+  let experiments: ExperimentFrontmatter[]
+  try {
+    experiments = await listAssistantExperimentFrontmatter(input.vault)
+  } catch {
+    return { kind: 'skip', reason: 'experiment vault unreadable at fire time' }
+  }
+  const experiment = experiments.find(
+    (entry) => entry.experimentId === experimentLookup,
+  )
+  if (!experiment) {
+    return { kind: 'skip', reason: 'experiment no longer present in the vault' }
+  }
+  if (experiment.status !== 'active' && experiment.status !== 'completed') {
+    return {
+      kind: 'skip',
+      reason: `experiment status is ${experiment.status}; final review not eligible`,
+    }
+  }
+
   const services = createIntegratedVaultServices()
   await services.core.writeExperimentOutcome({
     vault: input.vault,
     lookup: experimentLookup,
     requestId: null,
   })
+
+  return { kind: 'continue' }
 }
 
 function isExperimentFinalResultsAutomation(tags: readonly string[]): boolean {

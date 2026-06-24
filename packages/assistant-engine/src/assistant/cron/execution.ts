@@ -347,24 +347,39 @@ export async function executeClaimedAssistantCronJob(input: {
         const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
           claimedJob.target,
         )
-        // Run lifecycle-owned deterministic preconditions BEFORE the LLM
-        // notification turn. These must throw on failure so the surrounding
-        // try/catch records the run as failed and the existing cron backoff
-        // retries the one-shot — a skip or send_message from the LLM both
-        // mark the run successful and consume the at-occurrence.
+        // Run lifecycle-owned deterministic eligibility + persistence BEFORE
+        // the LLM turn. The precondition reads canonical experiment state
+        // once and decides:
+        //   - `continue`: not a lifecycle job (or eligible and outcome
+        //     persisted); proceed to the LLM as normal.
+        //   - `skip`: ineligible at fire time; mark the run skipped so the
+        //     one-shot is consumed without writing an outcome or invoking
+        //     the LLM.
+        // A persistence failure throws → the surrounding try/catch records
+        // the run as failed and the existing cron backoff retries. We must
+        // not delegate this to the LLM: skip and send_message both mark the
+        // run successful and consume the at-occurrence.
+        let lifecycleSkipReason: string | null = null
         if (
           input.job.kind === 'canonical' &&
           input.job.source.kind === 'automation'
         ) {
           // Route on the immutable automationId so a user-edited slug cannot
           // silently bypass the precondition.
-          await runExperimentLifecycleOutcomePrecondition({
+          const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
             automationId: input.job.source.automationId,
             tags: input.job.source.tags,
             vault: input.vault,
           })
+          if (lifecycleResult.kind === 'skip') {
+            lifecycleSkipReason = lifecycleResult.reason
+          }
         }
-        const result = await sendAssistantNotificationLocal({
+        if (lifecycleSkipReason !== null) {
+          status = 'skipped'
+          errorText = lifecycleSkipReason
+        } else {
+          const result = await sendAssistantNotificationLocal({
           vault: input.vault,
           ...automationTurn,
           instructions: buildAssistantCronExecutionInstructions(claimedJob),
@@ -400,6 +415,7 @@ export async function executeClaimedAssistantCronJob(input: {
           status = 'skipped'
         } else {
           status = 'succeeded'
+        }
         }
       }
     }
