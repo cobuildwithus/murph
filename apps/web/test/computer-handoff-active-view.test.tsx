@@ -112,7 +112,12 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   assert.ok(iframe);
 
   await click(window, findTakeoverButton(container));
-  await click(window, findDoneButton(container));
+  const doneButton = findDoneButton(container);
+  const focusButton = findFocusButton(container);
+  assert.ok(doneButton);
+  assert.ok(focusButton);
+
+  await click(window, doneButton);
 
   expect(fetch).toHaveBeenCalledWith(DONE_ENDPOINT, {
     method: "POST",
@@ -124,6 +129,10 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(savingStatus.textContent).toContain("Saving your progress");
   expect(savingStatus.querySelector("svg .murph-loader-dot")).toBeTruthy();
   expect(container.querySelector("iframe")).toBe(iframe);
+  expect(findDoneButton(container)).toBe(doneButton);
+  expect(findFocusButton(container)).toBe(focusButton);
+  expect(doneButton.disabled).toBe(true);
+  expect(focusButton.disabled).toBe(true);
 
   await act(async () => {
     resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
@@ -217,14 +226,22 @@ test.each([
   assert.ok(iframeBeforeClick);
 
   await click(window, findTakeoverButton(container));
-  await click(window, findDoneButton(container));
+  const doneButton = findDoneButton(container);
+  const focusButton = findFocusButton(container);
+  assert.ok(doneButton);
+  assert.ok(focusButton);
+
+  await click(window, doneButton);
 
   expect(container.querySelector("iframe")).toBe(iframeBeforeClick);
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Could not complete. Try again.",
   );
+  expect(findDoneButton(container)).toBe(doneButton);
+  expect(findFocusButton(container)).toBe(focusButton);
   expect(findDoneButton(container)?.disabled).toBe(false);
+  expect(findFocusButton(container)?.disabled).toBe(false);
 });
 
 async function renderHandoff(overrides: {

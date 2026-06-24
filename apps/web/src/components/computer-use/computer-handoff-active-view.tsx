@@ -93,6 +93,7 @@ export function ComputerHandoffActiveView({
     }
   };
 
+  const controlsDisabled = phase.kind !== "idle";
   const idleError = phase.kind === "idle" ? phase.error : null;
 
   return (
@@ -148,7 +149,7 @@ export function ComputerHandoffActiveView({
           </div>
         </div>
       ) : null}
-      {takeoverStarted && phase.kind === "idle" ? (
+      {takeoverStarted ? (
         <div
           className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
@@ -160,7 +161,7 @@ export function ComputerHandoffActiveView({
               </span>
             }
           >
-            <div className="flex items-center gap-2">
+            <div className="flex max-w-[calc(100vw-6rem)] flex-wrap items-center gap-2">
               {idleError ? (
                 <span role="alert" className="text-xs text-destructive">
                   {idleError}
@@ -170,6 +171,7 @@ export function ComputerHandoffActiveView({
                 type="button"
                 size="lg"
                 onClick={onDone}
+                disabled={controlsDisabled}
                 aria-label="Finish this step and return to Murph"
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
@@ -181,6 +183,7 @@ export function ComputerHandoffActiveView({
                 size="icon-lg"
                 className="size-11 rounded-2xl"
                 onClick={focusLiveView}
+                disabled={controlsDisabled}
                 aria-label="Focus the private browser for keyboard and paste"
                 title="Focus browser"
               >
