@@ -3610,18 +3610,10 @@ function expectMessageDelivery(
 function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[number] {
   return {
     kind: 'voice_memo',
-    url: null,
-    mimeType: 'audio/mpeg',
     filename: 'memo.mp3',
-    sizeBytes: 128,
-    transcript: 'Short memo',
-    source: 'elevenlabs',
-    voiceId: 'voice_murph',
-    modelId: 'eleven_multilingual_v2',
-    transportRefs: {
-      linq: {
-        attachmentId: 'attachment_voice_1',
-      },
+    transport: {
+      attachmentId: 'attachment_voice_1',
+      kind: 'linq_attachment',
     },
   }
 }

@@ -75,13 +75,20 @@ export async function executeGenerateVoiceMemoTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
+  const mediaConflict = rejectIfResponseMediaConflicts(
+    input.currentResponseMedia ?? [],
+    'voice memo',
+  )
+  if (mediaConflict) {
+    return mediaConflict
+  }
+
   const runtime = input.runtime ?? null
   if (!runtime) {
     return unavailableVoiceMemoResult('voice memo')
   }
 
   const preflight = validateGeneratedVoiceMemoPreconditions({
-    currentResponseMedia: input.currentResponseMedia ?? [],
     label: 'voice memo',
     runtime,
   })
@@ -128,13 +135,20 @@ export async function executeGenerateSongTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
+  const mediaConflict = rejectIfResponseMediaConflicts(
+    input.currentResponseMedia ?? [],
+    'song',
+  )
+  if (mediaConflict) {
+    return mediaConflict
+  }
+
   const runtime = input.runtime ?? null
   if (!runtime) {
     return unavailableVoiceMemoResult('song')
   }
 
   const preflight = validateGeneratedVoiceMemoPreconditions({
-    currentResponseMedia: input.currentResponseMedia ?? [],
     label: 'song',
     runtime,
   })
@@ -225,18 +239,23 @@ async function executeGeneratedVoiceMemo(input: {
   }
 }
 
+function rejectIfResponseMediaConflicts(
+  currentResponseMedia: readonly AssistantResponseMedia[],
+  label: 'song' | 'voice memo',
+): GenerateVoiceMemoToolResult | null {
+  if (currentResponseMedia.length === 0) {
+    return null
+  }
+  return {
+    rpcSuccess: false,
+    rpcText: `${label} generation cannot be combined with other response media`,
+  }
+}
+
 function validateGeneratedVoiceMemoPreconditions(input: {
-  currentResponseMedia: readonly AssistantResponseMedia[]
   label: 'song' | 'voice memo'
   runtime: VoiceMemoToolRuntime
 }): GenerateVoiceMemoToolResult | null {
-  if (input.currentResponseMedia.length > 0) {
-    return {
-      rpcSuccess: false,
-      rpcText: `${input.label} generation cannot be combined with other response media`,
-    }
-  }
-
   if (!input.runtime.elevenLabs.apiKeyAvailable) {
     return {
       rpcSuccess: false,

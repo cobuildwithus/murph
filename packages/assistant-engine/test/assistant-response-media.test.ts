@@ -27,50 +27,26 @@ describe('assistant response media', () => {
       },
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo-1.mp3',
-        sizeBytes: 128,
-        transcript: 'First memo',
-        source: 'elevenlabs',
-        voiceId: 'voice_1',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_1',
-          },
+        transport: {
+          attachmentId: 'attachment_1',
+          kind: 'linq_attachment',
         },
       },
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo-duplicate.mp3',
-        sizeBytes: 128,
-        transcript: 'Duplicate memo',
-        source: 'elevenlabs',
-        voiceId: 'voice_1',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_1',
-          },
+        transport: {
+          attachmentId: 'attachment_1',
+          kind: 'linq_attachment',
         },
       },
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo-2.mp3',
-        sizeBytes: 256,
-        transcript: 'Second memo',
-        source: 'elevenlabs',
-        voiceId: 'voice_1',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_2',
-          },
+        transport: {
+          attachmentId: 'attachment_2',
+          kind: 'linq_attachment',
         },
       },
     ])).toEqual([
@@ -88,34 +64,18 @@ describe('assistant response media', () => {
       },
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo-1.mp3',
-        sizeBytes: 128,
-        transcript: 'First memo',
-        source: 'elevenlabs',
-        voiceId: 'voice_1',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_1',
-          },
+        transport: {
+          attachmentId: 'attachment_1',
+          kind: 'linq_attachment',
         },
       },
       {
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo-2.mp3',
-        sizeBytes: 256,
-        transcript: 'Second memo',
-        source: 'elevenlabs',
-        voiceId: 'voice_1',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_2',
-          },
+        transport: {
+          attachmentId: 'attachment_2',
+          kind: 'linq_attachment',
         },
       },
     ])

@@ -251,106 +251,91 @@ describe('assistant CLI delivery contracts', () => {
     }
   })
 
-  it('accepts Linq-backed voice memo media without storing raw audio', () => {
+  it('accepts Linq-backed voice memo media via a discriminated transport', () => {
     expect(
       assistantResponseMediaSchema.parse({
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: ' memo.mp3 ',
-        sizeBytes: 1234,
-        transcript: ' Short memo transcript. ',
-        source: 'elevenlabs',
-        voiceId: ' voice_murph ',
-        modelId: ' eleven_multilingual_v2 ',
-        transportRefs: {
-          linq: {
-            attachmentId: ' attachment_123 ',
-          },
+        transport: {
+          attachmentId: ' attachment_123 ',
+          kind: 'linq_attachment',
         },
       }),
     ).toEqual({
       kind: 'voice_memo',
-      url: null,
-      mimeType: 'audio/mpeg',
       filename: 'memo.mp3',
-      sizeBytes: 1234,
-      transcript: 'Short memo transcript.',
-      source: 'elevenlabs',
-      voiceId: 'voice_murph',
-      modelId: 'eleven_multilingual_v2',
-      transportRefs: {
-        linq: {
-          attachmentId: 'attachment_123',
-        },
+      transport: {
+        attachmentId: 'attachment_123',
+        kind: 'linq_attachment',
       },
     })
 
     expect(
       assistantResponseMediaSchema.parse({
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: ' telegram-memo.mp3 ',
-        sizeBytes: null,
-        transcript: ' Telegram memo transcript. ',
-        source: 'elevenlabs',
-        voiceId: ' voice_murph ',
-        modelId: ' eleven_multilingual_v2 ',
-        transportRefs: {
-          telegram: {
-            sendMode: 'generate_at_delivery',
+        transport: {
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: ' eleven_multilingual_v2 ',
+            outputFormat: 'mp3_44100_128',
+            text: ' Telegram memo transcript. ',
+            voiceId: ' voice_murph ',
           },
+          kind: 'telegram_generation',
         },
       }),
     ).toEqual({
       kind: 'voice_memo',
-      url: null,
-      mimeType: 'audio/mpeg',
       filename: 'telegram-memo.mp3',
-      sizeBytes: null,
-      transcript: 'Telegram memo transcript.',
-      source: 'elevenlabs',
-      voiceId: 'voice_murph',
-      modelId: 'eleven_multilingual_v2',
-      transportRefs: {
-        telegram: {
-          sendMode: 'generate_at_delivery',
+      transport: {
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Telegram memo transcript.',
+          voiceId: 'voice_murph',
         },
+        kind: 'telegram_generation',
+      },
+    })
+
+    expect(
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        filename: 'song.mp3',
+        transport: {
+          generation: {
+            durationMs: 30_000,
+            forceInstrumental: true,
+            kind: 'elevenlabs_music',
+            modelId: 'music_v2',
+            outputFormat: 'mp3_48000_192',
+            prompt: 'Upbeat lo-fi piano motif',
+          },
+          kind: 'telegram_generation',
+        },
+      }),
+    ).toEqual({
+      kind: 'voice_memo',
+      filename: 'song.mp3',
+      transport: {
+        generation: {
+          durationMs: 30_000,
+          forceInstrumental: true,
+          kind: 'elevenlabs_music',
+          modelId: 'music_v2',
+          outputFormat: 'mp3_48000_192',
+          prompt: 'Upbeat lo-fi piano motif',
+        },
+        kind: 'telegram_generation',
       },
     })
 
     expect(() =>
       assistantResponseMediaSchema.parse({
         kind: 'voice_memo',
-        url: null,
-        mimeType: 'audio/mpeg',
         filename: 'memo.mp3',
-        sizeBytes: 1234,
-        transcript: 'Short memo transcript.',
-        source: 'elevenlabs',
-        voiceId: 'voice_murph',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {},
-      }),
-    ).toThrow()
-
-    expect(() =>
-      assistantResponseMediaSchema.parse({
-        kind: 'voice_memo',
-        url: 'https://cdn.example.test/memo.mp3',
-        mimeType: 'audio/mpeg',
-        filename: 'memo.mp3',
-        sizeBytes: 1234,
-        transcript: 'Short memo transcript.',
-        source: 'elevenlabs',
-        voiceId: 'voice_murph',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_123',
-          },
-        },
       }),
     ).toThrow()
   })

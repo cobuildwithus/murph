@@ -291,17 +291,9 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(result.responseMedia).toHaveLength(1)
     expect(result.responseMedia?.[0]).toMatchObject({
       kind: 'voice_memo',
-      url: null,
-      mimeType: 'audio/mpeg',
-      sizeBytes: mp3Bytes.byteLength,
-      transcript: 'Send a short reminder.',
-      source: 'elevenlabs',
-      voiceId: 'voice_murph',
-      modelId: 'eleven_multilingual_v2',
-      transportRefs: {
-        linq: {
-          attachmentId: 'attachment_voice_1',
-        },
+      transport: {
+        attachmentId: 'attachment_voice_1',
+        kind: 'linq_attachment',
       },
     })
     expect(result).not.toHaveProperty('usageDraft')
@@ -327,17 +319,15 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(result.responseMedia).toHaveLength(1)
     expect(result.responseMedia?.[0]).toMatchObject({
       kind: 'voice_memo',
-      url: null,
-      mimeType: 'audio/mpeg',
-      sizeBytes: null,
-      transcript: 'Send a short reminder.',
-      source: 'elevenlabs',
-      voiceId: 'voice_murph',
-      modelId: 'eleven_multilingual_v2',
-      transportRefs: {
-        telegram: {
-          sendMode: 'generate_at_delivery',
+      transport: {
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Send a short reminder.',
+          voiceId: 'voice_murph',
         },
+        kind: 'telegram_generation',
       },
     })
     expect(result).not.toHaveProperty('usageDraft')
@@ -461,18 +451,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
           media: [
             {
               kind: 'voice_memo',
-              url: null,
-              mimeType: 'audio/mpeg',
               filename: 'memo.mp3',
-              sizeBytes: 128,
-              transcript: 'Short memo',
-              source: 'elevenlabs',
-              voiceId: 'voice_murph',
-              modelId: 'eleven_multilingual_v2',
-              transportRefs: {
-                linq: {
-                  attachmentId: 'attachment_voice_1',
-                },
+              transport: {
+                attachmentId: 'attachment_voice_1',
+                kind: 'linq_attachment',
               },
             },
           ],
@@ -604,18 +586,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       currentResponseMedia: [
         {
           kind: 'voice_memo',
-          url: null,
-          mimeType: 'audio/mpeg',
           filename: 'memo.mp3',
-          sizeBytes: 128,
-          transcript: 'Short memo',
-          source: 'elevenlabs',
-          voiceId: 'voice_murph',
-          modelId: 'eleven_multilingual_v2',
-          transportRefs: {
-            linq: {
-              attachmentId: 'attachment_voice_1',
-            },
+          transport: {
+            attachmentId: 'attachment_voice_1',
+            kind: 'linq_attachment',
           },
         },
       ],
@@ -729,10 +703,9 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       media: [
         {
           kind: 'voice_memo',
-          transportRefs: {
-            linq: {
-              attachmentId: 'attachment_dynamic_1',
-            },
+          transport: {
+            attachmentId: 'attachment_dynamic_1',
+            kind: 'linq_attachment',
           },
         },
       ],
