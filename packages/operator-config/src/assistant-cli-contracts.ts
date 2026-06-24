@@ -727,8 +727,6 @@ export const assistantOutboxIntentSchema = z
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
-    autoReplyCrossSessionContextConsumedAt:
-      isoTimestampSchema.nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()

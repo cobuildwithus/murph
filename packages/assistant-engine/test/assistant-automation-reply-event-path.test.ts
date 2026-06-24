@@ -344,38 +344,8 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
 
-  it('marks selected cross-session outbox context consumed after a successful reply', async () => {
+  it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
     const vault = await createTempVault()
-    const persistedIntent = await createAssistantOutboxIntent({
-      channel: 'email',
-      createdAt: '2026-04-08T00:05:00.000Z',
-      identityId: 'identity-1',
-      message: 'persisted cross-session reminder',
-      replyToMessageId: 'message-1',
-      sessionId: 'session_automation',
-      threadId: 'thread-1',
-      threadIsDirect: true,
-      turnId: 'turn_automation',
-      turnTrigger: 'automation-auto-reply',
-      vault,
-    })
-    await saveAssistantOutboxIntent(vault, {
-      ...persistedIntent,
-      delivery: {
-        channel: 'email',
-        idempotencyKey: null,
-        kind: 'message',
-        messageLength: persistedIntent.message.length,
-        providerMessageId: null,
-        providerThreadId: 'thread-1',
-        sentAt: '2026-04-08T00:05:00.000Z',
-        target: 'thread-1',
-        targetKind: 'thread',
-      },
-      sentAt: '2026-04-08T00:05:00.000Z',
-      status: 'sent',
-      updatedAt: '2026-04-08T00:05:00.000Z',
-    })
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -385,7 +355,7 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
-        intentId: persistedIntent.intentId,
+        intentId: 'intent-persisted',
         message: 'persisted cross-session reminder',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session_automation',
@@ -409,11 +379,11 @@ describe('assistant auto-reply event-first path', () => {
       vault,
     })
 
-    await expect(
-      readAssistantOutboxIntent(vault, persistedIntent.intentId),
-    ).resolves.toMatchObject({
-      autoReplyCrossSessionContextConsumedAt: expect.any(String),
-    })
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-persisted',
+    }))
   })
 
   it('injects cross-session context across provider and local clock skew', async () => {
@@ -897,17 +867,10 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('serialized target context')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
-        autoReplyCrossSessionContextConsumedAt:
-          '2026-04-08T00:10:30.000Z',
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createConsumedCrossSessionReceipt({
         intentId: 'intent-hosted-email',
-        message: 'serialized target context',
-        providerThreadId: null,
-        sentAt: '2026-04-08T00:05:00.000Z',
-        sessionId: 'session-automation',
-        target: outboundTarget,
-        threadId: 'thread-1',
+        updatedAt: '2026-04-08T00:10:30.000Z',
       }),
     ])
     const nextCandidate = createAssistantInputCandidate({
@@ -957,12 +920,16 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-automation',
       }),
       createOutboxMessage({
-        autoReplyCrossSessionContextConsumedAt:
-          '2026-04-08T00:06:30.000Z',
         intentId: 'intent-already-seen',
         message: 'already seen reminder',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-automation',
+      }),
+    ])
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createConsumedCrossSessionReceipt({
+        intentId: 'intent-already-seen',
+        updatedAt: '2026-04-08T00:06:30.000Z',
       }),
     ])
     const candidate = createAssistantInputCandidate({
@@ -987,7 +954,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput).not.toHaveProperty('turnContext')
   })
 
-  it('uses outbox context consumption in hosted queue-only mode without terminal receipt fallback', async () => {
+  it('suppresses cross-session context in hosted queue-only mode via receipt metadata', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -998,12 +965,16 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
-        autoReplyCrossSessionContextConsumedAt:
-          '2026-04-08T00:06:30.000Z',
         intentId: 'intent-queue-context',
         message: 'queue-only reminder',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-automation',
+      }),
+    ])
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createConsumedCrossSessionReceipt({
+        intentId: 'intent-queue-context',
+        updatedAt: '2026-04-08T00:06:30.000Z',
       }),
     ])
     const candidate = createAssistantInputCandidate({
@@ -1033,7 +1004,7 @@ describe('assistant auto-reply event-first path', () => {
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput).not.toHaveProperty('turnContext')
-    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalled()
   })
 
   it('keeps cross-session context after session advance when only a failed receipt mentions it', async () => {
@@ -1254,7 +1225,6 @@ function createAssistantInputCandidate(input: {
 
 function createOutboxMessage(input: {
   actorId?: string | null
-  autoReplyCrossSessionContextConsumedAt?: string | null
   channel?: string
   identityId?: string | null
   intentId: string
@@ -1276,8 +1246,6 @@ function createOutboxMessage(input: {
   const channel = input.channel ?? 'email'
   return {
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
-    autoReplyCrossSessionContextConsumedAt:
-      input.autoReplyCrossSessionContextConsumedAt ?? null,
     channel,
     delivery:
       status === 'sent'
@@ -1304,6 +1272,30 @@ function createOutboxMessage(input: {
     sessionId: input.sessionId,
     status,
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+  }
+}
+
+function createConsumedCrossSessionReceipt(input: {
+  intentId: string
+  sessionId?: string
+  status?: 'completed' | 'deferred'
+  updatedAt: string
+}) {
+  return {
+    completedAt: input.status === 'deferred' ? null : input.updatedAt,
+    deliveryIntentId: null,
+    sessionId: input.sessionId ?? 'session-chat',
+    status: input.status ?? 'completed',
+    timeline: [
+      {
+        kind: 'turn.started' as const,
+        metadata: {
+          [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+            input.intentId,
+        },
+      },
+    ],
+    updatedAt: input.updatedAt,
   }
 }
 

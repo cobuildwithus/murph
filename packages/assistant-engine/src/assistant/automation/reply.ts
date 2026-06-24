@@ -11,8 +11,6 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
-  readAssistantOutboxIntent,
-  saveAssistantOutboxIntent,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import {
@@ -162,6 +160,7 @@ interface AssistantAutoReplyPrimaryInput {
   occurredAt: string
   receivedAt: string | null
   replyTarget: AssistantAutoReplyPromptInput['replyTarget']
+  replyToMessageId: string | null
   source: string
   text: string | null
 }
@@ -1041,10 +1040,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
-  let receipts: readonly AssistantAutoReplyReceiptRecord[] | null = null
+  const receipts = await readAssistantAutoReplyReceiptRecords(input)
 
   if (input.receiptFallbackEnabled) {
-    receipts = await readAssistantAutoReplyReceiptRecords(input)
     const handledReceipt = findHandledAutoReplyReceiptForGroup({
       captureIds: input.group.optionalInboxCaptureIds,
       inputIds: input.group.inputIds,
@@ -1110,6 +1108,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   const latestCrossSessionDelivery =
     await resolveAssistantAutoReplyLatestCrossSessionDelivery({
+      consumedIntentIds: readAssistantAutoReplyConsumedCrossSessionIntentIds(
+        receipts,
+      ),
       deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
       session: existingSession,
@@ -1219,6 +1220,10 @@ function createAssistantAutoReplyPrimaryInput(
     occurredAt: input.occurredAt,
     receivedAt: input.receivedAt,
     replyTarget: input.replyTarget,
+    replyToMessageId:
+      input.sourceMetadata?.kind === 'linq'
+        ? input.sourceMetadata.replyToMessageId ?? null
+        : null,
     source: input.source,
     text: input.text,
   }
@@ -1454,16 +1459,11 @@ async function executeAssistantAutoReply(input: {
         : null,
       onTraceEvent: input.onTraceEvent,
     })
-    const resolved = resolveAssistantAutoReplySendResult({
+    return resolveAssistantAutoReplySendResult({
       onEvent: input.onEvent,
       replyInputId: input.replyInputId,
       result,
     })
-    await markAssistantAutoReplyCrossSessionContextConsumedIfNeeded({
-      crossSessionContext: input.crossSessionContext,
-      vault: input.vault,
-    })
-    return resolved
   } catch (error) {
     throw markAssistantAutoReplyDeliveryFailureIfNeeded(
       watchdog.normalizeError(error),
@@ -1471,39 +1471,6 @@ async function executeAssistantAutoReply(input: {
   } finally {
     watchdog.dispose()
   }
-}
-
-async function markAssistantAutoReplyCrossSessionContextConsumedIfNeeded(input: {
-  crossSessionContext: AssistantAutoReplySelectedCrossSessionContext | null
-  vault: string
-}): Promise<void> {
-  if (input.crossSessionContext === null) {
-    return
-  }
-
-  // Do not retry a provider turn that already completed just because this
-  // supporting local marker could not be written.
-  await markAssistantOutboxIntentAutoReplyCrossSessionContextConsumed({
-    intentId: input.crossSessionContext.intentId,
-    vault: input.vault,
-  }).catch(() => undefined)
-}
-
-async function markAssistantOutboxIntentAutoReplyCrossSessionContextConsumed(input: {
-  intentId: string
-  vault: string
-}): Promise<void> {
-  const intent = await readAssistantOutboxIntent(input.vault, input.intentId)
-  if (!intent || intent.autoReplyCrossSessionContextConsumedAt !== null) {
-    return
-  }
-
-  const consumedAt = new Date().toISOString()
-  await saveAssistantOutboxIntent(input.vault, {
-    ...intent,
-    autoReplyCrossSessionContextConsumedAt: consumedAt,
-    updatedAt: consumedAt,
-  })
 }
 
 export type AssistantAutoReplyProviderRequestStartHook = (event: {
@@ -3261,6 +3228,7 @@ function isAssistantAutoReplyNearestTextEchoMatch(input: {
 }
 
 async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
+  consumedIntentIds: ReadonlySet<string>
   deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
   session: AssistantSession | null
@@ -3274,7 +3242,10 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     return null
   }
 
-  const matchingDeliveries = (
+  const replyToMessageId = normalizeNullableString(
+    input.input.replyToMessageId,
+  )
+  const sorted = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       input: input.input,
@@ -3287,18 +3258,54 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
         ? left.intentId.localeCompare(right.intentId)
         : left.sentAtMs - right.sentAtMs,
     )
-  if (matchingDeliveries.length === 0) {
+
+  // Once a delivery has been used as turn context, no earlier delivery from
+  // the same route should resurface. Skip everything at or before the
+  // newest consumed match.
+  let firstFreshIndex = 0
+  for (let index = 0; index < sorted.length; index++) {
+    if (input.consumedIntentIds.has(sorted[index]!.intentId)) {
+      firstFreshIndex = index + 1
+    }
+  }
+  const fresh = sorted.slice(firstFreshIndex).filter((delivery) =>
+    input.session === null || delivery.sessionId !== input.session.sessionId,
+  )
+  if (fresh.length === 0) {
     return null
   }
 
-  const selected = matchingDeliveries
-    .filter((delivery) =>
-      input.session === null || delivery.sessionId !== input.session.sessionId,
+  // When the native message reply chain identifies a specific prior message,
+  // require an exact provider-message-id match. Falling back to "latest sent"
+  // would risk injecting the wrong prior message as turn context.
+  if (replyToMessageId) {
+    return (
+      fresh.find((delivery) =>
+        delivery.providerMessageIds.includes(replyToMessageId),
+      ) ?? null
     )
-    .at(-1) ?? null
-  return selected?.autoReplyCrossSessionContextConsumedAt === null
-    ? selected
-    : null
+  }
+
+  return fresh.at(-1) ?? null
+}
+
+function readAssistantAutoReplyConsumedCrossSessionIntentIds(
+  receipts: readonly AssistantAutoReplyReceiptRecord[],
+): ReadonlySet<string> {
+  const consumed = new Set<string>()
+  for (const receipt of receipts) {
+    if (receipt.status !== 'completed' && receipt.status !== 'deferred') {
+      continue
+    }
+    for (const event of receipt.timeline) {
+      const intentId =
+        event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]
+      if (typeof intentId === 'string' && intentId.length > 0) {
+        consumed.add(intentId)
+      }
+    }
+  }
+  return consumed
 }
 
 function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
@@ -3318,7 +3325,6 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
-  autoReplyCrossSessionContextConsumedAt: string | null
   intentId: string
   message: string
   providerMessageIds: string[]
@@ -3372,8 +3378,6 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     }
 
     return [{
-      autoReplyCrossSessionContextConsumedAt:
-        intent.autoReplyCrossSessionContextConsumedAt,
       intentId: intent.intentId,
       message,
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(

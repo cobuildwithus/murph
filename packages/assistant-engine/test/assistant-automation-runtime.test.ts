@@ -4292,6 +4292,7 @@ describe('assistant auto-reply runtime', () => {
               kind: 'linq',
               partCount: 1,
               reactionEligible: true,
+              replyToMessageId: null,
               service: 'iMessage',
             },
           },
@@ -4322,6 +4323,7 @@ describe('assistant auto-reply runtime', () => {
           kind: 'linq',
           partCount: 1,
           reactionEligible: true,
+          replyToMessageId: null,
           service: 'iMessage',
         },
       },
@@ -4341,6 +4343,7 @@ describe('assistant auto-reply runtime', () => {
         kind: 'linq',
         partCount: 1,
         reactionEligible: false,
+        replyToMessageId: null,
         service: 'sms',
       },
       text: 'late sms text',
@@ -7745,7 +7748,9 @@ describe('assistant auto-reply runtime', () => {
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(inputSource.refresh).not.toHaveBeenCalled()
     expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
-    expect(replyMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+    // Receipts are read to drive cross-session context suppression even
+    // when the terminal receipt fallback is gated off.
+    expect(replyMocks.listAssistantTurnReceipts).toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -9368,6 +9373,7 @@ describe('assistant automation run loop', () => {
       kind: 'linq',
       partCount: 1,
       reactionEligible: true,
+      replyToMessageId: null,
       service: 'iMessage',
     })
   })

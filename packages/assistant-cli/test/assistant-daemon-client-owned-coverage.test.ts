@@ -148,7 +148,6 @@ const TEST_OUTBOX_INTENT = {
   deliverySource: null,
   deliveryTransportIdempotent: false,
   preparedDispatchToken: null,
-  autoReplyCrossSessionContextConsumedAt: null,
   lastError: null,
 }
 
