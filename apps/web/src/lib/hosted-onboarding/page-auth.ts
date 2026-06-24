@@ -8,6 +8,7 @@ import {
   anonymousHostedSidebarAuthSnapshot,
   type HostedSidebarAuthSnapshot,
 } from "./sidebar-auth";
+import { deriveHostedPostVerificationStage } from "./lifecycle";
 
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
@@ -51,6 +52,10 @@ const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAu
   return {
     authenticated: true,
     label: null,
+    requiresDashboardRecovery: deriveHostedPostVerificationStage({
+      billingStatus: session.member.billingStatus,
+      suspendedAt: session.member.suspendedAt,
+    }) === "checkout",
   };
 });
 

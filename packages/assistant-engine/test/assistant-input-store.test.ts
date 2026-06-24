@@ -5,6 +5,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
+  compareAssistantInputCursors,
   createAssistantInputEventId,
   listAssistantInputEvents,
   readAssistantInputEvent,
@@ -31,6 +32,27 @@ afterEach(async () => {
 })
 
 describe('assistant input event store', () => {
+  it('orders cursors by instant when timestamp offsets differ', () => {
+    expect(
+      compareAssistantInputCursors(
+        {
+          createdAt: '2026-04-22T10:30:00+01:00',
+          inputId: 'input-offset-earlier',
+          occurredAt: '2026-04-22T10:30:00+01:00',
+          sourceKind: 'inbox-capture',
+          sourcePosition: 'inbox-capture:linq:cap_offset',
+        },
+        {
+          createdAt: '2026-04-22T10:00:00.000Z',
+          inputId: 'input-utc-later',
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceKind: 'inbox-capture',
+          sourcePosition: 'inbox-capture:linq:cap_utc',
+        },
+      ),
+    ).toBeLessThan(0)
+  })
+
   it('creates deterministic ids and treats identical replays as idempotent', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-idempotent-',

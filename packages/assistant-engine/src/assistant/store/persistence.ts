@@ -24,6 +24,7 @@ import {
 } from '../runtime-budget-policy.js'
 import {
   appendTextFile,
+  compareAssistantTimestampsAscending,
   ensureAssistantStateDirectory,
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
@@ -738,7 +739,8 @@ function sortSessionsForIndexRebuild(
   sessions: readonly AssistantSession[],
 ): AssistantSession[] {
   return [...sessions].sort((left, right) =>
-    resolveAssistantIndexRebuildTimestamp(left).localeCompare(
+    compareAssistantTimestampsAscending(
+      resolveAssistantIndexRebuildTimestamp(left),
       resolveAssistantIndexRebuildTimestamp(right),
     ),
   )

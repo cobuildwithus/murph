@@ -9,6 +9,7 @@ import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { resolveAssistantStatePaths } from '../store.js'
 import {
+  compareAssistantTimestampsAscending,
   ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
@@ -81,7 +82,9 @@ export async function listAssistantOutboxIntentsLocal(
     }
   }
 
-  return intents.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+  return intents.sort((left, right) =>
+    compareAssistantTimestampsAscending(left.createdAt, right.createdAt),
+  )
 }
 
 export async function pruneAssistantTerminalOutboxIntents(input: {
@@ -123,7 +126,10 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     if (Number.isFinite(timeDelta) && timeDelta !== 0) {
       return timeDelta
     }
-    return right.intent.createdAt.localeCompare(left.intent.createdAt)
+    return compareAssistantTimestampsAscending(
+      right.intent.createdAt,
+      left.intent.createdAt,
+    )
   })
 
   let pruned = 0

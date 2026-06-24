@@ -430,6 +430,12 @@ describe('assistant quarantine', () => {
         artifactKind,
         directory: baseDirectory,
         index,
+        quarantinedAt:
+          index === 12
+            ? '2026-04-08T13:00:00.000Z'
+            : index === 11
+              ? '2026-04-08T13:30:00+01:00'
+              : undefined,
       })
     }
 
@@ -548,6 +554,7 @@ async function writeQuarantineMetadata(
     artifactKind: 'outbox-intent' | 'session' | 'status'
     directory: string
     index: number
+    quarantinedAt?: string
   },
 ): Promise<void> {
   const basename = `${input.artifactKind}-${input.index}.json`
@@ -567,7 +574,9 @@ async function writeQuarantineMetadata(
         message: `${input.artifactKind} quarantine ${input.index}`,
         metadataPath,
         originalPath: path.join(paths.journalsDirectory, `${basename}.original`),
-        quarantinedAt: `2026-04-08T12:${String(input.index).padStart(2, '0')}:00.000Z`,
+        quarantinedAt:
+          input.quarantinedAt ??
+          `2026-04-08T12:${String(input.index).padStart(2, '0')}:00.000Z`,
         quarantinedPath,
         quarantineId: `q_test_${input.index}`,
         schema: 'murph.assistant-quarantine-entry.v1',

@@ -238,6 +238,7 @@ test("Sidebar ignores supplied signed-in user labels in the account trigger", ()
       initialAuth: {
         authenticated: true,
         label: "initial@example.com",
+        requiresDashboardRecovery: false,
       },
     }),
   );
@@ -257,6 +258,7 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
       initialAuth: {
         authenticated: true,
         label: null,
+        requiresDashboardRecovery: false,
       },
     }),
   );
@@ -284,6 +286,7 @@ test("Sidebar surfaces a visible error when sign out fails", async () => {
       initialAuth: {
         authenticated: true,
         label: null,
+        requiresDashboardRecovery: false,
       },
     }),
     { requireButton: false },
@@ -351,6 +354,7 @@ test("Sidebar keeps Settings out of the primary navigation", () => {
       initialAuth: {
         authenticated: true,
         label: null,
+        requiresDashboardRecovery: false,
       },
     }),
   );
@@ -406,6 +410,7 @@ test("Sidebar uses initial server app-session auth", () => {
       initialAuth: {
         authenticated: true,
         label: "initial@example.com",
+        requiresDashboardRecovery: false,
       },
     }),
   );
@@ -424,6 +429,7 @@ test("Sidebar does not render a hardcoded wearable connection status", () => {
       initialAuth: {
         authenticated: true,
         label: null,
+        requiresDashboardRecovery: false,
       },
     }),
   );

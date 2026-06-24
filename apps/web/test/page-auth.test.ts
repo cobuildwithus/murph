@@ -108,6 +108,7 @@ describe("hosted sidebar auth", () => {
     await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
       authenticated: false,
       label: null,
+      requiresDashboardRecovery: false,
     });
   });
 
@@ -123,6 +124,25 @@ describe("hosted sidebar auth", () => {
     await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
       authenticated: true,
       label: null,
+      requiresDashboardRecovery: false,
+    });
+  });
+
+  it("marks checkout-stage app sessions for dashboard recovery", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.not_started,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      label: null,
+      requiresDashboardRecovery: true,
     });
   });
 
@@ -139,6 +159,7 @@ describe("hosted sidebar auth", () => {
     await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
       authenticated: false,
       label: null,
+      requiresDashboardRecovery: false,
     });
   });
 

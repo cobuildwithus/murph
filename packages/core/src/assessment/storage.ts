@@ -14,7 +14,7 @@ import { walkVaultFiles } from "../fs.ts";
 import { stageRawImportManifest } from "../operations/raw-manifests.ts";
 import { WriteBatch } from "../operations/write-batch.ts";
 import { prepareRawArtifact } from "../raw.ts";
-import { toIsoTimestamp } from "../time.ts";
+import { compareIsoTimestampsAscending, toIsoTimestamp } from "../time.ts";
 import { VaultError } from "../errors.ts";
 import { isPlainRecord } from "../types.ts";
 
@@ -112,7 +112,7 @@ function normalizeRawPath(value: unknown): string {
 function sortAssessmentResponses(records: readonly AssessmentResponseRecord[]): AssessmentResponseRecord[] {
   return [...records].sort((left, right) => {
     if (left.recordedAt !== right.recordedAt) {
-      return left.recordedAt.localeCompare(right.recordedAt);
+      return compareIsoTimestampsAscending(left.recordedAt, right.recordedAt);
     }
     return left.id.localeCompare(right.id);
   });

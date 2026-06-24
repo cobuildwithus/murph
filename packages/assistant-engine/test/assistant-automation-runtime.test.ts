@@ -1190,6 +1190,20 @@ describe('assistant automation shared helpers', () => {
         later,
       ),
     ).toBeGreaterThan(0)
+    expect(
+      shared.compareAssistantCaptureOrder(
+        {
+          captureId: 'capture-offset-earlier',
+          createdAt: '2026-04-08T00:30:00+01:00',
+          occurredAt: '2026-04-08T00:30:00+01:00',
+        },
+        {
+          captureId: 'capture-utc-later',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      ),
+    ).toBeLessThan(0)
     expect(shared.normalizeEnabledChannels([' telegram ', '', 'telegram', 'linq '])).toEqual([
       'telegram',
       'linq',

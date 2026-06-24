@@ -19,6 +19,7 @@ import {
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
+  compareAssistantTimestampsAscending,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -304,7 +305,8 @@ function insertRecentAssistantTurnReceipt(
   limit: number,
 ): void {
   const insertAt = receipts.findIndex(
-    (existing) => receipt.updatedAt.localeCompare(existing.updatedAt) > 0,
+    (existing) =>
+      compareAssistantTimestampsAscending(receipt.updatedAt, existing.updatedAt) > 0,
   )
   if (insertAt === -1) {
     if (receipts.length < limit) {
