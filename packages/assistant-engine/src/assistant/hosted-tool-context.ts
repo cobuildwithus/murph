@@ -11,6 +11,9 @@ import type {
 import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
+import type {
+  AssistantHostedFamilyPlanTool,
+} from './execution-context.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -19,6 +22,7 @@ export interface AssistantHostedDeliveryContext {
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
+  readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -33,6 +37,7 @@ type AssistantHostedToolDeliveryContext = {
 
 export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
+  familyPlanTool?: AssistantHostedFamilyPlanTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   messageInput: AssistantMessageInput
@@ -47,6 +52,7 @@ export function createAssistantHostedToolContext(input: {
 
   return {
     connectedApps: input.connectedApps ?? null,
+    familyPlanTool: input.familyPlanTool ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()

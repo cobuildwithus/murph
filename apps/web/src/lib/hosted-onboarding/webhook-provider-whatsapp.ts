@@ -24,12 +24,7 @@ import {
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromPhoneTx,
   hasHostedMemberEffectiveActiveAccessForMember,
-  issueHostedFamilyInviteFromOwnerChatTx,
 } from "./family-plan";
-import {
-  buildHostedFamilyInfoReplyText,
-  parseHostedFamilyInfoChatIntent,
-} from "./family-chat-intent";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedWhatsAppWebhookEventId,
@@ -215,48 +210,6 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     prisma: input.prisma,
   })) {
     return buildWhatsAppInboundTextNoWakePlan("inactive-member");
-  }
-
-  const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
-    now: input.inboundText.receivedAt,
-    ownerMemberId: member.id,
-    text: input.inboundText.text,
-    tx: input.prisma,
-  });
-  if (familyInvite) {
-    const notification = await appendHostedWhatsAppFamilyChatNotification({
-      inboundText: input.inboundText,
-      memberId: member.id,
-      message: familyInvite.replyText,
-      prisma: input.prisma,
-      reason: "family-invite-created",
-    });
-
-    return {
-      commandHandled: true,
-      duplicate: false,
-      ignored: false,
-      reason: "family-invite-created",
-      wakeHandoff: notification.wakeHandoff,
-    };
-  }
-
-  if (parseHostedFamilyInfoChatIntent(input.inboundText.text)) {
-    const notification = await appendHostedWhatsAppFamilyChatNotification({
-      inboundText: input.inboundText,
-      memberId: member.id,
-      message: buildHostedFamilyInfoReplyText(),
-      prisma: input.prisma,
-      reason: "family-info-replied",
-    });
-
-    return {
-      commandHandled: true,
-      duplicate: false,
-      ignored: false,
-      reason: "family-info-replied",
-      wakeHandoff: notification.wakeHandoff,
-    };
   }
 
   const command = parseWhatsAppCommand(input.inboundText.text);

@@ -10,6 +10,7 @@ import {
   createHostedStripeCustomerLookupKey,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionScheduleLookupKey,
+  createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedWalletAddressLookupKey,
   hostedPhoneLookupKeyMatchesValue,
   parseHostedBlindIndex,
@@ -89,6 +90,24 @@ describe("hosted member lookup keys", () => {
       expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
     } finally {
       restore();
+    }
+  });
+
+  it("does not require unrelated hosted onboarding env to read lookup candidates", () => {
+    const previousAllowedOrigins = process.env.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS;
+    process.env.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS =
+      "https://local.withmurph.ai:3443/not-an-origin";
+
+    try {
+      const candidates = createHostedTelegramUsernameLookupKeyReadCandidates("@Riderway");
+
+      expect(candidates).toHaveLength(2);
+      expect(candidates[0]).toMatch(/^hbidx:telegram-username:v1:/u);
+    } finally {
+      restoreEnvValue(
+        "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS",
+        previousAllowedOrigins,
+      );
     }
   });
 

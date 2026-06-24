@@ -79,6 +79,10 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeFamilyPlanToolRequest,
+  type HostedRuntimeFamilyPlanToolResponse,
+  type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
+  type HostedRuntimeFamilyPlanToolStatusResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
@@ -105,6 +109,7 @@ import {
   readOptionalStringArray,
   requireString,
   readNullableString,
+  readOptionalNullableString,
 } from "./assertions.ts";
 import {
   parseHostedBrowserVaultReplicaRef,
@@ -687,6 +692,160 @@ export function parseHostedRuntimeProductFeedbackRecordResponse(
   };
 }
 
+export function parseHostedRuntimeFamilyPlanToolRequest(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolRequest {
+  const record = requireObject(value, "Hosted runtime family plan tool request");
+  const action = requireString(
+    record.action,
+    "Hosted runtime family plan tool request action",
+  );
+  if (action === "read_status") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime family plan tool read_status request",
+    );
+    return {
+      action,
+    };
+  }
+  if (action === "start_checkout") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "invite"]),
+      "Hosted runtime family plan tool start_checkout request",
+    );
+    const invite = record.invite === undefined || record.invite === null
+      ? null
+      : parseHostedRuntimeFamilyPlanInviteRequest(
+          record.invite,
+          "Hosted runtime family plan tool start_checkout request invite",
+        );
+    return invite
+      ? {
+          action,
+          invite,
+        }
+      : {
+          action,
+        };
+  }
+  if (action !== "create_invite") {
+    throw new TypeError("Hosted runtime family plan tool action is not supported.");
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "invite"]),
+    "Hosted runtime family plan tool create_invite request",
+  );
+  const invite = parseHostedRuntimeFamilyPlanInviteRequest(
+    record.invite,
+    "Hosted runtime family plan tool create_invite request invite",
+  );
+
+  return {
+    action,
+    invite,
+  };
+}
+
+function parseHostedRuntimeFamilyPlanInviteRequest(
+  value: unknown,
+  label: string,
+) {
+  const invite = requireObject(value, label);
+  assertAllowedObjectKeys(
+    invite,
+    new Set(["targetLabel", "targetPhoneNumber", "targetTelegramUsername"]),
+    label,
+  );
+  const targetLabel = readOptionalNullableString(
+    invite.targetLabel,
+    "Hosted runtime family plan invite targetLabel",
+  );
+  const targetPhoneNumber = readOptionalNullableString(
+    invite.targetPhoneNumber,
+    "Hosted runtime family plan invite targetPhoneNumber",
+  );
+  const targetTelegramUsername = readOptionalNullableString(
+    invite.targetTelegramUsername,
+    "Hosted runtime family plan invite targetTelegramUsername",
+  );
+  if (!targetPhoneNumber && !targetTelegramUsername) {
+    throw new TypeError(
+      "Hosted runtime family plan invite requires a phone number or Telegram username.",
+    );
+  }
+
+  return {
+    targetLabel,
+    targetPhoneNumber,
+    targetTelegramUsername,
+  };
+}
+
+export function parseHostedRuntimeFamilyPlanToolResponse(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolResponse {
+  const record = requireObject(value, "Hosted runtime family plan tool response");
+  const action = requireString(
+    record.action,
+    "Hosted runtime family plan tool response action",
+  );
+  if (action === "read_status") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime family plan tool read_status response",
+    );
+    return {
+      action,
+      result: parseHostedRuntimeFamilyPlanStatusResponse(record.result),
+    };
+  }
+  if (action === "create_invite") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime family plan tool create_invite response",
+    );
+    const result = requireObject(
+      record.result,
+      "Hosted runtime family plan tool create_invite response result",
+    );
+    assertAllowedObjectKeys(
+      result,
+      new Set(["invite", "replyText", "seats"]),
+      "Hosted runtime family plan tool create_invite response result",
+    );
+    return {
+      action,
+      result: {
+        invite: parseHostedRuntimeFamilyPlanInvite(result.invite),
+        replyText: requireString(
+          result.replyText,
+          "Hosted runtime family plan invite replyText",
+        ),
+        seats: parseHostedRuntimeFamilyPlanSeatStatus(result.seats),
+      },
+    };
+  }
+  if (action === "start_checkout") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime family plan tool start_checkout response",
+    );
+    return {
+      action,
+      result: parseHostedRuntimeFamilyPlanStartCheckoutResponse(record.result),
+    };
+  }
+  throw new TypeError("Hosted runtime family plan tool response action is not supported.");
+}
+
 export function parseHostedCodexAuthUpdate(
   value: unknown,
 ): HostedCodexAuthUpdate {
@@ -831,6 +990,195 @@ function parseHostedProductFeedbackSlugArray(
     throw new TypeError(`${options.label} must contain at most seven unique items.`);
   }
   return entries;
+}
+
+function parseHostedRuntimeFamilyPlanStatusResponse(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolStatusResponse {
+  const record = requireObject(value, "Hosted runtime family plan status response");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "billingActive",
+      "billingStatus",
+      "members",
+      "owner",
+      "pendingInvites",
+      "seats",
+    ]),
+    "Hosted runtime family plan status response",
+  );
+
+  return {
+    billingActive: requireBoolean(
+      record.billingActive,
+      "Hosted runtime family plan status billingActive",
+    ),
+    billingStatus: requireString(
+      record.billingStatus,
+      "Hosted runtime family plan status billingStatus",
+    ),
+    members: requireArray(
+      record.members,
+      "Hosted runtime family plan status members",
+    ).map(parseHostedRuntimeFamilyPlanMember),
+    owner: requireBoolean(
+      record.owner,
+      "Hosted runtime family plan status owner",
+    ),
+    pendingInvites: requireArray(
+      record.pendingInvites,
+      "Hosted runtime family plan status pendingInvites",
+    ).map(parseHostedRuntimeFamilyPlanInvite),
+    seats: parseHostedRuntimeFamilyPlanSeatStatus(record.seats),
+  };
+}
+
+function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolStartCheckoutResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime family plan tool start_checkout response result",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "alreadyActive",
+      "billingActive",
+      "billingStatus",
+      "checkoutUrl",
+      "owner",
+      "preparedInvite",
+      "preparedInviteReplyText",
+      "seats",
+      "unavailableReason",
+    ]),
+    "Hosted runtime family plan tool start_checkout response result",
+  );
+  const unavailableReason = readOptionalNullableString(
+    record.unavailableReason,
+    "Hosted runtime family plan start_checkout unavailableReason",
+  );
+  if (unavailableReason !== null && unavailableReason !== "already_sponsored") {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout unavailableReason is not supported.",
+    );
+  }
+
+  return {
+    alreadyActive: requireBoolean(
+      record.alreadyActive,
+      "Hosted runtime family plan start_checkout alreadyActive",
+    ),
+    billingActive: requireBoolean(
+      record.billingActive,
+      "Hosted runtime family plan start_checkout billingActive",
+    ),
+    billingStatus: requireString(
+      record.billingStatus,
+      "Hosted runtime family plan start_checkout billingStatus",
+    ),
+    checkoutUrl: readNullableString(
+      record.checkoutUrl,
+      "Hosted runtime family plan start_checkout checkoutUrl",
+    ),
+    owner: requireBoolean(
+      record.owner,
+      "Hosted runtime family plan start_checkout owner",
+    ),
+    preparedInvite: record.preparedInvite === null || record.preparedInvite === undefined
+      ? null
+      : parseHostedRuntimeFamilyPlanInvite(record.preparedInvite),
+    preparedInviteReplyText: readNullableString(
+      record.preparedInviteReplyText,
+      "Hosted runtime family plan start_checkout preparedInviteReplyText",
+    ),
+    seats: parseHostedRuntimeFamilyPlanSeatStatus(record.seats),
+    unavailableReason,
+  };
+}
+
+function parseHostedRuntimeFamilyPlanSeatStatus(value: unknown) {
+  const record = requireObject(value, "Hosted runtime family plan seat status");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["active", "invited", "max", "remaining", "used"]),
+    "Hosted runtime family plan seat status",
+  );
+
+  return {
+    active: requireNumber(record.active, "Hosted runtime family plan seats active"),
+    invited: requireNumber(record.invited, "Hosted runtime family plan seats invited"),
+    max: requireNumber(record.max, "Hosted runtime family plan seats max"),
+    remaining: requireNumber(
+      record.remaining,
+      "Hosted runtime family plan seats remaining",
+    ),
+    used: requireNumber(record.used, "Hosted runtime family plan seats used"),
+  };
+}
+
+function parseHostedRuntimeFamilyPlanMember(value: unknown) {
+  const record = requireObject(value, "Hosted runtime family plan member");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["isOwner", "label", "role", "status"]),
+    "Hosted runtime family plan member",
+  );
+
+  return {
+    isOwner: requireBoolean(
+      record.isOwner,
+      "Hosted runtime family plan member isOwner",
+    ),
+    label: readNullableString(
+      record.label,
+      "Hosted runtime family plan member label",
+    ),
+    role: requireString(record.role, "Hosted runtime family plan member role"),
+    status: requireString(record.status, "Hosted runtime family plan member status"),
+  };
+}
+
+function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
+  const record = requireObject(value, "Hosted runtime family plan invite");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "acceptUrl",
+      "expiresAt",
+      "status",
+      "targetLabel",
+      "targetPhoneHint",
+      "telegramInviteUrl",
+    ]),
+    "Hosted runtime family plan invite",
+  );
+
+  return {
+    acceptUrl: readNullableString(
+      record.acceptUrl,
+      "Hosted runtime family plan invite acceptUrl",
+    ),
+    expiresAt: requireString(
+      record.expiresAt,
+      "Hosted runtime family plan invite expiresAt",
+    ),
+    status: requireString(record.status, "Hosted runtime family plan invite status"),
+    targetLabel: readNullableString(
+      record.targetLabel,
+      "Hosted runtime family plan invite targetLabel",
+    ),
+    targetPhoneHint: readNullableString(
+      record.targetPhoneHint,
+      "Hosted runtime family plan invite targetPhoneHint",
+    ),
+    telegramInviteUrl: readNullableString(
+      record.telegramInviteUrl,
+      "Hosted runtime family plan invite telegramInviteUrl",
+    ),
+  };
 }
 
 export function parseHostedRuntimeIssueExportRequest(

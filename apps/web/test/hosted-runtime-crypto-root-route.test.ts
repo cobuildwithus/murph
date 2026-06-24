@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
   readHostedDomainRootEnvelopeByRootKeyIdOrThrow: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -26,6 +27,11 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  hasHostedMemberEffectiveActiveAccessForMember:
+    mocks.hasHostedMemberEffectiveActiveAccessForMember,
+}));
+
 type HostedRuntimeCryptoRootRouteModule =
   typeof import("../app/api/internal/hosted-runtime/crypto-context/root/route");
 
@@ -41,10 +47,12 @@ describe("hosted runtime crypto root route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
     mocks.getPrisma.mockReturnValue({
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: "active",
+          id: "member_123",
           suspendedAt: null,
         }),
       },

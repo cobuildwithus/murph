@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -33,6 +34,7 @@ const PULSE_FEATURES = [
 ];
 
 export function StartPaidPulseButton(props: {
+  block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
   onPendingChange?: (pending: boolean) => void;
@@ -88,14 +90,14 @@ export function StartPaidPulseButton(props: {
   }
 
   return (
-    <div className="flex flex-col items-start gap-2 sm:items-end">
+    <div className={cn("flex flex-col gap-2", props.block ? "items-stretch" : "items-start sm:items-end")}>
       <Button
         type="button"
-        variant={props.presentation === "banner" ? "unstyled" : "default"}
+        variant={props.presentation === "banner" ? "unstyled" : props.block ? "secondary" : "default"}
         size={props.presentation === "banner" ? "unstyled" : "default"}
         className={props.presentation === "banner"
           ? "inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-          : undefined}
+          : props.block ? "w-full" : undefined}
         onClick={() => setConfirmationOpen(true)}
         disabled={disabled}
       >

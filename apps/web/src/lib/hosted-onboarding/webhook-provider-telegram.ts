@@ -10,13 +10,8 @@ import {
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromTelegramTx,
   hasHostedMemberEffectiveActiveAccessForMember,
-  issueHostedFamilyInviteFromOwnerChatTx,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
-import {
-  buildHostedFamilyInfoReplyText,
-  parseHostedFamilyInfoChatIntent,
-} from "./family-chat-intent";
 import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
@@ -64,6 +59,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   const familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
     now: new Date(summary.occurredAt),
     telegramThreadId: telegramMessage?.threadId ?? null,
+    telegramUsername: summary.senderTelegramUsername,
     telegramUserId: summary.senderTelegramUserId,
     text: telegramMessage?.text ?? null,
     tx: input.prisma,
@@ -136,74 +132,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
   });
-
-  const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
-    now: new Date(summary.occurredAt),
-    ownerMemberId: existingMember.id,
-    text: telegramMessage.text ?? null,
-    tx: input.prisma,
-  });
-  if (familyInvite) {
-    const route = await resolveHostedFamilyChatNotificationRouteTx({
-      fallbackTelegramThreadId: telegramMessage.threadId,
-      fallbackTelegramUserId: summary.senderTelegramUserId,
-      memberId: existingMember.id,
-      tx: input.prisma,
-    });
-    const notification = await appendHostedFamilyChatNotificationTx({
-      memberId: existingMember.id,
-      message: familyInvite.replyText,
-      occurredAt: summary.occurredAt,
-      route,
-      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
-      tx: input.prisma,
-    });
-
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        reason: "family-invite-created",
-      },
-      ...(notification.mailboxItemId
-        ? {
-            wakeMailboxItemId: notification.mailboxItemId,
-            wakeUserId: existingMember.id,
-          }
-        : {}),
-    };
-  }
-
-  if (parseHostedFamilyInfoChatIntent(telegramMessage.text)) {
-    const route = await resolveHostedFamilyChatNotificationRouteTx({
-      fallbackTelegramThreadId: telegramMessage.threadId,
-      fallbackTelegramUserId: summary.senderTelegramUserId,
-      memberId: existingMember.id,
-      tx: input.prisma,
-    });
-    const notification = await appendHostedFamilyChatNotificationTx({
-      memberId: existingMember.id,
-      message: buildHostedFamilyInfoReplyText(),
-      occurredAt: summary.occurredAt,
-      route,
-      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
-      tx: input.prisma,
-    });
-
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        reason: "family-info-replied",
-      },
-      ...(notification.mailboxItemId
-        ? {
-            wakeMailboxItemId: notification.mailboxItemId,
-            wakeUserId: existingMember.id,
-          }
-        : {}),
-    };
-  }
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({

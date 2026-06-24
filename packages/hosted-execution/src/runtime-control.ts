@@ -713,6 +713,95 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export type HostedRuntimeFamilyPlanToolAction =
+  | "create_invite"
+  | "read_status"
+  | "start_checkout";
+
+export interface HostedRuntimeFamilyPlanCreateInviteRequest {
+  targetLabel?: string | null;
+  targetPhoneNumber?: string | null;
+  targetTelegramUsername?: string | null;
+}
+
+export type HostedRuntimeFamilyPlanToolRequest =
+  | {
+      action: "create_invite";
+      invite: HostedRuntimeFamilyPlanCreateInviteRequest;
+    }
+  | {
+      action: "read_status";
+    }
+  | {
+      action: "start_checkout";
+      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
+    };
+
+export interface HostedRuntimeFamilyPlanToolSeatStatus {
+  active: number;
+  invited: number;
+  max: number;
+  remaining: number;
+  used: number;
+}
+
+export interface HostedRuntimeFamilyPlanToolMember {
+  isOwner: boolean;
+  label: string | null;
+  role: string;
+  status: string;
+}
+
+export interface HostedRuntimeFamilyPlanToolInvite {
+  acceptUrl: string | null;
+  expiresAt: string;
+  status: string;
+  targetLabel: string | null;
+  targetPhoneHint: string | null;
+  telegramInviteUrl: string | null;
+}
+
+export interface HostedRuntimeFamilyPlanToolStatusResponse {
+  billingActive: boolean;
+  billingStatus: string;
+  members: HostedRuntimeFamilyPlanToolMember[];
+  owner: boolean;
+  pendingInvites: HostedRuntimeFamilyPlanToolInvite[];
+  seats: HostedRuntimeFamilyPlanToolSeatStatus;
+}
+
+export interface HostedRuntimeFamilyPlanToolCreateInviteResponse {
+  invite: HostedRuntimeFamilyPlanToolInvite;
+  replyText: string;
+  seats: HostedRuntimeFamilyPlanToolSeatStatus;
+}
+
+export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
+  alreadyActive: boolean;
+  billingActive: boolean;
+  billingStatus: string;
+  checkoutUrl: string | null;
+  owner: boolean;
+  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
+  preparedInviteReplyText: string | null;
+  seats: HostedRuntimeFamilyPlanToolSeatStatus;
+  unavailableReason: "already_sponsored" | null;
+}
+
+export type HostedRuntimeFamilyPlanToolResponse =
+  | {
+      action: "create_invite";
+      result: HostedRuntimeFamilyPlanToolCreateInviteResponse;
+    }
+  | {
+      action: "read_status";
+      result: HostedRuntimeFamilyPlanToolStatusResponse;
+    }
+  | {
+      action: "start_checkout";
+      result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
+    };
+
 export type HostedCodexAuthUpdate =
   | {
       attemptId: string;

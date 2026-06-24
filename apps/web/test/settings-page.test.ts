@@ -19,11 +19,13 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
+    canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
+    familyState?: "none" | "owner" | "sponsored";
   }) =>
     React.createElement(
       "div",
@@ -32,6 +34,9 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
+  HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
+  readHostedFamilyAccessForMember: vi.fn(),
+  readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   prisma: {
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
@@ -105,8 +110,19 @@ vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
   HostedDataPrivacySettings: mocks.HostedDataPrivacySettings,
 }));
 
+vi.mock("@/src/components/settings/hosted-family-settings", () => ({
+  HostedFamilySettings: mocks.HostedFamilySettings,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
+  readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -308,6 +324,72 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
     currentBillingPlanCode: "launch_monthly",
     currentCheckoutOffer: "pulse_trial_7d",
   }), undefined);
+});
+
+test("SettingsPage does not mark an unpaid family owner group as the current plan", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: false,
+    billingStatus: "not_started",
+    displayName: null,
+    groupId: "group_123",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        joinedAt: new Date("2026-06-24T12:00:00.000Z"),
+        label: null,
+        memberId: "member_123",
+        role: "owner",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_123",
+    seats: {
+      active: 1,
+      invited: 0,
+      max: 4,
+      remaining: 3,
+      used: 1,
+    },
+    suspendedAt: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    canStartFamily: true,
+    familyState: "none",
+  }), undefined);
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledTimes(1);
 });
 
 test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {

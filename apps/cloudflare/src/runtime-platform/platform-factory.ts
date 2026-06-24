@@ -14,6 +14,7 @@ import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
+import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
@@ -186,6 +187,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(transport
       ? {
           issueExportPort: createHostedRuntimeIssueExportPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          familyPlanToolPort: createHostedRuntimeFamilyPlanToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

@@ -2554,7 +2554,6 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
-  hostedComputerRunRows?: Record<string, unknown>[];
   familyBillingRefRecords?: Record<string, unknown>[];
   familyGroups?: Array<{ id: string }>;
   identityRecord?: Record<string, unknown> | null;

@@ -97,6 +97,12 @@ export const HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS = {
   launch_monthly: 10_000_000n,
 } as const satisfies Record<HostedBillingPlanCode, bigint>;
 
+export const HOSTED_FAMILY_PLAN_DISPLAY = {
+  displayName: "Family",
+  recurringAmountUsdCents: 2_500,
+  seats: 4,
+} as const;
+
 export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {

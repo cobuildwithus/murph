@@ -20,6 +20,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
+import { normalizeHostedTelegramUsernameForLookup } from "./contact-privacy";
 
 export interface HostedTelegramWebhookSummary {
   chatType: string | null;
@@ -27,6 +28,7 @@ export interface HostedTelegramWebhookSummary {
   isDirect: boolean;
   occurredAt: string;
   senderTelegramUserId: string | null;
+  senderTelegramUsername: string | null;
 }
 
 export function assertHostedTelegramWebhookSecret(secretToken: string | null): void {
@@ -91,6 +93,7 @@ export async function summarizeHostedTelegramWebhook(
   if (!summary) {
     return null;
   }
+  const message = extractTelegramMessage(update);
 
   return {
     chatType: summary.thread.chatType,
@@ -98,6 +101,9 @@ export async function summarizeHostedTelegramWebhook(
     isDirect: summary.thread.isDirect,
     occurredAt: summary.occurredAt,
     senderTelegramUserId: summary.actor.senderTelegramUserId,
+    senderTelegramUsername: normalizeHostedTelegramUsernameForLookup(
+      message?.from?.username ?? null,
+    ),
   };
 }
 

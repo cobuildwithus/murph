@@ -91,3 +91,4 @@ agent-docs/product-ideas.md
 .fdc-work/
 .plasticlist-work/
 .product-tests-work/
+.env*.local

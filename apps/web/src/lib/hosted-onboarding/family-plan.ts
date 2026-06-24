@@ -17,12 +17,20 @@ import {
   decryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import {
+  createHostedEmailLookupKey,
+  createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+  createHostedTelegramUsernameLookupKey,
+  createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionLookupKeyReadCandidates,
+  hostedEmailLookupKeyMatchesValue,
   hostedPhoneLookupKeyMatchesValue,
+  normalizeHostedEmailAddress,
+  normalizeHostedTelegramUsernameForLookup,
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
@@ -70,6 +78,9 @@ import {
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
+import {
+  provisionActiveHostedDomainRootEnvelopeForUserOnly,
+} from "../hosted-crypto/domain-root-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -81,6 +92,7 @@ export const HOSTED_FAMILY_MAX_SEATS = 4;
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
+const HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/u;
 
 export const HOSTED_ACCOUNT_GROUP_MEMBERSHIP_ROLES = ["owner", "member"] as const;
 export type HostedAccountGroupMembershipRole =
@@ -102,8 +114,20 @@ export const HOSTED_ACCOUNT_GROUP_INVITE_STATUSES = [
 export type HostedAccountGroupInviteStatus =
   (typeof HOSTED_ACCOUNT_GROUP_INVITE_STATUSES)[number];
 
+function parseHostedAccountGroupInviteStatus(
+  value: string,
+): HostedAccountGroupInviteStatus {
+  return (HOSTED_ACCOUNT_GROUP_INVITE_STATUSES as readonly string[]).includes(value)
+    ? (value as HostedAccountGroupInviteStatus)
+    : "expired";
+}
+
 const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_PHONE_FIELD =
   "hosted-account-group-invite.target-phone";
+const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD =
+  "hosted-account-group-invite.target-telegram-username";
+const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD =
+  "hosted-account-group-invite.target-email";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
   "hosted-account-group-billing-ref.stripe-customer-id";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
@@ -143,9 +167,13 @@ const hostedAccountGroupInviteSelect =
     inviteCode: true,
     invitedByMemberId: true,
     status: true,
+    targetEmailEncrypted: true,
+    targetEmailLookupKey: true,
     targetLabel: true,
     targetPhoneLookupKey: true,
     targetPhoneNumberEncrypted: true,
+    targetTelegramUsernameEncrypted: true,
+    targetTelegramUsernameLookupKey: true,
     updatedAt: true,
   });
 
@@ -204,9 +232,13 @@ export type HostedFamilyStripeSubscriptionResult = {
 };
 
 export interface HostedAccountGroupInvitePrivateSnapshot
-  extends Omit<HostedAccountGroupInviteSnapshot, "targetPhoneNumberEncrypted"> {
+  extends Omit<HostedAccountGroupInviteSnapshot,
+    "targetEmailEncrypted" | "targetPhoneNumberEncrypted" | "targetTelegramUsernameEncrypted"
+  > {
+  targetEmail: string | null;
   targetPhoneHint: string | null;
   targetPhoneNumber: string | null;
+  targetTelegramUsername: string | null;
 }
 
 export interface HostedFamilyEntitlementInput {
@@ -215,16 +247,65 @@ export interface HostedFamilyEntitlementInput {
   memberSuspendedAt?: Date | null;
 }
 
-export interface HostedFamilyInviteCommand {
-  targetLabel: string | null;
-  targetPhoneNumber: string | null;
-  targetTelegramUsername: string | null;
-}
-
 export interface HostedFamilyChatInviteResult {
   group: HostedAccountGroupAccessSnapshot;
   invite: HostedAccountGroupInvitePrivateSnapshot;
   replyText: string;
+}
+
+export interface HostedFamilyOwnerSeatStatus {
+  active: number;
+  invited: number;
+  max: number;
+  remaining: number;
+  used: number;
+}
+
+export interface HostedFamilyOwnerMemberRow {
+  isOwner: boolean;
+  joinedAt: Date | null;
+  label: string | null;
+  memberId: string;
+  role: string;
+  status: string;
+}
+
+export interface HostedFamilyOwnerInviteRow {
+  acceptUrl: string | null;
+  channel: string;
+  expiresAt: Date;
+  id: string;
+  status: string;
+  targetEmail: string | null;
+  targetLabel: string | null;
+  targetPhoneHint: string | null;
+  telegramInviteUrl: string | null;
+  targetTelegramUsername: string | null;
+}
+
+export interface HostedFamilyOwnerSnapshot {
+  billingActive: boolean;
+  billingStatus: HostedBillingStatus;
+  displayName: string | null;
+  groupId: string;
+  invites: HostedFamilyOwnerInviteRow[];
+  members: HostedFamilyOwnerMemberRow[];
+  ownerMemberId: string;
+  seats: HostedFamilyOwnerSeatStatus;
+  suspendedAt: Date | null;
+}
+
+export interface HostedFamilyInviteAcceptanceView {
+  groupActive: boolean;
+  groupDisplayName: string | null;
+  inviteCode: string;
+  isEmailBound: boolean;
+  isPhoneBound: boolean;
+  seatAvailable: boolean;
+  status: HostedAccountGroupInviteStatus;
+  targetLabel: string | null;
+  telegramInviteUrl: string | null;
+  webAcceptable: boolean;
 }
 
 type HostedFamilyBillingCheckoutInput =
@@ -312,6 +393,253 @@ export async function hasActiveHostedFamilyAccess(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   return (await readHostedFamilyAccessForMember(input)) !== null;
+}
+
+export async function readHostedFamilyOwnerSnapshotForMember(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedFamilyOwnerSnapshot | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const group = await prisma.hostedAccountGroup.findUnique({
+    select: {
+      billingStatus: true,
+      displayName: true,
+      id: true,
+      ownerMemberId: true,
+      suspendedAt: true,
+    },
+    where: {
+      ownerMemberId: input.memberId,
+    },
+  });
+
+  if (!group) {
+    return null;
+  }
+
+  const [memberships, invites, acceptedInvites] = await Promise.all([
+    prisma.hostedAccountGroupMembership.findMany({
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        joinedAt: true,
+        memberId: true,
+        role: true,
+        status: true,
+      },
+      where: {
+        groupId: group.id,
+        status: "active",
+      },
+    }),
+    prisma.hostedAccountGroupInvite.findMany({
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: hostedAccountGroupInviteSelect,
+      where: {
+        expiresAt: {
+          gt: now,
+        },
+        groupId: group.id,
+        status: "pending",
+      },
+    }),
+    prisma.hostedAccountGroupInvite.findMany({
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: hostedAccountGroupInviteSelect,
+      where: {
+        acceptedByMemberId: {
+          not: null,
+        },
+        groupId: group.id,
+        status: "accepted",
+      },
+    }),
+  ]);
+
+  const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
+  for (const invite of acceptedInvites) {
+    if (invite.acceptedByMemberId && !firstAcceptedInviteByMember.has(invite.acceptedByMemberId)) {
+      firstAcceptedInviteByMember.set(invite.acceptedByMemberId, invite);
+    }
+  }
+  const labelByMemberId = new Map<string, string | null>(
+    await Promise.all(
+      [...firstAcceptedInviteByMember].map(async ([memberId, invite]) => {
+        if (invite.targetLabel) {
+          return [memberId, invite.targetLabel] as const;
+        }
+        const projected = await projectHostedFamilyInvitePrivateSnapshot(invite, prisma);
+        return [
+          memberId,
+          projected.targetEmail
+            ?? (projected.targetTelegramUsername ? `@${projected.targetTelegramUsername}` : null)
+            ?? projected.targetPhoneHint,
+        ] as const;
+      }),
+    ),
+  );
+
+  const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
+  const members: HostedFamilyOwnerMemberRow[] = memberships.map((membership) => ({
+    isOwner: membership.memberId === group.ownerMemberId,
+    joinedAt: membership.joinedAt,
+    label:
+      membership.memberId === group.ownerMemberId
+        ? null
+        : labelByMemberId.get(membership.memberId) ?? null,
+    memberId: membership.memberId,
+    role: membership.role,
+    status: membership.status,
+  }));
+
+  const inviteRows: HostedFamilyOwnerInviteRow[] = await Promise.all(
+    invites.map(async (invite) => {
+      const projected = await projectHostedFamilyInvitePrivateSnapshot(invite, prisma);
+
+      return {
+        acceptUrl: buildHostedFamilyInviteAcceptUrl({
+          inviteCode: invite.inviteCode,
+          publicBaseUrl,
+        }),
+        channel: invite.channel,
+        expiresAt: invite.expiresAt,
+        id: invite.id,
+        status: invite.status,
+        targetEmail: projected.targetEmail,
+        targetLabel: invite.targetLabel,
+        targetPhoneHint: projected.targetPhoneHint,
+        targetTelegramUsername: projected.targetTelegramUsername,
+        telegramInviteUrl: telegramBotUsername
+          ? buildHostedFamilyTelegramInviteUrl({
+              botUsername: telegramBotUsername,
+              inviteCode: invite.inviteCode,
+            })
+          : null,
+      };
+    }),
+  );
+
+  const active = members.length;
+  const invited = inviteRows.length;
+  const used = active + invited;
+
+  return {
+    billingActive: hasHostedAccountGroupAccess({
+      billingStatus: group.billingStatus,
+      suspendedAt: group.suspendedAt,
+    }),
+    billingStatus: group.billingStatus,
+    displayName: group.displayName,
+    groupId: group.id,
+    invites: inviteRows,
+    members,
+    ownerMemberId: group.ownerMemberId,
+    seats: {
+      active,
+      invited,
+      max: HOSTED_FAMILY_MAX_SEATS,
+      remaining: Math.max(0, HOSTED_FAMILY_MAX_SEATS - used),
+      used,
+    },
+    suspendedAt: group.suspendedAt,
+  };
+}
+
+export async function readHostedFamilyInviteAcceptanceView(input: {
+  inviteCode: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedFamilyInviteAcceptanceView | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const invite = await prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      expiresAt: true,
+      group: {
+        select: {
+          billingStatus: true,
+          displayName: true,
+          id: true,
+          ownerMemberId: true,
+          suspendedAt: true,
+        },
+      },
+      inviteCode: true,
+      status: true,
+      targetEmailLookupKey: true,
+      targetLabel: true,
+      targetPhoneLookupKey: true,
+    },
+    where: {
+      inviteCode: input.inviteCode,
+    },
+  });
+
+  if (!invite) {
+    return null;
+  }
+
+  const expired = invite.status === "pending" && invite.expiresAt <= now;
+  const status: HostedAccountGroupInviteStatus = expired
+    ? "expired"
+    : parseHostedAccountGroupInviteStatus(invite.status);
+  const isPending = status === "pending";
+
+  let seatAvailable = false;
+  if (isPending) {
+    const [activeMemberships, pendingInvites] = await Promise.all([
+      prisma.hostedAccountGroupMembership.count({
+        where: {
+          groupId: invite.group.id,
+          status: "active",
+        },
+      }),
+      prisma.hostedAccountGroupInvite.count({
+        where: {
+          expiresAt: {
+            gt: now,
+          },
+          groupId: invite.group.id,
+          status: "pending",
+        },
+      }),
+    ]);
+    seatAvailable = activeMemberships + pendingInvites <= HOSTED_FAMILY_MAX_SEATS;
+  }
+
+  const groupActive = hasHostedAccountGroupAccess({
+    billingStatus: invite.group.billingStatus,
+    suspendedAt: invite.group.suspendedAt,
+  });
+  const isPhoneBound = invite.targetPhoneLookupKey !== null;
+  const isEmailBound = invite.targetEmailLookupKey !== null;
+  const telegramBotUsername = readHostedOnboardingEnvironment().telegramBotUsername;
+
+  return {
+    groupActive,
+    groupDisplayName: invite.group.displayName,
+    inviteCode: invite.inviteCode,
+    isEmailBound,
+    isPhoneBound,
+    seatAvailable,
+    status,
+    targetLabel: invite.targetLabel,
+    telegramInviteUrl:
+      telegramBotUsername && isPending
+        ? buildHostedFamilyTelegramInviteUrl({
+            botUsername: telegramBotUsername,
+            inviteCode: invite.inviteCode,
+          })
+        : null,
+    webAcceptable: isPending && seatAvailable && groupActive && (isPhoneBound || isEmailBound),
+  };
 }
 
 export async function hasHostedMemberEffectiveActiveAccessForMember(input: {
@@ -739,8 +1067,96 @@ export async function createHostedFamilyBillingCheckout(input: {
 
   return {
     alreadyActive: false,
-    url: checkoutSession.url,
+    url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
+      checkoutSession.url,
   };
+}
+
+export function readHostedFamilyCheckoutSessionIdFromUrl(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return null;
+  }
+
+  return url.pathname
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .find(isHostedFamilyCheckoutSessionId) ?? null;
+}
+
+export function buildHostedFamilyCheckoutRedirectUrl(input: {
+  checkoutUrl: string | null | undefined;
+  publicBaseUrl?: string | null;
+}): string | null {
+  const sessionId = readHostedFamilyCheckoutSessionIdFromUrl(input.checkoutUrl);
+  if (!sessionId) {
+    return null;
+  }
+
+  const publicBaseUrl = normalizeNullableString(input.publicBaseUrl) ??
+    requireHostedOnboardingPublicBaseUrl();
+  const url = new URL(publicBaseUrl);
+  url.pathname = `/checkout/family/${encodeURIComponent(sessionId)}`;
+  url.search = "";
+  url.hash = "";
+
+  return url.toString();
+}
+
+export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
+  prisma?: HostedOnboardingReadClient;
+  sessionId: string;
+}): Promise<string> {
+  const sessionId = normalizeNullableString(input.sessionId);
+  if (!sessionId || !isHostedFamilyCheckoutSessionId(sessionId)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
+      httpStatus: 404,
+      message: "Family checkout session was not found.",
+    });
+  }
+
+  const session = await requireHostedStripeApi().checkout.sessions.retrieve(sessionId);
+  if (!isHostedFamilyCheckoutSession(session)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
+      httpStatus: 404,
+      message: "Family checkout session was not found.",
+    });
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const group = await findHostedAccountGroupForStripeCheckoutSession({
+    prisma,
+    session,
+  });
+  if (!group || session.metadata?.ownerMemberId !== group.ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
+      httpStatus: 404,
+      message: "Family checkout session was not found.",
+    });
+  }
+
+  const checkoutUrl = normalizeNullableString(session.url);
+  if (!checkoutUrl) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: 410,
+      message: "Family checkout session is no longer available. Start Family checkout again.",
+    });
+  }
+
+  return checkoutUrl;
 }
 
 export async function createHostedAccountGroupForOwner(input: {
@@ -823,6 +1239,7 @@ export async function issueHostedFamilyInvite(input: {
   invitedByMemberId: string;
   now?: Date;
   prisma?: PrismaClient;
+  targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
   targetTelegramUsername?: string | null;
@@ -840,6 +1257,7 @@ export async function issueHostedFamilyInviteTx(input: {
   groupId: string;
   invitedByMemberId: string;
   now?: Date;
+  targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
   targetTelegramUsername?: string | null;
@@ -875,19 +1293,42 @@ export async function issueHostedFamilyInviteTx(input: {
 
   const targetPhoneNumber = normalizePhoneNumber(input.targetPhoneNumber);
   const targetPhoneLookupKey = createHostedPhoneLookupKey(targetPhoneNumber);
-  const existingTargetInvite = targetPhoneLookupKey
+  const targetTelegramUsername = normalizeHostedTelegramUsernameForLookup(
+    input.targetTelegramUsername,
+  );
+  const targetTelegramUsernameLookupKey = createHostedTelegramUsernameLookupKey(
+    targetTelegramUsername,
+  );
+  const targetEmail = normalizeHostedEmailAddress(input.targetEmail);
+  const targetEmailLookupKey = createHostedEmailLookupKey(targetEmail);
+  const phoneLookupCandidates = createHostedPhoneLookupKeyReadCandidates(targetPhoneNumber);
+  const telegramLookupCandidates =
+    createHostedTelegramUsernameLookupKeyReadCandidates(targetTelegramUsername);
+  const emailLookupCandidates = createHostedEmailLookupKeyReadCandidates(targetEmail);
+  const reuseConditions: Prisma.HostedAccountGroupInviteWhereInput[] = [
+    ...(phoneLookupCandidates.length > 0
+      ? [{ targetPhoneLookupKey: { in: phoneLookupCandidates } }]
+      : []),
+    ...(telegramLookupCandidates.length > 0
+      ? [{ targetTelegramUsernameLookupKey: { in: telegramLookupCandidates } }]
+      : []),
+    ...(emailLookupCandidates.length > 0
+      ? [{ targetEmailLookupKey: { in: emailLookupCandidates } }]
+      : []),
+  ];
+  const existingTargetInvite = reuseConditions.length > 0
     ? await input.tx.hostedAccountGroupInvite.findFirst({
         orderBy: {
           createdAt: "asc",
         },
         select: hostedAccountGroupInviteSelect,
         where: {
+          OR: reuseConditions,
           expiresAt: {
             gt: now,
           },
           groupId: group.id,
           status: "pending",
-          targetPhoneLookupKey,
         },
       })
     : null;
@@ -907,6 +1348,18 @@ export async function issueHostedFamilyInviteTx(input: {
     prisma: input.tx,
     value: targetPhoneNumber,
   });
+  const targetTelegramUsernameEncrypted = await encryptHostedWebNullableString({
+    field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD,
+    memberId: group.ownerMemberId,
+    prisma: input.tx,
+    value: targetTelegramUsername,
+  });
+  const targetEmailEncrypted = await encryptHostedWebNullableString({
+    field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD,
+    memberId: group.ownerMemberId,
+    prisma: input.tx,
+    value: targetEmail,
+  });
 
   const invite = await input.tx.hostedAccountGroupInvite.create({
     data: {
@@ -917,9 +1370,13 @@ export async function issueHostedFamilyInviteTx(input: {
       invitedByMemberId: input.invitedByMemberId,
       inviteCode: generateHostedInviteCode(),
       status: "pending",
+      targetEmailEncrypted,
+      targetEmailLookupKey,
       targetLabel: normalizeFamilyLabel(input.targetLabel),
       targetPhoneLookupKey,
       targetPhoneNumberEncrypted,
+      targetTelegramUsernameEncrypted,
+      targetTelegramUsernameLookupKey,
     },
     select: hostedAccountGroupInviteSelect,
   });
@@ -927,38 +1384,14 @@ export async function issueHostedFamilyInviteTx(input: {
   return projectHostedFamilyInvitePrivateSnapshot(invite, input.tx);
 }
 
-export function parseHostedFamilyInviteCommand(
-  text: string | null | undefined,
-): HostedFamilyInviteCommand | null {
-  const normalized = normalizeNullableString(text);
-  if (!normalized || !/\binvite\b/iu.test(normalized)) {
-    return null;
-  }
-
-  const targetPhoneNumber = extractFamilyInviteCommandPhoneNumber(normalized);
-  const targetTelegramUsername = extractFamilyInviteCommandTelegramUsername(normalized);
-  if (!targetPhoneNumber && !targetTelegramUsername) {
-    return null;
-  }
-
-  return {
-    targetLabel: extractFamilyInviteCommandTargetLabel(normalized),
-    targetPhoneNumber,
-    targetTelegramUsername,
-  };
-}
-
-export async function issueHostedFamilyInviteFromOwnerChatTx(input: {
+export async function issueHostedFamilyInviteFromOwnerTx(input: {
   now?: Date;
   ownerMemberId: string;
-  text: string | null | undefined;
+  targetLabel?: string | null;
+  targetPhoneNumber?: string | null;
+  targetTelegramUsername?: string | null;
   tx: Prisma.TransactionClient;
-}): Promise<HostedFamilyChatInviteResult | null> {
-  const command = parseHostedFamilyInviteCommand(input.text);
-  if (!command) {
-    return null;
-  }
-
+}): Promise<HostedFamilyChatInviteResult> {
   const now = input.now ?? new Date();
   const group = await ensureHostedAccountGroupForOwnerTx({
     now,
@@ -969,9 +1402,9 @@ export async function issueHostedFamilyInviteFromOwnerChatTx(input: {
     groupId: group.id,
     invitedByMemberId: input.ownerMemberId,
     now,
-    targetLabel: command.targetLabel,
-    targetPhoneNumber: command.targetPhoneNumber,
-    targetTelegramUsername: command.targetTelegramUsername,
+    targetLabel: input.targetLabel ?? null,
+    targetPhoneNumber: input.targetPhoneNumber ?? null,
+    targetTelegramUsername: input.targetTelegramUsername ?? null,
     tx: input.tx,
   });
 
@@ -1074,10 +1507,12 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
 
 export async function acceptHostedFamilyInvite(input: {
   acceptedMemberId: string;
+  email?: string | null;
   inviteCode: string;
   now?: Date;
   phoneNumber?: string | null;
   prisma?: PrismaClient;
+  requireWebBinding?: boolean;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const prisma = input.prisma ?? getPrisma();
 
@@ -1103,11 +1538,35 @@ export function parseHostedFamilyInviteStartToken(text: string | null | undefine
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
   telegramThreadId?: string | null;
+  telegramUsername?: string | null;
   telegramUserId: string;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
-  const inviteCode = parseHostedFamilyInviteStartToken(input.text);
+  const now = input.now ?? new Date();
+  const startInviteCode = parseHostedFamilyInviteStartToken(input.text);
+  let inviteCode = startInviteCode;
+  if (inviteCode) {
+    const active = await isHostedFamilyInviteCodePendingActiveTx({
+      inviteCode,
+      now,
+      tx: input.tx,
+    });
+    if (!active) {
+      inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+        now,
+        telegramUsername: input.telegramUsername ?? null,
+        tx: input.tx,
+      });
+    }
+  } else {
+    inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx({
+      now,
+      telegramUsername: input.telegramUsername ?? null,
+      text: input.text,
+      tx: input.tx,
+    });
+  }
   if (!inviteCode) {
     return null;
   }
@@ -1131,6 +1590,12 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         memberId: generateHostedMemberId(),
         prisma: input.tx,
       });
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: input.tx,
+    reason: "hosted-family.telegram-routing",
+    userId: member.id,
+  });
   await upsertHostedMemberTelegramRoutingBindingTx({
     memberId: member.id,
     prisma: input.tx,
@@ -1141,9 +1606,80 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
     inviteCode,
-    now: input.now,
+    now,
     tx: input.tx,
   });
+}
+
+async function isHostedFamilyInviteCodePendingActiveTx(input: {
+  inviteCode: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const invite = await input.tx.hostedAccountGroupInvite.findUnique({
+    select: {
+      expiresAt: true,
+      status: true,
+    },
+    where: {
+      inviteCode: input.inviteCode,
+    },
+  });
+
+  return invite?.status === "pending" && invite.expiresAt > input.now;
+}
+
+async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
+  now: Date;
+  telegramUsername: string | null;
+  text: string | null | undefined;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  const normalizedText = normalizeNullableString(input.text);
+
+  if (normalizedText !== "/start") {
+    return null;
+  }
+
+  return resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+    now: input.now,
+    telegramUsername: input.telegramUsername,
+    tx: input.tx,
+  });
+}
+
+async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
+  now: Date;
+  telegramUsername: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  const lookupKeys = createHostedTelegramUsernameLookupKeyReadCandidates(
+    input.telegramUsername,
+  );
+  if (lookupKeys.length === 0) {
+    return null;
+  }
+
+  const invites = await input.tx.hostedAccountGroupInvite.findMany({
+    orderBy: {
+      createdAt: "asc",
+    },
+    select: {
+      inviteCode: true,
+    },
+    take: 2,
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      status: "pending",
+      targetTelegramUsernameLookupKey: {
+        in: lookupKeys,
+      },
+    },
+  });
+
+  return invites.length === 1 ? invites[0]?.inviteCode ?? null : null;
 }
 
 export async function acceptHostedFamilyInviteFromPhoneTx(input: {
@@ -1180,6 +1716,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
 
 export async function acceptHostedFamilyInviteTx(input: {
   acceptedMemberId: string;
+  email?: string | null;
   inviteCode: string;
   now?: Date;
   onAcceptedMemberValidated?: (input: {
@@ -1187,6 +1724,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
   phoneNumber?: string | null;
+  requireWebBinding?: boolean;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const now = input.now ?? new Date();
@@ -1206,6 +1744,18 @@ export async function acceptHostedFamilyInviteTx(input: {
   }
 
   if (
+    input.requireWebBinding &&
+    !invite.targetPhoneLookupKey &&
+    !invite.targetEmailLookupKey
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
+      httpStatus: 409,
+      message: "Open this invite from Telegram or WhatsApp to join.",
+    });
+  }
+
+  if (
     invite.targetPhoneLookupKey &&
     !hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)
   ) {
@@ -1213,6 +1763,17 @@ export async function acceptHostedFamilyInviteTx(input: {
       code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
       httpStatus: 403,
       message: "This family invite was sent to a different phone number.",
+    });
+  }
+
+  if (
+    invite.targetEmailLookupKey &&
+    !hostedEmailLookupKeyMatchesValue(input.email, invite.targetEmailLookupKey)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different email address.",
     });
   }
 
@@ -1372,6 +1933,41 @@ export async function removeHostedFamilyMemberTx(input: {
   return result.count > 0;
 }
 
+export async function revokeHostedFamilyInviteTx(input: {
+  groupId: string;
+  inviteId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: {
+      id: input.groupId,
+    },
+  });
+
+  if (!group || group.ownerMemberId !== input.ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the family plan owner can cancel family invites.",
+    });
+  }
+
+  const result = await input.tx.hostedAccountGroupInvite.updateMany({
+    data: {
+      status: "revoked",
+    },
+    where: {
+      groupId: input.groupId,
+      id: input.inviteId,
+      status: "pending",
+    },
+  });
+
+  return result.count > 0;
+}
+
 export function buildHostedFamilyTelegramInviteUrl(input: {
   botUsername: string;
   inviteCode: string;
@@ -1389,6 +1985,17 @@ export function buildHostedFamilyTelegramInviteUrl(input: {
   return `https://t.me/${botUsername}?start=${encodeURIComponent(`family_${input.inviteCode}`)}`;
 }
 
+export function buildHostedFamilyInviteAcceptUrl(input: {
+  inviteCode: string;
+  publicBaseUrl: string | null;
+}): string | null {
+  if (!input.publicBaseUrl) {
+    return null;
+  }
+
+  return `${input.publicBaseUrl.replace(/\/+$/u, "")}/family/accept/${encodeURIComponent(input.inviteCode)}`;
+}
+
 export function buildHostedFamilyInviteReplyText(input: {
   invite: Pick<HostedAccountGroupInvitePrivateSnapshot,
     "inviteCode" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber"
@@ -1398,7 +2005,7 @@ export function buildHostedFamilyInviteReplyText(input: {
   const targetLabel = input.invite.targetLabel ?? "your family member";
   const inviteToken = `family_${input.invite.inviteCode}`;
   const lines = [
-    `Done. I created a Murph Family invite for ${targetLabel}.`,
+    `Done. I prepared a Murph Family invite for ${targetLabel}.`,
   ];
   const telegramBotUsername = normalizeMurphTelegramUsername(input.telegramBotUsername);
 
@@ -1411,7 +2018,7 @@ export function buildHostedFamilyInviteReplyText(input: {
     );
   } else if (telegramBotUsername) {
     lines.push(
-      `Telegram link: ${buildHostedFamilyTelegramInviteUrl({
+      `Forward this Telegram invite link to ${targetLabel}: ${buildHostedFamilyTelegramInviteUrl({
         botUsername: telegramBotUsername,
         inviteCode: input.invite.inviteCode,
       })}`,
@@ -1584,11 +2191,25 @@ async function projectHostedFamilyInvitePrivateSnapshot(
     prisma,
     value: invite.targetPhoneNumberEncrypted,
   });
+  const targetTelegramUsername = await decryptHostedWebNullableString({
+    field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD,
+    memberId: invite.group.ownerMemberId,
+    prisma,
+    value: invite.targetTelegramUsernameEncrypted,
+  });
+  const targetEmail = await decryptHostedWebNullableString({
+    field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD,
+    memberId: invite.group.ownerMemberId,
+    prisma,
+    value: invite.targetEmailEncrypted,
+  });
 
   return {
     ...invite,
+    targetEmail,
     targetPhoneHint: targetPhoneNumber ? readHostedPhoneHint(targetPhoneNumber) : null,
     targetPhoneNumber,
+    targetTelegramUsername,
   };
 }
 
@@ -1599,39 +2220,6 @@ function normalizeFamilyLabel(value: string | null | undefined): string | null {
 
   const normalized = value.trim().replace(/\s+/gu, " ");
   return normalized.length > 0 ? normalized.slice(0, 80) : null;
-}
-
-function extractFamilyInviteCommandPhoneNumber(text: string): string | null {
-  const phoneMatch = text.match(
-    /\b(?:phone(?:\s+number)?|number|whatsapp)\s*(?:is|=|:)?\s*(\+[0-9][0-9\s().-]{6,}[0-9])/iu,
-  ) ?? text.match(/\B(\+[0-9][0-9\s().-]{6,}[0-9])\b/u);
-
-  return normalizePhoneNumber(phoneMatch?.[1] ?? null);
-}
-
-function extractFamilyInviteCommandTelegramUsername(text: string): string | null {
-  const telegramMatch = text.match(
-    /\btelegram\s*(?:is|=|:|handle is|username is)?\s*@?([A-Za-z0-9_]{5,32})\b/iu,
-  ) ?? text.match(/(^|\s)@([A-Za-z0-9_]{5,32})\b/u);
-
-  return normalizeMurphTelegramUsername(telegramMatch?.[2] ?? telegramMatch?.[1] ?? null);
-}
-
-function extractFamilyInviteCommandTargetLabel(text: string): string | null {
-  const labelMatch = text.match(
-    /\binvite\s+(?:my\s+)?([a-z][a-z\s'-]{0,40}?)(?=,|\s+(?:her|his|their|phone|number|telegram|whatsapp)\b|$)/iu,
-  );
-  const rawLabel = normalizeFamilyLabel(labelMatch?.[1] ?? null);
-  if (!rawLabel) {
-    return null;
-  }
-
-  return rawLabel
-    .replace(/\b(?:please|to|on)\b/giu, "")
-    .trim()
-    .replace(/\s+/gu, " ")
-    .slice(0, 80)
-    || null;
 }
 
 async function projectHostedAccountGroupBillingRefSnapshot(
@@ -1826,6 +2414,18 @@ function isHostedFamilyStripeSubscription(subscription: Stripe.Subscription): bo
     readHostedFamilyStripeSubscriptionPriceIds(subscription).includes(
       requireHostedFamilyStripePriceId(),
     );
+}
+
+function isHostedFamilyCheckoutSessionId(value: string): boolean {
+  return HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN.test(value);
+}
+
+function isHostedFamilyCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  return session.mode === "subscription" &&
+    session.metadata?.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND &&
+    session.metadata.billingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
+    normalizeNullableString(session.metadata.accountGroupId) !== null &&
+    normalizeNullableString(session.metadata.ownerMemberId) !== null;
 }
 
 function readHostedFamilyStripeSubscriptionPriceIds(subscription: Stripe.Subscription): string[] {

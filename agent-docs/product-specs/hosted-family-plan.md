@@ -113,12 +113,16 @@ respecting the four-person seat cap.
 Accepted invite targets:
 
 - phone number for WhatsApp or phone-bound flows
-- Telegram username as a human hint only
+- Telegram username for a convenience fallback when Telegram strips the deep
+  link start payload
 - optional display label such as "Mom" for owner-facing seat status
 
-Do not treat a Telegram username as identity proof. Usernames can change and a
-bot generally cannot initiate a private chat with an arbitrary username unless
-that Telegram account has already started the bot or is otherwise known.
+Do not treat a Telegram username as durable identity proof. Usernames can
+change and a bot generally cannot initiate a private chat with an arbitrary
+username unless that Telegram account has already started the bot or is
+otherwise known. When the owner pre-binds an invite to a Telegram username,
+store only the encrypted username plus blind index needed to match the inbound
+Telegram `from.username`.
 
 ## Invite Acceptance
 
@@ -134,7 +138,11 @@ https://t.me/<bot>?start=<family-invite-token>
 
 The hard binding is the Telegram user/chat identity observed when the invitee
 clicks the deep link and starts the bot, or an already-known Telegram route.
-The Telegram username supplied by the owner remains a display/hint field only.
+Some Telegram clients open the bot with a plain `/start` instead of preserving
+the deep-link payload. In that case, if the inbound `from.username` matches
+exactly one non-expired pending invite that was pre-bound to that username,
+accept that invite without requiring the user to paste a token. If the match is
+missing or ambiguous, fail closed rather than guessing.
 
 ### WhatsApp / Phone
 

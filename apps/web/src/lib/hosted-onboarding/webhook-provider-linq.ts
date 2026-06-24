@@ -11,7 +11,6 @@ import {
 } from "./entitlement";
 import {
   hasHostedMemberEffectiveActiveAccessForMember,
-  issueHostedFamilyInviteFromOwnerChatTx,
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
@@ -59,7 +58,6 @@ import {
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
-  buildFamilyInviteReplyResponse,
   buildConversationHomeRedirectResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
@@ -297,33 +295,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
           reason: "unknown-home-line",
           routeDecision: routeDecision.kind,
           routeStage: "active-member-ignored-home-line",
-        }),
-      );
-    }
-
-    const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
-      now: new Date(occurredAt),
-      ownerMemberId: existingMember.id,
-      text: readHostedLinqTextCommand(messageEvent.data.message.parts),
-      tx: input.prisma,
-    });
-    if (familyInvite) {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildFamilyInviteReplyResponse({
-          chatId: summary.chatId,
-          memberId: existingMember.id,
-          message: familyInvite.replyText,
-          messageId: summary.messageId,
-          occurredAt,
-          sourceEventId: input.event.event_id,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          homeRoutePresent: Boolean(homeRoute?.linqChatId),
-          reason: "family-invite-created",
-          routeDecision: routeDecision.kind,
-          routeStage: "active-member-family-invite",
         }),
       );
     }
@@ -783,18 +754,6 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       : {}),
     userId: input.userId,
   });
-}
-
-function readHostedLinqTextCommand(
-  parts: readonly HostedExecutionLinqConversationMessagePart[],
-): string | null {
-  const text = parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.value.trim())
-    .filter((value) => value.length > 0)
-    .join("\n");
-
-  return text.length > 0 ? text : null;
 }
 
 type HostedLinqMailboxPartCompactionMode = "normal" | "compact";

@@ -8,6 +8,8 @@ import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-u
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
+  HostedRuntimeFamilyPlanToolRequest,
+  HostedRuntimeFamilyPlanToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
@@ -51,6 +53,12 @@ export interface AssistantHostedProductFeedbackRecorder {
   ): Promise<HostedRuntimeProductFeedbackRecordResponse>
 }
 
+export interface AssistantHostedFamilyPlanTool {
+  request(
+    request: HostedRuntimeFamilyPlanToolRequest,
+  ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
 export type AssistantGeneratedImageContentType =
   | 'image/jpeg'
   | 'image/png'
@@ -85,6 +93,7 @@ export interface AssistantHostedExecutionContext {
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
+  familyPlanTool?: AssistantHostedFamilyPlanTool | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
@@ -123,6 +132,7 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
   )
@@ -142,6 +152,7 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
         ? { generatedImageUploaderRequired: true }
         : {}),
@@ -208,6 +219,18 @@ function normalizeAssistantProductFeedbackRecorder(
 
   return {
     recordProductFeedback: input.recordProductFeedback,
+  }
+}
+
+function normalizeAssistantFamilyPlanTool(
+  input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
+): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 

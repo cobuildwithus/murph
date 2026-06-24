@@ -178,7 +178,7 @@ function isLoopbackHost(hostname: string): boolean {
     && ipv4Parts.every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
-function readHostedContactPrivacyKeyring(
+export function readHostedContactPrivacyKeyring(
   source: HostedOnboardingEnvSource,
 ): HostedContactPrivacyKeyring {
   const keyringValue = readEnv(source, "HOSTED_CONTACT_PRIVACY_KEYS");

@@ -55,7 +55,6 @@ const mocks = vi.hoisted(() => ({
       usageGateDenied: false,
     };
   }),
-  issueHostedFamilyInviteFromOwnerChatTx: vi.fn(async () => null),
   signalHostedMailboxAppendRuntime: vi.fn(async () => ({
     signalAccepted: true,
     workflowId: "hosted-user-runtime:member_whatsapp_123",
@@ -94,7 +93,6 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   return {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
-    issueHostedFamilyInviteFromOwnerChatTx: mocks.issueHostedFamilyInviteFromOwnerChatTx,
   };
 });
 
@@ -114,7 +112,6 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     vi.clearAllMocks();
     vi.stubEnv("WHATSAPP_APP_SECRET", "whatsapp-app-secret");
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
-    mocks.issueHostedFamilyInviteFromOwnerChatTx.mockResolvedValue(null);
     mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
       mailboxItemId: string;
     }) => ({
@@ -586,9 +583,9 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
   });
 
-  it("answers Murph Family questions before handing WhatsApp text to the health assistant", async () => {
+  it("routes Murph Family questions to the assistant", async () => {
     const prisma = createWhatsAppPrismaHarness({
-      consentGranted: false,
+      consentGranted: true,
       memberId: "member_whatsapp_123",
     });
     const rawBody = buildWhatsAppInboundTextBody("wiesz cos o family planie?");
@@ -598,7 +595,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       rawBody,
       signature: signWhatsAppBody(rawBody),
     })).resolves.toEqual({
-      commandHandledCount: 1,
+      commandHandledCount: 0,
       ignored: false,
       inboundTextCount: 1,
       ok: true,
@@ -608,20 +605,13 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
-        eventId: "assistant.notification.requested:family-chat:member_whatsapp_123:whatsapp:message:wamid.test-message-1:family-info-replied",
-        kind: "assistant.notification.requested",
-        notification: expect.objectContaining({
-          responsePolicy: {
-            kind: "require_send_exact_text",
-            text: expect.stringContaining("up to 4 people total"),
-          },
-        }),
-      }),
-      tx: prisma,
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
+        eventId: "whatsapp:message:wamid.test-message-1",
         kind: "conversation.message",
+        message: expect.objectContaining({
+          whatsappMessage: expect.objectContaining({
+            text: "wiesz cos o family planie?",
+          }),
+        }),
       }),
       tx: prisma,
     });

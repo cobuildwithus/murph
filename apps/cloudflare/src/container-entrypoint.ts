@@ -2746,6 +2746,13 @@ function buildHostedContainerRunnerJobErrorMetadata(
   if (safeErrorName) {
     details.errorName = safeErrorName;
   }
+  const safeErrorDetails = buildHostedExecutionSafeErrorDetails(error);
+  if (
+    typeof safeErrorDetails?.errorDetail === "string" &&
+    safeErrorDetails.errorDetail.trim().length > 0
+  ) {
+    details.errorDetail = safeErrorDetails.errorDetail;
+  }
 
   const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
     ?? readHostedContainerSafeCodeProperty(error, "errorCode");

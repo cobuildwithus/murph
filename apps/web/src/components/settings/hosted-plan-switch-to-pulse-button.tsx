@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
@@ -29,6 +30,7 @@ const pulsePriceLabel = formatHostedBillingPlanMonthlyPrice(pulsePlan.recurringA
 const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
 
 export function SwitchToPulseButton(props: {
+  block?: boolean;
   children?: ReactNode;
   currentPeriodEnd?: string | null;
   disabled?: boolean;
@@ -63,12 +65,13 @@ export function SwitchToPulseButton(props: {
   }
 
   return (
-    <div className="flex flex-col items-start gap-2 sm:items-end">
+    <div className={cn("flex flex-col gap-2", props.block ? "items-stretch" : "items-start sm:items-end")}>
       <Button
         type="button"
-        variant="ghost"
+        variant={props.block ? "secondary" : "ghost"}
         onClick={() => setConfirmationOpen(true)}
         disabled={disabled}
+        className={props.block ? "w-full" : undefined}
       >
         {label}
       </Button>

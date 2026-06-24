@@ -46,6 +46,9 @@ const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/local-";
 const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION = "v1";
+const HOSTED_LOCAL_CONTACT_PRIVACY_KEYS =
+  `${HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION}:${HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY}`;
 const HOSTED_LOCAL_WORKER_NAME = "murph-hosted";
 const HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX = "murph-hosted-e2e";
 const HOSTED_LOCAL_WORKTREE_WORKER_NAME_PREFIX = "murph-worktree";
@@ -724,6 +727,7 @@ export function buildHostedLocalDevOverrides(
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_DEVICE_ROUTING_INDEX_KEY"),
+    ...resolveHostedLocalContactPrivacyEnv(cloudflareDevVars),
     HOSTED_MAILBOX_FINGERPRINT_KEY:
       cloudflareDevVars.HOSTED_MAILBOX_FINGERPRINT_KEY?.trim()
       || HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY,
@@ -755,6 +759,79 @@ export function buildHostedLocalDevOverrides(
 function copyNonEmptyEnv(source: Record<string, string>, key: string): NodeJS.ProcessEnv {
   const value = source[key]?.trim();
   return value ? { [key]: value } : {};
+}
+
+function resolveHostedLocalContactPrivacyEnv(source: Record<string, string>): NodeJS.ProcessEnv {
+  const keys = source.HOSTED_CONTACT_PRIVACY_KEYS?.trim();
+  const currentVersion = source.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION?.trim();
+
+  if (keys && currentVersion && isValidHostedLocalContactPrivacyKeyring(keys, currentVersion)) {
+    return {
+      HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: currentVersion,
+      HOSTED_CONTACT_PRIVACY_KEYS: keys,
+    };
+  }
+
+  return {
+    HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION,
+    HOSTED_CONTACT_PRIVACY_KEYS: HOSTED_LOCAL_CONTACT_PRIVACY_KEYS,
+  };
+}
+
+function isValidHostedLocalContactPrivacyKeyring(
+  keys: string,
+  currentVersion: string,
+): boolean {
+  const entries = keys
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (entries.length === 0) {
+    return false;
+  }
+
+  let hasCurrentVersion = false;
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf(":");
+    if (separatorIndex < 1 || separatorIndex === entry.length - 1) {
+      return false;
+    }
+
+    const version = entry.slice(0, separatorIndex).trim();
+    const value = entry.slice(separatorIndex + 1).trim();
+    hasCurrentVersion ||= version === currentVersion;
+
+    if (!/^v[0-9]+$/u.test(version) || !hostedLocalContactPrivacyKeyDecodesTo32Bytes(value)) {
+      return false;
+    }
+  }
+
+  return hasCurrentVersion;
+}
+
+function hostedLocalContactPrivacyKeyDecodesTo32Bytes(value: string): boolean {
+  const normalized = value.trim();
+
+  if (/^[0-9a-f]{64}$/iu.test(normalized)) {
+    return true;
+  }
+
+  const base64 = normalized.replace(/-/gu, "+").replace(/_/gu, "/");
+  const remainder = base64.length % 4;
+  const padded = remainder === 0 ? base64 : base64.padEnd(base64.length + (4 - remainder), "=");
+
+  if (
+    padded.length === 0
+    || padded.length % 4 !== 0
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(padded)
+  ) {
+    return false;
+  }
+
+  const decoded = Buffer.from(padded, "base64");
+
+  return decoded.length === 32 && decoded.toString("base64") === padded;
 }
 
 export function resolveHostedLocalClientWorkerHost(workerHost: string): string {

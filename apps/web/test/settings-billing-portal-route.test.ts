@@ -3,6 +3,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedAccountGroupStripeBillingRef: vi.fn(),
+  readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
@@ -18,6 +20,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  readHostedAccountGroupStripeBillingRef: mocks.readHostedAccountGroupStripeBillingRef,
+  readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -46,6 +53,14 @@ beforeEach(async () => {
     memberId: "member_123",
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    groupId: "hbag_123",
+  });
+  mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
+    groupId: "hbag_123",
+    stripeCustomerId: "cus_family_123",
+    stripeSubscriptionId: "sub_family_123",
   });
   mocks.requireHostedStripeApi.mockReturnValue({
     billingPortal: {
@@ -80,6 +95,39 @@ test("creates a Stripe billing portal session for an authenticated hosted member
   expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
     prisma: expect.any(Object),
+  });
+});
+
+test("creates a Stripe billing portal session for a Family owner group", async () => {
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      body: JSON.stringify({
+        billingScope: "family",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    url: "https://stripe.example.test/portal/session_123",
+  });
+  expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: expect.any(Object),
+  });
+  expect(mocks.readHostedAccountGroupStripeBillingRef).toHaveBeenCalledWith({
+    groupId: "hbag_123",
+    prisma: expect.any(Object),
+  });
+  expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
+    customer: "cus_family_123",
+    return_url: "https://join.example.test/settings",
   });
 });
 
