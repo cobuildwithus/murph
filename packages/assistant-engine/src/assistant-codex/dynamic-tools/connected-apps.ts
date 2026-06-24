@@ -255,18 +255,31 @@ function stripHtmlForConnectedAppsResult(value: string): string {
     .replace(/<head\b[^>]*>[\s\S]*?<\/head>/giu, ' ')
     // Preserve the most semantically important attributes: a hyperlink's
     // href (tracking links, order URLs, calendar invites, unsubscribe) and
-    // an image's alt text. Both get folded into the surrounding text so the
-    // model sees the destination/label even though the tag is gone.
+    // an image's alt text. The opening-tag pattern uses a quote-aware
+    // tokenizer (`[^>"']` OR a complete `"..."` / `'...'` string) so that
+    // attribute values containing literal `>` (`<a title="Reply >>"...>`,
+    // common in marketing email and table-of-contents emails) do not abort
+    // the match and silently drop the href. href and alt are then extracted
+    // from the captured opening tag with a separate regex so both single-
+    // and double-quoted forms work without nested capture-group plumbing.
     .replace(
-      /<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/giu,
-      (_match, href: string, label: string) => {
-        const trimmed = label.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
-        return trimmed && trimmed !== href ? `${trimmed} (${href})` : href
+      /<a\b(?:[^>"']|"[^"]*"|'[^']*')*?>([\s\S]*?)<\/a>/giu,
+      (match, inner: string) => {
+        const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const href = hrefMatch ? (hrefMatch[1] ?? hrefMatch[2] ?? null) : null
+        const label = inner.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
+        if (!href) return label
+        if (!label) return href
+        return label === href ? href : `${label} (${href})`
       },
     )
     .replace(
-      /<img\b[^>]*\balt\s*=\s*['"]([^'"]+)['"][^>]*>/giu,
-      (_match, alt: string) => `[image: ${alt}]`,
+      /<img\b(?:[^>"']|"[^"]*"|'[^']*')*?>/giu,
+      (match) => {
+        const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const alt = altMatch ? (altMatch[1] ?? altMatch[2] ?? null) : null
+        return alt ? `[image: ${alt}]` : ' '
+      },
     )
     // Block-level breaks become real newlines so flowing prose survives.
     .replace(/<br\s*\/?>/giu, '\n')

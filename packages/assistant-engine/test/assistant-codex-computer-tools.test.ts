@@ -82,6 +82,44 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
+  it("instructs the model toward macro-step computer_act calls and gated computer_observe", () => {
+    // The 2026-06-24 rollout analysis showed the assistant burning ~$1+ per
+    // turn by running 20-30 single-action computer_act calls plus an observe
+    // before/after each one. The tool descriptions are the only surface that
+    // teaches Codex how to batch those into coherent macro-steps. If this
+    // copy drifts back toward "one click per call" wording the fingerprint
+    // gate alone won't save us — pin the macro-step + gated-observe wording
+    // here and force the team to think about it on any future rewrite.
+    const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
+    const observeTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_observe");
+    const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
+    const actDescription = actTool?.description ?? "";
+    const observeDescription = observeTool?.description ?? "";
+    const osControlDescription = osControlTool?.description ?? "";
+
+    // computer_act must teach the macro-step contract.
+    expect(actDescription).toMatch(/macro-step/iu);
+    expect(actDescription).toMatch(/combine.*verification/iu);
+    expect(actDescription).toMatch(/locator\.waitFor|waitForURL|waitForLoadState/u);
+    expect(actDescription).toMatch(/return\s+compact/iu);
+    // The pre-2026-06-24 wording is now an anti-pattern — it taught the model
+    // to call computer_observe before AND after every computer_act, which is
+    // how we got to 20+ round-trips per turn.
+    expect(actDescription).not.toMatch(/computer_observe.*before.*after/iu);
+
+    // computer_observe must teach the gated-use contract — only at run
+    // start/resume, after an unknown-outcome failure, or when an act
+    // couldn't return enough state.
+    expect(observeDescription).toMatch(/starting or resuming/iu);
+    expect(observeDescription).toMatch(/(unknown.outcome|could not return)/iu);
+    expect(observeDescription).toMatch(/do not routinely observe/iu);
+
+    // computer_os_control must reflect the new gating too: only observe
+    // AFTER an OS-level action with an unknown outcome, not routinely.
+    expect(osControlDescription).toMatch(/unknown outcome/iu);
+    expect(osControlDescription).not.toMatch(/computer_observe.*before.*after/iu);
+  });
+
   it("advertises computer tools only when execution transport is available", () => {
     const toolNames = resolveMurphDynamicTools({}).map((tool) => tool.name);
 

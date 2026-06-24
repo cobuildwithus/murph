@@ -162,6 +162,36 @@ describe("murph connected-app dynamic tools", () => {
     );
   });
 
+  it("preserves anchor hrefs whose opening tag has a literal `>` inside an attribute value", async () => {
+    // Real Gmail/marketing HTML regularly emits anchors like
+    // `<a title="Reply >>" href="...">` where the attribute value contains
+    // a literal `>`. A naive `[^>]*` attribute-skip pattern aborts at the
+    // first `>` and the generic tag stripper then erases the opening tag,
+    // silently losing the href — which is exactly the data this compactor
+    // is meant to preserve. The quote-aware tokenizer in the stripper must
+    // handle this without dropping the URL or eating the surrounding prose.
+    const htmlBody = `<!doctype html><html><body>`
+      + `<p>Hi! See more:</p>`
+      + `<p><a title="Reply >>" href="https://example.com/track?id=abc&n=1">View update</a> for details.</p>`
+      + `<p>Or <a href='https://example.com/inline-quote/"q"'>this one</a>.</p>`
+      + `<p><img src="https://cdn.example.com/x.png" alt="Status: green > yellow"></p>`
+      + `</body></html>`;
+    const result = compactConnectedAppsResult({
+      data: { messageText: htmlBody },
+    }) as { data: { messageText: string } };
+    const compactedBody = result.data.messageText;
+    // The link's label, the href, AND the surrounding prose all survive.
+    expect(compactedBody).toContain("View update (https://example.com/track?id=abc&n=1)");
+    expect(compactedBody).toContain("Hi! See more:");
+    expect(compactedBody).toContain("for details.");
+    // The single-quoted anchor with a quote-bearing href still works.
+    expect(compactedBody).toContain('this one (https://example.com/inline-quote/"q")');
+    // Image alt with `>` inside survives.
+    expect(compactedBody).toContain("[image: Status: green > yellow]");
+    // None of the opening-tag attribute text leaked through as bare text.
+    expect(compactedBody).not.toMatch(/title=|src=/u);
+  });
+
   it("fails closed instead of truncating an oversized provider result", async () => {
     const connectedApps: AssistantConnectedAppsPort = {
       request: vi.fn(async () => ({ result: { body: "x".repeat(130_000) } })),
