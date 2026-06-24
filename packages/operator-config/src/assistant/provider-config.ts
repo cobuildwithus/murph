@@ -50,7 +50,7 @@ export interface AssistantProviderDefaultsConfig {
   sandbox: AssistantSandbox | null
 }
 
-export const DEFAULT_MURPH_CODEX_REASONING_EFFORT = 'medium'
+export const DEFAULT_MURPH_CODEX_REASONING_EFFORT = 'low'
 
 export type AssistantProviderConfigInput = {
   approvalPolicy?: AssistantApprovalPolicy | null

@@ -520,7 +520,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
     profile: 'team',
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     oss: false,

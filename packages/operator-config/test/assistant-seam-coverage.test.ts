@@ -80,7 +80,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     modelProvider: null,
     oss: false,
     profile: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: 'danger-full-access',
   })
 
@@ -114,7 +114,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: null,
   })
   assert.deepEqual(sanitizeAssistantModelTargetForPersistence(codexTarget), codexTarget)
@@ -128,7 +128,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     oss: false,
     profile: null,
     provider: 'codex-cli',
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: null,
   })
   assert.equal(
@@ -177,7 +177,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
   assert.deepEqual(mergedCodex, {
     policy: {
       approvalPolicy: null,
-      reasoningEffort: 'medium',
+      reasoningEffort: 'low',
       sandbox: null,
     },
     target: {
@@ -215,7 +215,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     oss: false,
     profile: null,
     provider: 'codex-cli',
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     resumeKind: 'codex-thread',
     sandbox: null,
   })
@@ -227,7 +227,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: null,
   })
   assert.equal(
