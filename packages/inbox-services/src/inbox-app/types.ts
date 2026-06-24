@@ -235,6 +235,7 @@ export interface InboxRuntimeModule {
     baseUrl?: string
   }): EmailDriver
   rebuildRuntimeFromVault(input: {
+    enqueueParserJobs: boolean
     vaultRoot: string
     runtime: RuntimeStore
   }): Promise<void>
@@ -570,6 +571,7 @@ export type DoctorTargetResolution =
 
 export interface InitInput extends CommandContext {
   rebuild?: boolean
+  rebuildParserJobs?: boolean
 }
 
 export interface SetupInput extends CommandContext {

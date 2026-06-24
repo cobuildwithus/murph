@@ -158,6 +158,9 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion:
             checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
+          inboxMediaRetentionWakeAt: Object.hasOwn(checkpointInput, "inboxMediaRetentionWakeAt")
+            ? checkpointInput.inboxMediaRetentionWakeAt ?? null
+            : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: input.request.leaseGeneration,
           nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
             ? checkpointInput.nextWakeAt ?? null
@@ -334,6 +337,7 @@ async function createHostedWorkspaceV2Snapshot(
     const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(input.vaultRoot);
     snapshotSession = await workspaceSnapshotPort.startSnapshotSession({
       expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+      inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
       nextWakeAt: input.request.nextWakeAt,
       nextWakeReason: input.request.nextWakeReason,
       reason: "idle_shutdown",

@@ -70,19 +70,21 @@ describe("RunnerStateStore execution lease authority", () => {
     });
   });
 
-  it("keeps the persisted active reason null while the write fence is live and after clear", async () => {
+  it("keeps the persisted processing mode while the write fence is live and clears it after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { db, store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
+      processingMode: "inbox_media_retention",
       runnerContainerName: "member_123",
       userId: "member_123",
     });
-    expect(readActiveReason(db)).toBeNull();
+    expect(readActiveReason(db)).toBe("inbox_media_retention");
     const restartedStore = new RunnerStateStore(createDurableObjectState(db));
     await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
       attemptId: token.attemptId,
+      processingMode: "inbox_media_retention",
       userId: "member_123",
     } satisfies Partial<RunnerWriteFenceToken>);
 

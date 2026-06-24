@@ -108,6 +108,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   currentHistoryLength(): number;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
+    processingMode?: "default" | "inbox_media_retention" | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -190,6 +191,7 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const executeRuntimeProcessing = async (processingInput: {
     clearMailboxPointerOnAccepted: boolean;
+    processingMode?: "default" | "inbox_media_retention" | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -199,6 +201,9 @@ export function createHostedUserRuntimeWorkflowMachine(
     try {
       execution = await runtime.ensureRuntimeProcessing({
         orchestrationAttemptId,
+        ...(processingInput.processingMode
+          ? { processingMode: processingInput.processingMode }
+          : {}),
         userId: input.userId,
       });
     } catch (error) {
@@ -336,7 +341,15 @@ export function createHostedUserRuntimeWorkflowMachine(
       lastMailboxSignalVersionRead = mailboxSignalVersion;
       recordReconciliationFactsSummary(state, facts);
 
+      const inboxMediaRetentionWakeAt = facts.workspace?.inboxMediaRetentionWakeAt ?? null;
       if (facts.blocked !== null) {
+        if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
+          await executeRuntimeProcessing({
+            clearMailboxPointerOnAccepted: false,
+            processingMode: "inbox_media_retention",
+          });
+          continue;
+        }
         if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
           await continueAsNewWithCurrentState();
         }
@@ -350,6 +363,14 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
+      // Priority on the unblocked branch: user-visible work (mailbox lag or
+      // a due default wake) always wins over retention. Retention runs in
+      // bounded per-pass batches and re-arms inboxMediaRetentionWakeAt while
+      // hasMoreEligibleAttachments is true, so dispatching it ahead of live
+      // work would starve mailbox/assistant turns for minutes per batch
+      // immediately after the migration backfills CURRENT_TIMESTAMP.
+      // Inactive/AI-denied users still purge media via the blocked branch
+      // above where retention is the only admissible mode.
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
@@ -359,13 +380,26 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       clearMailboxPointer(state);
 
-      const nextWakeAt = facts.workspace?.nextWakeAt ?? null;
-      if (isDueTimestamp(nextWakeAt, runtime.nowMs())) {
+      const defaultNextWakeAt = facts.workspace?.nextWakeAt ?? null;
+      if (isDueTimestamp(defaultNextWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
         });
         continue;
       }
+
+      if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: false,
+          processingMode: "inbox_media_retention",
+        });
+        continue;
+      }
+
+      const nextWakeAt = selectEarliestHostedRuntimeWorkflowWakeAt([
+        defaultNextWakeAt,
+        inboxMediaRetentionWakeAt,
+      ]);
 
       if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
         await continueAsNewWithCurrentState();
@@ -656,7 +690,12 @@ function recordReconciliationFactsSummary(
   }
 
   state.lastReconciliationStatus = "idle";
-  state.lastReconciliationNextWakeAt = facts.workspace?.nextWakeAt ?? null;
+  state.lastReconciliationNextWakeAt = facts.workspace
+    ? selectEarliestHostedRuntimeWorkflowWakeAt([
+      facts.workspace.nextWakeAt,
+      facts.workspace.inboxMediaRetentionWakeAt,
+    ])
+    : null;
 }
 
 function recordDirectMailboxProcessingSummary(
@@ -670,6 +709,26 @@ function recordDirectMailboxProcessingSummary(
 
 function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {
   return facts.mailboxLag.some((lane) => BigInt(lane.lag) > 0n);
+}
+
+function selectEarliestHostedRuntimeWorkflowWakeAt(
+  candidates: readonly (string | null)[],
+): string | null {
+  let selected: string | null = null;
+  let selectedMs = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    if (candidate === null) {
+      continue;
+    }
+    const candidateMs = Date.parse(candidate);
+    if (!Number.isFinite(candidateMs) || candidateMs >= selectedMs) {
+      continue;
+    }
+    selected = candidate;
+    selectedMs = candidateMs;
+  }
+
+  return selected;
 }
 
 function isDueTimestamp(timestamp: string | null, nowMs: number): boolean {

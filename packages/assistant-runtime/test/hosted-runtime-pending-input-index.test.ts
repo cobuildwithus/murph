@@ -4,8 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  updateAssistantInputAttachmentEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
@@ -15,6 +19,7 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
+  collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
@@ -65,6 +70,199 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("collects raw inbox media protections from active pending inputs", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_pending_media",
+        eventId: "evt_pending_media",
+        itemId: "item_pending_media",
+        laneSeq: "10",
+        messageId: "msg_pending_media",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "pending media input",
+      }),
+    });
+    const rawPath = "raw/inbox/linq/self/2026/06/cap_pending_media/attachments/01__photo.webp";
+
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [{
+          byteSize: 123,
+          derived: null,
+          descriptorAttachmentId: "descriptor_image_1",
+          fileName: "photo.webp",
+          inlineFragments: [],
+          kind: "image",
+          mime: "image/webp",
+          ordinal: 1,
+          parseState: null,
+          raw: {
+            byteSize: 123,
+            kind: "vault-relative-file",
+            mediaType: "image/webp",
+            path: rawPath,
+            sha256: "a".repeat(64),
+          },
+          sourceAttachmentId: "att_cap_pending_media_01",
+        }],
+        optionalInboxCaptureId: "cap_pending_media",
+        reasonCode: null,
+        source: "hosted-inbox-projection",
+        status: "available",
+        updatedAt: "2026-04-23T00:00:03.000Z",
+      },
+      inputId: event.inputId,
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
+      now: "2026-04-25T00:00:00.000Z",
+      vaultRoot,
+    })).resolves.toEqual({
+      protectedAttachmentIds: ["att_cap_pending_media_01", "descriptor_image_1"],
+      protectedCaptureIds: ["cap_pending_media"],
+      protectedStoredPaths: [rawPath],
+    });
+  });
+
+  it("protects a pending capture when attachment evidence failed without attachment rows", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const captureId = "cap_pending_failed_evidence";
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_pending_failed_evidence",
+        eventId: "evt_pending_failed_evidence",
+        itemId: "item_pending_failed_evidence",
+        laneSeq: "10",
+        messageId: "msg_pending_failed_evidence",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "pending media input with failed evidence",
+      }),
+    });
+
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      projection: {
+        captureId,
+        status: "succeeded",
+      },
+      vault: vaultRoot,
+    });
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: captureId,
+        reasonCode: "inbox_projection_unavailable",
+        source: "hosted-inbox-projection",
+        status: "failed",
+        updatedAt: "2026-04-23T00:00:03.000Z",
+      },
+      inputId: event.inputId,
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
+      now: "2026-04-25T00:00:00.000Z",
+      vaultRoot,
+    })).resolves.toEqual({
+      protectedAttachmentIds: [],
+      protectedCaptureIds: [captureId],
+      protectedStoredPaths: [],
+    });
+  });
+
+  it("drops protection for a pending input older than the inbox media retention window so a stuck or churned-user input cannot pin media past the 14-day privacy guarantee", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-01T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      version: 1,
+    });
+    const captureId = "cap_stuck_pending_media";
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_stuck_pending_media",
+        eventId: "evt_stuck_pending_media",
+        itemId: "item_stuck_pending_media",
+        laneSeq: "10",
+        messageId: "msg_stuck_pending_media",
+        occurredAt: "2026-04-01T00:00:01.000Z",
+        receivedAt: "2026-04-01T00:00:02.000Z",
+        text: "stuck pending input that never resolves",
+      }),
+    });
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      projection: {
+        captureId,
+        status: "succeeded",
+      },
+      vault: vaultRoot,
+    });
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: captureId,
+        reasonCode: "inbox_projection_unavailable",
+        source: "hosted-inbox-projection",
+        status: "failed",
+        updatedAt: "2026-04-01T00:00:03.000Z",
+      },
+      inputId: event.inputId,
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    // now is 35 days after receivedAt — well past the 14-day window.
+    await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
+      now: "2026-05-06T00:00:00.000Z",
+      vaultRoot,
+    })).resolves.toEqual({
+      protectedAttachmentIds: [],
+      protectedCaptureIds: [],
+      protectedStoredPaths: [],
+    });
   });
 
   it("enqueues a fresh input without backfilling a missing rollout index", async () => {

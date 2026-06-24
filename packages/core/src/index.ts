@@ -29,6 +29,12 @@ export {
 } from "./path-safety.ts";
 export { walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
 export {
+  safeStatAndHashVaultFile,
+  statAndHashVaultFile,
+  statAndHashVaultFileInterruptible,
+} from "./raw-artifact-integrity.ts";
+export type { RawArtifactIntegrity } from "./raw-artifact-integrity.ts";
+export {
   hashWearableRawPayload,
   stableStringifyWearableRawPayload,
 } from "./wearable-raw-payload-hash.ts";

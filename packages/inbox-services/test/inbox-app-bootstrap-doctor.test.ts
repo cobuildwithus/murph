@@ -471,6 +471,20 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
     '.runtime/projections/inboxd.sqlite',
   ])
   assert.equal(nonStrict.init.rebuiltCaptures, 4)
+  assert.deepEqual(rebuildRuntimeMock.mock.calls[0]?.[2], {
+    enqueueParserJobs: true,
+  })
+  await ops.init({
+    rebuild: true,
+    rebuildParserJobs: false,
+    requestId: null,
+    vault: '/vault',
+  })
+  const latestRebuildCall =
+    rebuildRuntimeMock.mock.calls[rebuildRuntimeMock.mock.calls.length - 1]
+  assert.deepEqual(latestRebuildCall?.[2], {
+    enqueueParserJobs: false,
+  })
   assert.equal(nonStrict.setup.updatedAt, '2026-04-08T12:00:00.000Z')
   assert.deepEqual(writeParserToolchainConfig.mock.calls[0]?.[0], {
     tools: {
@@ -693,6 +707,7 @@ test('doctor rebuilds runtime and runs the telegram strategy for a configured co
   assert.equal(result.ok, true)
   assert.equal(result.target, 'telegram:bot')
   assert.equal(rebuildRuntimeMock.mock.calls.length, 1)
+  assert.equal(rebuildRuntimeMock.mock.calls[0]?.[2], undefined)
   assert.equal(
     result.checks.some(
       (check) => check.name === 'rebuild' && check.status === 'pass',

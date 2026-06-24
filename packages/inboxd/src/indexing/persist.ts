@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import {
   assertContract,
   inboxCaptureRecordSchema,
+  type InboxAttachmentRetentionRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
 } from "@murphai/contracts";
 import {
@@ -31,7 +32,12 @@ import {
   resolveVaultPath,
   sanitizeFileName,
 } from "../shared.ts";
-import { replaceInboxCaptureProjection, type InboxRuntimeStore } from "../kernel/sqlite.ts";
+import {
+  replaceInboxCaptureProjection,
+  type InboxCaptureProjectionAttachment,
+  type InboxCaptureProjectionStoredCapture,
+  type InboxRuntimeStore,
+} from "../kernel/sqlite.ts";
 import {
   buildInboxCaptureDirectory,
   buildInboxEnvelopePath,
@@ -46,6 +52,8 @@ import {
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
+import { listInboxParserManifestPathsNewestFirst } from "./parser-derivatives.js";
+import { listInboxAttachmentRetentionRecords } from "./retention.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -81,6 +89,15 @@ interface RecoverableInboxCaptureOperation {
 }
 
 type StoredWriteOperation = Awaited<ReturnType<typeof readStoredWriteOperation>>;
+
+interface ParserProjection {
+  derivedPath: string;
+  extractedText: string | null;
+  parseState: "succeeded";
+  parseUpdatedAt: string | null;
+  parserProviderId: string | null;
+  transcriptText: string | null;
+}
 
 const MAX_INBOX_CAPTURE_ATTACHMENT_COUNT = 64;
 const MAX_INBOX_CAPTURE_ATTACHMENT_BYTES = 128 * 1024 * 1024;
@@ -526,7 +543,16 @@ export async function findStoredCaptureEnvelope(input: {
   });
 
   if (storedRecord) {
-    return inboxCaptureRecordToStoredCaptureEnvelope(storedRecord);
+    const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
+    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(storedRecord, retainedAttachments);
+    return {
+      ...envelope,
+      stored: await hydrateAttachmentParserProjections({
+        retainedAttachments,
+        stored: envelope.stored,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
   }
 
   const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
@@ -587,25 +613,31 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
 }
 
 export async function rebuildRuntimeFromVault(input: {
+  enqueueParserJobs: boolean;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
 }): Promise<void> {
   const canonicalRecords = await listCanonicalInboxCaptureRecords(input.vaultRoot);
+  const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
   const restoredIdentityKeys = new Set<string>();
   const projectionEntries: Array<{
     captureId: string;
     eventId: string;
     input: InboundCapture;
-    stored: StoredCapture;
+    stored: InboxCaptureProjectionStoredCapture;
   }> = [];
 
   for (const record of canonicalRecords) {
-    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(record);
+    const envelope = inboxCaptureRecordToStoredCaptureEnvelope(record, retainedAttachments);
     projectionEntries.push({
       captureId: envelope.captureId,
       eventId: envelope.eventId,
       input: envelope.input,
-      stored: envelope.stored,
+      stored: await hydrateAttachmentParserProjections({
+        retainedAttachments,
+        stored: envelope.stored,
+        vaultRoot: input.vaultRoot,
+      }),
     });
     restoredIdentityKeys.add(record.identityKey);
   }
@@ -633,8 +665,157 @@ export async function rebuildRuntimeFromVault(input: {
 
   replaceInboxCaptureProjection({
     databasePath: input.runtime.databasePath,
+    enqueueParserJobs: input.enqueueParserJobs,
     entries: projectionEntries,
   });
+}
+
+async function readRetainedAttachmentMap(
+  vaultRoot: string,
+): Promise<Map<string, InboxAttachmentRetentionRecord>> {
+  return new Map(
+    (await listInboxAttachmentRetentionRecords(vaultRoot))
+      .map((record) => [record.attachmentId, record]),
+  );
+}
+
+async function hydrateAttachmentParserProjections(input: {
+  retainedAttachments: ReadonlyMap<string, InboxAttachmentRetentionRecord>;
+  stored: StoredCapture;
+  vaultRoot: string;
+}): Promise<InboxCaptureProjectionStoredCapture> {
+  const attachments: InboxCaptureProjectionAttachment[] = [];
+
+  for (const attachment of input.stored.attachments) {
+    const retained = input.retainedAttachments.get(attachment.attachmentId);
+    const parserProjection = await readAttachmentParserProjection({
+      attachment,
+      captureId: input.stored.captureId,
+      fallbackUpdatedAt: retained?.purgedAt ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+    attachments.push({
+      ...attachment,
+      ...(parserProjection ?? {}),
+    });
+  }
+
+  return {
+    ...input.stored,
+    attachments,
+  };
+}
+
+async function readAttachmentParserProjection(input: {
+  attachment: Pick<StoredAttachment, "attachmentId" | "kind">;
+  captureId: string;
+  fallbackUpdatedAt: string | null;
+  vaultRoot: string;
+}): Promise<ParserProjection | null> {
+  const manifestPaths = await listInboxParserManifestPathsNewestFirst({
+    attachmentId: input.attachment.attachmentId,
+    captureId: input.captureId,
+    vaultRoot: input.vaultRoot,
+  });
+  for (const manifestPath of manifestPaths) {
+    const projection = await readAttachmentParserProjectionFromManifest({
+      ...input,
+      manifestPath,
+    });
+    if (projection) {
+      return projection;
+    }
+  }
+
+  return null;
+}
+
+async function readAttachmentParserProjectionFromManifest(input: {
+  attachment: Pick<StoredAttachment, "attachmentId" | "kind">;
+  captureId: string;
+  fallbackUpdatedAt: string | null;
+  manifestPath: string;
+  vaultRoot: string;
+}): Promise<ParserProjection | null> {
+  let manifest: Record<string, unknown>;
+  try {
+    const manifestAbsolutePath = await resolveVaultPath(input.vaultRoot, input.manifestPath);
+    manifest = expectRecord(
+      JSON.parse(await readFile(manifestAbsolutePath, "utf8")),
+      `retained parser manifest at ${input.manifestPath}`,
+    );
+  } catch {
+    return null;
+  }
+
+  if (manifest.schema !== "murph.parser-manifest.v1") {
+    return null;
+  }
+
+  const artifact = expectOptionalRecord(manifest.artifact);
+  if (
+    !artifact ||
+    artifact.captureId !== input.captureId ||
+    artifact.attachmentId !== input.attachment.attachmentId
+  ) {
+    return null;
+  }
+
+  const paths = expectOptionalRecord(manifest.paths);
+  const plainTextPath = normalizeParserArtifactPath({
+    attachmentId: input.attachment.attachmentId,
+    captureId: input.captureId,
+    pathValue: paths?.plainTextPath,
+  });
+  if (!plainTextPath) {
+    return null;
+  }
+
+  let plainText: string;
+  try {
+    plainText = (await readFile(await resolveVaultPath(input.vaultRoot, plainTextPath), "utf8")).trim();
+  } catch {
+    return null;
+  }
+  if (!plainText) {
+    return null;
+  }
+
+  const transcriptOnly = input.attachment.kind === "audio" || input.attachment.kind === "video";
+  return {
+    derivedPath: input.manifestPath,
+    extractedText: transcriptOnly ? null : plainText,
+    parseState: "succeeded",
+    parseUpdatedAt: typeof manifest.createdAt === "string" ? manifest.createdAt : input.fallbackUpdatedAt,
+    parserProviderId: typeof manifest.providerId === "string" ? manifest.providerId : null,
+    transcriptText: transcriptOnly ? plainText : null,
+  };
+}
+
+function normalizeParserArtifactPath(input: {
+  attachmentId: string;
+  captureId: string;
+  pathValue: unknown;
+}): string | null {
+  if (typeof input.pathValue !== "string" || !input.captureId) {
+    return null;
+  }
+
+  let normalized: string;
+  try {
+    normalized = normalizeRelativePath(input.pathValue);
+  } catch {
+    return null;
+  }
+
+  const attemptsPrefix = path.posix.join(
+    "derived/inbox",
+    input.captureId,
+    "attachments",
+    input.attachmentId,
+    "attempts",
+  );
+  return normalized.startsWith(`${attemptsPrefix}/`) ? normalized : null;
 }
 
 async function readStoredCaptureEnvelope(input: {
@@ -924,7 +1105,10 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
   return left.relativePath.localeCompare(right.relativePath);
 }
 
-function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCaptureRecord): StoredCaptureEnvelope {
+function inboxCaptureRecordToStoredCaptureEnvelope(
+  record: CanonicalInboxCaptureRecord,
+  retainedAttachments: ReadonlyMap<string, { storedPath: string }> = new Map(),
+): StoredCaptureEnvelope {
   const input: InboundCapture = {
     source: record.source,
     externalId: record.externalId,
@@ -958,18 +1142,24 @@ function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCapture
     storedAt: record.recordedAt,
     sourceDirectory: record.sourceDirectory,
     envelopePath: record.envelopePath,
-    attachments: record.attachments.map((attachment) => ({
-      attachmentId: attachment.attachmentId,
-      ordinal: attachment.ordinal,
-      externalId: attachment.externalId ?? null,
-      kind: attachment.kind,
-      mime: attachment.mime ?? null,
-      originalPath: null,
-      storedPath: attachment.storedPath ?? null,
-      fileName: attachment.fileName ?? null,
-      byteSize: attachment.byteSize ?? null,
-      sha256: attachment.sha256 ?? null,
-    })),
+    attachments: record.attachments.map((attachment) => {
+      const retained = retainedAttachments.get(attachment.attachmentId);
+      const retentionExpired = retained?.storedPath === attachment.storedPath;
+
+      return {
+        attachmentId: attachment.attachmentId,
+        ordinal: attachment.ordinal,
+        externalId: attachment.externalId ?? null,
+        kind: attachment.kind,
+        mime: attachment.mime ?? null,
+        originalPath: null,
+        storedPath: retentionExpired ? null : attachment.storedPath ?? null,
+        fileName: attachment.fileName ?? null,
+        byteSize: attachment.byteSize ?? null,
+        sha256: attachment.sha256 ?? null,
+        contentStatus: retentionExpired ? "retention_expired" : "available",
+      };
+    }),
   };
   return {
     schema: "murph.inbox-envelope.v1",
@@ -1154,6 +1344,14 @@ function normalizeStoredCaptureInboundAttachment(
 function expectRecord(value: unknown, context: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`Expected object in ${context}.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function expectOptionalRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
   }
 
   return value as Record<string, unknown>;

@@ -149,6 +149,9 @@ export async function writeConfig(
 export async function rebuildRuntime(
   paths: InboxPaths,
   inboxd: InboxRuntimeModule,
+  options: {
+    enqueueParserJobs?: boolean
+  } = {},
 ): Promise<number> {
   const runtime = await inboxd.openInboxRuntime({
     vaultRoot: paths.absoluteVaultRoot,
@@ -156,6 +159,7 @@ export async function rebuildRuntime(
 
   try {
     await inboxd.rebuildRuntimeFromVault({
+      enqueueParserJobs: options.enqueueParserJobs ?? true,
       vaultRoot: paths.absoluteVaultRoot,
       runtime,
     })

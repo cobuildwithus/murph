@@ -38,6 +38,7 @@ export function createInboxBootstrapDoctorOps(
     vault: string
     requestId: string | null
     rebuild?: boolean
+    rebuildParserJobs?: boolean
   }) => {
     const paths = resolveRuntimePaths(input.vault)
     const inboxd = await env.loadInbox()
@@ -63,7 +64,9 @@ export function createInboxBootstrapDoctorOps(
 
     let rebuiltCaptures = 0
     if (input.rebuild) {
-      rebuiltCaptures = await rebuildRuntime(paths, inboxd)
+      rebuiltCaptures = await rebuildRuntime(paths, inboxd, {
+        enqueueParserJobs: input.rebuildParserJobs ?? true,
+      })
     }
 
     return {

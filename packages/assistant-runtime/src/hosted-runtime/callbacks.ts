@@ -3,6 +3,7 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
+  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
@@ -88,7 +89,6 @@ import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
-import { compareHostedIsoTimestampsAscending } from "./timestamp-order.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds the per-collect approval reconciliation work so a backlog of

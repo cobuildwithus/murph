@@ -96,6 +96,7 @@ export interface HostedWorkspaceCheckpointMetadata {
 export interface HostedWorkspaceSnapshotCheckpointMetadata {
   attemptId: string;
   expectedWorkspaceVersion: string;
+  inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
@@ -121,6 +122,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
+    inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -249,6 +251,12 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   signal?: AbortSignal | null;
 }
 
+export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
+  foreground: boolean;
+  ordinal: number;
+  startedAtEpochMs: number;
+}
+
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
@@ -266,6 +274,7 @@ export interface HostedWorkspaceRunnerInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
@@ -357,10 +366,20 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
+  // The builder owns every field of checkpoint metadata that
+  // buildHostedWorkspaceSnapshotCheckpointRequest falls back to. Mirroring the
+  // committed workspace here after a successful checkpoint prevents a later
+  // pass that omits one of these fields (e.g. a mailbox checkpoint after an
+  // idle retention checkpoint) from resurrecting a stale process-start value.
   const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse): void => {
-    if (response.checkpointed) {
-      input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    if (!response.checkpointed) {
+      return;
     }
+    input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    input.metadata.inboxMediaRetentionWakeAt =
+      response.workspace.inboxMediaRetentionWakeAt ?? null;
+    input.metadata.nextWakeAt = response.workspace.nextWakeAt ?? null;
+    input.metadata.nextWakeReason = response.workspace.nextWakeReason ?? null;
   };
 
   return {
@@ -417,6 +436,9 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
+    inboxMediaRetentionWakeAt: Object.hasOwn(input.requestInput, "inboxMediaRetentionWakeAt")
+      ? input.requestInput.inboxMediaRetentionWakeAt ?? null
+      : input.metadata.inboxMediaRetentionWakeAt ?? null,
     leaseGeneration: input.metadata.leaseGeneration,
     nextWakeAt: Object.hasOwn(input.requestInput, "nextWakeAt")
       ? input.requestInput.nextWakeAt ?? null
@@ -719,7 +741,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
+        foregroundWakeOrdinal: wakeOrdinal,
         foregroundWaitResolvedAtEpochMs: waitResolvedAtEpochMs,
+        orchestration: notification.orchestration ?? null,
+        runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
       try {
@@ -846,16 +871,28 @@ function hostedWorkspaceRunnerWakeIsImmediate(
 }
 
 function createHostedForegroundMailboxImportLatencyMilestones(input: {
+  foregroundWakeOrdinal: number;
   foregroundWaitResolvedAtEpochMs: number;
+  orchestration?: HostedRuntimeLatencyPhaseBreakdown["orchestration"] | null;
+  runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs: number | null;
 }): HostedRuntimeLatencyTraceStagedMilestones {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
+    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     wake: {
       ...(input.runtimeWakeNotifiedAtEpochMs === null
         ? {}
         : { runtimeWakeNotifiedAtEpochMs: input.runtimeWakeNotifiedAtEpochMs }),
       foregroundWaitResolvedAtEpochMs: input.foregroundWaitResolvedAtEpochMs,
+      foregroundWakeOrdinal: input.foregroundWakeOrdinal,
+      ...(input.runtimePassDiagnostics
+        ? {
+            activeRuntimePassForeground: input.runtimePassDiagnostics.foreground,
+            activeRuntimePassOrdinal: input.runtimePassDiagnostics.ordinal,
+            activeRuntimePassStartedAtEpochMs: input.runtimePassDiagnostics.startedAtEpochMs,
+          }
+        : {}),
     },
   };
 

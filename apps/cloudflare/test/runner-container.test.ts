@@ -1,4 +1,7 @@
-import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
+  type HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -222,6 +225,10 @@ describe("RunnerContainer", () => {
         kind: "workspace-invocation",
         request: createRunnerRequest(),
       },
+      orchestration: {
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_090,
+        replacedStaleFence: true,
+      },
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -230,6 +237,10 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
+      orchestration: {
+        activeWakeStartedAtEpochMs: 1_777_000_000_100,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
+      },
       userId: "member_123",
     })).resolves.toEqual({
       action: "woken",
@@ -256,7 +267,21 @@ describe("RunnerContainer", () => {
     expect(JSON.parse(String(wakeCall?.[1]?.body))).toEqual({
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
+      orchestration: {
+        activeWakeStartedAtEpochMs: 1_777_000_000_100,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
+      },
       userId: "member_123",
+    });
+    const runnerCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    const runnerHeaders = new Headers(runnerCall?.[1]?.headers);
+    expect(JSON.parse(
+      runnerHeaders.get(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER) ?? "",
+    )).toEqual({
+      freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_090,
+      replacedStaleFence: true,
     });
   });
 
