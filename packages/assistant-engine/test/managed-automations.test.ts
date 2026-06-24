@@ -1032,6 +1032,94 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
+  it('reconciles an existing one-shot whose desired moment moved earlier within the live window', async () => {
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      // New schedule for a Pacific/Auckland vault: 09:00 NZST on 2026-04-29
+      // is 2026-04-28T21:00Z — 18h earlier than the previous 15:00 UTC fire.
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    // `now` is before BOTH the new desired fire and the old stored fire, so
+    // the new seed is not yet stale and the reconcile must update in place.
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-04-28T18:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+        status: 'active',
+      })
+  })
+
+  it('archives an existing one-shot when the new desired moment has already expired', async () => {
+    // Migration repro: a pre-PR final-results automation persisted with the
+    // old 15:00 UTC fire is still in the future, but the new desired fire
+    // (09:00 in Pacific/Auckland → 21:00 UTC the previous day) has already
+    // passed by more than the one-shot expiry window. The installer must
+    // archive the obsolete record instead of leaving the old schedule + old
+    // instructions to fire at the wrong local time.
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After the new desired fire by far more than the stale-seed window
+      // (1h), but before the obsolete stored fire at 15:00 UTC the next day.
+      now: new Date('2026-04-29T08:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+        status: 'archived',
+      })
+  })
+
   it('creates a timely one-shot seed but skips it once stale', async () => {
     const featureDropSeed: MurphManagedAutomationSeed = {
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3G0',

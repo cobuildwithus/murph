@@ -373,15 +373,18 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    if (isStaleMurphManagedOneShotSeed(seed, now)) {
-      result.skipped += 1
-      continue
-    }
-
     if (!murphManagedAutomationSeedChanged(existing, seed)) {
       result.skipped += 1
       continue
     }
+
+    // Seed has changed. Reconcile in place. If the new desired one-shot
+    // occurrence has already expired, archive the record so its old future
+    // schedule and instructions cannot still fire — a stale-seed skip here
+    // would silently keep the previous spec alive.
+    const reconciledStatus = isStaleMurphManagedOneShotSeed(seed, now)
+      ? 'archived'
+      : existing.status
 
     const summary = normalizeMurphManagedAutomationSummary(seed)
     await upsertAutomation({
@@ -396,7 +399,7 @@ export async function applyMurphManagedAutomations(
       route: existing.route,
       schedule: seed.schedule,
       slug: existing.slug,
-      status: existing.status,
+      status: reconciledStatus,
       ...(summary === null
         ? {}
         : { summary }),
