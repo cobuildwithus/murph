@@ -5,6 +5,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  readHostedSystemMailboxState,
+  removeHostedSystemMailboxPendingItemIfCurrent,
+  resolveHostedSystemMailboxNextWakeCandidate,
+  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+  updateHostedSystemMailboxPendingItem,
+  type HostedSystemMailboxPendingItem,
+  type HostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
+import {
   HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
@@ -17,6 +26,22 @@ import {
   resolveHostedMailboxImportStatePath,
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+
+const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
+
+function listDenseRawRetentionMailboxItems(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxPendingItem[] {
+  return state.pending.filter((item) =>
+    item.mailboxDedupeKey === DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY
+  );
+}
+
+async function readDenseRawRetentionMailboxItems(
+  vaultRoot: string,
+): Promise<HostedSystemMailboxPendingItem[]> {
+  return listDenseRawRetentionMailboxItems(await readHostedSystemMailboxState(vaultRoot));
+}
 
 describe("hosted runtime mailbox import state", () => {
   it("initializes empty runtime-local state at the assistant operations path", async () => {
@@ -265,5 +290,201 @@ describe("hosted runtime mailbox import state", () => {
     }
 
     expect(state.recentStatuses.map((record) => record.seq)).toEqual(["2", "3", "4"]);
+  });
+});
+
+describe("hosted runtime system mailbox state", () => {
+  it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        now: () => "2026-04-07T23:59:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+      const [dueItem] = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(dueItem).toBeDefined();
+
+      const sendingItem: HostedSystemMailboxPendingItem = {
+        ...dueItem!,
+        attemptCount: 1,
+        lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        nextAttemptAt: null,
+        status: "sending",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: sendingItem,
+        vaultRoot,
+      });
+
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        now: () => "2026-04-08T00:00:00.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+
+      let denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems).toHaveLength(2);
+      const successor = denseItems.find((item) => item.status === "pending");
+      expect(successor).toBeDefined();
+      expect(successor!.itemId).not.toBe(sendingItem.itemId);
+      expect(successor!.nextAttemptAt).toBe("2026-04-08T00:00:30.000Z");
+      expect(successor!.routeAction).toBe("run-device-sync-wake");
+      expect(successor!.wake.kind).toBe("device-sync.wake");
+      expect(successor!.wake.eventId).toBe(successor!.itemId);
+
+      const recordingItem: HostedSystemMailboxPendingItem = {
+        ...sendingItem,
+        postCheckpointRecord: {
+          connectionId: "conn_123",
+          kind: "device-sync.dirty-processed",
+          processedRevision: "rev_1",
+        },
+        status: "recording",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: recordingItem,
+        vaultRoot,
+      });
+
+      denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems.map((item) => item.itemId).sort()).toEqual(
+        [recordingItem.itemId, successor!.itemId].sort(),
+      );
+
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: recordingItem,
+        vaultRoot,
+      });
+
+      denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems).toHaveLength(1);
+      expect(denseItems[0].itemId).toBe(successor!.itemId);
+      expect(denseItems[0].nextAttemptAt).toBe("2026-04-08T00:00:30.000Z");
+
+      await expect(
+        resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => "2026-04-08T00:00:00.000Z",
+          vaultRoot,
+        }),
+      ).resolves.toEqual({
+        at: "2026-04-08T00:00:30.000Z",
+        reason: "device-sync.reconcile",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("clears only pending dense raw retention successors when retention finishes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        now: () => "2026-04-07T23:59:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+      const [dueItem] = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(dueItem).toBeDefined();
+
+      const sendingItem: HostedSystemMailboxPendingItem = {
+        ...dueItem!,
+        attemptCount: 1,
+        lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        nextAttemptAt: null,
+        status: "sending",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: sendingItem,
+        vaultRoot,
+      });
+
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: null,
+        now: () => "2026-04-08T00:00:00.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+
+      let denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems).toHaveLength(1);
+      expect(denseItems[0]).toMatchObject({
+        itemId: sendingItem.itemId,
+        status: "sending",
+      });
+
+      const recordingRetry: HostedSystemMailboxPendingItem = {
+        ...sendingItem,
+        lastErrorCode: "device_sync_ack_failed",
+        lastErrorMessage: "ack failed",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        postCheckpointRecord: {
+          connectionId: "conn_123",
+          kind: "device-sync.dirty-processed",
+          processedRevision: "rev_1",
+        },
+        status: "recording",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: recordingRetry,
+        vaultRoot,
+      });
+
+      denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems).toHaveLength(1);
+      expect(denseItems[0]).toMatchObject({
+        itemId: recordingRetry.itemId,
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "recording",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("coalesces pending dense raw retention successors without touching in-flight items", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        now: () => "2026-04-08T00:00:00.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+      const [firstSuccessor] = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(firstSuccessor).toBeDefined();
+
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: "2026-04-08T00:01:00.000Z",
+        now: () => "2026-04-08T00:00:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+
+      const denseItems = await readDenseRawRetentionMailboxItems(vaultRoot);
+      expect(denseItems).toHaveLength(1);
+      expect(denseItems[0].itemId).not.toBe(firstSuccessor!.itemId);
+      expect(denseItems[0]).toMatchObject({
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "pending",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 });

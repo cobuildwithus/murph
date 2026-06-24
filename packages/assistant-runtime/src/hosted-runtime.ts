@@ -113,6 +113,7 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
+  type HostedWorkspaceRunnerHandledDeviceSyncWake,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
@@ -150,6 +151,7 @@ import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
 import {
+  HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   selectHostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
 export {
@@ -1148,6 +1150,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
+    let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
     const stageDeviceSyncDirtyAcks = (
       records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
     ): void => {
@@ -1169,6 +1172,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const clearStagedDeviceSyncDirtyAcks = (): void => {
       stagedDeviceSyncDirtyAcks = [];
       suppressDirtyPendingFetchUntilCheckpoint = false;
+      deviceSyncWorkspaceWakeHandledUntilCheckpoint = null;
     };
     let browserVaultReplicaRefreshRequested = false;
     const recordBrowserVaultReplicaRefreshIntent = (
@@ -1221,6 +1225,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   });
                   return await (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
                     ...phaseInput,
+                    deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
                     restored,
                     runtime: foregroundRuntime,
@@ -1249,6 +1254,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
+        deviceSyncWorkspaceWakeHandledUntilCheckpoint =
+          resolveHandledDeviceSyncWorkspaceWake({
+            current: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+            result: passResult,
+            workspace: passInput.workspace,
+          });
         recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
@@ -2135,7 +2146,20 @@ function mergeHostedWorkspaceInvocationProjection(
     replaceWake?: boolean;
   } = {},
 ): HostedWorkspaceInvocationProjection {
-  const selectedWake = options.replaceWake
+  const preserveCheckpointGatedWake =
+    options.replaceWake === true
+    && previous.projectedWakeRequiresCheckpoint
+    && previous.nextWakeAt !== null
+    && (
+      next.nextWakeAt === null
+      || hostedWorkspaceInvocationProjectionWakeMatchesNormalized(next, previous)
+    );
+  const selectedWake = preserveCheckpointGatedWake
+    ? {
+        nextWakeAt: previous.nextWakeAt,
+        nextWakeReason: previous.nextWakeReason,
+      }
+    : options.replaceWake
     ? {
         nextWakeAt: next.nextWakeAt,
         nextWakeReason: next.nextWakeReason,
@@ -2150,20 +2174,93 @@ function mergeHostedWorkspaceInvocationProjection(
           reason: next.nextWakeReason,
         },
       ]);
+  let selectedWakeRequiresCheckpoint = false;
+  if (preserveCheckpointGatedWake) {
+    selectedWakeRequiresCheckpoint = true;
+  } else if (options.replaceWake) {
+    selectedWakeRequiresCheckpoint = next.projectedWakeRequiresCheckpoint
+      || (
+        previous.projectedWakeRequiresCheckpoint
+        && next.nextWakeAt !== null
+        && next.nextWakeReason !== "assistant"
+      );
+  } else {
+    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, previous)) {
+      selectedWakeRequiresCheckpoint ||= previous.projectedWakeRequiresCheckpoint;
+    }
+    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, next)) {
+      selectedWakeRequiresCheckpoint ||= next.projectedWakeRequiresCheckpoint;
+    }
+  }
 
   return {
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
     nextWakeAt: selectedWake.nextWakeAt,
     nextWakeReason: selectedWake.nextWakeReason,
-    projectedWakeRequiresCheckpoint: previous.projectedWakeRequiresCheckpoint
-      || next.projectedWakeRequiresCheckpoint,
+    projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
     redactedStatus: {
       ...previous.redactedStatus,
       ...next.redactedStatus,
     },
-    status: options.replaceWake
+    status: options.replaceWake && !preserveCheckpointGatedWake
       ? next.status
       : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
+  };
+}
+
+function hostedWorkspaceInvocationProjectionWakeMatches(
+  selectedWake: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): boolean {
+  return selectedWake.nextWakeAt === projection.nextWakeAt
+    && selectedWake.nextWakeReason === projection.nextWakeReason;
+}
+
+function hostedWorkspaceInvocationProjectionWakeMatchesNormalized(
+  selectedWake: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): boolean {
+  const normalizedSelected = normalizeHostedWorkspaceInvocationProjectionWake(selectedWake);
+  const normalizedProjection = normalizeHostedWorkspaceInvocationProjectionWake(projection);
+  return normalizedSelected.nextWakeAt === normalizedProjection.nextWakeAt
+    && normalizedSelected.nextWakeReason === normalizedProjection.nextWakeReason;
+}
+
+function normalizeHostedWorkspaceInvocationProjectionWake(
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">,
+): Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason"> {
+  const wake = selectHostedRuntimeWakeCandidate([{
+    at: projection.nextWakeAt,
+    reason: projection.nextWakeReason,
+  }]);
+  return {
+    nextWakeAt: wake.at,
+    nextWakeReason: wake.reason,
+  };
+}
+
+function resolveHandledDeviceSyncWorkspaceWake(input: {
+  current: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
+  result: HostedWorkspaceRunnerResult;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceRunnerHandledDeviceSyncWake | null {
+  if (input.result.assistantPhaseResult?.deviceSyncMaintenanceRan !== true) {
+    return input.current;
+  }
+
+  const nextWakeAt = input.workspace?.nextWakeAt ?? null;
+  if (!nextWakeAt) {
+    return input.current;
+  }
+
+  const nextWakeReason = input.workspace?.nextWakeReason ?? null;
+  if (nextWakeReason !== HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON) {
+    return input.current;
+  }
+
+  return {
+    nextWakeAt,
+    nextWakeReason,
   };
 }
 
