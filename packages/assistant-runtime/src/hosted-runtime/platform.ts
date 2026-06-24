@@ -16,6 +16,8 @@ import type {
   HostedRuntimeIssueExportResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
+  HostedCodexAuthUpdate,
+  HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -261,6 +263,10 @@ export interface HostedRuntimeProductFeedbackPort {
   ): Promise<HostedRuntimeProductFeedbackRecordResponse>;
 }
 
+export interface HostedRuntimeCodexAuthPort {
+  update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   // Optional for deploy-window compatibility with older platform builds.
   // Advances the durable per-lane consumed watermark after a clean pass;
@@ -368,6 +374,7 @@ export interface HostedRuntimeVaultSharePort {
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
+  codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;

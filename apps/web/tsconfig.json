@@ -121,6 +121,9 @@
       "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
+      "@murphai/runtime-state/hosted-codex-subscription-auth": [
+        "packages/runtime-state/src/hosted-codex-subscription-auth.ts"
+      ],
       "@murphai/runtime-state/loopback-control-plane": [
         "packages/runtime-state/src/loopback-control-plane.ts"
       ],

@@ -32,7 +32,11 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
-  prisma: {},
+  prisma: {
+    hostedCodexAuthConnection: {
+      findUnique: vi.fn(async () => null),
+    },
+  },
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),

@@ -16,6 +16,7 @@ export type {
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
   HostedRuntimeArtifactWriter,
+  HostedRuntimeCodexAuthPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,

@@ -475,6 +475,7 @@ describe("hosted execution coverage gaps", () => {
       "device-sync.wake",
       "runtime.manual-requested",
       "runtime.browser-vault-refresh-requested",
+      "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
@@ -616,6 +617,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
+      "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",

@@ -2679,6 +2679,53 @@ describe("hosted local dev stack", () => {
     expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
   });
 
+  it("bypasses the subscription seed and logs a dev banner when MURPH_DEV_USE_OPENAI_API_KEY=1", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 145 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 146 }));
+    // The opt-out is intended for `pnpm dev`, so the integration must hold on
+    // the same NODE_ENV=development baseline that would otherwise seed.
+    const stderrWriteSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        // Inherited shell values are host-only and must never reach the worker
+        // even on the opt-out path.
+        HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON: "inherited-shell-value",
+        MURPH_DEV_USE_OPENAI_API_KEY: "1",
+        NODE_ENV: "development",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    // The opt-out must short-circuit before the host Codex home is read.
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    // No ChatGPT auth env, and no inherited shell leak into the worker.
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
+    // The API key stays configured so the runner can bill assistant turns.
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+
+    // The dev banner names both the env var and the billing consequence so an
+    // operator noticing the line in pnpm dev output understands the override.
+    // Phrasing is value-agnostic ("is set:") because the parser accepts "1"
+    // and "true"; the value the operator picked is not echoed back.
+    const stderrText = stderrWriteSpy.mock.calls
+      .map(([chunk]) => (typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString("utf8")))
+      .join("");
+    expect(stderrText).toContain("MURPH_DEV_USE_OPENAI_API_KEY is set");
+    expect(stderrText).toContain("OPENAI_API_KEY");
+
+    stderrWriteSpy.mockRestore();
+  });
+
   it("generates a unique non-default local runner build id for each stack", async () => {
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
