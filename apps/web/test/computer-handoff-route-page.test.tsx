@@ -277,6 +277,7 @@ describe("computer handoff route and page", () => {
       warn.mockRestore();
     }
   });
+
 });
 
 function createHeaders(userAgent: string | null): Headers {
