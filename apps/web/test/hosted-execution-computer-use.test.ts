@@ -2489,12 +2489,12 @@ describe("ComputerUseService", () => {
 
     await expect(service.ensureHandoffViewport({
       memberId: "member_123",
-      preset: "tablet",
+      preset: "mobile",
       token: "handoff-token",
     })).resolves.toBeUndefined();
     expect(kernel.ensureBrowserViewportInputs).toEqual([
       {
-        preset: "tablet",
+        preset: "mobile",
         sessionId: "kernel-session-1",
       },
     ]);
@@ -2520,7 +2520,7 @@ describe("ComputerUseService", () => {
 
     await expect(service.ensureHandoffViewport({
       memberId: "member_123",
-      preset: "tablet",
+      preset: "mobile",
       token: "handoff-token",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CLOSED",

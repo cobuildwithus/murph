@@ -20,7 +20,6 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
 
 type RenderClientComponentOptions = {
   location?: Record<string, string>;
-  viewportWidth?: number;
 };
 
 export async function renderClientComponent(
@@ -41,12 +40,6 @@ export async function renderClientComponent(
   const { document, window } = loadLinkedom().parseHTML(
     "<html><body><div id='root'></div></body></html>",
   );
-  if (options.viewportWidth !== undefined) {
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: options.viewportWidth,
-    });
-  }
   installGlobals(window, document);
   const assign = vi.fn();
   const open = vi.fn();

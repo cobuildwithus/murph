@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock3 } from "lucide-react";
+import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
@@ -6,6 +7,7 @@ import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
+import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { cn } from "@/src/lib/utils";
@@ -94,15 +96,27 @@ export default async function ComputerHandoffPage({
     );
   }
 
-  const handoffEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}`;
+  const preset = resolveComputerBrowserViewportPreset(
+    (await headers()).get("user-agent"),
+  );
+  try {
+    await service.ensureHandoffViewport({
+      memberId: session.member.id,
+      preset,
+      token,
+    });
+  } catch (error) {
+    console.warn("[computer-handoff] viewport resize failed", error);
+  }
+
+  const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
-        doneEndpoint={`${handoffEndpoint}/done`}
+        doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
         liveViewUrl={state.liveViewUrl}
-        viewportEndpoint={`${handoffEndpoint}/viewport`}
       />
     </main>
   );
