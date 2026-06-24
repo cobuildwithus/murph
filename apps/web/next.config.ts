@@ -273,6 +273,7 @@ export function configureHostedWebWorkflowLocalDataDir(
 
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
+    allowedDevOrigins: ["local.withmurph.ai"],
     distDir: resolveHostedWebDistDir(phase, process.env),
     env: buildHostedWebClientEnv(process.env),
     experimental: {
