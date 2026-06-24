@@ -250,6 +250,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.manual-requested":
+    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":
@@ -761,6 +762,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "runtime.manual-requested":
+    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":

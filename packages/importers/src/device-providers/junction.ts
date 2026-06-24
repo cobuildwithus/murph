@@ -16,13 +16,13 @@ import { stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
-  createRawArtifact,
+  createEvidencePart,
   finiteNumber,
   kilojoulesToKilocalories,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   minutesBetween,
-  pushRawArtifact,
+  pushEvidencePart,
   slugify,
   stringId,
   trimToLength,
@@ -83,7 +83,7 @@ import type {
   DeviceDataOrigin,
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
   DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
@@ -126,7 +126,7 @@ interface ResourceContext {
   externalRefResourceType: string;
   artifactRole: string;
   artifactFileName: string;
-  rawArtifactRoles: string[];
+  evidenceRoles: string[];
   connection?: PlainObject;
   fallbackIdentityDisambiguator?: string;
 }
@@ -136,7 +136,7 @@ interface NormalizationContext {
   windowStart?: string;
   windowEnd?: string;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
-  rawArtifacts: DeviceRawArtifactPayload[];
+  evidenceParts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
 }
@@ -630,7 +630,7 @@ interface JunctionDailyTimeseriesAggregate {
   lastSampleAt: string;
   maxValue: number;
   minValue: number;
-  rawArtifactRole: string;
+  evidencePartRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
   sum: number;
@@ -646,7 +646,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
   const importedAt = normalizeTimestamp(snapshot.importedAt);
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const evidenceParts: DeviceEvidencePartPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
   const connections = asArray(snapshot.connections).flatMap((connection) => {
@@ -658,7 +658,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     windowStart,
     windowEnd,
     connectionsByKey: buildConnectionsByKey(connections),
-    rawArtifacts,
+    evidenceParts,
     events,
     samples,
   };
@@ -672,7 +672,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     importedAt,
     events,
     samples: samples.length > 0 ? samples : undefined,
-    rawArtifacts,
+    evidenceParts,
     provenance: stripUndefined({
       schema: "junction.snapshot.v1",
       normalizerVersion: "junction-normalizer.v1",
@@ -692,21 +692,21 @@ function normalizeSummaries(
   for (const [resource, payload] of allowedResourceEntries(summaries, SUMMARY_RESOURCE_ALLOWLIST)) {
     const entries = resourceEntries(payload, resource);
     const resourceSlug = slugify(resource, "summary");
-    const rawArtifactRole = `junction-summary-${resourceSlug}`;
+    const evidencePartRole = `junction-summary-${resourceSlug}`;
     const fallbackIdentityDisambiguators = resource === "meal"
       ? buildJunctionMealFallbackIdentityDisambiguators({
           context,
           entries,
-          fallbackArtifactRole: rawArtifactRole,
+          fallbackArtifactRole: evidencePartRole,
           resource,
           resourceSlug,
         })
       : new Map<number, string>();
-    pushRawArtifact(
-      context.rawArtifacts,
-      createRawArtifact(
-        rawArtifactRole,
-        `${rawArtifactRole}.json`,
+    pushEvidencePart(
+      context.evidenceParts,
+      createEvidencePart(
+        evidencePartRole,
+        `${evidencePartRole}.json`,
         buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
@@ -719,7 +719,7 @@ function normalizeSummaries(
         resourceSlug,
         identityKind: "summary",
         index,
-        fallbackArtifactRole: rawArtifactRole,
+        fallbackArtifactRole: evidencePartRole,
         fallbackIdentityDisambiguator: fallbackIdentityDisambiguators.get(index),
         context,
       });
@@ -994,7 +994,7 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 // reading (docs.junction.com/api-reference/data/timeseries/blood-pressure),
 // so it cannot reduce through the single-value daily-aggregate descriptors.
 // Readings are sparse (10s-100s per member-year): each one lands as a paired
-// `measurement` event plus one compact per-reading raw artifact.
+// `measurement` event plus one compact per-reading evidence part.
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 
 // Derived from the descriptor entries (plus the sparse paired blood-pressure
@@ -1072,7 +1072,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   resourceSlug: string;
   valuePaths: readonly string[];
 }): JunctionDailyTimeseriesAggregate[] {
-  const rawArtifactRole = `junction-timeseries-daily-${input.resourceSlug}`;
+  const evidencePartRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
@@ -1083,7 +1083,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       resourceSlug: input.resourceSlug,
       identityKind: "timeseries",
       index,
-      fallbackArtifactRole: rawArtifactRole,
+      fallbackArtifactRole: evidencePartRole,
       context: input.context,
     });
 
@@ -1119,7 +1119,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         lastSampleAt: sampleAt,
         maxValue: value,
         minValue: value,
-        rawArtifactRole,
+        evidencePartRole,
         resourceContext,
         sampleCount: 1,
         sum: value,
@@ -1166,11 +1166,11 @@ function pushJunctionEmptyDailyTimeseriesAggregateArtifact(
   resourceSlug: string,
 ): void {
   const role = `junction-timeseries-daily-${resourceSlug}:no-valid-samples`;
-  pushRawArtifact(
-    context.rawArtifacts,
+  pushEvidencePart(
+    context.evidenceParts,
     withJunctionCompactTimeseriesMetadata(
       resource,
-      createRawArtifact(
+      createEvidencePart(
         role,
         `${role}.json`,
         {
@@ -1194,19 +1194,19 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
     // The role derives only from the aggregate's stable grouping identity
     // (resource role + day + source); a sorted-position index here would
     // churn artifact roles across replays and differently-windowed payloads.
-    const role = `${aggregate.rawArtifactRole}:${aggregate.dayKey}:${shortHash([
+    const role = `${aggregate.evidencePartRole}:${aggregate.dayKey}:${shortHash([
       aggregate.resourceContext.sourceProviderSlug,
       aggregate.resourceContext.origin.sourceType ?? "",
       aggregate.resourceContext.origin.sourceInstanceId ?? "",
     ])}`;
 
-    aggregate.rawArtifactRole = role;
+    aggregate.evidencePartRole = role;
 
-    pushRawArtifact(
-      context.rawArtifacts,
+    pushEvidencePart(
+      context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
         resource,
-        createRawArtifact(
+        createEvidencePart(
           role,
           `${role}.json`,
           stripUndefined({
@@ -1244,9 +1244,9 @@ function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefi
 
 function withJunctionCompactTimeseriesMetadata(
   resource: string,
-  artifact: DeviceRawArtifactPayload | null,
+  artifact: DeviceEvidencePartPayload | null,
   resourceCategory: "timeseries_daily_aggregate" | "timeseries_reading" = "timeseries_daily_aggregate",
-): DeviceRawArtifactPayload | null {
+): DeviceEvidencePartPayload | null {
   if (!artifact) {
     return null;
   }
@@ -1290,7 +1290,7 @@ function pushJunctionDailyTimeseriesObservation(
     timeZone: aggregate.timeZone,
     source: "device",
     title: observation.title,
-    rawArtifactRoles: [aggregate.rawArtifactRole],
+    evidenceRoles: [aggregate.evidencePartRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
@@ -1305,7 +1305,7 @@ function pushJunctionDailyTimeseriesObservation(
 // Sparse paired blood-pressure readings land as-is: one canonical
 // `measurement` event (systolic + diastolic mmHg entries, so both flow into
 // the existing blood-pressure catalog metrics) plus one compact per-reading
-// raw artifact (~350 B; readings arrive 10s-100s per member-year).
+// evidence part (~350 B; readings arrive 10s-100s per member-year).
 function pushJunctionBloodPressureReadings(
   payload: unknown,
   resource: string,
@@ -1369,11 +1369,11 @@ function pushJunctionBloodPressureReadings(
     readingCount += 1;
     const role = `${baseArtifactRole}:${dayKey}:${readingIdentityHash}`;
 
-    pushRawArtifact(
-      context.rawArtifacts,
+    pushEvidencePart(
+      context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
         resource,
-        createRawArtifact(
+        createEvidencePart(
           role,
           `${role}.json`,
           stripUndefined({
@@ -1403,7 +1403,7 @@ function pushJunctionBloodPressureReadings(
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
       title: "Junction blood pressure",
-      rawArtifactRoles: [role],
+      evidenceRoles: [role],
       externalRef: makeProviderExternalRef(
         "junction",
         resourceContext.externalRefResourceType,
@@ -1423,11 +1423,11 @@ function pushJunctionBloodPressureReadings(
 
   if (readingCount === 0) {
     const role = `${baseArtifactRole}:no-valid-samples`;
-    pushRawArtifact(
-      context.rawArtifacts,
+    pushEvidencePart(
+      context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
         resource,
-        createRawArtifact(
+        createEvidencePart(
           role,
           `${role}.json`,
           {
@@ -1626,7 +1626,7 @@ function pushSleepSummary(
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
       title: "Junction sleep",
-      rawArtifactRoles: resourceContext.rawArtifactRoles,
+      evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
@@ -1780,7 +1780,7 @@ function pushWorkoutSummary(
     timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
     source: "device",
     title,
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session"),
     dataOrigin: buildDataOrigin(entry, resourceContext, workoutTimestamp),
     fields: stripUndefined({
@@ -1828,7 +1828,7 @@ function pushMealSummary(
     timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
     source: "device",
     title: resolveJunctionMealTitle(entry),
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, mealTimestamp, "meal"),
     dataOrigin: buildDataOrigin(entry, resourceContext, mealTimestamp),
     fields: stripUndefined({
@@ -1926,7 +1926,7 @@ function pushProfileSummary(
     source: "device",
     title: "Junction profile",
     note: trimToLength(segments.join(" "), 4000),
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
   }));
@@ -2015,7 +2015,7 @@ function pushMenstrualCycleSummary(
         dayKey: cycleTimestamp.dayKey,
         source: "device",
         title: observation.title,
-        rawArtifactRoles: resourceContext.rawArtifactRoles,
+        evidenceRoles: resourceContext.evidenceRoles,
         externalRef: makeJunctionExternalRef(resourceContext, entry, cycleTimestamp, observation.metric),
         dataOrigin: buildDataOrigin(entry, resourceContext, cycleTimestamp),
         fields: {
@@ -2149,7 +2149,7 @@ function pushJunctionCycleDailyMeasurement(
     dayKey: timestamp.dayKey,
     source: "device",
     title: input.title,
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, input.facet),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: {
@@ -2266,7 +2266,7 @@ function pushElectrocardiogramSummary(
     timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
     source: "device",
     title: classification ? `Junction ECG (${classification.replaceAll("_", " ")})` : "Junction ECG",
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "ecg-recording"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: {
@@ -2808,7 +2808,7 @@ function pushObservationMetrics(
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
       title: metric.title,
-      rawArtifactRoles: resourceContext.rawArtifactRoles,
+      evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
@@ -2846,7 +2846,7 @@ function pushJunctionRecoveryReadinessScore(
     timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
     source: "device",
     title: "Junction recovery readiness score",
-    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: {
@@ -2919,7 +2919,7 @@ function buildResourceContext(input: {
     externalRefResourceType: resourceType,
     artifactRole: input.fallbackArtifactRole,
     artifactFileName: `${input.fallbackArtifactRole}.json`,
-    rawArtifactRoles: [input.fallbackArtifactRole],
+    evidenceRoles: [input.fallbackArtifactRole],
     connection,
     fallbackIdentityDisambiguator: input.fallbackIdentityDisambiguator,
   };

@@ -16,6 +16,9 @@ import type { Writable } from "node:stream";
 import { promisify } from "node:util";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
+} from "@murphai/contracts";
+import {
   decodeHostedBundleBase64,
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -1027,7 +1030,7 @@ async function createExplicitVaultProofRoot(activeVaultRoot: string): Promise<st
     path.join(explicitVaultRoot, "vault.json"),
     `${JSON.stringify({
       createdAt: "2026-05-21T00:00:00Z",
-      formatVersion: 1,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       timezone: "UTC",
       title: "Explicit Vault Proof",
       vaultId: CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID,
