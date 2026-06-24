@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   requireActivePrivyMemberAuth: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   signalHostedBrowserVaultRefreshRuntime: vi.fn(),
+  verifyAndConsumeSensitiveActionChallenge: vi.fn(),
 }));
 
 vi.mock("next/server", async (importOriginal) => {
@@ -66,6 +67,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
+}));
+
+vi.mock("@/src/lib/sensitive-actions/server", () => ({
+  buildSettingsSensitiveActionBinding: vi.fn(() => "a".repeat(64)),
+  verifyAndConsumeSensitiveActionChallenge: mocks.verifyAndConsumeSensitiveActionChallenge,
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", () => ({
@@ -110,7 +116,10 @@ describe("browser vault session route", () => {
       member: {
         id: "member_123",
       },
+      privyUserId: "privy-user-123",
+      sessionId: "session_123",
     });
+    mocks.verifyAndConsumeSensitiveActionChallenge.mockResolvedValue(undefined);
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: null,
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -216,6 +225,10 @@ describe("browser vault session route", () => {
 
     const response = await settingsVaultExportSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
         browserPublicKeyJwk: browser.publicKeyJwk,
       }),
     );
@@ -227,6 +240,17 @@ describe("browser vault session route", () => {
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
+    });
+    expect(mocks.verifyAndConsumeSensitiveActionChallenge).toHaveBeenCalledWith({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
+      bindingHash: "a".repeat(64),
+      kind: "vault.export",
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      privyUserId: "privy-user-123",
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({

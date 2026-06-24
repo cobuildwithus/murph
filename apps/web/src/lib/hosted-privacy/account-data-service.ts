@@ -41,7 +41,6 @@ import {
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
   HOSTED_DATA_EXPORT_SCHEMA,
 } from "./account-data-shared";
 
@@ -79,6 +78,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "live-delete",
     export: "metadata-and-counts",
     note: "Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes.",
+  },
+  {
+    slug: "prisma.hosted_sensitive_action_challenge",
+    label: "Short-lived sensitive-action challenges",
+    deletion: "live-delete",
+    export: "not-exported-secret",
+    note: "Deletes short-lived hashed approval challenges. User exports omit challenge rows, token hashes, signatures, and wallet authorization material.",
   },
   {
     slug: "prisma.hosted_member_identity",
@@ -477,6 +483,7 @@ const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
   "DeviceOauthSession",
   "DeviceBrowserAssertionNonce",
   "HostedWebInternalRequestNonce",
+  "HostedSensitiveActionChallenge",
   "HostedStripeEvent",
   "HostedAssistantRuntimeIssue",
 ] as const;
@@ -501,34 +508,6 @@ export function parseHostedAccountDeletionRequest(
 
   return {
     confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-  };
-}
-
-export function parseHostedDataExportRequest(
-  body: Record<string, unknown>,
-): {
-  acknowledgedSensitiveDownload: true;
-  confirmationText: typeof HOSTED_DATA_EXPORT_CONFIRMATION_TEXT;
-} {
-  if (body.acknowledgedSensitiveDownload !== true) {
-    throw hostedOnboardingError({
-      code: "DATA_EXPORT_ACK_REQUIRED",
-      httpStatus: 400,
-      message: "Acknowledge that the export may contain sensitive account and message data before downloading it.",
-    });
-  }
-
-  if (body.confirmationText !== HOSTED_DATA_EXPORT_CONFIRMATION_TEXT) {
-    throw hostedOnboardingError({
-      code: "DATA_EXPORT_CONFIRMATION_REQUIRED",
-      httpStatus: 400,
-      message: `Type ${HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} exactly to export your Murph data.`,
-    });
-  }
-
-  return {
-    acknowledgedSensitiveDownload: true,
-    confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
   };
 }
 
@@ -2061,6 +2040,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
   record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId } }));

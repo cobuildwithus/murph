@@ -52,7 +52,6 @@ import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 import {
   buildHostedMemberBillingPrivateColumns,
@@ -66,7 +65,6 @@ import {
   deleteHostedAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
-  parseHostedDataExportRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 type HostedAccountDataPrismaForTest = Parameters<typeof buildHostedDataExport>[0]["prisma"];
@@ -74,6 +72,7 @@ type HostedAccountDataPrismaForTest = Parameters<typeof buildHostedDataExport>[0
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
   "prisma.hosted_web_session",
+  "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
@@ -184,44 +183,6 @@ describe("parseHostedAccountDeletionRequest", () => {
     let error: unknown;
     try {
       parseHostedAccountDeletionRequest(body);
-    } catch (caught) {
-      error = caught;
-    }
-
-    expect(error).toBeInstanceOf(HostedOnboardingError);
-    expect((error as HostedOnboardingError).code).toBe(expectedCode);
-    expect((error as HostedOnboardingError).httpStatus).toBe(400);
-  });
-});
-
-describe("parseHostedDataExportRequest", () => {
-  it("requires the exact export phrase and sensitive-download acknowledgement", () => {
-    expect(parseHostedDataExportRequest({
-      acknowledgedSensitiveDownload: true,
-      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
-    })).toEqual({
-      acknowledgedSensitiveDownload: true,
-      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
-    });
-  });
-
-  it.each([
-    ["lowercase phrase", {
-      acknowledgedSensitiveDownload: true,
-      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT.toLowerCase(),
-    }, "DATA_EXPORT_CONFIRMATION_REQUIRED"],
-    ["extra whitespace", {
-      acknowledgedSensitiveDownload: true,
-      confirmationText: `${HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} `,
-    }, "DATA_EXPORT_CONFIRMATION_REQUIRED"],
-    ["missing acknowledgement", {
-      acknowledgedSensitiveDownload: false,
-      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
-    }, "DATA_EXPORT_ACK_REQUIRED"],
-  ])("rejects %s", (_label, body, expectedCode) => {
-    let error: unknown;
-    try {
-      parseHostedDataExportRequest(body);
     } catch (caught) {
       error = caught;
     }
@@ -909,6 +870,26 @@ describe("deleteHostedAccountData", () => {
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED");
     expect(onTransaction).toHaveBeenCalledTimes(1);
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+  });
+
+  it("deletes sensitive-action challenges explicitly with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_sensitive_action_challenge"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedSensitiveActionChallenge",
+      where: { memberId: "member_123" },
+    });
   });
 
   it("deletes short-lived hosted device connect intents with account data", async () => {

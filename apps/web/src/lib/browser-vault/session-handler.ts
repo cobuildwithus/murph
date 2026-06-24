@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
@@ -14,6 +15,7 @@ import {
 import {
   requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
+  type HostedAppSession,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -32,6 +34,11 @@ import { browserVaultReplicaRefsMatch } from "./ref";
 const BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 
 export function createBrowserVaultSessionRoute(input: {
+  authorize?: (context: {
+    auth: HostedAppSession;
+    body: Record<string, unknown>;
+    prisma: PrismaClient;
+  }) => Promise<void>;
   requireActiveAccess: boolean;
 }) {
   return withJsonError(async (request: Request) => {
@@ -57,6 +64,7 @@ export function createBrowserVaultSessionRoute(input: {
       body.knownReplicaRef ?? null,
       "Browser vault session request knownReplicaRef",
     );
+    await input.authorize?.({ auth, body, prisma });
     const [workspace, deviceSyncImportPending] = await Promise.all([
       readHostedWorkspace({ userId: auth.member.id }),
       new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(

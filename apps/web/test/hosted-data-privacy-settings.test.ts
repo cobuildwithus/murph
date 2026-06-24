@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
       "data-hosted-settings-session-state": "true",
     }),
   ),
+  authorize: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -48,6 +49,10 @@ vi.mock("react", async () => {
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
+  useSensitiveActionAuthorization: () => ({ authorize: mocks.authorize }),
 }));
 
 vi.mock("@/src/lib/browser-vault/loader", () => ({
@@ -108,6 +113,10 @@ let cleanupRender: (() => Promise<void> | void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.authorize.mockResolvedValue({
+    signature: `0x${"11".repeat(65)}`,
+    token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+  });
   mocks.loadBrowserVaultReplica.mockResolvedValue({
     client: {
       replica: createBrowserVaultReplicaForTest(),
@@ -182,6 +191,7 @@ describe("HostedDataPrivacySettings", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
+    expect(mocks.authorize).not.toHaveBeenCalled();
     expect(mocks.loadBrowserVaultReplica).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
@@ -228,7 +238,12 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Download vault JSON", window);
 
+    expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
       emptyOnUnauthorized: false,
       endpoint: "/api/settings/vault-export/session",
       knownReplicaRef: null,
@@ -264,9 +279,14 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Delete account", window);
 
+    expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
         confirmationPhrase: "DELETE MY ACCOUNT",
       },
       url: "/api/settings/privacy/delete",

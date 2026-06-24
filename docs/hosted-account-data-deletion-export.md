@@ -4,26 +4,26 @@ Last verified: 2026-06-24
 
 ## Purpose
 
-Murph hosted users need a real way to export useful private vault data and delete their account (and all their data) from the Settings page before wider beta. The primary user-facing export downloads the decrypted browser-vault replica JSON that powers dashboard pages. Deletion requires an authenticated destructive request with an exact typed confirmation phrase before deletion starts, and also wipes the member's Stripe and Privy vendor accounts.
+Murph hosted users need a real way to export useful private vault data and delete their account (and all their data) from the Settings page before wider beta. Both sensitive actions require a one-time, session-bound signature from the member's Privy embedded Ethereum wallet. Privy protects that wallet with passkey MFA and may reuse its verified MFA session for up to one hour. The primary user-facing export downloads the decrypted browser-vault replica JSON that powers dashboard pages. Deletion also requires an exact typed confirmation phrase and wipes the member's Stripe and Privy vendor accounts.
 
 ## User-facing entry points
 
 - `/settings` includes a **Data & privacy** section.
-- **Export vault** opens a confirmation dialog that requires an acknowledgement checkbox plus the exact phrase `EXPORT MY VAULT`, then loads the current browser-vault replica through `/api/settings/vault-export/session` and downloads it as a JSON attachment in the browser.
-- **Delete account** opens a single confirmation dialog that explains the deletion is permanent (account, data, subscription, and login) and requires the exact phrase `DELETE MY ACCOUNT`. After a successful deletion the Settings page shows a short confirmation and redirects to the home page; the hosted session is revoked server-side.
+- **Export vault** opens a confirmation dialog that requires a sensitive-data acknowledgement, creates a short-lived authorization challenge, signs it with the passkey-MFA-protected Privy wallet, then loads the current browser-vault replica through `/api/settings/vault-export/session` and downloads it as JSON in the browser.
+- **Delete account** explains that deletion is permanent, requires the exact phrase `DELETE MY ACCOUNT`, and signs a distinct one-time authorization challenge before deletion begins. After success the Settings page shows a short confirmation and redirects home; the hosted session is revoked server-side.
 
 ## Security model
 
 The export and delete paths are intentionally stricter than normal settings reads.
 
-1. Settings vault export uses the same encrypted browser-vault session machinery as dashboard reads through the privacy-specific `POST /api/settings/vault-export/session` route. It requires an authenticated hosted app session, launch-required legal consent, browser mutation-origin protection, and a caller-provided browser public key before returning a per-session encrypted replica.
-2. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload is not routed through the hosted account metadata export route.
-3. Settings vault export and `POST /api/settings/data-export` both use authenticated hosted app-session privacy access, including members who need export access after losing active billing state. The dashboard `POST /api/browser-vault/session` route remains active-access gated for normal app reads.
-4. `POST /api/settings/privacy/delete` requires an authenticated Murph hosted app session via `requireHostedAppSessionFromRequest`, including members who need privacy access after losing active billing state.
-5. The account metadata export and deletion routes enforce browser mutation-origin protection with `assertHostedOnboardingMutationOrigin`, allowing only the canonical hosted origin or explicitly trusted mutation origins.
-6. The account metadata export and deletion routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
-7. `parseHostedDataExportRequest` still requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement for direct account metadata export route callers.
-8. `parseHostedAccountDeletionRequest` requires the exact deletion confirmation phrase. Lowercase, extra spaces, or a missing phrase fail with structured 400 errors.
+1. `POST /api/settings/sensitive-action-challenge` derives a binding from the authenticated member, action kind, and Murph app-session id. It stores only a SHA-256 hash of the random challenge token and expires the row after 15 minutes.
+2. The browser signs the exact server-generated message with the canonical Privy embedded Ethereum wallet. Murph does not clear Privy's one-hour MFA verification cache; each action still requires a fresh one-time wallet signature.
+3. The real export or deletion route fetches the current Privy user, requires passkey-only wallet MFA, recovers the signer locally, compares it with the canonical embedded wallet, and atomically deletes the matching challenge before any sensitive work begins.
+4. Settings vault export uses the same encrypted browser-vault session machinery as dashboard reads through `POST /api/settings/vault-export/session`. It additionally requires the one-time authorization before reading workspace state or releasing an encrypted replica.
+5. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload never passes through a separate hosted metadata-export endpoint; the obsolete public `/api/settings/data-export` route was removed.
+6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
+7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
+8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
 9. Provider revocation runs before local database deletion while local token references are still readable.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
@@ -104,6 +104,7 @@ The account metadata export explicitly omits:
 | --- | --- | --- | --- |
 | `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
 | `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes. |
+| `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes short-lived hashed authorization challenges. Raw tokens, signatures, and wallet authorization material are never persisted or exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |
