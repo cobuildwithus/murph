@@ -7,6 +7,8 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  isHostedLocalUseOpenaiApiKey,
+  MURPH_DEV_USE_OPENAI_API_KEY_ENV,
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
   shouldSeedHostedLocalCodexSubscriptionAuth,
 } from "./codex-subscription-auth.ts";
@@ -367,14 +369,27 @@ export async function startHostedLocalDevStack(input: {
     requireHostedLocalAssistantProviderEnv(vercelEnv);
     // Interactive dev runs hosted Codex model turns on the local ChatGPT
     // subscription instead of the API key; the key stays for image generation.
+    // MURPH_DEV_USE_OPENAI_API_KEY=1 is the explicit dev opt-out that bypasses
+    // the subscription seed so assistant turns bill OPENAI_API_KEY (used when
+    // the local Codex subscription is exhausted or unavailable).
+    const useOpenaiApiKey = isHostedLocalUseOpenaiApiKey(initialEnv);
     const codexSubscriptionAuthEnvValue =
       workerPortMode === "start" &&
       shouldSeedHostedLocalCodexSubscriptionAuth({
         nodeEnv: inputNodeEnv,
         profileName: vercelEnv.MURPH_HOSTED_LOCAL_PROFILE,
+        useOpenaiApiKey,
       })
         ? await resolveHostedLocalCodexSubscriptionAuthEnvValue(vercelEnv)
         : null;
+    if (useOpenaiApiKey) {
+      const stderrTarget = input.stderrTarget ?? process.stderr;
+      stderrTarget.write(
+        workerPortMode === "start"
+          ? `[setup] ${MURPH_DEV_USE_OPENAI_API_KEY_ENV} is set: hosted Codex assistant turns will bill OPENAI_API_KEY for this dev run.\n`
+          : `[setup] ${MURPH_DEV_USE_OPENAI_API_KEY_ENV} is set but ignored: this stack is reusing an existing worker, so the runner's existing auth mode stays in effect.\n`,
+      );
+    }
     linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
       config,
       env: vercelEnv,
