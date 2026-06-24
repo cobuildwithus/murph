@@ -34,16 +34,49 @@ describe("murph connected-app dynamic tools", () => {
     ).toHaveLength(3);
   });
 
-  it("requires explicit account selection for execution", () => {
+  it("accepts accountless built-in service execution requests", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        arguments: {},
-        toolSlug: "GMAIL_FETCH_EMAILS",
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
       },
       tool: "connected_apps_execute",
     }));
 
-    expect(request?.kind).toBe("invalid-connected-apps-arguments");
+    expect(request).toMatchObject({
+      args: {
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+      },
+      kind: "connected-apps-execute",
+    });
+  });
+
+  it("preserves explicit agent approval for calendar creation", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        account: "calendar",
+        agentApproved: true,
+        arguments: {
+          event_duration_hour: 0,
+          event_duration_minutes: 30,
+          start_datetime: "2026-07-01T10:00:00-04:00",
+          summary: "Annual physical",
+          timezone: "America/New_York",
+        },
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      },
+      tool: "connected_apps_execute",
+    }));
+
+    expect(request).toMatchObject({
+      args: {
+        account: "calendar",
+        agentApproved: true,
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      },
+      kind: "connected-apps-execute",
+    });
   });
 
   it("passes search through the signed hosted control-plane transport", async () => {
@@ -91,6 +124,50 @@ describe("murph connected-app dynamic tools", () => {
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       success: true,
     });
+  });
+
+  it("surfaces calendar-create failures as no-retry ambiguous outcomes", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => {
+        throw Object.assign(
+          new Error(
+            'Hosted connected apps failed with HTTP 400. {"error":{"code":"CONNECTED_APPS_PROVIDER_UNAVAILABLE","message":"The connected-app request could not be completed.","retryable":false}}',
+          ),
+          { status: 400, statusCode: 400 },
+        );
+      }),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "calendar",
+          agentApproved: true,
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(connectedApps.request).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult.success).toBe(false);
+    const text = result.rpcResult.contentItems[0]!.text;
+    expect(text).toContain("failed or returned an ambiguous result");
+    expect(text).toContain("Do not retry");
+    expect(text).toContain("Search the selected calendar");
+    expect(text).not.toContain("connected apps API is unavailable");
   });
 
   it("does not call the control plane when connected apps are unavailable", async () => {

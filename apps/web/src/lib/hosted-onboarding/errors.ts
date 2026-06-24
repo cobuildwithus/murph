@@ -2,6 +2,7 @@ export interface HostedOnboardingErrorInput {
   code: string;
   message: string;
   httpStatus: number;
+  cause?: unknown;
   details?: Record<string, unknown>;
   retryable?: boolean;
 }
@@ -13,7 +14,7 @@ export class HostedOnboardingError extends Error {
   readonly retryable: boolean;
 
   constructor(input: HostedOnboardingErrorInput) {
-    super(input.message);
+    super(input.message, { cause: input.cause });
     this.name = "HostedOnboardingError";
     this.code = input.code;
     this.httpStatus = input.httpStatus;
