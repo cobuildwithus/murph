@@ -298,6 +298,75 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it.each([
+    ["manual_browser_help", "screen_inspection"],
+    ["screen_inspection", "manual_browser_help"],
+  ] as const)(
+    "switches a refreshed final-confirmation handoff from %s to %s when requested",
+    async (existingPurpose, requestedPurpose) => {
+      const now = new Date("2026-06-17T12:05:00.000Z");
+      const oldHandoff = createHandoffRecord({
+        id: "hch_handoff123",
+        purpose: existingPurpose,
+        status: "open",
+        suggestedReply: "yes",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      });
+      const store = new FakeComputerUseStore({
+        handoff: oldHandoff,
+        run: createRunRecord({
+          awaitingMessage: "Should I book this appointment?",
+          awaitingReason: "final_confirmation",
+          checkpointContext: {
+            conversationId: "conversation-a",
+            recipientKey: "recipient-a",
+          },
+          pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+          pendingHandoffId: oldHandoff.id,
+          status: "awaiting_user",
+          suggestedReply: "yes",
+        }),
+      });
+      const service = new ComputerUseService({
+        env: {
+          HOSTED_WEB_BASE_URL: "https://web.example.test",
+        },
+        kernel: fakeKernel,
+        now: () => now,
+        store,
+      });
+
+      const result = await service.pauseForUser({
+        handoffPurpose: requestedPurpose,
+        memberId: "member_123",
+        pauseDeliveryContext: {
+          conversationId: "conversation-a",
+          recipientKey: "recipient-a",
+        },
+        reason: "final_confirmation",
+        runId: "hcr_run123",
+        suggestedReply: null,
+      });
+
+      expect(result).toMatchObject({
+        awaitingReason: "final_confirmation",
+        suggestedReply: "yes",
+      });
+      expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+        status: "expired",
+      });
+      expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+        purpose: requestedPurpose,
+        status: "open",
+        suggestedReply: "yes",
+      });
+      expect(store.run).toMatchObject({
+        pendingHandoffId: "hch_handoff124",
+        status: "awaiting_user",
+      });
+    },
+  );
+
   it("mints a replacement handoff after a final-confirmation handoff was completed too early", async () => {
     const now = new Date("2026-06-17T12:07:00.000Z");
     const oldHandoff = createHandoffRecord({
@@ -431,6 +500,32 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("rejects screen inspection for a running run", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({ updatedAt: now });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "screen_inspection",
+      memberId: "member_123",
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: "yes",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SCREEN_INSPECTION_UNAVAILABLE",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.handoff).toBeNull();
+  });
+
   it("mints an inspection handoff for an already-awaiting final confirmation", async () => {
     const pausedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
@@ -452,7 +547,7 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.pauseForUser({
-      handoffPurpose: "manual_browser_help",
+      handoffPurpose: "screen_inspection",
       memberId: "member_123",
       reason: "final_confirmation",
       runId: "hcr_run123",
@@ -473,7 +568,7 @@ describe("ComputerUseService", () => {
       status: "awaiting_user",
     });
     expect(store.handoff).toMatchObject({
-      purpose: "manual_browser_help",
+      purpose: "screen_inspection",
       status: "open",
       suggestedReply: "yes",
     });
@@ -1045,7 +1140,7 @@ describe("ComputerUseService", () => {
   it("resumes final confirmation from chat while an inspection handoff is open", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "manual_browser_help",
+      purpose: "screen_inspection",
       status: "open",
       suggestedReply: "yes",
       updatedAt: new Date("2026-06-17T12:03:00.000Z"),
@@ -1095,6 +1190,69 @@ describe("ComputerUseService", () => {
     });
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
+
+  it.each([
+    ["logically expired open", "open"],
+    ["already marked expired", "expired"],
+  ] as const)(
+    "resumes final confirmation from chat while an inspection handoff is %s",
+    async (_label, handoffStatus) => {
+      const now = new Date("2026-06-17T12:25:00.000Z");
+      const handoff = createHandoffRecord({
+        expiresAt: new Date("2026-06-17T12:20:00.000Z"),
+        purpose: "screen_inspection",
+        status: handoffStatus,
+        suggestedReply: "yes",
+        updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+      });
+      const run = createRunRecord({
+        awaitingReason: "final_confirmation",
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        pausedAt: new Date("2026-06-17T12:02:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+        suggestedReply: "yes",
+        updatedAt: new Date("2026-06-17T12:02:00.000Z"),
+      });
+      const store = new FakeComputerUseStore({
+        handoff,
+        resumeMailboxItems: [
+          createResumeMailboxItem({
+            createdAt: new Date("2026-06-17T12:24:00.000Z"),
+            id: "hmi_user_reply",
+            occurredAt: new Date("2026-06-17T12:24:00.000Z"),
+          }),
+        ],
+        run,
+      });
+      const service = new ComputerUseService({
+        kernel: createFakeKernel(),
+        now: () => now,
+        store,
+      });
+
+      const result = await service.startRun({
+        memberId: "member_123",
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        startUrl: null,
+      });
+
+      expect(result).toMatchObject({
+        awaitingReason: null,
+        reused: true,
+        runId: "hcr_run123",
+        status: "running",
+      });
+      expect(store.run).toMatchObject({
+        pendingHandoffId: null,
+        status: "running",
+      });
+      expect(store.handoff).toMatchObject({
+        status: "expired",
+      });
+      expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
+    },
+  );
 
   it("expires an open handoff without deleting the awaiting browser run", async () => {
     const now = new Date("2026-06-17T12:25:00.000Z");
@@ -2833,6 +2991,7 @@ describe("ComputerUseService", () => {
     })).resolves.toEqual({
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
+      interaction: "takeover",
       kind: "open",
       liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
       purpose: "login",
@@ -2845,6 +3004,100 @@ describe("ComputerUseService", () => {
       kernelSessionId: "kernel-session-1",
       status: "awaiting_user",
     });
+  });
+
+  it("returns a view-only handoff page state for final confirmation inspection links", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pausedAt: new Date("2026-06-17T12:02:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+        suggestedReply: "yes",
+      }),
+    });
+    const crypto = createFakeCrypto({
+      decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+    });
+    const service = new ComputerUseService({
+      crypto,
+      kernel: createFakeKernel({
+        executeResult: "data:image/jpeg;base64,aW1hZ2U=",
+      }),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
+
+    expect(result).toEqual({
+      handoffId: handoff.id,
+      interaction: "view_only",
+      kind: "open",
+      purpose: "screen_inspection",
+      screenshotDataUrl: "data:image/jpeg;base64,aW1hZ2U=",
+      suggestedReply: "yes",
+    });
+    expect(store.run).toMatchObject({
+      kernelLiveViewUrlEncrypted: "encrypted-live-view",
+    });
+    expect(crypto.decryptRunSecretCalls).toBe(0);
+  });
+
+  it("keeps final confirmation manual help handoffs interactive", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pausedAt: new Date("2026-06-17T12:02:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const crypto = createFakeCrypto({
+      decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+    });
+    const kernel = createFakeKernel({
+      executeResult: "data:image/jpeg;base64,aW1hZ2U=",
+    });
+    const service = new ComputerUseService({
+      crypto,
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({
+      handoffId: handoff.id,
+      iframeAllow: "autoplay; clipboard-read; clipboard-write",
+      interaction: "takeover",
+      kind: "open",
+      liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      purpose: "manual_browser_help",
+      suggestedReply: "yes",
+    });
+    expect(crypto.decryptRunSecretCalls).toBe(1);
+    expect(kernel.executePlaywrightCalls).toBe(0);
   });
 
   it("does not expose a handoff after the run stops awaiting it", async () => {
@@ -6065,9 +6318,13 @@ function createFakeKernel(input: {
 
 function createFakeCrypto(input: {
   decryptedRunSecret: string | null;
-}): ComputerUseCrypto {
+}): ComputerUseCrypto & {
+  decryptRunSecretCalls: number;
+} {
   return {
+    decryptRunSecretCalls: 0,
     async decryptRunSecret() {
+      this.decryptRunSecretCalls += 1;
       return input.decryptedRunSecret;
     },
     async encryptRunSecret(encryptInput) {

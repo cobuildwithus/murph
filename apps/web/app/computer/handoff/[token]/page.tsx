@@ -97,6 +97,20 @@ export default async function ComputerHandoffPage({
     );
   }
 
+  if (state.interaction === "view_only") {
+    return (
+      <main className="relative min-h-dvh bg-foreground text-foreground">
+        {/* eslint-disable-next-line @next/next/no-img-element -- Ephemeral data URL screenshot; next/image optimization does not apply. */}
+        <img
+          alt="Murph private page preview"
+          className="block h-dvh w-full object-contain bg-foreground"
+          draggable={false}
+          src={state.screenshotDataUrl}
+        />
+      </main>
+    );
+  }
+
   const preset = resolveComputerBrowserViewportPreset(
     (await headers()).get("user-agent"),
   );

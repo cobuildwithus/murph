@@ -36,6 +36,7 @@ export const HOSTED_COMPUTER_HANDOFF_PURPOSES = [
   "card",
   "captcha",
   "manual_browser_help",
+  "screen_inspection",
 ] as const;
 export type HostedComputerHandoffPurpose =
   (typeof HOSTED_COMPUTER_HANDOFF_PURPOSES)[number];

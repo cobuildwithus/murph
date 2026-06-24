@@ -88,65 +88,70 @@ export function ComputerHandoffActiveView({
   };
 
   const idleError = phase.kind === "idle" ? phase.error : null;
+  const showBrowserSurface = phase.kind === "idle" || phase.kind === "saving";
 
   return (
     <>
-      <iframe
-        ref={iframeRef}
-        allow={iframeAllow}
-        className="block h-dvh w-full border-0 bg-foreground"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
-        src={liveViewUrl}
-        title="Murph private page"
-      />
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
-      >
-        <ComputerHandoffFloatingIsland
-          handle={
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            </span>
-          }
-        >
-          <div className="flex max-w-[calc(100vw-6rem)] flex-col gap-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              {idleError ? (
-                <span role="alert" className="text-xs text-destructive">
-                  {idleError}
+      {showBrowserSurface ? (
+        <>
+          <iframe
+            ref={iframeRef}
+            allow={iframeAllow}
+            className="block h-dvh w-full border-0 bg-foreground"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
+            src={liveViewUrl}
+            title="Murph private page"
+          />
+          <div
+            className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
+          >
+            <ComputerHandoffFloatingIsland
+              handle={
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                  <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                 </span>
-              ) : null}
-              <Button
-                type="button"
-                size="lg"
-                onClick={onDone}
-                disabled={phase.kind !== "idle"}
-                aria-label="Mark this done and reply to Murph"
-              >
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                Done
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="lg"
-                onClick={onEnableFocus}
-                disabled={phase.kind !== "idle"}
-                aria-label="Focus the private page so the keyboard and paste work"
-              >
-                <Keyboard className="h-4 w-4" aria-hidden="true" />
-                Keyboard<span className="hidden sm:inline"> / Paste</span>
-              </Button>
-            </div>
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              Copy your password, tap Keyboard / Paste, then paste with the
-              keyboard icon inside the page.
-            </p>
+              }
+            >
+              <div className="flex max-w-[calc(100vw-6rem)] flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  {idleError ? (
+                    <span role="alert" className="text-xs text-destructive">
+                      {idleError}
+                    </span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="lg"
+                    onClick={onDone}
+                    disabled={phase.kind !== "idle"}
+                    aria-label="Mark this done and reply to Murph"
+                  >
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    Done
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    onClick={onEnableFocus}
+                    disabled={phase.kind !== "idle"}
+                    aria-label="Focus the private page so the keyboard and paste work"
+                  >
+                    <Keyboard className="h-4 w-4" aria-hidden="true" />
+                    Keyboard<span className="hidden sm:inline"> / Paste</span>
+                  </Button>
+                </div>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Copy your password, tap Keyboard / Paste, then paste with the
+                  keyboard icon inside the page.
+                </p>
+              </div>
+            </ComputerHandoffFloatingIsland>
           </div>
-        </ComputerHandoffFloatingIsland>
-      </div>
+        </>
+      ) : null}
       {phase.kind === "saving" ? (
         <div
           aria-busy

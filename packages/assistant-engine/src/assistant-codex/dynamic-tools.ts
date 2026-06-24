@@ -69,7 +69,6 @@ import {
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
-const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -378,7 +377,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when direct browser takeover is needed.',
+    'Pause a computer run for missing user input, direct user takeover, or view-only screen inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -387,7 +386,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         anyOf: [
           {
             type: 'string',
-            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help'],
+            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help', 'screen_inspection'],
           },
           { type: 'null' },
         ],
@@ -1292,10 +1291,6 @@ export async function executeMurphDynamicToolRequest(input: {
           ),
         } satisfies HostedComputerPauseForUserRequest,
         fetchImpl: input.fetchImpl,
-        finishPath: buildHostedComputerRunOperationPath({
-          operation: 'finish',
-          runId,
-        }),
         path: buildHostedComputerRunOperationPath({
           operation: 'pause-for-user',
           runId,
@@ -1377,7 +1372,6 @@ async function executeHostedComputerPauseForUserTool(input: {
   abortSignal: AbortSignal | null
   body: HostedComputerPauseForUserRequest
   fetchImpl: typeof fetch
-  finishPath: string
   path: string
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi({
@@ -1386,9 +1380,8 @@ async function executeHostedComputerPauseForUserTool(input: {
   })
   if (!apiResult.ok) {
     if (apiResult.unknownOutcome) {
-      return await cancelComputerRunAfterUnknownPauseOutcome({
-        ...input,
-        reason: apiResult.errorText,
+      return toolTextResult(false, apiResult.errorText, {
+        computerRunPausedForUser: true,
       })
     }
     return toolTextResult(false, apiResult.errorText)
@@ -1451,37 +1444,6 @@ async function executeHostedComputerApiTool(input: {
         apiResult.payload,
       )))
     : toolTextResult(false, apiResult.errorText)
-}
-
-async function cancelComputerRunAfterUnknownPauseOutcome(input: {
-  abortSignal: AbortSignal | null
-  fetchImpl: typeof fetch
-  finishPath: string
-  reason: string
-}): Promise<MurphDynamicToolExecutionResult> {
-  const cancelResult = await callHostedComputerApi({
-    abortSignal: createHostedComputerCleanupAbortSignal(),
-    body: {
-      outcome: 'failed',
-      summary: null,
-    },
-    fetchImpl: input.fetchImpl,
-    path: input.finishPath,
-    unknownOutcomeOnTransportError: true,
-  })
-
-  return toolTextResult(
-    false,
-    cancelResult.ok
-      ? `${input.reason}; computer run was canceled`
-      : `${input.reason}; computer run cancellation failed: ${cancelResult.errorText}`,
-  )
-}
-
-function createHostedComputerCleanupAbortSignal(): AbortSignal | null {
-  return typeof AbortSignal.timeout === 'function'
-    ? AbortSignal.timeout(HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS)
-    : null
 }
 
 async function callHostedComputerApi(input: {
