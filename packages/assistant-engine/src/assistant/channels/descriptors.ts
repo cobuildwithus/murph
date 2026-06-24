@@ -41,6 +41,7 @@ import {
   sendLinqMessage,
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
+  sendTelegramImageMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
   sendTelegramMessage,
@@ -69,7 +70,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent() {
     return false
   },
-  supportedResponseMediaKinds: ['voice_memo'],
+  supportedResponseMediaKinds: ['image', 'voice_memo'],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -82,6 +83,16 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   async sendMessage({ candidate, dependencies, idempotencyKey, media, message, replyToMessageId }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendTelegramVoiceMemoDelivery({
+        candidate,
+        dependencies,
+        idempotencyKey,
+        media,
+        message,
+        replyToMessageId,
+      })
+    }
+    if (hasImageMedia(media)) {
+      return await sendTelegramImageDelivery({
         candidate,
         dependencies,
         idempotencyKey,
@@ -140,6 +151,54 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     }
   },
 })
+
+async function sendTelegramImageDelivery(input: {
+  candidate: AssistantDeliveryCandidate
+  dependencies: AssistantChannelDependencies
+  idempotencyKey?: string | null
+  media: readonly AssistantResponseMedia[]
+  message: string
+  replyToMessageId?: string | null
+}): Promise<{
+  cleanupMessages?: Array<{ messageId: string; target: string }> | null
+  cleanupTargetAliases?: string[] | null
+  providerMessageId?: string | null
+  providerMessageIds?: string[] | null
+  target?: string | null
+  targetKind?: 'explicit' | 'participant' | 'thread' | null
+}> {
+  const images = input.media.filter(isImageMedia)
+  if (images.length !== input.media.length) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_IMAGE_MEDIA_MIX_UNSUPPORTED',
+      'Telegram image delivery cannot mix image media with other media.',
+    )
+  }
+
+  const request = {
+    idempotencyKey: input.idempotencyKey ?? null,
+    media: images,
+    message: input.message,
+    replyToMessageId: input.replyToMessageId ?? null,
+    ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+    target: input.candidate.target,
+  }
+  const delivered = input.dependencies.sendTelegramImage
+    ? await input.dependencies.sendTelegramImage(request)
+    : await sendTelegramImageMessage(
+        request,
+        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      )
+
+  return {
+    cleanupMessages: readDeliveredCleanupMessages(delivered),
+    cleanupTargetAliases: readDeliveredCleanupTargetAliases(delivered),
+    target: readDeliveredTarget(delivered) ?? input.candidate.target,
+    targetKind: readDeliveredTargetKind(delivered) ?? input.candidate.kind,
+    providerMessageId: readDeliveredProviderMessageId(delivered),
+    providerMessageIds: readDeliveredProviderMessageIds(delivered),
+  }
+}
 
 async function sendTelegramVoiceMemoDelivery(input: {
   candidate: AssistantDeliveryCandidate
@@ -709,6 +768,18 @@ function hasVoiceMemoMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some(isVoiceMemoMedia)
+}
+
+function hasImageMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some(isImageMedia)
+}
+
+function isImageMedia(
+  media: AssistantResponseMedia,
+): media is Extract<AssistantResponseMedia, { kind: 'image' }> {
+  return media.kind === 'image'
 }
 
 function isVoiceMemoMedia(

@@ -19,6 +19,10 @@
       "types": "./dist/assistant-ids.d.ts",
       "default": "./dist/assistant-ids.js"
     },
+    "./hosted-codex-subscription-auth": {
+      "types": "./dist/hosted-codex-subscription-auth.d.ts",
+      "default": "./dist/hosted-codex-subscription-auth.js"
+    },
     "./loopback-control-plane": {
       "types": "./dist/loopback-control-plane.d.ts",
       "default": "./dist/loopback-control-plane.js"

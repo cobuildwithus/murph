@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
+import { HomeExperimentCard } from "./home-experiment-card";
+
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 
 const HISTORY_CARD_LIMIT = 6;
@@ -65,13 +66,9 @@ function HomeExperimentsSection({
         </span>
         {action ?? null}
       </div>
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2">
         {cards.map((card) => (
-          <ExperimentBrowseCard
-            key={card.id}
-            {...card}
-            imageSizes="(min-width: 1280px) 33vw, (min-width: 640px) 50vw, 100vw"
-          />
+          <HomeExperimentCard key={card.id} card={card} />
         ))}
       </div>
     </section>

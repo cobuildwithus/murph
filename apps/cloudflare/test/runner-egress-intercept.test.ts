@@ -5063,6 +5063,11 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       method: "POST",
+      operation: "sendPhoto",
+      query: "",
+    },
+    {
+      method: "POST",
       operation: "sendVoice",
       query: "",
     },

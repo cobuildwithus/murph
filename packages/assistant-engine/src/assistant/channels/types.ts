@@ -16,6 +16,8 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
+type AssistantImageResponseMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
+
 export interface AssistantChannelActivityHandle {
   stop: () => Promise<void>
 }
@@ -54,6 +56,25 @@ export interface AssistantChannelDependencies {
   }) => Promise<AssistantChannelActivityHandle | void>
   sendTelegram?: (input: {
     idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    signal?: AbortSignal
+    target: string
+  }) => Promise<
+    | {
+        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  sendTelegramImage?: (input: {
+    idempotencyKey?: string | null
+    media: readonly AssistantImageResponseMedia[]
     message: string
     replyToMessageId?: string | null
     signal?: AbortSignal

@@ -6,7 +6,11 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  issueHostedInvite: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  redirect: vi.fn((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  }),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
@@ -35,6 +39,7 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
   useRouter: () => ({
     refresh: mocks.routerRefresh,
   }),
@@ -96,6 +101,10 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
   shouldShowHomeDeviceSyncStep: mocks.shouldShowHomeDeviceSyncStep,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
+  issueHostedInvite: mocks.issueHostedInvite,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -141,6 +150,9 @@ beforeEach(() => {
     authenticatedMember: MEMBER,
     session: null,
   });
+  mocks.issueHostedInvite.mockResolvedValue({
+    inviteCode: "invite_recovery",
+  });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
@@ -164,6 +176,43 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test.each(["not_started", "incomplete"] as const)(
+  "HomePage redirects %s members to their join flow before loading dashboard data",
+  async (billingStatus) => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticated: true,
+      authenticatedMember: {
+        ...MEMBER,
+        billingStatus,
+      },
+      session: null,
+    });
+    mocks.issueHostedInvite.mockResolvedValueOnce({
+      inviteCode: "invite/recovery",
+    });
+
+    const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+    await assert.rejects(
+      () => HomePage(),
+      /NEXT_REDIRECT:\/join\/invite%2Frecovery/u,
+    );
+    assert.deepEqual(mocks.issueHostedInvite.mock.calls, [
+      [
+        {
+          channel: "web",
+          memberId: MEMBER.id,
+        },
+      ],
+    ]);
+    assert.deepEqual(mocks.redirect.mock.calls, [["/join/invite%2Frecovery"]]);
+    assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
+    assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
+    assert.equal(mocks.readHostedMemberStripeBillingRef.mock.calls.length, 0);
+    assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+  },
+);
+
 test("HomePage hides the connect devices card when device sync is already active", async () => {
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValueOnce(false);
 
@@ -181,6 +230,8 @@ test("HomePage hides the connect devices card when device sync is already active
     mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.now.toISOString(),
     "2026-05-26T12:00:00.000Z",
   );
+  assert.equal(mocks.issueHostedInvite.mock.calls.length, 0);
+  assert.equal(mocks.redirect.mock.calls.length, 0);
 });
 
 test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {

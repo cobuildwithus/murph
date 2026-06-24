@@ -63,6 +63,7 @@ const ACTION_BY_KIND = {
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",
   "runtime.browser-vault-refresh-requested": "apply-runtime-control-request",
+  "runtime.codex-auth-requested": "apply-runtime-control-request",
   "runtime.device-sync-recovery-requested": "apply-runtime-control-request",
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
   "runtime.manual-requested": "apply-runtime-control-request",
