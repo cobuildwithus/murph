@@ -9,11 +9,13 @@ import {
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
   projectRunnerStateRecord,
+  readRunnerRuntimeProcessingMode,
   readWriteFenceKind,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
   type DurableObjectStateLike,
+  type RunnerRuntimeProcessingMode,
   type RunnerWriteFenceKind,
   type RunnerStateRecord,
 } from "./types.js";
@@ -24,6 +26,7 @@ export interface RunnerWriteFenceToken {
   generation: string;
   kind: RunnerWriteFenceKind;
   leaseGeneration: string;
+  processingMode: RunnerRuntimeProcessingMode;
   providerEgressToken: string | null;
   runnerContainerName: string | null;
   startedAt: string;
@@ -146,6 +149,7 @@ export class RunnerStateStore {
   }
 
   async beginWriteFence(input: {
+    processingMode?: RunnerRuntimeProcessingMode | null;
     runnerContainerName: string;
     userId: string;
   }): Promise<RunnerWriteFenceToken> {
@@ -163,13 +167,14 @@ export class RunnerStateStore {
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
     const kind: RunnerWriteFenceKind = "runtime";
+    const processingMode = readRunnerRuntimeProcessingMode(input.processingMode);
 
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
     meta.active_provider_egress_token_hash = providerEgressTokenHash;
-    meta.active_reason = null;
+    meta.active_reason = processingMode;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
@@ -182,6 +187,7 @@ export class RunnerStateStore {
       generation: nextGeneration.toString(),
       kind,
       leaseGeneration: nextGeneration.toString(),
+      processingMode,
       providerEgressToken,
       runnerContainerName: meta.active_runner_container_name,
       startedAt,
@@ -624,7 +630,7 @@ export class RunnerStateStore {
       meta.active_kind,
       meta.active_provider_egress_token_hash,
       meta.active_runner_container_name,
-      null,
+      meta.active_reason,
       meta.active_started_at,
       meta.active_expires_at,
       meta.active_workspace_version,
@@ -690,6 +696,7 @@ export class RunnerStateStore {
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       kind,
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       providerEgressToken: null,
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),
       startedAt: meta.active_started_at,

@@ -150,6 +150,7 @@ export async function prepareAssistantAutoReplyInput(
     .map((entry, index) => {
       const attachmentSections = buildAssistantAutoReplyAttachmentSections({
         lifecycleSection: renderAssistantInputAttachmentDescriptorPromptSection({
+          attachmentBundles: entry.attachmentBundles,
           attachments: entry.attachmentEvidence.attachments,
           descriptors: entry.attachmentDescriptors,
           evidenceReasonCode: entry.attachmentEvidence.reasonCode,
@@ -244,6 +245,7 @@ export function readTelegramAutoReplyMetadataFromAssistantInput(input: {
 }
 
 export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
+  attachmentBundles?: readonly AssistantInputAttachmentPromptBundle[]
   attachments?: readonly AssistantInputAttachmentEvidenceItem[]
   descriptors: readonly AssistantInputAttachmentDescriptor[]
   evidenceReasonCode?: string | null
@@ -252,6 +254,7 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
   projectionStatus?: AssistantInputProjectionStatus | null
 }): string | null {
   const attachments = input.attachments ?? []
+  const rawPathByOrdinal = buildLifecycleRawPathByOrdinal(input.attachmentBundles)
   if (input.descriptors.length === 0 && attachments.length === 0) {
     return null
   }
@@ -266,10 +269,12 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
     `- raw evidence: ${renderAssistantInputRawEvidenceLifecycleStatus({
       attachments,
       evidenceStatus: input.evidenceStatus ?? null,
+      rawPathByOrdinal,
     })}`,
     renderAssistantInputAttachmentLifecycleDetails({
       attachments,
       descriptors: input.descriptors,
+      rawPathByOrdinal,
     }),
   ]
     .filter((line): line is string => line !== null && line.length > 0)
@@ -648,6 +653,7 @@ function renderAssistantInputProjectionLifecycleStatus(input: {
 function renderAssistantInputRawEvidenceLifecycleStatus(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
   evidenceStatus: AssistantInputAttachmentEvidence['status'] | null
+  rawPathByOrdinal: ReadonlyMap<number, string | null> | null
 }): string {
   if (input.evidenceStatus === 'failed') {
     return 'failed'
@@ -662,7 +668,12 @@ function renderAssistantInputRawEvidenceLifecycleStatus(input: {
       return 'not_attempted'
     }
     return input.attachments.every((attachment) =>
-      hasRawAttachmentStoredPath(attachment.raw?.path ?? null),
+      hasRawAttachmentStoredPath(
+        resolveLifecycleRawAttachmentPath({
+          attachment,
+          rawPathByOrdinal: input.rawPathByOrdinal,
+        }),
+      ),
     )
       ? 'available'
       : 'partial'
@@ -674,6 +685,7 @@ function renderAssistantInputRawEvidenceLifecycleStatus(input: {
 function renderAssistantInputAttachmentLifecycleDetails(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
   descriptors: readonly AssistantInputAttachmentDescriptor[]
+  rawPathByOrdinal: ReadonlyMap<number, string | null> | null
 }): string | null {
   const ordinals = new Set<number>()
   input.descriptors.forEach((_, index) => ordinals.add(index + 1))
@@ -691,6 +703,7 @@ function renderAssistantInputAttachmentLifecycleDetails(input: {
       attachment: attachmentByOrdinal.get(ordinal) ?? null,
       descriptor: input.descriptors[ordinal - 1] ?? null,
       ordinal,
+      rawPathByOrdinal: input.rawPathByOrdinal,
     }),
   )
 
@@ -701,9 +714,13 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
   attachment: AssistantInputAttachmentEvidenceItem | null
   descriptor: AssistantInputAttachmentDescriptor | null
   ordinal: number
+  rawPathByOrdinal: ReadonlyMap<number, string | null> | null
 }): string[] {
   if (input.attachment) {
-    const rawPath = normalizePromptRawAttachmentPath(input.attachment.raw?.path ?? null)
+    const rawPath = resolveLifecycleRawAttachmentPath({
+      attachment: input.attachment,
+      rawPathByOrdinal: input.rawPathByOrdinal,
+    })
     return [
       '',
       `Attachment ${input.ordinal}`,
@@ -728,6 +745,32 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
     `byteSize: ${typeof descriptor?.sizeBytes === 'number' ? descriptor.sizeBytes : 'unknown'}`,
     'rawPath: missing',
   ]
+}
+
+function buildLifecycleRawPathByOrdinal(
+  attachmentBundles: readonly AssistantInputAttachmentPromptBundle[] | undefined,
+): ReadonlyMap<number, string | null> | null {
+  if (!attachmentBundles) {
+    return null
+  }
+
+  return new Map(
+    attachmentBundles.map((bundle) => [
+      bundle.ordinal,
+      normalizePromptRawAttachmentPath(bundle.storedPath),
+    ]),
+  )
+}
+
+function resolveLifecycleRawAttachmentPath(input: {
+  attachment: AssistantInputAttachmentEvidenceItem
+  rawPathByOrdinal: ReadonlyMap<number, string | null> | null
+}): string | null {
+  if (input.rawPathByOrdinal?.has(input.attachment.ordinal)) {
+    return input.rawPathByOrdinal.get(input.attachment.ordinal) ?? null
+  }
+
+  return normalizePromptRawAttachmentPath(input.attachment.raw?.path ?? null)
 }
 
 function normalizeAttachmentLifecycleDescriptorKind(

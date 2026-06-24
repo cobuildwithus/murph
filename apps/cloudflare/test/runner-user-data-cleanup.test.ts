@@ -133,6 +133,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(validObjectKey, "encrypted-snapshot");
     const service = createWorkspaceSnapshotSessionService({
       bucket,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
       stateStore,
       readHostedWorkspaceFromWeb: async (userId) => ({
@@ -182,6 +183,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(validObjectKey, "encrypted-snapshot");
     const service = createWorkspaceSnapshotSessionService({
       bucket,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
       stateStore,
       readHostedWorkspaceFromWeb: async (userId) => ({
@@ -251,6 +253,14 @@ function createBindOnlyStateStore(): {
       return userId;
     },
     boundUsers,
+  };
+}
+
+function createUnusedRunnerStoreCache() {
+  return {
+    async ensure(): Promise<never> {
+      throw new Error("V2 orphan cleanup must not load runtime stores.");
+    },
   };
 }
 

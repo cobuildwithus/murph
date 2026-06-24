@@ -2184,6 +2184,7 @@ describe("cloudflare worker routes", () => {
         activeRuntime: {
           attemptId: token.attemptId,
           leaseGeneration: token.generation,
+          processingMode: "default",
           userId: "test-user",
         },
         userId: "test-user",
@@ -2227,6 +2228,7 @@ describe("cloudflare worker routes", () => {
         activeRuntime: {
           attemptId: oldToken.attemptId,
           leaseGeneration: oldToken.generation,
+          processingMode: "default",
           userId: "test-user",
         },
         userId: "test-user",

@@ -52,7 +52,16 @@ export interface HostedRuntimeReconciliationFactsRequest {
   userId: string;
 }
 
+export const HOSTED_RUNTIME_PROCESSING_MODES = [
+  "default",
+  "inbox_media_retention",
+] as const;
+
+export type HostedRuntimeProcessingMode =
+  (typeof HOSTED_RUNTIME_PROCESSING_MODES)[number];
+
 export interface HostedRuntimeReconciliationFactsWorkspace {
+  inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   version: string | null;
@@ -71,6 +80,7 @@ export interface HostedRuntimeReconciliationFacts {
 
 export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
+  processingMode?: HostedRuntimeProcessingMode | null;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [

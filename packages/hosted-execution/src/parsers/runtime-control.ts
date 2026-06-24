@@ -30,6 +30,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxConsumeRequest,
   type HostedMailboxConsumeResponse,
@@ -1229,6 +1230,14 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
           ),
         }),
     createdAt: requireString(record.createdAt, "Hosted workspace state createdAt"),
+    ...(record.inboxMediaRetentionWakeAt === undefined
+      ? {}
+      : {
+          inboxMediaRetentionWakeAt: readNullableString(
+            record.inboxMediaRetentionWakeAt,
+            "Hosted workspace state inboxMediaRetentionWakeAt",
+          ),
+        }),
     ...(record.nextWakeAt === undefined
       ? {}
       : { nextWakeAt: readNullableString(record.nextWakeAt, "Hosted workspace state nextWakeAt") }),
@@ -1293,6 +1302,14 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.leaseGeneration,
       "Hosted workspace checkpoint request leaseGeneration",
     ),
+    ...(record.inboxMediaRetentionWakeAt === undefined
+      ? {}
+      : {
+          inboxMediaRetentionWakeAt: readNullableString(
+            record.inboxMediaRetentionWakeAt,
+            "Hosted workspace checkpoint request inboxMediaRetentionWakeAt",
+          ),
+        }),
     ...(record.nextWakeAt === undefined
       ? {}
       : {
@@ -1342,6 +1359,14 @@ export function parseHostedWorkspaceCheckpointResponse(
             record.checkpointConflictReason,
             "Hosted workspace checkpoint response checkpointConflictReason",
             HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
+          ),
+        }),
+    ...(record.replacedSnapshotRef === undefined
+      ? {}
+      : {
+          replacedSnapshotRef: parseHostedExecutionSnapshotRef(
+            record.replacedSnapshotRef,
+            "Hosted workspace checkpoint response replacedSnapshotRef",
           ),
         }),
     workspace: parseHostedWorkspaceState(record.workspace),
@@ -1722,6 +1747,15 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
       record.leaseGeneration,
       "Hosted workspace invocation request leaseGeneration",
     ),
+    ...(record.processingMode === undefined
+      ? {}
+      : {
+          processingMode: parseNullableAllowedString(
+            record.processingMode,
+            "Hosted workspace invocation request processingMode",
+            HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+          ),
+        }),
     ...(record.providerEgressToken === undefined
       ? {}
       : {

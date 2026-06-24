@@ -36,6 +36,7 @@ export interface StoredAttachment extends Omit<InboundAttachment, "data"> {
   ordinal: number;
   storedPath?: string | null;
   sha256?: string | null;
+  contentStatus?: "available" | "retention_expired" | null;
 }
 
 export interface IndexedAttachment extends StoredAttachment {

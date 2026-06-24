@@ -1,10 +1,21 @@
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import type { DurableObjectStateLike, RunnerStateRecord } from "./types.js";
+import {
+  readWorkspaceSnapshotOrphanCandidateNextAlarmAt,
+} from "./workspace-snapshot-sessions.js";
 
 export class RunnerAlarmCoordinator {
   constructor(private readonly state: DurableObjectStateLike) {}
 
-  async sync(_record: RunnerStateRecord): Promise<void> {
+  async sync(record: RunnerStateRecord): Promise<void> {
+    const nextOrphanCleanupAt = await readWorkspaceSnapshotOrphanCandidateNextAlarmAt({
+      state: this.state,
+      userId: record.userId,
+    });
+    if (nextOrphanCleanupAt !== null) {
+      await this.state.storage.setAlarm(nextOrphanCleanupAt);
+      return;
+    }
     await this.clearAlarm();
   }
 

@@ -49,6 +49,7 @@ import {
 } from "./runner-state-store.js";
 import type {
   DurableObjectStateLike,
+  RunnerRuntimeProcessingMode,
   RunnerStateRecord,
 } from "./types.js";
 import {
@@ -79,6 +80,7 @@ type FreshRuntimeStartPreparation =
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
     orchestrationAttemptId: input.orchestrationAttemptId,
+    ...(input.processingMode ? { processingMode: input.processingMode } : {}),
     userId: input.userId,
   };
 }
@@ -178,10 +180,55 @@ export class RuntimeProcessingController {
       });
     }
 
+    const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    if (activeFence.processingMode !== requestedProcessingMode) {
+      const activeRuntimeState =
+        await this.readActiveRuntimeFenceWithoutWake({
+          activeFence,
+          commandBudget: input.commandBudget,
+          record,
+        });
+      if (activeRuntimeState === "inactive") {
+        return await this.replaceStartRequiredRuntimeFence({
+          activeFence,
+          commandBudget: input.commandBudget,
+          input: input.input,
+          record,
+          runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+        });
+      }
+
+      await this.syncRunnerAlarm(record);
+      return createRuntimeProcessingRetryLater({
+        reason: "container_busy",
+        userId: input.input.userId,
+      });
+    }
+
+    if (activeFence.processingMode === "inbox_media_retention") {
+      const activeRuntimeState =
+        await this.readActiveRuntimeFenceWithoutWake({
+          activeFence,
+          commandBudget: input.commandBudget,
+          record,
+        });
+      if (activeRuntimeState !== "inactive") {
+        await this.syncRunnerAlarm(record);
+        return {
+          action: "already_running",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt:
+            this.computeRuntimeProcessingOwnerRecheckAt(),
+          runtimeAttemptId: activeFence.attemptId,
+        };
+      }
+    }
+
     const containerResult = await ensureActiveRuntimeProcessing({
       activeRuntime: {
         attemptId: activeFence.attemptId,
         leaseGeneration: String(activeFence.generation),
+        processingMode: activeFence.processingMode,
         userId: record.userId,
       },
       commandBudget: input.commandBudget,
@@ -206,65 +253,11 @@ export class RuntimeProcessingController {
     }
 
     if (containerResult.kind === "start-required") {
-      if (this.shouldPreserveStartingWriteFence(activeFence)) {
-        await this.syncRunnerAlarm(record);
-        return createRuntimeProcessingRetryLater({
-          reason: "container_rpc_timeout",
-          userId: input.input.userId,
-        });
-      }
-
-      const recoveredCompletion =
-        await this.input.invocationService.recoverAcceptedRuntimeCompletionAfterTransportFailure({
-          executionInput: toRuntimeInvocationInput(input.input),
-          token: {
-            attemptId: activeFence.attemptId,
-            expiresAt: activeFence.expiresAt,
-            generation: String(activeFence.generation),
-            kind: activeFence.kind,
-            leaseGeneration: String(activeFence.generation),
-            providerEgressToken: null,
-            runnerContainerName: activeFence.runnerContainerName,
-            startedAt: activeFence.startedAt,
-            userId: record.userId,
-            workspaceVersion: activeFence.workspaceVersion,
-          },
-          workspaceVersion: activeFence.workspaceVersion,
-        });
-      if (recoveredCompletion.kind === "completed") {
-        return {
-          action: "already_running",
-          kind: "runtime_processing_accepted",
-          recommendedRecheckAt:
-            this.computeRuntimeProcessingOwnerRecheckAt(),
-          runtimeAttemptId: activeFence.attemptId,
-        };
-      }
-      if (recoveredCompletion.kind === "unknown") {
-        await this.syncRunnerAlarm(record);
-        return createRuntimeProcessingRetryLater({
-          reason: "container_rpc_error",
-          userId: input.input.userId,
-        });
-      }
-
-      const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
-        attemptId: activeFence.attemptId,
-        finishedAt: new Date().toISOString(),
-        generation: String(activeFence.generation),
-        userId: record.userId,
-      });
-      await this.syncRunnerAlarm(cleared.record);
-      if (!cleared.cleared) {
-        return createRuntimeProcessingRetryLater({
-          reason: "stale_fence_replacement_race",
-          userId: input.input.userId,
-        });
-      }
-      return await this.startRuntimeProcessing({
-        action: "replaced",
+      return await this.replaceStartRequiredRuntimeFence({
+        activeFence,
         commandBudget: input.commandBudget,
         input: input.input,
+        record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
@@ -274,6 +267,126 @@ export class RuntimeProcessingController {
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
     });
+  }
+
+  private async replaceStartRequiredRuntimeFence(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    commandBudget: RuntimeProcessingCommandBudget;
+    input: RuntimeProcessingInput;
+    record: RunnerStateRecord;
+    runtimeWakeStartedAt: number;
+  }): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const { activeFence, record } = input;
+    if (this.shouldPreserveStartingWriteFence(activeFence)) {
+      await this.syncRunnerAlarm(record);
+      return createRuntimeProcessingRetryLater({
+        reason: "container_rpc_timeout",
+        userId: input.input.userId,
+      });
+    }
+
+    const recoveredCompletion =
+      await this.input.invocationService.recoverAcceptedRuntimeCompletionAfterTransportFailure({
+        executionInput: toRuntimeInvocationInput(input.input),
+        token: {
+          attemptId: activeFence.attemptId,
+          expiresAt: activeFence.expiresAt,
+          generation: String(activeFence.generation),
+          kind: activeFence.kind,
+          leaseGeneration: String(activeFence.generation),
+          processingMode: activeFence.processingMode,
+          providerEgressToken: null,
+          runnerContainerName: activeFence.runnerContainerName,
+          startedAt: activeFence.startedAt,
+          userId: record.userId,
+          workspaceVersion: activeFence.workspaceVersion,
+        },
+        workspaceVersion: activeFence.workspaceVersion,
+      });
+    if (recoveredCompletion.kind === "completed") {
+      return {
+        action: "already_running",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt:
+          this.computeRuntimeProcessingOwnerRecheckAt(),
+        runtimeAttemptId: activeFence.attemptId,
+      };
+    }
+    if (recoveredCompletion.kind === "unknown") {
+      await this.syncRunnerAlarm(record);
+      return createRuntimeProcessingRetryLater({
+        reason: "container_rpc_error",
+        userId: input.input.userId,
+      });
+    }
+
+    const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
+      attemptId: activeFence.attemptId,
+      finishedAt: new Date().toISOString(),
+      generation: String(activeFence.generation),
+      userId: record.userId,
+    });
+    await this.syncRunnerAlarm(cleared.record);
+    if (!cleared.cleared) {
+      return createRuntimeProcessingRetryLater({
+        reason: "stale_fence_replacement_race",
+        userId: input.input.userId,
+      });
+    }
+    return await this.startRuntimeProcessing({
+      action: "replaced",
+      commandBudget: input.commandBudget,
+      input: input.input,
+      runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+    });
+  }
+
+  private async readActiveRuntimeFenceWithoutWake(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    commandBudget: RuntimeProcessingCommandBudget;
+    record: RunnerStateRecord;
+  }): Promise<"inactive" | "indeterminate" | "matching"> {
+    if (!this.input.runnerContainerNamespace) {
+      return "indeterminate";
+    }
+
+    const runnerContainerName = input.activeFence.runnerContainerName;
+    if (!runnerContainerName) {
+      return "indeterminate";
+    }
+
+    const container = this.input.runnerContainerNamespace.getByName(
+      runnerContainerName,
+    );
+    if (!container.readActiveRuntimeUserFence) {
+      return "indeterminate";
+    }
+
+    try {
+      const activeRuntime = await runRuntimeProcessingCommandStep({
+        budget: input.commandBudget,
+        operation: async () => await container.readActiveRuntimeUserFence!(),
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+      if (!activeRuntime.active) {
+        return "inactive";
+      }
+      return activeRuntime.attemptId === input.activeFence.attemptId
+        && activeRuntime.leaseGeneration === String(input.activeFence.generation)
+        && activeRuntime.userId === input.record.userId
+        ? "matching"
+        : "indeterminate";
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted runner active retention liveness check failed.",
+        phase: "scheduled",
+        userId: input.record.userId,
+      });
+      return "indeterminate";
+    }
   }
 
   private async startRuntimeProcessing(input: {
@@ -315,6 +428,7 @@ export class RuntimeProcessingController {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
+        processingMode: normalizeRuntimeProcessingMode(input.input.processingMode),
         runnerContainerName,
         userId: input.input.userId,
       });
@@ -661,4 +775,10 @@ export class RuntimeProcessingController {
       return null;
     }
   }
+}
+
+function normalizeRuntimeProcessingMode(
+  value: RuntimeProcessingInput["processingMode"],
+): RunnerRuntimeProcessingMode {
+  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
 }

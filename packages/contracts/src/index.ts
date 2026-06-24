@@ -1,6 +1,7 @@
 export * from "./bank-entities.ts";
 export * from "./constants.ts";
 export * from "./event-lifecycle.ts";
+export * from "./event-raw-references.ts";
 export * from "./examples.ts";
 export * from "./exa-research-scout.ts";
 export * from "./experiment-progress-card.ts";

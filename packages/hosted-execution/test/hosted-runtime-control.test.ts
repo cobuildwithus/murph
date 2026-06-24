@@ -263,6 +263,7 @@ describe("hosted runtime control contracts", () => {
     const workspaceState = {
       checkpointedAt: "2026-04-27T00:00:00.000Z",
       createdAt: "2026-04-27T00:00:00.000Z",
+      inboxMediaRetentionWakeAt: null,
       nextWakeAt: null,
       nextWakeReason: null,
       redactedStatus: null,
@@ -274,6 +275,19 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
+    );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      processingMode: "inbox_media_retention",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      processingMode: "inbox_media_retention",
+    });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      processingMode: "assistant",
+    })).toThrow(
+      "Hosted workspace invocation request processingMode is not supported.",
     );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
@@ -1148,9 +1162,11 @@ describe("hosted runtime control contracts", () => {
     }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     })).toEqual({
       checkpointed: true,
+      replacedSnapshotRef: null,
       workspace,
     });
     expect(parseHostedWorkspaceCheckpointResponse({
@@ -1222,11 +1238,13 @@ describe("hosted runtime control contracts", () => {
       attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:05:00.000Z",
       reason: "canonical_runtime_commit",
     })).toEqual({
       attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:05:00.000Z",
       reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
@@ -2020,6 +2038,7 @@ function createWorkspaceState() {
   return {
     checkpointedAt: "2026-04-26T00:00:04.000Z",
     createdAt: "2026-04-26T00:00:00.000Z",
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatus: {
