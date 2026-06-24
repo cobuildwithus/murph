@@ -255,6 +255,10 @@ type StoredWriteAction =
       effect?: "delete";
       existedBefore?: boolean;
       backupRelativePath?: string;
+      // Opt-in for delete paths that are otherwise covered by the raw
+      // immutability policy (e.g. raw/inbox/... privacy retention sweeps).
+      // Persisted in the operation record so resume keeps the same allowance.
+      allowRaw?: boolean;
       appliedAt?: string;
       rolledBackAt?: string;
     };
@@ -1685,6 +1689,7 @@ export class WriteBatch {
     targetRelativePath: string,
     options: {
       allowAppendOnlyJsonl?: boolean;
+      allowRaw?: boolean;
     } = {},
   ): Promise<string> {
     this.assertMutable();
@@ -1692,15 +1697,18 @@ export class WriteBatch {
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
       kind: "delete",
       allowAppendOnlyJsonl: options.allowAppendOnlyJsonl,
+      allowRaw: options.allowRaw,
       messages: {
         appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
-        rawDisallowed: "Use stageRawCopy for raw artifacts.",
+        rawDisallowed:
+          "Raw files are immutable; opt in with allowRaw for retention/privacy deletes.",
       },
     });
     this.record.actions.push({
       kind: "delete",
       state: "staged",
       targetRelativePath: normalizedTarget,
+      allowRaw: options.allowRaw ?? false,
     });
     await this.persist();
     return normalizedTarget;
@@ -2567,6 +2575,7 @@ export class WriteBatch {
       prepareTarget: async () =>
         await prepareVerifiedDeleteTarget(this.vaultRoot, action.targetRelativePath, {
           kind: "delete",
+          allowRaw: action.allowRaw,
         }),
     });
   }

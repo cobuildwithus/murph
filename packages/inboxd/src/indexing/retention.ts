@@ -330,8 +330,15 @@ export async function runInboxMediaRetention(
         }
 
         const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
-        if (records.length > 0) {
+        if (records.length > 0 || storedPathsToDelete.length > 0) {
           throwIfRetentionAborted(input.signal);
+          // Tombstone append and raw-file unlink must commit atomically.
+          // Previously the unlink ran after runCanonicalWrite committed, so a
+          // crash, deploy eviction, or unlink failure (EPERM/EIO) between the
+          // two left the ledger advertising the attachment as purged while
+          // the raw bytes remained on disk; rebuildRuntimeFromVault then
+          // projected the attachment as `retention_expired` with
+          // storedPath: null, hiding the orphan private data.
           await runCanonicalWrite({
             vaultRoot: input.vaultRoot,
             operationType: "inbox_media_retention",
@@ -344,12 +351,11 @@ export async function runInboxMediaRetention(
                   `${JSON.stringify(record)}\n`,
                 );
               }
+              for (const storedPath of storedPathsToDelete) {
+                await batch.stageDelete(storedPath, { allowRaw: true });
+              }
             },
           });
-        }
-
-        for (const storedPath of storedPathsToDelete) {
-          await deleteVaultFileIfPresent(input.vaultRoot, storedPath);
         }
 
         return {
@@ -727,27 +733,6 @@ async function statExistingVaultRegularFile(
   }
 
   return { kind: "ok" };
-}
-
-async function deleteVaultFileIfPresent(
-  vaultRoot: string,
-  relativePath: string,
-  signal?: AbortSignal | null,
-): Promise<void> {
-  throwIfRetentionAborted(signal);
-  const resolved = await resolveRetentionVaultPathOnDisk(vaultRoot, relativePath);
-  if (!resolved) {
-    return;
-  }
-  try {
-    await fs.unlink(resolved.absolutePath);
-  } catch (error) {
-    if (isErrnoException(error) && error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  throwIfRetentionAborted(signal);
 }
 
 async function resolveRetentionVaultPathOnDisk(

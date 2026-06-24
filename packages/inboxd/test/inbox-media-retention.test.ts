@@ -1672,6 +1672,67 @@ test("processCapture preserves retention-expired attachment state on dedupe repl
   }
 });
 
+test.skipIf(process.platform === "win32")(
+  "runInboxMediaRetention rolls back the tombstone when the raw unlink fails so the ledger never advertises non-deleted bytes",
+  async () => {
+    const vaultRoot = await makeTempDirectory(
+      "murph-inbox-media-retention-unlink-fail",
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+    const imageBytes = await createPngBytes();
+
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: "cap_retention_unlink_fail_media",
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WD",
+      storedAt: "2026-06-01T00:00:00.000Z",
+      input: buildOldImageCaptureInput({
+        externalId: "msg-unlink-fail",
+        imageBytes,
+        text: "unlink fail old media",
+        threadId: "thread-unlink-fail",
+      }),
+    });
+    const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
+    assert.ok(imagePath);
+
+    const attachmentDirectory = path.dirname(path.join(vaultRoot, imagePath));
+    const originalMode = (await fs.stat(attachmentDirectory)).mode;
+    await fs.chmod(attachmentDirectory, 0o555);
+
+    let threw = false;
+    try {
+      await runInboxMediaRetention({
+        now: "2026-07-05T00:00:00.000Z",
+        vaultRoot,
+      });
+    } catch {
+      threw = true;
+    } finally {
+      await fs.chmod(attachmentDirectory, originalMode);
+    }
+
+    assert.equal(threw, true);
+    // The raw bytes must still be on disk: the canonical operation failed at
+    // unlink time, so the tombstone append must roll back. Otherwise the
+    // ledger would advertise the attachment as `retention_expired` while the
+    // private bytes still exist on the volume / next workspace snapshot.
+    assert.equal(await fileExists(vaultRoot, imagePath), true);
+    let retentionRecords: unknown[] = [];
+    try {
+      retentionRecords = await readJsonlRecords({
+        vaultRoot,
+        relativePath: buildInboxAttachmentRetentionLedgerPath(
+          "2026-07-05T00:00:00.000Z",
+        ),
+      });
+    } catch {
+      retentionRecords = [];
+    }
+    assert.equal(retentionRecords.length, 0);
+  },
+);
+
 function buildOldImageCaptureInput(input: {
   externalId: string;
   imageBytes: Uint8Array;
