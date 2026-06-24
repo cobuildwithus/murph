@@ -97,6 +97,11 @@ function renderInvite(input: {
   }
 
   const inviter = view.groupDisplayName ?? "Your family plan owner";
+  const webBindingLabel = view.isEmailBound && view.isPhoneBound
+    ? "phone number or email address"
+    : view.isEmailBound
+      ? "email address"
+      : "phone number";
 
   return (
     <div className="flex flex-col gap-6">
@@ -111,14 +116,14 @@ function renderInvite(input: {
         </ul>
       </div>
 
-      {view.isPhoneBound ? (
+      {view.webAcceptable ? (
         input.authenticated ? (
           <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
         ) : (
           <div className="flex flex-col gap-2">
             <FamilyInviteSignInButton />
             <p className="text-xs leading-5 text-muted-foreground">
-              {"Sign in with the phone number this invite was sent to, and we'll bring you back here."}
+              {`Sign in with the ${webBindingLabel} this invite was sent to, and we'll bring you back here.`}
             </p>
           </div>
         )

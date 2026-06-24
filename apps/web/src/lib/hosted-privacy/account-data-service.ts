@@ -104,28 +104,24 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_account_group",
     label: "Hosted Family plan group ownership",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes Family plan groups owned by the member during account deletion. Export reports counts only and never exposes other family members' private account data.",
   },
   {
     slug: "prisma.hosted_account_group_membership",
     label: "Hosted Family plan memberships",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes the member's Family plan memberships and memberships in groups they own. Export reports counts only so sponsorship does not disclose relatives' health or message data.",
   },
   {
     slug: "prisma.hosted_account_group_invite",
     label: "Hosted Family plan invitations",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes Family invitations sent, accepted, or owned through the member's Family group. Export reports counts only and omits invite codes and private target contact values.",
   },
   {
     slug: "prisma.hosted_account_group_billing_ref",
     label: "Hosted Family plan Stripe references",
     deletion: "local-reference-delete",
-    export: "metadata-and-counts",
     note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
   },
   {
