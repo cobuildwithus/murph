@@ -52,38 +52,6 @@ The Settings vault export does not include:
 - Hosted R2 object keys for workspace snapshots, browser-vault replicas, artifacts, runner secrets, or raw email.
 - API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
 
-The direct account metadata export route calls `buildHostedDataExport`, which returns schema `murph.hosted-data-export.v1`.
-
-That account metadata export includes:
-
-- Hosted member core fields plus decrypted user-facing identity, routing, billing reference, and email authorization fields when available.
-- Mailbox items with envelope metadata, payload byte counts, and payload presence flags, plus lane counters and Linq daily state.
-- Hosted invites without active invite codes.
-- Consent events and grants.
-- Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
-- Hosted workspace metadata with object keys and bundle hashes replaced by presence flags.
-- Hosted computer-use profile, run, and handoff metadata with Kernel profile names, session ids, live-view URLs, handoff token hashes, Managed Auth connection ids, and stored credentials omitted.
-- Assistant-captured product feedback rows with safe kind/summary metadata and optional published changelog item ids, while omitting internal feedback ids.
-- AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
-- AI usage period snapshots with allowance totals, period windows, and billing-state metadata needed to explain current quota state.
-- Device connect intents as metadata/counts only; connect assertion, nonce, and routing internals stay omitted.
-- Per-store row limits and truncation metadata. Each multi-row export query returns at most 250 rows for this MVP.
-
-The account metadata export explicitly omits:
-
-- OAuth access and refresh tokens.
-- Token hashes.
-- Privy, Stripe, contact, Telegram, device, and other blind-index lookup keys.
-- CSRF, browser assertion, internal request, and OAuth state nonce tables.
-- Active invite codes.
-- Active signup phone-code attempt IDs.
-- Internal row, correlation, session, trace, and route identifiers when a presence flag is sufficient.
-- Arbitrary decoded mailbox payload bodies.
-- Hosted workspace snapshot/browser-replica object keys and bundle hashes.
-- Hosted computer-use Kernel profile names, Kernel session ids, live-view URLs, and handoff token hashes.
-- API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
-- Hosted runtime log rows, diagnostics, and runtime-log counts.
-
 ## Deletion workflow
 
 `deleteHostedAccountData` performs deletion in this order:

@@ -121,6 +121,9 @@ beforeEach(() => {
     client: {
       replica: createBrowserVaultReplicaForTest(),
     },
+    deviceSyncImportPending: false,
+    freshness: "fresh",
+    refreshPending: false,
     replicaRef: {
       dataVersion: "d".repeat(64),
     },
@@ -254,6 +257,60 @@ describe("HostedDataPrivacySettings", () => {
     assert.equal(downloadedBlobs.length, 1);
     await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"schema\": \"murph.browser-vault-replica\"");
     await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"entity-title\"");
+  });
+
+  test("does not download the vault when the replica is stale or a refresh is still pending", async () => {
+    mockHostedVaultExportFlowState();
+    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
+      client: {
+        replica: createBrowserVaultReplicaForTest(),
+      },
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+      replicaRef: {
+        dataVersion: "d".repeat(64),
+      },
+      state: "ready",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const createObjectURL = vi.fn(() => "blob:vault-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window, "URL", {
+      configurable: true,
+      value: {
+        createObjectURL,
+        revokeObjectURL,
+      },
+    });
+    const clickDownloadLink = vi.fn();
+    Object.defineProperty(window.HTMLElement.prototype, "click", {
+      configurable: true,
+      value: clickDownloadLink,
+    });
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Download vault JSON", window);
+
+    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(clickDownloadLink).not.toHaveBeenCalled();
   });
 
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {

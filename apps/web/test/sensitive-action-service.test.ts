@@ -315,8 +315,8 @@ function createPrismaFake() {
   const rows = new Map<string, Row>();
   const prisma = {
     __rows: rows,
-    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) {
-      return callback(prisma);
+    async $transaction<T>(callback: (tx: PrismaClient) => Promise<T>) {
+      return callback(prisma as unknown as PrismaClient);
     },
     hostedSensitiveActionChallenge: {
       async create({ data }: { data: Row }) {

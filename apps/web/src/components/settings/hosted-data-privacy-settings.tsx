@@ -134,6 +134,16 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         throw new Error("Your vault is not ready to export yet.");
       }
 
+      if (
+        result.freshness !== "fresh"
+        || result.refreshPending
+        || result.deviceSyncImportPending
+      ) {
+        throw new Error(
+          "Your vault is still being prepared. Try the export again in a moment.",
+        );
+      }
+
       const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
         type: VAULT_EXPORT_MIME_TYPE,
       });
