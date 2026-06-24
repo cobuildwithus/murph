@@ -82,6 +82,7 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   expect(progress?.instructions).toContain('experiment progress sauna-rhr')
   expect(progress?.instructions).toContain('experiment progress-card sauna-rhr')
   expect(progress?.instructions).toContain('murph.attach_response_media')
+  expect(progress?.instructions).toContain('opts out of scheduled summaries')
   expect(progress?.instructions).toContain('Sparse or unchanged metric data is not a reason to skip')
 
   const finalResults = seeds.find((seed) => seed.slug === 'experiment-final-results-sauna-rhr')
@@ -94,6 +95,7 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   expect(finalResults?.tags).toEqual(expect.arrayContaining(['final-results', 'progress-card']))
   expect(finalResults?.instructions).toContain('experiment outcome write sauna-rhr')
   expect(finalResults?.instructions).toContain('experiment progress-card sauna-rhr')
+  expect(finalResults?.instructions).toContain('opts out of scheduled summaries')
   expect(finalResults?.instructions).toContain('direct congratulations')
   expect(finalResults?.instructions).toContain('An inconclusive or sparse result is still a result')
   expect(finalResults?.instructions).toContain('voice memo may replace it')
