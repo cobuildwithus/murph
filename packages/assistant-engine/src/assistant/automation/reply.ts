@@ -1111,14 +1111,12 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
-      // Pick the anchor from the newest grouped input that carries a native
-      // reply, not from the bookkeeping primary (which is the oldest item).
-      // Otherwise a later native reply to M1 in the same group is ignored
-      // and the assistant interprets the user against the wrong assistant
-      // message.
-      replyToMessageId: readPromptInputsCrossSessionReplyToMessageId(
-        promptInputs,
-      ),
+      // Anchor is the newest grouped input that carries a native reply.
+      // The exact-match branch then uses the anchor's own timestamps for its
+      // causal cutoff, so a delivery sent after the oldest grouped input but
+      // before the anchored input remains eligible. Without this the oldest
+      // input's cutoff would slice the anchored delivery out of the search.
+      replyAnchor: readPromptInputsCrossSessionReplyAnchor(promptInputs),
       session: existingSession,
       vault: input.vault,
     })
@@ -1231,13 +1229,24 @@ function createAssistantAutoReplyPrimaryInput(
   }
 }
 
-function readPromptInputsCrossSessionReplyToMessageId(
+interface AssistantAutoReplyCrossSessionReplyAnchor {
+  occurredAt: string
+  receivedAt: string | null
+  replyToMessageId: string
+}
+
+function readPromptInputsCrossSessionReplyAnchor(
   inputs: readonly AssistantAutoReplyPromptInput[],
-): string | null {
+): AssistantAutoReplyCrossSessionReplyAnchor | null {
   for (let index = inputs.length - 1; index >= 0; index -= 1) {
-    const metadata = inputs[index]?.sourceMetadata
+    const input = inputs[index]
+    const metadata = input?.sourceMetadata
     if (metadata?.kind === 'linq' && metadata.replyToMessageId) {
-      return metadata.replyToMessageId
+      return {
+        occurredAt: input.occurredAt,
+        receivedAt: input.receivedAt,
+        replyToMessageId: metadata.replyToMessageId,
+      }
     }
   }
   return null
@@ -3263,19 +3272,21 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   consumedIntentIds: ReadonlySet<string>
   deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
-  replyToMessageId: string | null
+  replyAnchor: AssistantAutoReplyCrossSessionReplyAnchor | null
   session: AssistantSession | null
   vault: string
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
-  const causalUpperBoundMs =
-    resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input.input)
+  // The causal cutoff is anchored to whichever input is being interpreted:
+  // the anchored reply when present, otherwise the bookkeeping primary.
+  const causalUpperBoundMs = resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
+    input.replyAnchor ?? input.input,
+  )
   if (!channel || !deliveryTarget || causalUpperBoundMs === null) {
     return null
   }
 
-  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
   const eligible = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
@@ -3299,7 +3310,8 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // Explicit native reply: the user is anchoring to a specific prior message
   // identified by provider message id. An earlier consumed delivery that
   // moved the watermark past it must not hide that explicit anchor.
-  if (replyToMessageId) {
+  if (input.replyAnchor) {
+    const replyToMessageId = input.replyAnchor.replyToMessageId
     return (
       eligible.find((delivery) =>
         delivery.providerMessageIds.includes(replyToMessageId),
@@ -3337,9 +3349,10 @@ function readAssistantAutoReplyConsumedCrossSessionIntentIds(
   return consumed
 }
 
-function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
-  input: AssistantAutoReplyPrimaryInput,
-): number | null {
+function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
+  occurredAt: string
+  receivedAt: string | null
+}): number | null {
   const occurredAtMs = Date.parse(input.occurredAt)
   if (!Number.isFinite(occurredAtMs)) {
     return null

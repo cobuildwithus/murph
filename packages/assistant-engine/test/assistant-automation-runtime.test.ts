@@ -921,6 +921,7 @@ function createReplyGroupItem(
   telegramMetadata: { mediaGroupId: string | null; messageId: string | null; replyContext: string | null } | null = null,
 ) {
   const inputCandidate = assistantInputCandidateFromInboxCapture(capture)
+  const metadata = inputCandidate.event.sourceMetadata
   return {
     inputCandidate,
     summary: {
@@ -933,6 +934,8 @@ function createReplyGroupItem(
       text: capture.text,
       attachmentCount: capture.attachmentCount,
       actorIsSelf: capture.actorIsSelf,
+      replyToMessageId:
+        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: capture.captureId,
     },
     telegramMetadata,
@@ -943,6 +946,7 @@ function createCapturelessReplyGroupItem(
   candidate: AssistantInputCandidate,
 ) {
   const conversation = candidate.event.conversation
+  const metadata = candidate.event.sourceMetadata
   return {
     inputCandidate: candidate,
     summary: {
@@ -962,6 +966,8 @@ function createCapturelessReplyGroupItem(
       receivedAt: candidate.event.receivedAt,
       source: candidate.event.source,
       text: candidate.event.transcriptText ?? candidate.event.text,
+      replyToMessageId:
+        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: candidate.event.inputId,
     },
     telegramMetadata: null,

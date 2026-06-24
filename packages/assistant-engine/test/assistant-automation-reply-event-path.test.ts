@@ -1020,6 +1020,91 @@ describe('assistant auto-reply event-first path', () => {
     }))
   })
 
+  it('uses the anchored input timestamps to compute the causal cutoff so an anchored delivery sent after the oldest grouped input is still eligible', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      // Sent at 12:00:45 — after the oldest grouped input at 12:00:00, before
+      // the anchored input at 12:01:00. The cutoff must come from the anchor.
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-anchored-mid-window',
+        message: 'anchored reminder sent between grouped inputs',
+        providerMessageId: 'linq-msg-anchor',
+        sentAt: '2026-04-08T12:00:45.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const oldestUnanchored = createAssistantInputCandidate({
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-04-08T12:00:00.000Z',
+      receivedAt: '2026-04-08T12:00:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-anchor',
+        service: null,
+      },
+      text: 'one moment',
+      threadIsDirect: true,
+    })
+    const anchored = createAssistantInputCandidate({
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-04-08T12:01:00.000Z',
+      receivedAt: '2026-04-08T12:01:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-anchor',
+        service: null,
+      },
+      text: 'yes do that',
+      threadIsDirect: true,
+    })
+    const context = createAssistantAutoReplyGroupContext([
+      {
+        inputCandidate: oldestUnanchored,
+        summary: assistantAutomationInputSummaryFromCandidate(oldestUnanchored),
+        telegramMetadata: null,
+      },
+      {
+        inputCandidate: anchored,
+        summary: assistantAutomationInputSummaryFromCandidate(anchored),
+        telegramMetadata: null,
+      },
+    ])
+    if (!context) {
+      throw new Error('expected auto-reply group context')
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain(
+      'anchored reminder sent between grouped inputs',
+    )
+  })
+
   it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
