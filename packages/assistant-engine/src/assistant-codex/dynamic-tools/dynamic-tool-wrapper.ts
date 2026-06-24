@@ -46,9 +46,11 @@ export function wrapVoiceMemoToolResult(
   }
 }
 
-export function parseDynamicToolArguments<T extends z.ZodObject<z.ZodRawShape>>(
+export function parseDynamicToolArguments<T extends z.ZodType<unknown>>(
   input: {
     schema: T
+    schemaName?: string
+    schemaRootKeys: readonly string[]
     toolName: string
     value: unknown
   },
@@ -63,11 +65,11 @@ export function parseDynamicToolArguments<T extends z.ZodObject<z.ZodRawShape>>(
         error: parsed.error,
         rawInput: input.value,
         requestedToolName: input.toolName,
-        schemaName: `${input.toolName}.input`,
-        schemaRootKeys: Object.keys(input.schema.shape),
+        schemaName: input.schemaName ?? `${input.toolName}.input`,
+        schemaRootKeys: input.schemaRootKeys,
         toolName: input.toolName,
       }),
     }
   }
-  return { args: parsed.data, ok: true }
+  return { args: parsed.data as z.infer<T>, ok: true }
 }

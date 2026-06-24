@@ -13,7 +13,7 @@ import {
   parseDynamicToolArguments,
   wrapVoiceMemoToolResult,
   type DynamicToolResult,
-} from './voice-memo-tool-wrapper.js'
+} from './dynamic-tool-wrapper.js'
 
 export const MURPH_GENERATE_SONG_TOOL = {
   namespace: 'murph',
@@ -59,6 +59,7 @@ export function parseGenerateSongArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateSongArgumentsSchema,
+    schemaRootKeys: Object.keys(generateSongArgumentsSchema.shape),
     toolName: 'murph.generate_song',
     value,
   })

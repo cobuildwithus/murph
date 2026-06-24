@@ -718,14 +718,17 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
 ): HostedAssistantDeliveryVoiceMemoMedia {
   requireExactObjectKeys(
     record,
-    ["filename", "kind", "transcript", "transport"],
+    {
+      required: ["filename", "kind", "transport"],
+      optional: ["transcript"],
+    },
     label,
   );
 
   return {
     filename: requireBoundedTrimmedString(record.filename, `${label}.filename`, 255),
     kind: "voice_memo",
-    transcript: record.transcript === null
+    transcript: record.transcript === undefined || record.transcript === null
       ? null
       : requireBoundedTrimmedString(
           record.transcript,
@@ -746,7 +749,7 @@ function parseHostedAssistantDeliveryVoiceMemoTransport(
   const record = requireObject(value, label);
   const kind = requireString(record.kind, `${label}.kind`);
   if (kind === "linq_attachment") {
-    requireExactObjectKeys(record, ["attachmentId", "kind"], label);
+    requireExactObjectKeys(record, { required: ["attachmentId", "kind"] }, label);
     return {
       attachmentId: requireBoundedTrimmedString(
         record.attachmentId,
@@ -757,7 +760,7 @@ function parseHostedAssistantDeliveryVoiceMemoTransport(
     };
   }
   if (kind === "telegram_generation") {
-    requireExactObjectKeys(record, ["generation", "kind"], label);
+    requireExactObjectKeys(record, { required: ["generation", "kind"] }, label);
     return {
       generation: parseHostedAssistantDeliveryVoiceMemoGeneration(
         record.generation,
@@ -779,7 +782,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
   if (kind === "elevenlabs_speech") {
     requireExactObjectKeys(
       record,
-      ["kind", "modelId", "outputFormat", "text", "voiceId"],
+      { required: ["kind", "modelId", "outputFormat", "text", "voiceId"] },
       label,
     );
     if (record.outputFormat !== "mp3_44100_128") {
@@ -796,14 +799,16 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
   if (kind === "elevenlabs_music") {
     requireExactObjectKeys(
       record,
-      [
-        "durationMs",
-        "forceInstrumental",
-        "kind",
-        "modelId",
-        "outputFormat",
-        "prompt",
-      ],
+      {
+        required: [
+          "durationMs",
+          "forceInstrumental",
+          "kind",
+          "modelId",
+          "outputFormat",
+          "prompt",
+        ],
+      },
       label,
     );
     if (record.modelId !== "music_v2") {
@@ -835,20 +840,26 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
 
 function requireExactObjectKeys(
   record: Record<string, unknown>,
-  requiredKeys: readonly string[],
+  spec: { required: readonly string[]; optional?: readonly string[] },
   label: string,
 ): void {
-  const required = new Set(requiredKeys);
+  const required = new Set(spec.required);
+  const allowed = new Set<string>([...spec.required, ...(spec.optional ?? [])]);
   const presentKeys = Object.keys(record);
   const present = new Set(presentKeys);
-  const unknown = presentKeys.filter((key) => !required.has(key)).sort();
-  const missing = requiredKeys.filter((key) => !present.has(key)).sort();
+  const unknown = presentKeys.filter((key) => !allowed.has(key)).sort();
+  const missing = spec.required.filter((key) => !present.has(key)).sort();
+  if (missing.length === 0 && unknown.length === 0) {
+    return;
+  }
+  const parts: string[] = [];
   if (missing.length > 0) {
-    throw new TypeError(`${label} is missing required fields: ${missing.join(", ")}.`);
+    parts.push(`missing required fields: ${missing.join(", ")}`);
   }
   if (unknown.length > 0) {
-    throw new TypeError(`${label} contains unsupported fields: ${unknown.join(", ")}.`);
+    parts.push(`unsupported fields: ${unknown.join(", ")}`);
   }
+  throw new TypeError(`${label} has ${parts.join("; ")}.`);
 }
 
 function requireBoundedTrimmedString(

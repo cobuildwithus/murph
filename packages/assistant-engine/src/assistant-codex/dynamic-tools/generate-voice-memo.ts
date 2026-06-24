@@ -13,7 +13,7 @@ import {
   parseDynamicToolArguments,
   wrapVoiceMemoToolResult,
   type DynamicToolResult,
-} from './voice-memo-tool-wrapper.js'
+} from './dynamic-tool-wrapper.js'
 
 export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   namespace: 'murph',
@@ -57,6 +57,7 @@ export function parseGenerateVoiceMemoArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateVoiceMemoArgumentsSchema,
+    schemaRootKeys: Object.keys(generateVoiceMemoArgumentsSchema.shape),
     toolName: 'murph.generate_voice_memo',
     value,
   })

@@ -201,7 +201,29 @@ describe("hosted assistant delivery contracts", () => {
     ).toThrow(/transport.kind must be linq_attachment or telegram_generation/);
   });
 
-  it("rejects assistant-delivery voice memo media with missing required fields", () => {
+  it("accepts assistant-delivery voice memo media without a transcript (migration-safe)", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      media: [{
+        filename: "memo.mp3",
+        kind: "voice_memo",
+        transport: {
+          attachmentId: "attachment_voice_1",
+          kind: "linq_attachment",
+        },
+      } as unknown as HostedAssistantDeliveryMedia],
+      message: "",
+    });
+
+    expect(
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload,
+      }).payload.media[0],
+    ).toMatchObject({ kind: "voice_memo", transcript: null });
+  });
+
+  it("rejects assistant-delivery voice memo media that is missing transport (the real required field)", () => {
     expect(() =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
@@ -210,14 +232,11 @@ describe("hosted assistant delivery contracts", () => {
           media: [{
             filename: "memo.mp3",
             kind: "voice_memo",
-            transport: {
-              attachmentId: "attachment_voice_1",
-              kind: "linq_attachment",
-            },
+            transcript: null,
           } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
-    ).toThrow(/is missing required fields: transcript/);
+    ).toThrow(/missing required fields: transport/);
   });
 
   it("rejects assistant-delivery voice memo media with extra top-level fields", () => {
@@ -238,7 +257,7 @@ describe("hosted assistant delivery contracts", () => {
           } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
-    ).toThrow(/contains unsupported fields/);
+    ).toThrow(/unsupported fields: sourceMetadata/);
   });
 
   it("parses media-only assistant delivery with an empty message", () => {

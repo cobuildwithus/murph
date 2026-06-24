@@ -265,7 +265,12 @@ function validateElevenLabsApiKeyPrecondition(
 function voiceMemoGenerationTranscript(
   generation: AssistantVoiceMemoGeneration,
 ): string | null {
-  return generation.kind === 'elevenlabs_speech' ? generation.text : null
+  switch (generation.kind) {
+    case 'elevenlabs_speech':
+      return generation.text
+    case 'elevenlabs_music':
+      return null
+  }
 }
 
 function unavailableVoiceMemoResult(
@@ -425,5 +430,10 @@ function isAbortError(error: unknown): boolean {
 function voiceMemoGenerationLabel(
   generation: AssistantVoiceMemoGeneration,
 ): VoiceMemoGenerationLabel {
-  return generation.kind === 'elevenlabs_music' ? 'song' : 'voice memo'
+  switch (generation.kind) {
+    case 'elevenlabs_speech':
+      return 'voice memo'
+    case 'elevenlabs_music':
+      return 'song'
+  }
 }

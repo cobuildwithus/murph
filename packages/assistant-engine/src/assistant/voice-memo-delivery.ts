@@ -28,26 +28,14 @@ export function resolveAssistantVoiceMemoDeliveryChannel(input: {
     sharedPlan: input.sharedPlan,
   })
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
-  if (channel === 'linq') {
-    const bindingTarget =
-      deliveryFields.bindingDelivery?.kind === 'thread'
-        ? normalizeNullableString(deliveryFields.bindingDelivery.target)
-        : null
-    const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
-    return bindingTarget !== null &&
-      (explicitTarget === null || explicitTarget === bindingTarget)
-      ? 'linq'
-      : null
+  if (channel !== 'linq' && channel !== 'telegram') {
+    return null
   }
-
-  if (channel === 'telegram') {
-    return (
-      normalizeNullableString(deliveryFields.explicitTarget) !== null ||
-      normalizeNullableString(deliveryFields.bindingDelivery?.target) !== null
-    )
-      ? 'telegram'
-      : null
-  }
-
-  return null
+  // For both channels, the deliver path accepts an explicit target OR a
+  // binding target (thread or participant). Mirror that here so we do not
+  // hide the tool for audiences delivery can actually reach.
+  const hasTarget =
+    normalizeNullableString(deliveryFields.explicitTarget) !== null ||
+    normalizeNullableString(deliveryFields.bindingDelivery?.target) !== null
+  return hasTarget ? channel : null
 }

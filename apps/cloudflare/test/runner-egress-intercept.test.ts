@@ -1246,6 +1246,189 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("injects ElevenLabs music credentials and records successful music usage", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith("https://api.elevenlabs.io/")) {
+        return new Response(new Uint8Array([0x49, 0x44, 0x33]), {
+          headers: {
+            "content-type": "audio/mpeg",
+            "request-id": "elevenlabs-music-req-123",
+          },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
+        body: JSON.stringify({
+          force_instrumental: true,
+          model_id: "music_v2",
+          music_length_ms: 45_000,
+          prompt: "Upbeat lo-fi piano motif",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = findFetchCall(fetchMock, "api.elevenlabs.io")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe(
+      "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+    );
+    expect(forwardedRequest.headers.get("xi-api-key")).toBe("elevenlabs-worker-secret");
+    expect(await forwardedRequest.clone().json()).toEqual({
+      force_instrumental: true,
+      model_id: "music_v2",
+      music_length_ms: 45_000,
+      prompt: "Upbeat lo-fi piano motif",
+    });
+
+    await Promise.all(waitUntilPromises);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      apiKeyEnv: "ELEVENLABS_API_KEY",
+      baseUrl: "https://api.elevenlabs.io",
+      credentialSource: "platform",
+      featureKey: "music-generation",
+      memberId: "member_123",
+      provider: "elevenlabs",
+      providerName: "ElevenLabs",
+      providerRequestId: "elevenlabs-music-req-123",
+      rawUsageJson: { durationMs: 45_000 },
+      requestedModel: "music_v2",
+      surface: "hosted-runner",
+      triggerKind: "generate-song",
+      usageExtractionSourcePath: "elevenlabs.music.compose",
+      usageExtractionVersion: "elevenlabs-music-v1",
+    });
+    expect(usageBody.usage.turnId).toMatch(/^turn_elevenlabs_music_[0-9a-f]{32}$/u);
+  });
+
+  it("rejects ElevenLabs music egress with the wrong output_format or model", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const invalidRequests = [
+      // missing output_format
+      new Request("https://api.elevenlabs.io/v1/music", {
+        body: JSON.stringify({
+          force_instrumental: false,
+          model_id: "music_v2",
+          music_length_ms: 30_000,
+          prompt: "x",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      // wrong output_format
+      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          force_instrumental: false,
+          model_id: "music_v2",
+          music_length_ms: 30_000,
+          prompt: "x",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      // unsupported model
+      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
+        body: JSON.stringify({
+          force_instrumental: false,
+          model_id: "music_v1",
+          music_length_ms: 30_000,
+          prompt: "x",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      // duration out of range
+      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
+        body: JSON.stringify({
+          force_instrumental: false,
+          model_id: "music_v2",
+          music_length_ms: 1_500,
+          prompt: "x",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      // missing force_instrumental field (exact-keys check)
+      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
+        body: JSON.stringify({
+          model_id: "music_v2",
+          music_length_ms: 30_000,
+          prompt: "x",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+    ];
+
+    for (const request of invalidRequests) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { containerId: "member_123--v-version_1" },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("injects OpenAI authorization from a provider egress token without authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

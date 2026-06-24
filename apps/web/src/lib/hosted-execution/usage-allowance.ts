@@ -266,11 +266,13 @@ export function priceHostedAiUsageForAllowance(
     });
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsMusicRecord(record)) {
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
     return priceHostedAiUsageElevenLabsMusicForAllowance({
       counted,
       credentialSource,
+      match: musicMatch,
       record,
     });
   }
@@ -380,7 +382,7 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
     return tokenPricingBasis;
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsMusicRecord(record)) {
+  if (matchHostedAiUsageElevenLabsMusicRecord(record) !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
     return tokenPricingBasis;
   }
@@ -1549,34 +1551,48 @@ function normalizeHostedAiUsageAllowanceElevenLabsTtsModel(
   return normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(value);
 }
 
-function isHostedAiUsageAllowanceElevenLabsMusicRecord(
+interface HostedAiUsageAllowanceElevenLabsMusicMatch {
+  durationMs: bigint;
+  modelResolution: {
+    model: HostedAiUsageAllowanceElevenLabsMusicPricedModel | null;
+    source: HostedAiUsageAllowancePricingModelSource | null;
+  };
+}
+
+function matchHostedAiUsageElevenLabsMusicRecord(
   record: AssistantUsageRecord,
-): boolean {
-  return record.provider === "elevenlabs"
-    && record.featureKey === "music-generation"
-    && record.usageExtractionSourcePath === "elevenlabs.music.compose"
-    && record.cacheWriteTokens === null
-    && record.cachedInputTokens === null
-    && record.inputTokens === null
-    && record.outputTokens === null
-    && record.reasoningTokens === null
-    && record.totalTokens === null
-    && readHostedAiUsageDurationMs(record) !== null
-    && resolveHostedAiUsageAllowanceElevenLabsMusicModel(record).model !== null;
+): HostedAiUsageAllowanceElevenLabsMusicMatch | null {
+  if (
+    record.provider !== "elevenlabs"
+    || record.featureKey !== "music-generation"
+    || record.usageExtractionSourcePath !== "elevenlabs.music.compose"
+    || record.cacheWriteTokens !== null
+    || record.cachedInputTokens !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.totalTokens !== null
+  ) {
+    return null;
+  }
+  const durationMs = readHostedAiUsageDurationMs(record);
+  if (durationMs === null) {
+    return null;
+  }
+  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsMusicModel(record);
+  if (modelResolution.model === null) {
+    return null;
+  }
+  return { durationMs, modelResolution };
 }
 
 function priceHostedAiUsageElevenLabsMusicForAllowance(input: {
   counted: boolean;
   credentialSource: AssistantUsageCredentialSource;
+  match: HostedAiUsageAllowanceElevenLabsMusicMatch;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const durationMs = readHostedAiUsageDurationMs(input.record) ?? 0n;
-  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsMusicModel(input.record);
-  if (input.counted && modelResolution.model === null) {
-    throw new TypeError(
-      "Hosted AI usage allowance ElevenLabs Music pricing is missing for the model.",
-    );
-  }
+  const { durationMs, modelResolution } = input.match;
   const costUsdMicros = input.counted
     ? priceAudioDurationUsdMicros(
         durationMs,

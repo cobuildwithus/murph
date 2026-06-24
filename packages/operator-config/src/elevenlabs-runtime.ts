@@ -222,6 +222,7 @@ async function requestElevenLabsAudio(input: {
         'ELEVENLABS_API_REQUEST_FAILED',
         `ElevenLabs ${input.operation} request failed with HTTP ${response.status}.`,
         {
+          elapsedMs: Date.now() - startedAtMs,
           failureStage: 'http',
           operation: input.operation,
           provider: 'elevenlabs',
