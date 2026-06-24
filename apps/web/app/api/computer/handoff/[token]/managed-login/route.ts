@@ -25,12 +25,6 @@ export async function GET(
       case "redirect":
         return noStoreRedirect(result.url);
       case "completed":
-        if (result.authenticated !== null) {
-          handoffUrl.searchParams.set(
-            "managed",
-            result.authenticated ? "authenticated" : "failed",
-          );
-        }
         return noStoreRedirect(handoffUrl);
       case "checkpointing":
         handoffUrl.searchParams.set("managed", "waiting");

@@ -77,26 +77,21 @@ export default async function ComputerHandoffPage({
     state.kind === "expired"
   ) {
     const isCompleted = state.kind === "completed";
-    const managedFailed = isCompleted && managedState === "failed";
-    const canSendDoneReply = isCompleted && !managedFailed;
-    const Icon = isCompleted && !managedFailed ? CheckCircle2 : Clock3;
-    const title = managedFailed
-      ? "Sign-in needs another step"
-      : isCompleted
-        ? "All set"
-        : state.kind === "checkpointing"
-          ? "Saving your progress"
-          : "This link expired";
-    const iconClassName = isCompleted && !managedFailed
+    const canSendDoneReply = isCompleted;
+    const Icon = isCompleted ? CheckCircle2 : Clock3;
+    const title = isCompleted
+      ? "All set"
+      : state.kind === "checkpointing"
+        ? "Saving your progress"
+        : "This link expired";
+    const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
-    const nextStep = managedFailed
-      ? "Return to Murph and ask it to open the browser for this sign-in."
-      : isCompleted
-        ? "Reply to Murph to continue."
-        : state.kind === "checkpointing"
-          ? "Keep this tab open for a moment, then return to Murph when saving finishes."
-          : "Return to Murph and ask for a new link.";
+    const nextStep = isCompleted
+      ? "Reply to Murph to continue."
+      : state.kind === "checkpointing"
+        ? "Keep this tab open for a moment, then return to Murph when saving finishes."
+        : "Return to Murph and ask for a new link.";
     const contactOptions = canSendDoneReply
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
@@ -178,13 +173,11 @@ export default async function ComputerHandoffPage({
 
 function readManagedHandoffState(
   searchParams: { managed?: string | string[] },
-): "authenticated" | "failed" | "retry" | "waiting" | null {
+): "retry" | "waiting" | null {
   const value = Array.isArray(searchParams.managed)
     ? searchParams.managed[0]
     : searchParams.managed;
-  return value === "authenticated" ||
-      value === "failed" ||
-      value === "retry" ||
+  return value === "retry" ||
       value === "waiting"
     ? value
     : null;

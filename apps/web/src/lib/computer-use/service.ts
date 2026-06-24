@@ -94,7 +94,6 @@ export interface ComputerAccountExternalCleanupResult {
 
 export type ComputerManagedLoginContinuation =
   | {
-      authenticated: boolean | null;
       kind: "completed";
     }
   | {
@@ -778,7 +777,6 @@ export class ComputerUseService {
 
     if (handoff.status === "completed") {
       return {
-        authenticated: null,
         kind: "completed",
       };
     }
@@ -957,9 +955,6 @@ export class ComputerUseService {
           now: this.now(),
         });
         return {
-          authenticated:
-            currentFlow.flowStatus === "SUCCESS" &&
-            currentFlow.status === "AUTHENTICATED",
           kind: "completed",
         };
       }
@@ -1129,9 +1124,6 @@ export class ComputerUseService {
       });
 
       return {
-        authenticated:
-          currentFlow.flowStatus === "SUCCESS" &&
-          currentFlow.status === "AUTHENTICATED",
         kind: "completed",
       };
     } catch (error) {

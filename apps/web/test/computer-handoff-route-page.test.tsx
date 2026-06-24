@@ -225,9 +225,8 @@ describe("computer handoff route and page", () => {
     });
   });
 
-  it("returns failed managed login attempts to the handoff page", async () => {
+  it("returns completed managed login callbacks to the handoff page", async () => {
     mocks.service.continueManagedLoginHandoff.mockResolvedValueOnce({
-      authenticated: false,
       kind: "completed",
     });
 
@@ -240,7 +239,7 @@ describe("computer handoff route and page", () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
-      "https://join.example.test/computer/handoff/handoff-token?managed=failed",
+      "https://join.example.test/computer/handoff/handoff-token",
     );
     expect(mocks.service.continueManagedLoginHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -270,24 +269,6 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
-  });
-
-  it("does not render Done reply controls for failed managed login completion", async () => {
-    const markup = renderToStaticMarkup(await computerHandoffPage.default({
-      params: Promise.resolve({ token: "handoff-token" }),
-      searchParams: Promise.resolve({ managed: "failed" }),
-    }));
-
-    assert.match(markup, /Sign-in needs another step/);
-    assert.match(
-      markup,
-      /Return to Murph and ask it to open the browser for this sign-in\./,
-    );
-    assert.equal(markup.includes("Reply to Murph to continue."), false);
-    assert.equal(markup.includes("Reply in Messages"), false);
-    assert.equal(markup.includes("body=Done"), false);
-    assert.equal(markup.includes(">Done<"), false);
-    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
   it("renders a literal Done fallback when completed handoff has no contact channel", async () => {

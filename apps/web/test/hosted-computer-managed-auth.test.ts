@@ -271,7 +271,6 @@ describe("Kernel managed-login handoffs", () => {
       memberId: run.memberId,
       token: "handoff-token",
     })).resolves.toEqual({
-      authenticated: true,
       kind: "completed",
     });
     expect(kernel.createBrowser).toHaveBeenCalledTimes(1);
@@ -390,7 +389,6 @@ describe("Kernel managed-login handoffs", () => {
       memberId: run.memberId,
       token: "handoff-token",
     })).resolves.toEqual({
-      authenticated: null,
       kind: "completed",
     });
     expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
