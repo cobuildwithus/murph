@@ -26,6 +26,10 @@ import {
   hasHostedMemberEffectiveActiveAccessForMember,
   issueHostedFamilyInviteFromOwnerChatTx,
 } from "./family-plan";
+import {
+  buildHostedFamilyInfoReplyText,
+  parseHostedFamilyInfoChatIntent,
+} from "./family-chat-intent";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedWhatsAppWebhookEventId,
@@ -233,6 +237,24 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       duplicate: false,
       ignored: false,
       reason: "family-invite-created",
+      wakeHandoff: notification.wakeHandoff,
+    };
+  }
+
+  if (parseHostedFamilyInfoChatIntent(input.inboundText.text)) {
+    const notification = await appendHostedWhatsAppFamilyChatNotification({
+      inboundText: input.inboundText,
+      memberId: member.id,
+      message: buildHostedFamilyInfoReplyText(),
+      prisma: input.prisma,
+      reason: "family-info-replied",
+    });
+
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "family-info-replied",
       wakeHandoff: notification.wakeHandoff,
     };
   }

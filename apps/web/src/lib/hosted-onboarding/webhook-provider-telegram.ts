@@ -14,6 +14,10 @@ import {
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
 import {
+  buildHostedFamilyInfoReplyText,
+  parseHostedFamilyInfoChatIntent,
+} from "./family-chat-intent";
+import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
@@ -160,6 +164,37 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       response: {
         ok: true,
         reason: "family-invite-created",
+      },
+      ...(notification.mailboxItemId
+        ? {
+            wakeMailboxItemId: notification.mailboxItemId,
+            wakeUserId: existingMember.id,
+          }
+        : {}),
+    };
+  }
+
+  if (parseHostedFamilyInfoChatIntent(telegramMessage.text)) {
+    const route = await resolveHostedFamilyChatNotificationRouteTx({
+      fallbackTelegramThreadId: telegramMessage.threadId,
+      fallbackTelegramUserId: summary.senderTelegramUserId,
+      memberId: existingMember.id,
+      tx: input.prisma,
+    });
+    const notification = await appendHostedFamilyChatNotificationTx({
+      memberId: existingMember.id,
+      message: buildHostedFamilyInfoReplyText(),
+      occurredAt: summary.occurredAt,
+      route,
+      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
+      tx: input.prisma,
+    });
+
+    return {
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        reason: "family-info-replied",
       },
       ...(notification.mailboxItemId
         ? {

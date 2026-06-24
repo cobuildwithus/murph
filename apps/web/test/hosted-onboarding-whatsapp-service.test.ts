@@ -586,6 +586,47 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
   });
 
+  it("answers Murph Family questions before handing WhatsApp text to the health assistant", async () => {
+    const prisma = createWhatsAppPrismaHarness({
+      consentGranted: false,
+      memberId: "member_whatsapp_123",
+    });
+    const rawBody = buildWhatsAppInboundTextBody("wiesz cos o family planie?");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 1,
+      ignored: false,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "wake-appended-active-member",
+      routedTextCount: 1,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "assistant.notification.requested:family-chat:member_whatsapp_123:whatsapp:message:wamid.test-message-1:family-info-replied",
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: expect.stringContaining("up to 4 people total"),
+          },
+        }),
+      }),
+      tx: prisma,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "conversation.message",
+      }),
+      tx: prisma,
+    });
+  });
+
   it("signals the hosted user runtime for opted-in WhatsApp texts", async () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,

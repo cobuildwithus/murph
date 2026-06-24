@@ -333,6 +333,78 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
+  it("answers Murph Family questions before handing text to the health assistant", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn(async (args?: { where?: { memberId?: string } }) => {
+      if (args?.where?.memberId) {
+        return null;
+      }
+
+      return {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_123",
+          suspendedAt: null,
+        },
+        memberId: "member_telegram_123",
+      };
+    });
+    const prisma = withPrismaTransaction({
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 2,
+          text: "wiesz cos o family planie?",
+        },
+        update_id: 322,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "family-info-replied",
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "assistant.notification.requested:family-chat:member_telegram_123:telegram:update:322",
+          kind: "assistant.notification.requested",
+          notification: expect.objectContaining({
+            responsePolicy: {
+              kind: "require_send_exact_text",
+              text: expect.stringContaining("up to 4 people total"),
+            },
+          }),
+        }),
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          kind: "conversation.message",
+        }),
+      }),
+    );
+  });
+
   it("refreshes the persisted Telegram routing target when the inbound direct thread carries business context", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
