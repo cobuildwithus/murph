@@ -1706,12 +1706,15 @@ export function compareAssistantInputCursors(
     }
   }
 
-  const useCreatedAt = Boolean(left.createdAt && right.createdAt)
-  const leftTimestamp = useCreatedAt ? left.createdAt! : left.occurredAt
-  const rightTimestamp = useCreatedAt ? right.createdAt! : right.occurredAt
+  const leftTimestamp = left.createdAt ?? left.occurredAt
+  const rightTimestamp = right.createdAt ?? right.occurredAt
 
-  if (leftTimestamp !== rightTimestamp) {
-    return compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
+  const timestampOrder = compareAssistantTimestampsAscending(
+    leftTimestamp,
+    rightTimestamp,
+  )
+  if (timestampOrder !== 0) {
+    return timestampOrder
   }
 
   if (
