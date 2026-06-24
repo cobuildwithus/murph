@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-06-18
+Last verified: 2026-06-24
 
 ## Purpose
 
@@ -62,7 +62,7 @@ That account metadata export includes:
 - Consent events and grants.
 - Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
 - Hosted workspace metadata with object keys and bundle hashes replaced by presence flags.
-- Hosted computer-use profile, run, and handoff metadata with Kernel profile names, session ids, live-view URLs, and handoff token hashes omitted.
+- Hosted computer-use profile, run, and handoff metadata with Kernel profile names, session ids, live-view URLs, handoff token hashes, Managed Auth connection ids, and stored credentials omitted.
 - Assistant-captured product feedback rows with safe kind/summary metadata and optional published changelog item ids, while omitting internal feedback ids.
 - AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
 - AI usage period snapshots with allowance totals, period windows, and billing-state metadata needed to explain current quota state.
@@ -91,7 +91,7 @@ The account metadata export explicitly omits:
 1. Load the hosted member, decrypted Stripe/Privy vendor account references, and device connection identities.
 2. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 3. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
-4. Delete Prisma-hosted account rows in a transaction.
+4. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
 5. Best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted`.
 6. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
 7. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
@@ -131,6 +131,7 @@ The account metadata export explicitly omits:
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
 | `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
+| `kernel.managed_auth_connections` | Live delete | Not exported secret | Deletes durable domain connections, saved credentials, and active login workflows before the member profile. Murph does not persist connection ids or credential values locally. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
 | `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
 | `temporal.per_user_runtime_workflow` | Best-effort delete | Documented only | Account deletion terminates the per-user hosted Temporal runtime workflow after the Prisma deletion commits and around Cloudflare cleanup, neutralizing sleeping wake flags and runtime-result wake state. |

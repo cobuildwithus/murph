@@ -16,9 +16,11 @@ import {
 } from "./crypto";
 import { createComputerHandoffToken, createComputerId, sha256Hex, shortHash } from "./ids";
 import { isAllowedComputerLiveViewUrl } from "./live-view-origin";
+import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 import {
   KernelComputerClient,
   type ComputerKernelClient,
+  type KernelManagedAuthConnection,
 } from "./kernel-client";
 import {
   PrismaComputerUseStore,
@@ -90,6 +92,21 @@ export interface ComputerAccountExternalCleanupResult {
   profilesDeleted: number;
 }
 
+export type ComputerManagedLoginContinuation =
+  | {
+      kind: "completed";
+    }
+  | {
+      kind: "expired";
+    }
+  | {
+      kind: "checkpointing";
+    }
+  | {
+      kind: "redirect";
+      url: string;
+    };
+
 export type ComputerHandoffPageState =
   | {
       kind: "completed";
@@ -101,6 +118,10 @@ export type ComputerHandoffPageState =
     }
   | {
       kind: "checkpointing";
+      suggestedReply: string | null;
+    }
+  | {
+      kind: "managed_login";
       suggestedReply: string | null;
     }
   | {
@@ -452,10 +473,14 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     }, store);
+    if (input.handoffPurpose === "managed_login" && input.reason !== "login_needed") {
+      throw managedLoginRequiresLoginNeededError();
+    }
 
     if (run.status === "awaiting_user") {
       const refreshed = input.handoffPurpose
         ? await this.refreshAwaitingRunHandoff({
+            handoffPurpose: input.handoffPurpose,
             memberId: input.memberId,
             now,
             pauseDeliveryContext: input.pauseDeliveryContext ?? null,
@@ -482,7 +507,11 @@ export class ComputerUseService {
       });
     }
 
-    await this.captureBrowserStateBestEffort(run);
+    if (input.handoffPurpose === "managed_login") {
+      await this.captureManagedLoginBrowserDomain(run, store);
+    } else {
+      await this.captureBrowserStateBestEffort(run, store);
+    }
 
     const handoff = input.handoffPurpose
       ? await this.createHandoff({
@@ -668,6 +697,13 @@ export class ComputerUseService {
         suggestedReply: expired.suggestedReply,
       };
     }
+    if (handoff.purpose === "managed_login") {
+      return {
+        kind: "managed_login",
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
     const liveViewUrl = await this.crypto.decryptRunSecret({
       field: "kernel-live-view-url",
       memberId: run.memberId,
@@ -724,6 +760,457 @@ export class ComputerUseService {
       preset: input.preset,
       sessionId: requireKernelSessionId(run),
     });
+  }
+
+  async continueManagedLoginHandoff(input: {
+    memberId: string;
+    token: string;
+  }): Promise<ComputerManagedLoginContinuation> {
+    await this.store.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    const now = this.now();
+    const tokenHash = sha256Hex(input.token);
+    let handoff = await this.store.requireHandoffByTokenHash({
+      tokenHash,
+    });
+
+    assertHandoffOwnedByMember(handoff, input.memberId);
+    handoff = await this.releaseStaleHandoffClaim({
+      handoff,
+      now,
+      store: this.store,
+      tokenHash,
+    });
+
+    if (handoff.status === "completed") {
+      return {
+        kind: "completed",
+      };
+    }
+    if (isFreshCheckpointingHandoff(handoff, now)) {
+      return { kind: "checkpointing" };
+    }
+    if (isExpiredHandoff(handoff, now)) {
+      if (handoff.status === "open" || handoff.status === "checkpointing") {
+        await this.store.markHandoffExpired({
+          expectedStatus: handoff.status,
+          expectedUpdatedAt: handoff.updatedAt,
+          handoffId: handoff.id,
+          now,
+        });
+      }
+      return { kind: "expired" };
+    }
+
+    assertOpenFreshHandoff(handoff, now);
+    if (handoff.purpose !== "managed_login") {
+      throw computerUseNotFoundError("Computer handoff was not found.");
+    }
+
+    const run = await this.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: handoff.runId,
+    });
+    if (
+      run.status !== "awaiting_user" ||
+      run.pendingHandoffId !== handoff.id ||
+      run.expiresAt <= now
+    ) {
+      await this.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: handoff.updatedAt,
+        handoffId: handoff.id,
+        now,
+      });
+      return { kind: "expired" };
+    }
+
+    const domain = requireManagedLoginDomain(run);
+    const connection = await this.requireKernel().findManagedAuthConnection({
+      domain,
+      profileName: run.kernelProfileName,
+    });
+    const currentFlow = readManagedAuthFlowForHandoff({
+      connection,
+      handoff,
+    });
+
+    if (run.kernelSessionId) {
+      return await this.beginManagedLoginHandoff({
+        domain,
+        handoff,
+        memberId: input.memberId,
+        run,
+        store: this.store,
+        token: input.token,
+      });
+    }
+
+    if (currentFlow && isManagedAuthTerminalFlow(currentFlow)) {
+      return await this.finishManagedLoginHandoff({
+        domain,
+        handoff,
+        memberId: input.memberId,
+        run,
+        store: this.store,
+        token: input.token,
+      });
+    }
+
+    if (currentFlow && isManagedAuthInProgressFlow(currentFlow, now)) {
+      return {
+        kind: "redirect",
+        url: buildManagedLoginHostedUrl({
+          env: this.env,
+          hostedUrl: requireManagedAuthHostedUrl(currentFlow),
+          token: input.token,
+        }),
+      };
+    }
+
+    return await this.beginManagedLoginHandoff({
+      domain,
+      handoff,
+      memberId: input.memberId,
+      run,
+      store: this.store,
+      token: input.token,
+    });
+  }
+
+  private async beginManagedLoginHandoff(input: {
+    domain: string;
+    handoff: ComputerHandoffRecord;
+    memberId: string;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+    token: string;
+  }): Promise<ComputerManagedLoginContinuation> {
+    const claimed = await input.store.claimHandoffForCompletion({
+      handoffId: input.handoff.id,
+      memberId: input.memberId,
+    });
+    if (!claimed) {
+      return { kind: "checkpointing" };
+    }
+
+    let browserlessRun: ComputerRunRecord | null = null;
+    try {
+      let connection = await this.requireKernel().ensureManagedAuthConnection({
+        domain: input.domain,
+        profileName: input.run.kernelProfileName,
+      });
+      let run = await input.store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: input.run.id,
+      });
+      if (
+        run.status !== "awaiting_user" ||
+        run.pendingHandoffId !== claimed.id
+      ) {
+        throw managedLoginUnavailableError();
+      }
+
+      const hadTaskBrowser = Boolean(run.kernelSessionId);
+      if (run.kernelSessionId) {
+        run = await this.detachRunBrowserForHandoff(
+          run,
+          this.now(),
+          input.store,
+          claimed.updatedAt,
+        );
+      }
+      browserlessRun = run;
+
+      connection =
+        await this.requireKernel().findManagedAuthConnection({
+          domain: input.domain,
+          profileName: run.kernelProfileName,
+        }) ?? connection;
+      if (hadTaskBrowser && connection.browserSessionId) {
+        await this.requireKernel().deleteBrowserByIdOrName(
+          connection.browserSessionId,
+        );
+      }
+      const currentFlow = hadTaskBrowser ? null : readManagedAuthFlowForHandoff({
+        connection,
+        handoff: input.handoff,
+      });
+
+      if (currentFlow && isManagedAuthTerminalFlow(currentFlow)) {
+        if (currentFlow.browserSessionId) {
+          await this.requireKernel().deleteBrowserByIdOrName(
+            currentFlow.browserSessionId,
+          );
+        }
+        if (!isManagedAuthSuccessfulTerminalFlow(currentFlow)) {
+          return await this.redirectManagedLoginToLiveViewFallback({
+            claimed,
+            memberId: input.memberId,
+            run,
+            store: input.store,
+          });
+        }
+        await this.attachRunBrowserFromProfile(
+          run,
+          input.store,
+          claimed.updatedAt,
+        );
+        await input.store.completeHandoff({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+          now: this.now(),
+        });
+        return {
+          kind: "completed",
+        };
+      }
+
+      let hostedUrl: string;
+      if (currentFlow && isManagedAuthInProgressFlow(currentFlow, this.now())) {
+        hostedUrl = requireManagedAuthHostedUrl(currentFlow);
+      } else {
+        if (!hadTaskBrowser && connection.browserSessionId) {
+          await this.requireKernel().deleteBrowserByIdOrName(
+            connection.browserSessionId,
+          );
+        }
+        hostedUrl = (
+          await this.requireKernel().startManagedAuthLogin(connection.id)
+        ).hostedUrl;
+      }
+
+      await input.store.releaseHandoffClaim({
+        expectedUpdatedAt: claimed.updatedAt,
+        handoffId: claimed.id,
+      });
+      return {
+        kind: "redirect",
+        url: buildManagedLoginHostedUrl({
+          env: this.env,
+          hostedUrl,
+          token: input.token,
+        }),
+      };
+    } catch {
+      const latest = await this.requireKernel().findManagedAuthConnection({
+        domain: input.domain,
+        profileName: input.run.kernelProfileName,
+      }).catch(() => null);
+      const recoveredFlow = readManagedAuthFlowForHandoff({
+        connection: latest,
+        handoff: input.handoff,
+      });
+
+      if (
+        recoveredFlow &&
+        isManagedAuthInProgressFlow(recoveredFlow, this.now())
+      ) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+        return {
+          kind: "redirect",
+          url: buildManagedLoginHostedUrl({
+            env: this.env,
+            hostedUrl: requireManagedAuthHostedUrl(recoveredFlow),
+            token: input.token,
+          }),
+        };
+      }
+
+      if (latest?.browserSessionId) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+        return { kind: "checkpointing" };
+      }
+
+      if (browserlessRun) {
+        await this.attachRunBrowserFromProfile(
+          browserlessRun,
+          input.store,
+          claimed.updatedAt,
+        );
+      }
+      await input.store.releaseHandoffClaim({
+        expectedUpdatedAt: claimed.updatedAt,
+        handoffId: claimed.id,
+      }).catch(() => {});
+      throw managedLoginUnavailableError();
+    }
+  }
+
+  private async finishManagedLoginHandoff(input: {
+    domain: string;
+    handoff: ComputerHandoffRecord;
+    memberId: string;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+    token: string;
+  }): Promise<ComputerManagedLoginContinuation> {
+    const claimed = await input.store.claimHandoffForCompletion({
+      handoffId: input.handoff.id,
+      memberId: input.memberId,
+    });
+    if (!claimed) {
+      return { kind: "checkpointing" };
+    }
+
+    let browserAttachStarted = false;
+    try {
+      let run = await input.store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: input.run.id,
+      });
+      const connection =
+        await this.requireKernel().findManagedAuthConnection({
+          domain: input.domain,
+          profileName: run.kernelProfileName,
+        });
+      const currentFlow = readManagedAuthFlowForHandoff({
+        connection,
+        handoff: input.handoff,
+      });
+
+      if (
+        currentFlow &&
+        isManagedAuthInProgressFlow(currentFlow, this.now())
+      ) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        });
+        return {
+          kind: "redirect",
+          url: buildManagedLoginHostedUrl({
+            env: this.env,
+            hostedUrl: requireManagedAuthHostedUrl(currentFlow),
+            token: input.token,
+          }),
+        };
+      }
+
+      if (!currentFlow || !isManagedAuthTerminalFlow(currentFlow)) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        });
+        throw managedLoginUnavailableError();
+      }
+
+      if (currentFlow.browserSessionId) {
+        await this.requireKernel().deleteBrowserByIdOrName(
+          currentFlow.browserSessionId,
+        );
+      }
+
+      if (!isManagedAuthSuccessfulTerminalFlow(currentFlow)) {
+        return await this.redirectManagedLoginToLiveViewFallback({
+          claimed,
+          memberId: input.memberId,
+          run,
+          store: input.store,
+        });
+      }
+
+      if (!run.kernelSessionId) {
+        browserAttachStarted = true;
+        run = await this.attachRunBrowserFromProfile(
+          run,
+          input.store,
+          claimed.updatedAt,
+        );
+      }
+      await input.store.completeHandoff({
+        expectedUpdatedAt: claimed.updatedAt,
+        handoffId: claimed.id,
+        now: this.now(),
+      });
+
+      return {
+        kind: "completed",
+      };
+    } catch (error) {
+      if (!browserAttachStarted) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+      }
+      throw error;
+    }
+  }
+
+  private async redirectManagedLoginToLiveViewFallback(input: {
+    claimed: ComputerHandoffRecord;
+    memberId: string;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerManagedLoginContinuation> {
+    let run = input.run;
+    if (!run.kernelSessionId) {
+      run = await this.attachRunBrowserFromProfile(
+        run,
+        input.store,
+        input.claimed.updatedAt,
+      );
+    }
+
+    await input.store.releaseHandoffClaim({
+      expectedUpdatedAt: input.claimed.updatedAt,
+      handoffId: input.claimed.id,
+    });
+    const released = await input.store.findHandoffByRun({
+      handoffId: input.claimed.id,
+      runId: run.id,
+    });
+    if (!released || released.status !== "open") {
+      throw managedLoginUnavailableError();
+    }
+
+    const fallback = await this.createHandoff({
+      memberId: input.memberId,
+      purpose: "login",
+      runExpiresAt: run.expiresAt,
+      runId: run.id,
+      suggestedReply: released.suggestedReply,
+    }, input.store);
+    const now = this.now();
+    try {
+      await input.store.replaceAwaitingRunHandoff({
+        expectedHandoffUpdatedAt: released.updatedAt,
+        expectedPendingHandoffId: released.id,
+        newPendingHandoffId: fallback.record.id,
+        now,
+        runId: run.id,
+      });
+      await input.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: released.updatedAt,
+        handoffId: released.id,
+        now,
+      }).catch(() => {
+        // The run now points at the fallback handoff; the old link expires on use.
+      });
+      return {
+        kind: "redirect",
+        url: fallback.handoffUrl,
+      };
+    } catch (error) {
+      await input.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: fallback.record.updatedAt,
+        handoffId: fallback.record.id,
+        now,
+      }).catch(() => {
+        // Preserve the swap failure; the fallback handoff cleanup is compensating.
+      });
+      throw error;
+    }
   }
 
   async completeHandoff(input: {
@@ -785,6 +1272,13 @@ export class ComputerUseService {
     }
 
     assertOpenFreshHandoff(openHandoff, now);
+    if (openHandoff.purpose === "managed_login") {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_VERIFICATION",
+        message: "Managed sign-in must be verified before completion.",
+      });
+    }
+
     const claimed = await store.claimHandoffForCompletion({
       handoffId: openHandoff.id,
       memberId: input.memberId,
@@ -898,7 +1392,13 @@ export class ComputerUseService {
       now,
     });
     const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
-    const profileNames = buildKernelProfileNamesForAccountDeletion(runs);
+    const profileNames = uniqueStrings([
+      buildKernelProfileNameForAccountDeletion({
+        env: this.env,
+        memberId: input.memberId,
+      }),
+      ...buildKernelProfileNamesForAccountDeletion(runs),
+    ]);
 
     if (browserIds.length === 0 && profileNames.length === 0) {
       return {
@@ -912,6 +1412,12 @@ export class ComputerUseService {
       await kernel.deleteBrowserByIdOrName(browserId);
     }
     for (const profileName of profileNames) {
+      const connections = await kernel.listManagedAuthConnections({
+        profileName,
+      });
+      for (const connection of connections) {
+        await kernel.deleteManagedAuthConnection(connection.id);
+      }
       await kernel.deleteProfile(profileName);
     }
 
@@ -955,6 +1461,7 @@ export class ComputerUseService {
   }
 
   private async refreshAwaitingRunHandoff(input: {
+    handoffPurpose: HostedComputerHandoffPurpose;
     memberId: string;
     now: Date;
     pauseDeliveryContext: HostedComputerDeliveryContext | null;
@@ -967,8 +1474,9 @@ export class ComputerUseService {
     ) {
       return null;
     }
+    const awaitingReason = input.run.awaitingReason;
 
-    if (!input.run.kernelSessionId || input.run.expiresAt <= input.now) {
+    if (input.run.expiresAt <= input.now) {
       return null;
     }
 
@@ -989,6 +1497,9 @@ export class ComputerUseService {
     if (!existing) {
       return null;
     }
+    if (!input.run.kernelSessionId && existing.purpose !== "managed_login") {
+      return null;
+    }
     if (
       existing.status === "checkpointing" &&
       !isStaleCheckpointingHandoff(existing, input.now)
@@ -996,7 +1507,44 @@ export class ComputerUseService {
       return null;
     }
 
-    if (existing.status === "open" && existing.expiresAt <= input.now) {
+    let run = input.run;
+    const replacementPurpose = existing.purpose === "managed_login"
+      ? input.handoffPurpose
+      : existing.purpose;
+    if (
+      !run.kernelSessionId &&
+      existing.purpose === "managed_login" &&
+      replacementPurpose !== "managed_login" &&
+      existing.status === "open" &&
+      existing.expiresAt > input.now
+    ) {
+      const claimed = await input.store.claimHandoffForCompletion({
+        handoffId: existing.id,
+        memberId: input.memberId,
+      });
+      if (!claimed) {
+        return null;
+      }
+      try {
+        run = await this.attachRunBrowserFromProfile(
+          run,
+          input.store,
+          claimed.updatedAt,
+        );
+        existing = await input.store.markHandoffExpired({
+          expectedStatus: "checkpointing",
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+          now: input.now,
+        });
+      } catch (error) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+        throw error;
+      }
+    } else if (existing.status === "open" && existing.expiresAt <= input.now) {
       existing = await input.store.markHandoffExpired({
         expectedStatus: "open",
         expectedUpdatedAt: existing.updatedAt,
@@ -1012,11 +1560,19 @@ export class ComputerUseService {
       });
     }
 
+    if (
+      !run.kernelSessionId &&
+      existing.purpose === "managed_login" &&
+      replacementPurpose !== "managed_login"
+    ) {
+      return null;
+    }
+
     const handoff = await this.createHandoff({
       memberId: input.memberId,
-      purpose: existing.purpose,
-      runExpiresAt: input.run.expiresAt,
-      runId: input.run.id,
+      purpose: replacementPurpose,
+      runExpiresAt: run.expiresAt,
+      runId: run.id,
       suggestedReply: existing.suggestedReply,
     }, input.store);
     try {
@@ -1025,7 +1581,7 @@ export class ComputerUseService {
         expectedPendingHandoffId: existing.id,
         newPendingHandoffId: handoff.record.id,
         now: input.now,
-        runId: input.run.id,
+        runId: run.id,
       });
       if (existing.status === "open") {
         await input.store.markHandoffExpired({
@@ -1039,9 +1595,9 @@ export class ComputerUseService {
       }
 
       return {
-        awaitingReason: refreshed.awaitingReason ?? input.run.awaitingReason,
+        awaitingReason: refreshed.awaitingReason ?? awaitingReason,
         handoffUrl: handoff.handoffUrl,
-        runId: input.run.id,
+        runId: run.id,
         status: "awaiting_user",
         suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,
       };
@@ -1151,6 +1707,25 @@ export class ComputerUseService {
     store: ComputerUseStore = this.store,
     expectedHandoffUpdatedAt?: Date,
   ): Promise<void> {
+    const detached = await this.detachRunBrowserForHandoff(
+      run,
+      now,
+      store,
+      expectedHandoffUpdatedAt,
+    );
+    await this.attachRunBrowserFromProfile(
+      detached,
+      store,
+      expectedHandoffUpdatedAt,
+    );
+  }
+
+  private async detachRunBrowserForHandoff(
+    run: ComputerRunRecord,
+    now: Date,
+    store: ComputerUseStore,
+    expectedHandoffUpdatedAt?: Date,
+  ): Promise<ComputerRunRecord> {
     const state = run.kernelSessionId
       ? await this.readBrowserState(run).catch(() => ({
           title: run.lastTitle,
@@ -1162,44 +1737,58 @@ export class ComputerUseService {
           url: run.lastUrl,
           visibleText: "",
         };
-    if (run.kernelSessionId) {
-      const oldKernelSessionId = run.kernelSessionId;
-      if (!await this.deleteBrowserBestEffort(oldKernelSessionId)) {
-        throw browserCleanupFailedError();
-      }
-      await store.clearRunBrowser({
-        expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
-        expectedKernelSessionId: oldKernelSessionId,
-        expectedPendingHandoffId: run.pendingHandoffId,
-        lastTitle: state.title,
-        lastUrl: sanitizeComputerDisplayUrl(state.url),
-        now,
-        runId: run.id,
-      });
-    } else {
+    const lastUrl = sanitizeComputerDisplayUrl(state.url);
+
+    if (!run.kernelSessionId) {
       await store.updateRunBrowserState({
-        expectedKernelSessionId: run.kernelSessionId,
+        expectedKernelSessionId: null,
         lastTitle: state.title,
-        lastUrl: sanitizeComputerDisplayUrl(state.url),
+        lastUrl,
         runId: run.id,
       });
+      return {
+        ...run,
+        lastTitle: state.title,
+        lastUrl,
+      };
     }
-    const browserName = buildKernelBrowserName({ runId: run.id });
-    if (!run.kernelSessionId && !await this.deleteBrowserBestEffort(browserName)) {
+
+    const oldKernelSessionId = run.kernelSessionId;
+    if (!await this.deleteBrowserBestEffort(oldKernelSessionId)) {
       throw browserCleanupFailedError();
     }
+    return await store.clearRunBrowser({
+      expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
+      expectedKernelSessionId: oldKernelSessionId,
+      expectedPendingHandoffId: run.pendingHandoffId,
+      lastTitle: state.title,
+      lastUrl,
+      now,
+      runId: run.id,
+    });
+  }
+
+  private async attachRunBrowserFromProfile(
+    run: ComputerRunRecord,
+    store: ComputerUseStore,
+    expectedHandoffUpdatedAt?: Date,
+  ): Promise<ComputerRunRecord> {
+    const browserName = buildKernelBrowserName({ runId: run.id });
+    if (!await this.deleteBrowserBestEffort(browserName)) {
+      throw browserCleanupFailedError();
+    }
+
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
     let replaceAttempt: ReplaceRunBrowserInput | null = null;
     try {
       const createNow = this.now();
-      const timeoutSeconds = requireRemainingKernelTimeoutSeconds(run, createNow);
       browserDeleteName = browserName;
       browser = await this.requireKernel().createBrowser({
         browserName,
         profileName: run.kernelProfileName,
         saveChanges: true,
-        timeoutSeconds,
+        timeoutSeconds: requireRemainingKernelTimeoutSeconds(run, createNow),
       });
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const replaceInput: ReplaceRunBrowserInput = {
@@ -1217,8 +1806,9 @@ export class ComputerUseService {
         runId: run.id,
       };
       replaceAttempt = replaceInput;
-      await store.replaceRunBrowser(replaceInput);
+      const attached = await store.replaceRunBrowser(replaceInput);
       browser = null;
+      return attached;
     } catch (error) {
       if (browser && replaceAttempt && !isMemberSuspendedComputerUseError(error)) {
         const attachedRun = await this.replayAmbiguousRunBrowserReplace({
@@ -1230,25 +1820,24 @@ export class ComputerUseService {
           browserDeleteName = null;
         } else if (attachedRun) {
           browser = null;
-          return;
+          return attachedRun;
         }
       }
-      let cleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
-        cleanupFailed = true;
-      }
-      if (cleanupFailed) {
         throw browserCleanupFailedError();
       }
       throw error;
     }
   }
 
-  private async captureBrowserStateBestEffort(run: ComputerRunRecord): Promise<void> {
+  private async captureBrowserStateBestEffort(
+    run: ComputerRunRecord,
+    store: ComputerUseStore = this.store,
+  ): Promise<void> {
     try {
       const state = await this.readBrowserState(run);
-      await this.store.updateRunBrowserState({
+      await store.updateRunBrowserState({
         expectedKernelSessionId: run.kernelSessionId,
         lastTitle: state.title,
         lastUrl: sanitizeComputerDisplayUrl(state.url),
@@ -1256,6 +1845,36 @@ export class ComputerUseService {
       });
     } catch {
       // A user checkpoint must remain durable even if the live browser cannot be observed.
+    }
+  }
+
+  private async captureManagedLoginBrowserDomain(
+    run: ComputerRunRecord,
+    store: ComputerUseStore,
+  ): Promise<void> {
+    let state: {
+      title: string | null;
+      url: string | null;
+      visibleText: string;
+    };
+    try {
+      state = await this.readBrowserState(run);
+    } catch {
+      throw managedLoginUnavailableError();
+    }
+    const lastUrl = sanitizeComputerDisplayUrl(state.url);
+    if (!readManagedLoginDomainFromUrl(lastUrl)) {
+      throw managedLoginUnavailableError();
+    }
+    try {
+      await store.updateRunBrowserState({
+        expectedKernelSessionId: run.kernelSessionId,
+        lastTitle: state.title,
+        lastUrl,
+        runId: run.id,
+      });
+    } catch {
+      throw managedLoginUnavailableError();
     }
   }
 
@@ -1300,6 +1919,39 @@ export class ComputerUseService {
         handoffId: run.pendingHandoffId,
         runId: run.id,
       });
+      if (
+        pendingHandoff?.purpose === "managed_login" &&
+        !run.kernelSessionId &&
+        pendingHandoff.status !== "completed"
+      ) {
+        await this.requireResumeMailboxItemAfterPause({
+          memberId: input.memberId,
+          pausedAt,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext,
+          runCheckpointContext: run.checkpointContext,
+          store,
+        });
+        const restored = await this.completeManagedLoginForResume({
+          handoff: pendingHandoff,
+          memberId: input.memberId,
+          now: input.now,
+          run,
+          store,
+        });
+        if (!restored) {
+          return runHandle(run, true);
+        }
+        const resumed = await store.markRunRunning({
+          awaitingReason: run.awaitingReason,
+          expectedPausedAt: pausedAt,
+          expectedPendingHandoffId: run.pendingHandoffId,
+          now: input.now,
+          runId: run.id,
+        });
+        return runHandle(resumed, true);
+      }
+
       if (pendingHandoff) {
         if (pendingHandoff.status !== "completed") {
           if (
@@ -1394,6 +2046,115 @@ export class ComputerUseService {
       runId: run.id,
     });
     return runHandle(resumed, true);
+  }
+
+  private async completeManagedLoginForResume(input: {
+    handoff: ComputerHandoffRecord;
+    memberId: string;
+    now: Date;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerRunRecord | null> {
+    let handoff = input.handoff;
+    if (isStaleCheckpointingHandoff(handoff, input.now)) {
+      await input.store.releaseHandoffClaim({
+        expectedUpdatedAt: handoff.updatedAt,
+        handoffId: handoff.id,
+      }).catch(() => {});
+      const latest = await input.store.findHandoffByRun({
+        handoffId: handoff.id,
+        runId: input.run.id,
+      });
+      if (!latest) {
+        return null;
+      }
+      handoff = latest;
+    }
+    if (
+      handoff.status !== "open" ||
+      isExpiredHandoff(handoff, input.now)
+    ) {
+      return null;
+    }
+
+    const domain = requireManagedLoginDomain(input.run);
+    const connection = await this.requireKernel().findManagedAuthConnection({
+      domain,
+      profileName: input.run.kernelProfileName,
+    });
+    const currentFlow = readManagedAuthFlowForHandoff({
+      connection,
+      handoff,
+    });
+    if (
+      !currentFlow ||
+      !isManagedAuthSuccessfulTerminalFlow(currentFlow)
+    ) {
+      return null;
+    }
+
+    const claimed = await input.store.claimHandoffForCompletion({
+      handoffId: handoff.id,
+      memberId: input.memberId,
+    });
+    if (!claimed) {
+      return null;
+    }
+
+    let browserAttachStarted = false;
+    try {
+      let run = await input.store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: input.run.id,
+      });
+      const latestConnection =
+        await this.requireKernel().findManagedAuthConnection({
+          domain,
+          profileName: run.kernelProfileName,
+        });
+      const latestFlow = readManagedAuthFlowForHandoff({
+        connection: latestConnection,
+        handoff,
+      });
+      if (
+        !latestFlow ||
+        !isManagedAuthSuccessfulTerminalFlow(latestFlow)
+      ) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        });
+        return null;
+      }
+
+      if (latestFlow?.browserSessionId) {
+        await this.requireKernel().deleteBrowserByIdOrName(
+          latestFlow.browserSessionId,
+        );
+      }
+      if (!run.kernelSessionId) {
+        browserAttachStarted = true;
+        run = await this.attachRunBrowserFromProfile(
+          run,
+          input.store,
+          claimed.updatedAt,
+        );
+      }
+      await input.store.completeHandoff({
+        expectedUpdatedAt: claimed.updatedAt,
+        handoffId: claimed.id,
+        now: this.now(),
+      });
+      return run;
+    } catch (error) {
+      if (!browserAttachStarted) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+      }
+      throw error;
+    }
   }
 
   private async expireStaleActiveRunsForMember(input: {
@@ -1602,6 +2363,14 @@ export class ComputerUseService {
       });
     }
 
+    if (
+      pendingHandoff?.purpose === "managed_login" &&
+      !run.kernelSessionId &&
+      !await this.deleteManagedAuthFlowBrowserBestEffort(run)
+    ) {
+      return "failed";
+    }
+
     let cleanupRun = run;
     if (!run.kernelSessionId && run.status !== "cleanup_pending") {
       try {
@@ -1728,6 +2497,14 @@ export class ComputerUseService {
       throw handoffCheckpointingError();
     }
 
+    if (
+      handoff.purpose === "managed_login" &&
+      !run.kernelSessionId &&
+      !await this.deleteManagedAuthFlowBrowserBestEffort(run)
+    ) {
+      throw browserCleanupFailedError();
+    }
+
     await store.markHandoffExpired({
       expectedStatus: handoff.status === "checkpointing"
         ? "checkpointing"
@@ -1783,6 +2560,29 @@ export class ComputerUseService {
       handoffId: run.pendingHandoffId,
       runId: run.id,
     });
+  }
+
+  private async deleteManagedAuthFlowBrowserBestEffort(
+    run: ComputerRunRecord,
+  ): Promise<boolean> {
+    const domain = readManagedLoginDomain(run);
+    if (!domain) {
+      return true;
+    }
+    try {
+      const connection = await this.requireKernel().findManagedAuthConnection({
+        domain,
+        profileName: run.kernelProfileName,
+      });
+      if (connection?.browserSessionId) {
+        await this.requireKernel().deleteBrowserByIdOrName(
+          connection.browserSessionId,
+        );
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async deleteRunBrowserBestEffort(
@@ -1888,6 +2688,115 @@ function isTerminalRunStatus(
   status: ComputerRunRecord["status"],
 ): status is HostedComputerFinishOutcome | "expired" {
   return isFinishOutcomeStatus(status) || status === "expired";
+}
+
+function readManagedLoginDomain(run: ComputerRunRecord): string | null {
+  return readManagedLoginDomainFromUrl(run.lastUrl);
+}
+
+function readManagedLoginDomainFromUrl(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname
+      ? url.hostname.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function requireManagedLoginDomain(run: ComputerRunRecord): string {
+  const domain = readManagedLoginDomain(run);
+  if (!domain) {
+    throw managedLoginUnavailableError();
+  }
+  return domain;
+}
+
+function readManagedAuthFlowForHandoff(input: {
+  connection: KernelManagedAuthConnection | null;
+  handoff: ComputerHandoffRecord;
+}): KernelManagedAuthConnection | null {
+  const { connection, handoff } = input;
+  if (
+    !connection?.flowStatus ||
+    !connection.flowExpiresAt ||
+    connection.flowExpiresAt <= handoff.updatedAt
+  ) {
+    return null;
+  }
+  return connection;
+}
+
+function isManagedAuthInProgressFlow(
+  connection: KernelManagedAuthConnection,
+  now: Date,
+): boolean {
+  return connection.flowStatus === "IN_PROGRESS" &&
+    Boolean(connection.hostedUrl) &&
+    Boolean(connection.flowExpiresAt && connection.flowExpiresAt > now);
+}
+
+function isManagedAuthTerminalFlow(
+  connection: KernelManagedAuthConnection,
+): boolean {
+  return connection.flowStatus === "SUCCESS" ||
+    connection.flowStatus === "FAILED" ||
+    connection.flowStatus === "EXPIRED" ||
+    connection.flowStatus === "CANCELED";
+}
+
+function isManagedAuthSuccessfulTerminalFlow(
+  connection: KernelManagedAuthConnection,
+): boolean {
+  return connection.flowStatus === "SUCCESS" &&
+    connection.status === "AUTHENTICATED";
+}
+
+function requireManagedAuthHostedUrl(
+  connection: KernelManagedAuthConnection,
+): string {
+  if (!connection.hostedUrl) {
+    throw managedLoginUnavailableError();
+  }
+  return connection.hostedUrl;
+}
+
+function buildManagedLoginHostedUrl(input: {
+  env: EnvSource;
+  hostedUrl: string;
+  token: string;
+}): string {
+  const hostedUrl = new URL(input.hostedUrl);
+  if (!isAllowedKernelManagedAuthHostedUrl({ url: hostedUrl })) {
+    throw managedLoginUnavailableError();
+  }
+  const callbackUrl = new URL(
+    `/api/computer/handoff/${encodeURIComponent(input.token)}/managed-login`,
+    `${requireHostedPublicBaseUrl(input.env)}/`,
+  ).toString();
+  hostedUrl.searchParams.set("success_url", callbackUrl);
+  hostedUrl.searchParams.set("error_url", callbackUrl);
+  return hostedUrl.toString();
+}
+
+function managedLoginUnavailableError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+    message: "Managed sign-in is temporarily unavailable.",
+    retryable: true,
+  });
+}
+
+function managedLoginRequiresLoginNeededError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_LOGIN_NEEDED",
+    message: "Managed sign-in is only available for login checkpoints.",
+    retryable: true,
+  });
 }
 
 function requireKernelSessionId(run: ComputerRunRecord): string {
@@ -2407,6 +3316,20 @@ function buildKernelProfileNamesForAccountDeletion(
   runs: readonly ComputerRunRecord[],
 ): string[] {
   return uniqueStrings(runs.map((run) => run.kernelProfileName));
+}
+
+function buildKernelProfileNameForAccountDeletion(input: {
+  env: EnvSource;
+  memberId: string;
+}): string | null {
+  const namespace = input.env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim()
+    ?? process.env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim();
+  return namespace
+    ? buildKernelProfileName({
+        memberId: input.memberId,
+        namespace,
+      })
+    : null;
 }
 
 function requireKernelProfileNamespace(env: EnvSource): string {

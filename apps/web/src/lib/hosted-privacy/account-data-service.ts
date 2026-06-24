@@ -148,7 +148,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted computer-use runs",
     deletion: "live-delete",
     export: "metadata-and-counts",
-    note: "Deletes Kernel browser sessions and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits live-view URLs, Kernel session ids, and Kernel profile names.",
+    note: "Deletes Kernel browser sessions, Managed Auth connections, and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits credentials, auth connection ids, live-view URLs, Kernel session ids, and Kernel profile names.",
   },
   {
     slug: "prisma.hosted_computer_handoff",

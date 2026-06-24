@@ -73,7 +73,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
 - bounded hosted product-feedback rows for explicit structured product feedback
-- Kernel-backed hosted computer runs and handoff checkpoints
+- Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
@@ -140,9 +140,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   or confirmation text are not proof.
   `computer_act` runs bounded raw Playwright code against the current Kernel
   page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
-  surfaces that cannot be operated through Playwright; manual browser handoff
-  remains available for login, CAPTCHA, missing details, or direct user
-  takeover, but is not the default final-action boundary. Each authenticated
+  surfaces that cannot be operated through Playwright. The agent explicitly
+  selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
+  connection, or `login` for the existing Live View takeover; CAPTCHA,
+  payment, missing-detail, and direct takeover handoffs remain Live View. Each authenticated
   handoff matches the active browser viewport to the opening screen before
   showing the live view.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root

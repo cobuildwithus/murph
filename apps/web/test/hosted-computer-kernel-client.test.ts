@@ -9,7 +9,17 @@ const kernelSdkMocks = vi.hoisted(() => {
     scroll: vi.fn(),
     typeText: vi.fn(),
   };
+  const connections = {
+    create: vi.fn(),
+    delete: vi.fn(),
+    list: vi.fn(),
+    login: vi.fn(),
+    update: vi.fn(),
+  };
   const kernelClient = {
+    auth: {
+      connections,
+    },
     browsers: {
       computer,
       create: vi.fn(),
@@ -39,6 +49,7 @@ const kernelSdkMocks = vi.hoisted(() => {
     Kernel,
     NotFoundError: class NotFoundError extends Error {},
     computer,
+    connections,
     playwrightExecute: kernelClient.browsers.playwright.execute,
   };
 });
@@ -315,6 +326,89 @@ describe("KernelComputerClient", () => {
     expect(serializedDetails).not.toContain("/app/");
     expect(serializedDetails).not.toContain("https://shop.example.test");
     expect(serializedDetails).not.toContain("model-controlled console output");
+  });
+
+  it("creates durable managed auth connections with explicit policy", async () => {
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+    kernelSdkMocks.connections.list.mockResolvedValueOnce({ items: [] });
+    kernelSdkMocks.connections.create.mockResolvedValueOnce({
+      domain: "www.amazon.com",
+      id: "managed-auth-1",
+      profile_name: "murph-test-profile",
+      record_session: false,
+      save_credentials: true,
+      status: "NEEDS_AUTH",
+    });
+    kernelSdkMocks.connections.update.mockResolvedValueOnce({
+      auto_reauth: true,
+      domain: "www.amazon.com",
+      health_checks: true,
+      id: "managed-auth-1",
+      profile_name: "murph-test-profile",
+      record_session: false,
+      save_credentials: true,
+      status: "NEEDS_AUTH",
+    });
+
+    await expect(client.ensureManagedAuthConnection({
+      domain: "www.amazon.com",
+      profileName: "murph-test-profile",
+    })).resolves.toMatchObject({
+      domain: "www.amazon.com",
+      id: "managed-auth-1",
+      profileName: "murph-test-profile",
+      status: "NEEDS_AUTH",
+    });
+
+    expect(kernelSdkMocks.connections.create).toHaveBeenCalledWith({
+      auto_reauth: true,
+      domain: "www.amazon.com",
+      health_checks: true,
+      profile_name: "murph-test-profile",
+      record_session: false,
+      save_credentials: true,
+    });
+    expect(kernelSdkMocks.connections.update).toHaveBeenCalledWith(
+      "managed-auth-1",
+      {
+        auto_reauth: true,
+        health_checks: true,
+        record_session: false,
+        save_credentials: true,
+      },
+    );
+  });
+
+  it("starts managed auth without exposing Kernel handoff capabilities", async () => {
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+    kernelSdkMocks.connections.login.mockResolvedValueOnce({
+      flow_expires_at: "2026-06-17T12:20:00.000Z",
+      handoff_code: "must-not-escape",
+      hosted_url: "https://auth.onkernel.com/login/test",
+      live_view_url: "https://private.onkernel.com/live",
+    });
+
+    await expect(client.startManagedAuthLogin("managed-auth-1")).resolves.toEqual({
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      hostedUrl: "https://auth.onkernel.com/login/test",
+    });
+    expect(kernelSdkMocks.connections.login).toHaveBeenCalledWith(
+      "managed-auth-1",
+      { record_session: false },
+    );
+  });
+
+  it("rejects managed auth Hosted UI URLs outside Kernel", async () => {
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+    kernelSdkMocks.connections.login.mockResolvedValueOnce({
+      flow_expires_at: "2026-06-17T12:20:00.000Z",
+      hosted_url: "https://attacker.example/login",
+    });
+
+    await expect(client.startManagedAuthLogin("managed-auth-1")).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_AUTH_INVALID",
+      retryable: true,
+    });
   });
 
   it("bounds long Playwright evaluation diagnostics", async () => {
