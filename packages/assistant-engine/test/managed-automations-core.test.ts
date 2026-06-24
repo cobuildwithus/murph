@@ -156,7 +156,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 13 * * 3',
+        expression: '30 19 * * 3',
       },
       slug: 'weekly-health-research-scout',
       status: 'active',
@@ -164,7 +164,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain('Wednesday at 1:00 PM local time')
+    expect(researchScoutRecord?.instructions).toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
