@@ -35,9 +35,13 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about five minutes.";
-const setupRequestText = "Remind me here in about five minutes to go to sleep.";
-const scheduledReminderLeadMs = 300_000;
+const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
+const scheduledReminderFullLeadMs = 300_000;
+const scheduledReminderFastGateLeadMs = 120_000;
+const scheduledReminderLeadMs = resolveScheduledReminderLeadMs(fastDeployGate);
+const setupLeadText = fastDeployGate ? "about two minutes" : "about five minutes";
+const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
+const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const scheduledReminderSendWaitMs = 240_000;
 const productionLikeAssistantModel = "gpt-5.5";
@@ -168,11 +172,21 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("scripts the reminder five minutes ahead of the current time", () => {
+  it("uses a two-minute lead for fast deploy gates and five minutes otherwise", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
 
-    expect(resolveScheduledReminderTimes(now)).toEqual({
+    expect(resolveScheduledReminderLeadMs(true)).toBe(scheduledReminderFastGateLeadMs);
+    expect(resolveScheduledReminderLeadMs(false)).toBe(scheduledReminderFullLeadMs);
+    expect(resolveScheduledReminderTimes(now, scheduledReminderFastGateLeadMs)).toEqual({
+      dueAtIso: "2026-06-18T12:02:00.000Z",
+    });
+    expect(resolveScheduledReminderTimes(now, scheduledReminderFullLeadMs)).toEqual({
       dueAtIso: "2026-06-18T12:05:00.000Z",
+    });
+    expect(resolveScheduledReminderTimes(now)).toEqual({
+      dueAtIso: fastDeployGate
+        ? "2026-06-18T12:02:00.000Z"
+        : "2026-06-18T12:05:00.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -420,10 +434,17 @@ function summarizeObservedLinqRequests(): Array<{ method: string; url: string }>
   }));
 }
 
-function resolveScheduledReminderTimes(now = new Date()): {
+function resolveScheduledReminderLeadMs(useFastGate: boolean): number {
+  return useFastGate ? scheduledReminderFastGateLeadMs : scheduledReminderFullLeadMs;
+}
+
+function resolveScheduledReminderTimes(
+  now = new Date(),
+  leadMs = scheduledReminderLeadMs,
+): {
   dueAtIso: string;
 } {
-  const dueAtMs = now.getTime() + scheduledReminderLeadMs;
+  const dueAtMs = now.getTime() + leadMs;
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
   };
