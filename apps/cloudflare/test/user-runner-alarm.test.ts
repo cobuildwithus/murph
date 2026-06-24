@@ -1414,7 +1414,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("preempts active retention-only work when default processing arrives", async () => {
+  it("keeps default processing from waking active retention-only work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -1434,22 +1434,14 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-default-preempts-retention",
+      orchestrationAttemptId: "test-orchestration-attempt-default-behind-retention",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:05.000Z",
     });
 
-    expect(ensureProcessing).toHaveBeenCalledWith({
-      activeRuntime: {
-        attemptId: token.attemptId,
-        leaseGeneration: String(token.generation),
-        processingMode: "inbox_media_retention",
-        userId: TEST_USER_ID,
-      },
-      userId: TEST_USER_ID,
-    });
+    expect(ensureProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
@@ -1458,7 +1450,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("replaces a stale retention-only fence when default processing has no active child", async () => {
+  it("replaces a stale retention-only fence when retention processing has no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -1468,9 +1460,16 @@ describe("HostedUserRunner execution coordination", () => {
         reason: "no-active-child" as const,
       }),
     );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: false,
+      reason: "no_active_runtime",
+    }));
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
+      readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -1482,7 +1481,8 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-default-replaces-stale-retention",
+      orchestrationAttemptId: "test-orchestration-attempt-retention-replaces-stale-retention",
+      processingMode: "inbox_media_retention",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -1491,6 +1491,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
     expect(ensureProcessing).toHaveBeenCalledWith({
       activeRuntime: {
         attemptId: token.attemptId,

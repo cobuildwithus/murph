@@ -43,8 +43,6 @@ export const HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TI
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 export const HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID =
   "hosted-runtime-reconcile-before-mailbox-processing";
-export const HOSTED_USER_RUNTIME_MAILBOX_BEFORE_RETENTION_PATCH_ID =
-  "hosted-runtime-mailbox-before-retention-processing";
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -86,8 +84,6 @@ export async function hostedUserRuntimeWorkflow(
     nowMs: () => Date.now(),
     reconciliationBeforeMailboxProcessingEnabled: () =>
       patched(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID),
-    mailboxBeforeInboxMediaRetentionEnabled: () =>
-      patched(HOSTED_USER_RUNTIME_MAILBOX_BEFORE_RETENTION_PATCH_ID),
     readRuntimeReconciliationFacts:
       reconciliationActivities.readRuntimeReconciliationFacts,
     uuid: uuid4,
@@ -115,7 +111,6 @@ export interface HostedUserRuntimeWorkflowRuntime {
     processingMode?: "default" | "inbox_media_retention" | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
-  mailboxBeforeInboxMediaRetentionEnabled(): boolean;
   nowMs(): number;
   reconciliationBeforeMailboxProcessingEnabled(): boolean;
   readRuntimeReconciliationFacts(
@@ -368,15 +363,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      const mailboxBeforeRetention =
-        runtime.mailboxBeforeInboxMediaRetentionEnabled();
-      if (mailboxBeforeRetention && hasAnyMailboxLag(facts)) {
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: true,
-        });
-        continue;
-      }
-
       if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
@@ -385,7 +371,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      if (!mailboxBeforeRetention && hasAnyMailboxLag(facts)) {
+      if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
         });

@@ -181,45 +181,6 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     if (activeFence.processingMode !== requestedProcessingMode) {
-      if (
-        activeFence.processingMode === "inbox_media_retention"
-        && requestedProcessingMode === "default"
-      ) {
-        const containerResult = await ensureActiveRuntimeProcessing({
-          activeRuntime: {
-            attemptId: activeFence.attemptId,
-            leaseGeneration: String(activeFence.generation),
-            processingMode: activeFence.processingMode,
-            userId: record.userId,
-          },
-          commandBudget: input.commandBudget,
-          env: this.input.env,
-          runnerContainerName: activeFence.runnerContainerName,
-          runnerContainerNamespace: this.input.runnerContainerNamespace,
-          runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
-        });
-        if (containerResult.kind === "accepted") {
-          await this.syncRunnerAlarm(record);
-          return createRuntimeProcessingRetryLater({
-            reason: "container_busy",
-            userId: input.input.userId,
-          });
-        }
-        if (containerResult.kind === "start-required") {
-          return await this.replaceStartRequiredRuntimeFence({
-            activeFence,
-            commandBudget: input.commandBudget,
-            input: input.input,
-            record,
-            runtimeWakeStartedAt: input.runtimeWakeStartedAt,
-          });
-        }
-        await this.syncRunnerAlarm(record);
-        return createRuntimeProcessingRetryLater({
-          reason: mapRunnerProcessingRetryReason(containerResult.reason),
-          userId: input.input.userId,
-        });
-      }
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_busy",
