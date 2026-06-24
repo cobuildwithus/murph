@@ -94,14 +94,15 @@ export default async function ComputerHandoffPage({
     );
   }
 
-  const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
+  const handoffEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}`;
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
-        doneEndpoint={doneEndpoint}
+        doneEndpoint={`${handoffEndpoint}/done`}
         iframeAllow={state.iframeAllow}
         liveViewUrl={state.liveViewUrl}
+        viewportEndpoint={`${handoffEndpoint}/viewport`}
       />
     </main>
   );

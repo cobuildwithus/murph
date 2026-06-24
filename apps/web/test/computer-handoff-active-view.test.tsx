@@ -4,8 +4,12 @@ import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
+import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 
 import { renderClientComponent } from "./render-client-component";
+
+const DONE_ENDPOINT = "/api/computer/handoff/handoff-token/done";
+const VIEWPORT_ENDPOINT = "/api/computer/handoff/handoff-token/viewport";
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -20,42 +24,125 @@ afterEach(async () => {
   }
 });
 
+test.each([
+  [undefined, "mobile"],
+  [767, "mobile"],
+  [768, "tablet"],
+  [1023, "tablet"],
+  [1024, "desktop"],
+] as const)("resolves viewport width %s to %s", (width, expected) => {
+  expect(resolveComputerBrowserViewportPreset(width)).toBe(expected);
+});
+
+test.each([
+  [390, "mobile"],
+  [1280, "desktop"],
+] as const)(
+  "ComputerHandoffActiveView waits for viewport matching at width %s, then opens the live view as %s",
+  async (viewportWidth, expectedPreset) => {
+    let resolveViewport!: (response: Response) => void;
+    const viewportPromise = new Promise<Response>((resolve) => {
+      resolveViewport = resolve;
+    });
+    vi.mocked(fetch).mockReturnValue(viewportPromise);
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ComputerHandoffActiveView, {
+        doneEndpoint: DONE_ENDPOINT,
+        iframeAllow: "clipboard-read",
+        liveViewUrl: "https://browser.example.test/live",
+        viewportEndpoint: VIEWPORT_ENDPOINT,
+      }),
+      { requireButton: false, viewportWidth },
+    );
+    cleanupRender = cleanup;
+
+    expect(container.querySelector("iframe")).toBeNull();
+    const preparingStatus = container.querySelector('[aria-busy="true"][role="status"]');
+    assert.ok(preparingStatus);
+    expect(preparingStatus.textContent).toContain("Preparing your browser");
+    expect(fetch).toHaveBeenCalledWith(
+      VIEWPORT_ENDPOINT,
+      expect.objectContaining({
+        body: JSON.stringify({ preset: expectedPreset }),
+        credentials: "same-origin",
+        method: "POST",
+      }),
+    );
+
+    await act(async () => {
+      resolveViewport(new Response(null, { status: 204 }));
+      await viewportPromise;
+      await flushMicrotasks();
+    });
+
+    const iframe = container.querySelector("iframe");
+    assert.ok(iframe);
+    expect(iframe.getAttribute("src")).toBe("https://browser.example.test/live");
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.querySelector("button")).toBeTruthy();
+  },
+);
+
+test("ComputerHandoffActiveView fails open with an inline error when viewport matching fails", async () => {
+  vi.mocked(fetch).mockResolvedValue(new Response("server error", { status: 502 }));
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: DONE_ENDPOINT,
+      iframeAllow: "clipboard-read",
+      liveViewUrl: "https://browser.example.test/live",
+      viewportEndpoint: VIEWPORT_ENDPOINT,
+    }),
+    { viewportWidth: 1280 },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector("iframe")).toBeTruthy();
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    "Could not fit the browser to this screen. Showing the current view.",
+  );
+});
+
 test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
-  let resolveFetch!: (response: Response) => void;
-  const fetchPromise = new Promise<Response>((resolve) => {
-    resolveFetch = resolve;
+  let resolveDone!: (response: Response) => void;
+  const donePromise = new Promise<Response>((resolve) => {
+    resolveDone = resolve;
   });
-  vi.mocked(fetch).mockReturnValue(fetchPromise);
+  vi.mocked(fetch).mockImplementation((input) => {
+    if (input === VIEWPORT_ENDPOINT) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (input === DONE_ENDPOINT) {
+      return donePromise;
+    }
+    return Promise.reject(new Error("Unexpected fetch URL."));
+  });
 
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read; clipboard-write",
       liveViewUrl: "https://browser.example.test/live",
+      viewportEndpoint: VIEWPORT_ENDPOINT,
     }),
+    { viewportWidth: 390 },
   );
   cleanupRender = cleanup;
 
   const iframe = container.querySelector("iframe");
   assert.ok(iframe);
-  expect(iframe.getAttribute("src")).toBe("https://browser.example.test/live");
   expect(iframe.getAttribute("allow")).toBe("clipboard-read; clipboard-write");
   expect(iframe.getAttribute("referrerPolicy")).toBe("no-referrer");
   expect(iframe.getAttribute("sandbox")).toBe(
     "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals",
   );
-  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   await flushReact();
 
-  expect(fetch).toHaveBeenCalledWith("/api/computer/handoff/handoff-token/done", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  });
   const savingStatus = container.querySelector('[aria-busy="true"][role="status"]');
   assert.ok(savingStatus);
   expect(savingStatus.textContent).toContain("Saving your progress");
@@ -63,11 +150,11 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(container.querySelector("iframe")).toBe(iframe);
 
   await act(async () => {
-    resolveFetch(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
+    resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
       headers: { "content-type": "application/json" },
       status: 200,
     }));
-    await fetchPromise;
+    await donePromise;
     await flushMicrotasks();
   });
 
@@ -80,21 +167,27 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   assert.ok(fallbackLink);
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");
   expect(fallbackLink.textContent).toContain("Open Murph");
-  expect(container.querySelector("iframe")).toBe(iframe);
 });
 
 test.each([
   ["HTTP error", new Response("server error", { status: 500 })],
   ["invalid JSON", new Response("not-json", { status: 200 })],
 ])("ComputerHandoffActiveView clears the saving overlay after %s", async (_label, response) => {
-  vi.mocked(fetch).mockResolvedValue(response);
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    if (input === VIEWPORT_ENDPOINT) {
+      return new Response(null, { status: 204 });
+    }
+    return response;
+  });
 
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read",
       liveViewUrl: "https://browser.example.test/live",
+      viewportEndpoint: VIEWPORT_ENDPOINT,
     }),
+    { viewportWidth: 390 },
   );
   cleanupRender = cleanup;
 
