@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import * as runtimeState from "@murphai/runtime-state";
 import * as assistantIds from "@murphai/runtime-state/assistant-ids";
+import * as hostedCodexSubscriptionAuth from "@murphai/runtime-state/hosted-codex-subscription-auth";
 import * as runtimeStateNode from "@murphai/runtime-state/node";
 import * as runtimeStateNodeAssistantRuntimeIssues from "@murphai/runtime-state/node/assistant-runtime-issues";
 import * as runtimeStateNodeAssistantStateFs from "@murphai/runtime-state/node/assistant-state-fs";
@@ -66,6 +67,23 @@ describe("@murphai/runtime-state package boundary", () => {
     expect(packageJson.exports?.["./assistant-ids"]).toEqual({
       default: "./dist/assistant-ids.js",
       types: "./dist/assistant-ids.d.ts",
+    });
+  });
+
+  it("exposes hosted Codex subscription auth through a dedicated subpath", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      exports?: Record<string, { default?: string; types?: string }>;
+    };
+
+    expect(hostedCodexSubscriptionAuth.parseHostedLocalCodexSubscriptionHostAuth)
+      .toBeTypeOf("function");
+    expect(hostedCodexSubscriptionAuth.buildHostedLocalCodexSubscriptionSeedAuth)
+      .toBeTypeOf("function");
+    expect(packageJson.exports?.["./hosted-codex-subscription-auth"]).toEqual({
+      default: "./dist/hosted-codex-subscription-auth.js",
+      types: "./dist/hosted-codex-subscription-auth.d.ts",
     });
   });
 

@@ -9,7 +9,7 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   type HostedRuntimeSignal,
-  type HostedExecutionRuntimeControlWakeKind,
+  type HostedExecutionPlainRuntimeControlWakeKind,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeSignal,
@@ -253,7 +253,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
-  kind: HostedExecutionRuntimeControlWakeKind;
+  kind: HostedExecutionPlainRuntimeControlWakeKind;
   occurredAt?: string | null;
   prisma?: PrismaClient;
   userId: string;

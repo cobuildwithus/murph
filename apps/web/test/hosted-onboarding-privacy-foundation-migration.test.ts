@@ -24,6 +24,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
+    "codexAuthConnection HostedCodexAuthConnection?",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
@@ -382,8 +383,10 @@ describe("hosted Prisma baseline migration", () => {
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
       "20260622190000_add_hosted_product_feedback",
+      "20260623120000_hosted_codex_auth_connection",
       "20260623170000_generalize_hosted_product_feedback",
       "20260623193000_hosted_product_feedback_summary",
+      "20260624000000_clear_hosted_codex_auth_connected",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
