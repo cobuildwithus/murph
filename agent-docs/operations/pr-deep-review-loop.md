@@ -3,7 +3,7 @@
 Last verified: 2026-06-19
 
 Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
-It is additive: it never satisfies, replaces, or reorders the required completion audits in `agent-docs/operations/completion-workflow.md`.
+For PR-lane patch implementation, this loop is the audit gate: the worktree/PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent agent default-skip the local required audit subagent passes and rely on this loop to cover that surface. For current-checkout (non-PR-lane) work it stays additive — it does not satisfy, replace, or reorder the local required completion audits in that document, and those passes still run there.
 For non-trivial PR-lane work, do not call the PR good to merge until this loop has passed.
 
 ## When It Runs
@@ -18,6 +18,8 @@ The review target must be the pushed PR head. Do not run this loop on
 unpushed local changes, local patch text, or attached ZIP/repomix context. If
 the current fixes are only local, commit and push them to the PR branch first,
 then run ReviewGPT against the PR URL through the GitHub connector.
+
+The PR body must carry the intent contract from `agent-docs/operations/completion-workflow.md` § PR Description (why the PR exists, the user-visible goal it is meant to ship, and invariants to preserve). Before firing a round, confirm that block is present and current — if it is missing or stale (for example the PR's intended behavior has shifted since the last round), update the PR body first so the reviewer judges the diff against intent rather than the current runtime state.
 
 Fire each round as soon as the head it reviews is pushed — do NOT wait for
 PR CI to go green first. CI and the review round run in parallel; a round
@@ -41,7 +43,9 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
      --response-file audit-packages/pr-<number>-round-<k>.md
    ```
 
-   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended. Do not downgrade to non-Pro models, lower reasoning, or a different connector when the Pro run is slow or sticky; retry on Pro in a fresh thread instead. The repo defaults (`gpt-5.5-pro`, GitHub connector, connector-only context with no zip artifacts) are the intended configuration. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes rather than starting new threads or repeatedly hammering the browser; keep the `90m` command timeout as the normal outer guard.
+   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended. Do not downgrade to non-Pro models, lower reasoning, or a different connector when the Pro run is slow or sticky; retry on Pro in a fresh thread instead. The repo defaults (`gpt-5.5-pro`, GitHub connector, connector-only context with no zip artifacts) are the intended configuration. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes — not more frequently — to keep parent-agent token usage low and avoid hammering the browser or starting duplicate threads. Keep the `90m` command timeout as the normal outer guard.
+
+   If a round returns that ReviewGPT cannot access the GitHub repo (or the GitHub connector otherwise reports access failure), retry the round once on the same Pro + GitHub-connector configuration in a fresh thread before doing anything else — the connector is occasionally flaky and a single retry typically succeeds. Do not fall back to `--zip`, repomix, attached repo archives, paste-dumps, or any alternate context delivery on a connector-access error; the boundary in §Boundaries against zip/archive context still holds. If the second connector attempt also fails, stop and report the connector failure rather than silently routing the round through a different context path.
 2. Check the captured response is the actual review before triaging it. If the response file is a short preliminary acknowledgment (for example "I'll inspect the PR and report back") instead of findings or an explicit no-findings summary, the model was still working when capture finished: the round does not count, and do not fire a new thread. Re-capture the finished reply from the same thread with `pnpm review:gpt thread export --chat-url <thread-url> --output audit-packages/pr-<number>-round-<k>-recapture.json` (the thread URL is in the run output) and read the final assistant message from that export. Note the conversation URL does not load (redirects home) while the turn is still generating, so wait a few minutes and retry the export until the thread loads. If the same thread still cannot load or export a final review after roughly 90 minutes, try recovery before abandoning the round: use the in-app browser or Computer Use against the managed browser session from `scripts/review-gpt.config.sh` to inspect the ChatGPT thread, recover the thread URL from the ReviewGPT output, or copy/export the final assistant reply. Start a fresh Pro thread only after the original thread is proven inaccessible, failed, or missing a final review.
 3. When the response lands, the local agent triages every finding before any fix:
    first decide whether it is worth fixing at all. Reject it when it is wrong,
@@ -102,7 +106,7 @@ fires immediately, in parallel with CI).
 
 ## Boundaries
 
-- Never use this loop (or any `review:gpt`/`thread wake` flow) to satisfy required completion audits; see `agent-docs/operations/completion-workflow.md`.
+- For current-checkout (non-PR-lane) work, never use this loop (or any `review:gpt`/`thread wake` flow) to satisfy the local required completion audits; see `agent-docs/operations/completion-workflow.md`. For PR-lane patch implementation, the worktree/PR-lane skip in that document explicitly lets this loop serve as the audit gate, so the local subagent passes default-skip and this loop must run to zero accepted findings before merge.
 - Never use `--zip`, attached repo archives, repomix bundles, or local dirty-worktree context for this PR-lane loop. The reviewer must inspect the pushed PR through the GitHub connector so the review, CI, and merge target all refer to the same head.
 - Response files under `audit-packages/` are local working artifacts and stay uncommitted.
 - The managed browser profile, port, model, and connector defaults live in `scripts/review-gpt.config.sh`; the prompt lives in `scripts/chatgpt-review-presets/pr-deep-review.md`. Change them there, not inline.
