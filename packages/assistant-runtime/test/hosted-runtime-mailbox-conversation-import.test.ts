@@ -177,6 +177,7 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "linq",
       partCount: 2,
       reactionEligible: false,
+      replyToMessageId: null,
       service: null,
     });
     assert.ok(replyTarget);
@@ -1052,6 +1053,7 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "linq",
       partCount: 1,
       reactionEligible: true,
+      replyToMessageId: null,
       service: "iMessage",
     });
   });

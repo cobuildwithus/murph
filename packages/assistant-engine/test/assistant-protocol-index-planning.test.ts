@@ -202,6 +202,10 @@ describe('assistant protocol index planning', () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
 
+    const turnContext = [
+      'Conversation context:',
+      'The assistant previously sent a reminder from another assistant run.',
+    ].join('\n')
     const resumedSession = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
@@ -211,7 +215,10 @@ describe('assistant protocol index planning', () => {
     })
     const resumedPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
-      input: createMessageInput(),
+      input: {
+        ...createMessageInput(),
+        turnContext,
+      },
       profile: executionProfile,
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
@@ -225,6 +232,7 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-resume')
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
+    expect(resumedPlan.turnContextPrompt).toContain(turnContext)
     expect(resumedPlan.resume?.prepareFreshThreadFallback).toEqual(expect.any(Function))
     expect(resumedPlan.planningDiagnostics).toMatchObject({
       shouldPrepareBootstrapContext: false,
@@ -242,6 +250,7 @@ describe('assistant protocol index planning', () => {
     expect(fallback?.developerInstructions).toContain(
       'bootstrap contract',
     )
+    expect(fallback?.turnContextPrompt).toContain(turnContext)
     expect(fallback?.sessionContext).toEqual({
       binding: resumedSession.binding,
     })

@@ -22,6 +22,7 @@ function createInputSummary(
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
     actorIsSelf: overrides.actorIsSelf ?? overrides.conversation?.actorIsSelf ?? false,
+    replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
 
@@ -57,5 +58,44 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(first, differentThread)).toBe(false)
+  })
+
+  it('keeps grouping when both inputs share the same native reply target', () => {
+    const first = createInputSummary({
+      inputId: 'ain_reply_a',
+      replyToMessageId: 'linq-msg-shared',
+    })
+    const second = createInputSummary({
+      inputId: 'ain_reply_b',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      replyToMessageId: 'linq-msg-shared',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(first, second)).toBe(true)
+  })
+
+  it('splits the group when adjacent inputs reply to different assistant messages', () => {
+    const first = createInputSummary({
+      inputId: 'ain_reply_m1',
+      replyToMessageId: 'linq-msg-m1',
+    })
+    const replyToM2 = createInputSummary({
+      inputId: 'ain_reply_m2',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      replyToMessageId: 'linq-msg-m2',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(first, replyToM2)).toBe(false)
+  })
+
+  it('separates an anchored reply from a preceding unanchored input', () => {
+    const unanchored = createInputSummary({ inputId: 'ain_unanchored' })
+    const anchored = createInputSummary({
+      inputId: 'ain_anchored',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      replyToMessageId: 'linq-msg-anchor',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(unanchored, anchored)).toBe(false)
   })
 })

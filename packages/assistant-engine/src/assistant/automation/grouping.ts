@@ -116,5 +116,13 @@ export function shouldGroupAdjacentConversationInput(
   first: AssistantAutomationInputSummary,
   candidate: AssistantAutomationInputSummary,
 ): boolean {
-  return isSameAssistantConversationRef(first.conversation, candidate.conversation)
+  if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
+    return false
+  }
+  // Native reply targets identify the specific prior assistant message the
+  // input is answering. Mixing them into one group would inject only one
+  // turn context for messages that semantically need different anchors;
+  // split the group at every reply-anchor boundary so each anchored input
+  // gets its own turn with its own context.
+  return first.replyToMessageId === candidate.replyToMessageId
 }

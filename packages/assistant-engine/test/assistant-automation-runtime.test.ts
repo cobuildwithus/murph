@@ -91,6 +91,7 @@ const replyMocks = vi.hoisted(() => ({
   getAssistantChannelAdapter: vi.fn(),
   isAssistantProviderConnectionLostError: vi.fn(),
   isAssistantProviderStalledError: vi.fn(),
+  listAssistantOutboxIntents: vi.fn(),
   listAssistantTranscriptEntries: vi.fn(),
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
@@ -189,6 +190,7 @@ vi.mock('../src/assistant/fault-injection.ts', () => ({
 
 vi.mock('../src/assistant/outbox.ts', () => ({
   drainAssistantOutboxLocal: runLoopMocks.drainAssistantOutbox,
+  listAssistantOutboxIntents: replyMocks.listAssistantOutboxIntents,
 }))
 
 vi.mock('../src/assistant/outbox/summary.ts', () => ({
@@ -329,6 +331,7 @@ function createAutomationInputSummary(input: {
     text: 'hello',
     attachmentCount: 0,
     actorIsSelf: false,
+    replyToMessageId: null,
   }
 }
 
@@ -357,6 +360,61 @@ function createCaptureDetail(
     attachments: [],
     ...overrides,
   }).capture
+}
+
+function createSentOutboxIntent(input: {
+  actorId?: string | null
+  channel?: string
+  identityId?: string | null
+  intentId?: string
+  message: string
+  providerMessageId?: string | null
+  providerMessageIds?: string[]
+  providerThreadId?: string | null
+  sentAt: string
+  sessionId?: string
+  target?: string
+  threadId?: string | null
+}) {
+  const channel = input.channel ?? 'telegram'
+  const target = input.target ?? 'thread-1'
+  const providerThreadId = input.providerThreadId ?? target
+  return {
+    actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
+    channel,
+    delivery: {
+      channel,
+      idempotencyKey: null,
+      kind: 'message',
+      messageLength: input.message.length,
+      providerMessageId: input.providerMessageId ?? null,
+      ...(input.providerMessageIds ? { providerMessageIds: input.providerMessageIds } : {}),
+      providerThreadId,
+      sentAt: input.sentAt,
+      target,
+      targetKind: 'thread',
+    },
+    identityId: input.identityId ?? null,
+    intentId: input.intentId ?? 'intent-1',
+    message: input.message,
+    operation: null,
+    sessionId: input.sessionId ?? 'session-1',
+    status: 'sent',
+    threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+  }
+}
+
+function createTranscriptEntry(input: {
+  createdAt: string
+  kind?: 'assistant' | 'error' | 'status' | 'thinking' | 'user'
+  text: string
+}) {
+  return {
+    createdAt: input.createdAt,
+    kind: input.kind ?? 'assistant',
+    schema: 'murph.assistant-transcript-entry.v1',
+    text: input.text,
+  }
 }
 
 function createListResult(
@@ -702,6 +760,7 @@ function assistantInputCandidateFromInboxCapture(
 }
 
 function createCapturelessAssistantInputCandidate(input: {
+  actorIsSelf?: boolean
   conversationThreadId?: string | null
   inputId: string
   mailboxRow?: {
@@ -740,7 +799,7 @@ function createCapturelessAssistantInputCandidate(input: {
       conversation: {
         accountId: 'safe_acct_1',
         actorId: 'safe_actor_1',
-        actorIsSelf: false,
+        actorIsSelf: input.actorIsSelf ?? false,
         source,
         threadId: input.conversationThreadId ?? 'safe_thread_1',
         threadIsDirect: true,
@@ -888,6 +947,7 @@ function createReplyGroupItem(
   telegramMetadata: { mediaGroupId: string | null; messageId: string | null; replyContext: string | null } | null = null,
 ) {
   const inputCandidate = assistantInputCandidateFromInboxCapture(capture)
+  const metadata = inputCandidate.event.sourceMetadata
   return {
     inputCandidate,
     summary: {
@@ -900,6 +960,8 @@ function createReplyGroupItem(
       text: capture.text,
       attachmentCount: capture.attachmentCount,
       actorIsSelf: capture.actorIsSelf,
+      replyToMessageId:
+        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: capture.captureId,
     },
     telegramMetadata,
@@ -910,6 +972,7 @@ function createCapturelessReplyGroupItem(
   candidate: AssistantInputCandidate,
 ) {
   const conversation = candidate.event.conversation
+  const metadata = candidate.event.sourceMetadata
   return {
     inputCandidate: candidate,
     summary: {
@@ -929,6 +992,8 @@ function createCapturelessReplyGroupItem(
       receivedAt: candidate.event.receivedAt,
       source: candidate.event.source,
       text: candidate.event.transcriptText ?? candidate.event.text,
+      replyToMessageId:
+        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
       captureId: candidate.event.inputId,
     },
     telegramMetadata: null,
@@ -1078,6 +1143,7 @@ beforeEach(() => {
   replyMocks.getAssistantChannelAdapter.mockReset().mockReturnValue(null)
   replyMocks.isAssistantProviderConnectionLostError.mockReset().mockReturnValue(false)
   replyMocks.isAssistantProviderStalledError.mockReset().mockReturnValue(false)
+  replyMocks.listAssistantOutboxIntents.mockReset().mockResolvedValue([])
   replyMocks.listAssistantTranscriptEntries.mockReset().mockResolvedValue([])
   replyMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
   replyMocks.normalizeNullableString
@@ -2319,6 +2385,14 @@ describe('assistant auto-reply runtime', () => {
     if (!context) {
       throw new Error('expected reply context')
     }
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        deliveryIntentId: 'intent-already-handled',
+        inputIds: context.inputIds,
+        primaryInputId: context.firstInputId,
+        status: 'completed',
+      }),
+    ])
 
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
@@ -4298,6 +4372,7 @@ describe('assistant auto-reply runtime', () => {
               kind: 'linq',
               partCount: 1,
               reactionEligible: true,
+              replyToMessageId: null,
               service: 'iMessage',
             },
           },
@@ -4328,6 +4403,7 @@ describe('assistant auto-reply runtime', () => {
           kind: 'linq',
           partCount: 1,
           reactionEligible: true,
+          replyToMessageId: null,
           service: 'iMessage',
         },
       },
@@ -4347,6 +4423,7 @@ describe('assistant auto-reply runtime', () => {
         kind: 'linq',
         partCount: 1,
         reactionEligible: false,
+        replyToMessageId: null,
         service: 'sms',
       },
       text: 'late sms text',
@@ -5681,28 +5758,29 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('skips recent self-authored assistant echoes', async () => {
+  it('skips recent self-authored assistant echoes when the provider timestamp precedes the transcript write', async () => {
     replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
       session: {
-        sessionId: 'session-1',
-        lastTurnAt: '2026-04-08T00:00:00.000Z',
-        updatedAt: '2026-04-08T00:00:00.000Z',
-        createdAt: '2026-04-08T00:00:00.000Z',
+        lastTurnAt: '2026-04-08T00:00:01.000Z',
+        sessionId: 'session-echo',
       },
     })
     replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
-      {
-        kind: 'assistant',
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:01.000Z',
         text: 'same text',
-      },
+      }),
     ])
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(
         createShowResult(
           createCaptureDetail({
             actorIsSelf: true,
-            occurredAt: '2026-04-08T00:05:00.000Z',
+            occurredAt: '2026-04-08T00:00:00.000Z',
+            source: 'linq',
             text: 'same text',
+            threadId: 'thread-1',
           }),
         ),
       ),
@@ -5714,8 +5792,10 @@ describe('assistant auto-reply runtime', () => {
       createReplyGroupItem(
         createCaptureSummary({
           actorIsSelf: true,
-          occurredAt: '2026-04-08T00:05:00.000Z',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'linq',
           text: 'same text',
+          threadId: 'thread-1',
         }),
       ),
     ])
@@ -5727,7 +5807,7 @@ describe('assistant auto-reply runtime', () => {
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: true,
       context,
-      enabledChannels: ['telegram'],
+      enabledChannels: ['linq'],
       inboxServices,
       requestId: null,
       sessionMaxAgeMs: null,
@@ -5742,6 +5822,224 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('replies to self-authored text that only matches an older transcript entry', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:04.000Z',
+        sessionId: 'session-echo-multiple',
+      },
+    })
+    replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:01.000Z',
+        text: 'first reminder',
+      }),
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:04.000Z',
+        text: 'second reminder',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            actorIsSelf: true,
+            occurredAt: '2026-04-08T00:00:05.000Z',
+            source: 'linq',
+            text: 'first reminder',
+            threadId: 'thread-1',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          actorIsSelf: true,
+          occurredAt: '2026-04-08T00:00:05.000Z',
+          source: 'linq',
+          text: 'first reminder',
+          threadId: 'thread-1',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+  })
+
+  it('suppresses self-authored echoes from confirmed cross-session outbox history', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        channel: 'linq',
+        intentId: 'intent-old-provider-id',
+        message: 'older provider-id message',
+        providerMessageId: 'linq-old-message-id',
+        sentAt: '2026-04-08T00:01:00.000Z',
+        sessionId: 'session-old',
+      }),
+      createSentOutboxIntent({
+        channel: 'linq',
+        message: 'same text',
+        sentAt: '2026-04-08T00:02:01.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            actorIsSelf: true,
+            externalId: 'linq:linq-new-message-id',
+            occurredAt: '2026-04-08T00:02:00.000Z',
+            source: 'linq',
+            text: 'same text',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          actorIsSelf: true,
+          externalId: 'linq:linq-new-message-id',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+          source: 'linq',
+          text: 'same text',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('suppresses Linq self-authored echoes by provider message id after thread materialization', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        actorId: null,
+        channel: 'linq',
+        identityId: null,
+        message: 'provider-id matched assistant delivery',
+        providerMessageId: 'linq-assistant-message-1',
+        providerThreadId: 'raw-linq-chat-1',
+        sentAt: '2026-04-08T00:02:01.000Z',
+        sessionId: 'session-automation',
+        target: 'raw-linq-chat-1',
+        threadId: null,
+      }),
+    ])
+    const candidate = createCapturelessAssistantInputCandidate({
+      actorIsSelf: true,
+      conversationThreadId: 'lid_linq_chat_1',
+      inputId: 'ain_linq_echo_1',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-assistant-message-1',
+        threadId: 'raw-linq-chat-1',
+      },
+      source: 'linq',
+      text: 'scheduled prompt',
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(candidate),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('still replies when self-authored captures cannot be matched to a recent assistant echo', async () => {
@@ -7530,7 +7828,9 @@ describe('assistant auto-reply runtime', () => {
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(inputSource.refresh).not.toHaveBeenCalled()
     expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
-    expect(replyMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+    // Receipts are read to drive cross-session context suppression even
+    // when the terminal receipt fallback is gated off.
+    expect(replyMocks.listAssistantTurnReceipts).toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -9153,6 +9453,7 @@ describe('assistant automation run loop', () => {
       kind: 'linq',
       partCount: 1,
       reactionEligible: true,
+      replyToMessageId: null,
       service: 'iMessage',
     })
   })

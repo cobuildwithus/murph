@@ -1231,6 +1231,9 @@ function createHostedConversationAssistantInputSourceMetadata(
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
+      replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
+        wake.message.linqMessage.replyToMessageId ?? null,
+      ),
       service: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.service ?? null,
       ),

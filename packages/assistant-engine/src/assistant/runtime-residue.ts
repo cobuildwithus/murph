@@ -14,6 +14,7 @@ import {
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
 import {
+  AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
   readAssistantAutoReplyReceiptMetadata,
 } from './automation/auto-reply-retry.js'
 import {
@@ -312,6 +313,10 @@ function planAssistantRuntimeResiduePrune(input: {
           pendingInputIds,
           receipt: record,
         }) &&
+        !receiptReferencesLiveCrossSessionContextIntent({
+          liveOutboxIntentIds: allOutboxIntentIds,
+          receipt: record,
+        }) &&
         Number.isFinite(resolveReceiptTimestampMs(record)),
       )
 
@@ -366,6 +371,30 @@ function receiptHasNoPendingAutoReplyInputs(input: {
     return true
   }
   return metadata.inputIds.every((inputId) => !input.pendingInputIds.has(inputId))
+}
+
+// Cross-session context consumption is tracked by recording the source outbox
+// intent's id in this receipt's timeline metadata. The selector treats the
+// receipt as the sole source of truth, so we must keep the receipt at least as
+// long as the referenced outbox intent itself — otherwise pruning could delete
+// the consumption record while the source intent is still selectable, and the
+// same prior message would resurface as turn context.
+function receiptReferencesLiveCrossSessionContextIntent(input: {
+  liveOutboxIntentIds: ReadonlySet<string>
+  receipt: AssistantTurnReceipt
+}): boolean {
+  for (const event of input.receipt.timeline) {
+    const intentId =
+      event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]
+    if (
+      typeof intentId === 'string' &&
+      intentId.length > 0 &&
+      input.liveOutboxIntentIds.has(intentId)
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 function isPrunableTerminalAssistantTurnReceipt(

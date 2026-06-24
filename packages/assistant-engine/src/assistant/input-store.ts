@@ -354,6 +354,9 @@ const assistantInputLinqSourceMetadataSchema = z
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
     reactionEligible: z.boolean().optional().default(false),
+    replyToMessageId: safeNullableAssistantInputTokenSchema(
+      'sourceMetadata.replyToMessageId',
+    ),
     service: safeNullableAssistantInputTokenSchema('sourceMetadata.service'),
   })
   .strict()

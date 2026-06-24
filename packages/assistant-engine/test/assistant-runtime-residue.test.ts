@@ -10,6 +10,7 @@ import {
   writeAssistantAutoReplyIntentProvenance,
 } from '../src/assistant/automation/intent-provenance.ts'
 import {
+  AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
   AUTO_REPLY_RECEIPT_INPUT_ID_KEY,
   AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
 } from '../src/assistant/automation/auto-reply-retry.ts'
@@ -341,6 +342,58 @@ describe('assistant runtime residue pruning', () => {
     expect(result.receiptsPruned).toBe(1)
     await expectPathMissing(resolveAssistantTurnReceiptPath(paths, oldTurnId))
     await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
+  })
+
+  it('retains terminal receipts whose cross-session context intent is still in the outbox', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-cross-session-context-',
+    )
+    const sessionId = createSessionId('8')
+    const consumingTurnId = createTurnId('8')
+
+    const sourceIntent = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: OLD_RECORD_AT,
+      identityId: 'identity-cross-session',
+      message: 'cross-session reminder',
+      replyToMessageId: 'message-cross-session',
+      sessionId: createSessionId('9'),
+      threadId: 'thread-cross-session',
+      threadIsDirect: true,
+      turnId: createTurnId('9'),
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: false,
+      metadata: {
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+          sourceIntent.intentId,
+      },
+      prompt: 'consumes cross-session context',
+      provider: 'codex-cli',
+      providerModel: null,
+      sessionId,
+      startedAt: OLD_RECORD_AT,
+      turnId: consumingTurnId,
+      vault: vaultRoot,
+    })
+    await finalizeAssistantTurnReceipt({
+      completedAt: OLD_RECORD_AT,
+      response: 'done',
+      status: 'completed',
+      turnId: consumingTurnId,
+      vault: vaultRoot,
+    })
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.receiptsPruned).toBe(0)
+    await expectPathExists(resolveAssistantTurnReceiptPath(paths, consumingTurnId))
   })
 
   it('prunes intent provenance only after the outbox intent is gone', async () => {
