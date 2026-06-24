@@ -386,6 +386,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260623120000_hosted_codex_auth_connection",
       "20260623170000_generalize_hosted_product_feedback",
       "20260623193000_hosted_product_feedback_summary",
+      "20260624000000_clear_hosted_codex_auth_connected",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
