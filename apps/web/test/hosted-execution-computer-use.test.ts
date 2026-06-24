@@ -366,6 +366,72 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("upgrades a screen-inspection handoff to manual takeover when requested", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      id: "hch_handoff123",
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Should I book this appointment?",
+        awaitingReason: "final_confirmation",
+        checkpointContext: {
+          conversationId: "conversation-a",
+          recipientKey: "recipient-a",
+        },
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+        suggestedReply: "yes",
+      }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    // The existing screen_inspection page only renders a screenshot; it never
+    // received an interactive iframe, so swapping the handoff up to a manual
+    // takeover purpose adds capability without leaving stale capability behind.
+    const result = await service.pauseForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      pauseDeliveryContext: {
+        conversationId: "conversation-a",
+        recipientKey: "recipient-a",
+      },
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      suggestedReply: "yes",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
+  });
+
   it("mints a replacement handoff after a final-confirmation handoff was completed too early", async () => {
     const now = new Date("2026-06-17T12:07:00.000Z");
     const oldHandoff = createHandoffRecord({

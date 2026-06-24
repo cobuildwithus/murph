@@ -1055,14 +1055,19 @@ export class ComputerUseService {
       });
     }
 
-    // Handoff purpose is monotonic on refresh: an already-issued manual_browser_help
-    // page holds a live, decrypted browser iframe that cannot be revoked, so we
-    // never substitute a different purpose (e.g. a "view-only" screen_inspection)
-    // for the existing record. Callers that need a different purpose must wait
-    // for the existing handoff to complete or expire.
+    // Handoff purpose is monotonic in the takeover direction. An already-issued
+    // interactive handoff (manual_browser_help, login, payment, card, captcha)
+    // page has the decrypted live-view iframe loaded; the server cannot revoke
+    // that capability, so we never substitute a different purpose for those
+    // records. A screen_inspection page only ever rendered a screenshot, so
+    // upgrading it to the requested purpose is safe: the old tab has no
+    // interactive capability to revoke.
+    const refreshedPurpose = existing.purpose === "screen_inspection"
+      ? input.handoffPurpose
+      : existing.purpose;
     const handoff = await this.createHandoff({
       memberId: input.memberId,
-      purpose: existing.purpose,
+      purpose: refreshedPurpose,
       runExpiresAt: input.run.expiresAt,
       runId: input.run.id,
       suggestedReply: existing.suggestedReply,
