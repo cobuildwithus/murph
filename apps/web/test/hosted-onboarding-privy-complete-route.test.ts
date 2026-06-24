@@ -107,7 +107,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
-      joinUrl: "https://join.example.test/join/invite_123",
+      joinUrl: "/join/invite_123",
       launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,
@@ -163,7 +163,7 @@ describe("hosted onboarding Privy completion route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
-      joinUrl: "https://join.example.test/join/invite_123",
+      joinUrl: "/join/invite_123",
       launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,

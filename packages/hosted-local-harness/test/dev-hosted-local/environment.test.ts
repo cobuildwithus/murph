@@ -1029,6 +1029,16 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
   });
 
+  it("preserves an explicit hosted onboarding public base URL for web links", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("https://local.withmurph.ai:3443");
+    expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
+    expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe("http://127.0.0.1:8787");
+  });
+
   it("preserves an explicit wake fetch proof key override", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
     });
