@@ -811,9 +811,10 @@ async function readLegacyIntegrationBundle(input: {
         });
         continue;
       }
+      const isReceipt = artifact.role.startsWith("wearable-raw-receipt:");
       let content: string;
       try {
-        content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: !isReceipt }).decode(bytes);
       } catch {
         addBlocker(input.state, {
           code: "MIGRATION_UNSUPPORTED_CONTENT",

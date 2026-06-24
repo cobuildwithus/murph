@@ -533,6 +533,55 @@ test("integration ingest migration rewrites event rawRefs before deleting legacy
   assert.equal(Object.hasOwn(rewrittenEvents[0] ?? {}, "rawRefs"), false);
 });
 
+test("integration ingest migration preserves BOM-prefixed evidence bytes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-migration-bom");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await writeLegacyVaultFormat(vaultRoot);
+
+  const bundle = await writeLegacyIntegrationBundle({
+    vaultRoot,
+    importId: "xfm_BBBBBBBBBBBBBBBBBBBBBBBBBB",
+    importedAt: "2026-05-04T00:00:00.000Z",
+    resource: "heart_rate",
+  });
+
+  const bomBytes = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(`${JSON.stringify({ resource: "heart_rate", values: [1, 2, 3] }, null, 2)}\n`, "utf8"),
+  ]);
+  const bomSha256 = sha256Hex(bomBytes);
+  await fs.writeFile(path.join(vaultRoot, bundle.artifactPath), bomBytes);
+
+  const manifest = parseRawImportManifest(
+    JSON.parse(await fs.readFile(path.join(vaultRoot, bundle.manifestPath), "utf8")),
+  );
+  const patchedArtifacts = manifest.artifacts.map((artifact) =>
+    artifact.relativePath === bundle.artifactPath
+      ? { ...artifact, byteSize: bomBytes.byteLength, sha256: bomSha256 }
+      : artifact,
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, bundle.manifestPath),
+    `${JSON.stringify({ ...manifest, artifacts: patchedArtifacts }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const result = await runIntegrationIngestMigration({ apply: true, vaultRoot });
+
+  assert.equal(result.appendedBundleCount, 1);
+  assert.equal(result.finalized, true);
+  assert.equal(await readVaultMetadataFormatVersion(vaultRoot), CURRENT_VAULT_FORMAT_VERSION);
+
+  const migrated = await readIntegrationIngestById(vaultRoot, bundle.importId);
+  assert.ok(migrated);
+  const part = migrated.record.parts[0];
+  assert.ok(part);
+  assert.equal(part.role, bundle.artifactRole);
+  assert.equal(part.byteSize, bomBytes.byteLength);
+  assert.equal(part.sha256, bomSha256);
+  assert.deepEqual(Buffer.from(part.content, "utf8"), bomBytes);
+});
+
 test("integration ingest migration fails closed on unverified legacy inputs", async () => {
   const cases: Array<{
     expectedCode: string;
