@@ -41,6 +41,7 @@ import {
 } from "../web-control-plane.ts";
 import {
   prepareHostedWorkspaceSnapshotRestore,
+  type HostedWorkspaceSnapshotPreparedRestore,
 } from "../workspace-snapshot-restore-preparation.ts";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
@@ -50,6 +51,7 @@ import type {
   RuntimeProcessingCommandBudget,
 } from "./runtime-command-budget.js";
 import {
+  isRuntimeProcessingCommandBudgetTimeout,
   readRuntimeProcessingCommandStepTimeoutMs,
   runRuntimeProcessingCommandStep,
 } from "./runtime-command-budget.js";
@@ -577,25 +579,26 @@ export class RuntimeInvocationService {
     );
     const readRunnerSecrets = async () =>
       await stores.runnerSecrets.readRunnerSecrets(input.userId);
+    const emitSnapshotRestorePreparationUnavailableLog = (error: unknown): void => {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          runtimeSnapshotRestorePreparationFailureCode:
+            deriveHostedExecutionErrorCode(error),
+          workspaceAttemptId: input.token.attemptId,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted workspace snapshot restore preparation unavailable.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+    };
     const prepareSnapshotRestore = async () =>
       await prepareHostedWorkspaceSnapshotRestore({
         configSource,
         crypto: stores.crypto,
-        onPreparationUnavailable: (error) => {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              runtimeSnapshotRestorePreparationFailureCode:
-                deriveHostedExecutionErrorCode(error),
-              workspaceAttemptId: input.token.attemptId,
-              workspaceVersion: input.workspaceVersion,
-            },
-            level: "warn",
-            message: "Hosted workspace snapshot restore preparation unavailable.",
-            phase: "wake.running",
-            userId: input.userId,
-          });
-        },
+        onPreparationUnavailable: emitSnapshotRestorePreparationUnavailableLog,
         userId: input.userId,
         workspace: input.workspace,
       });
@@ -609,13 +612,12 @@ export class RuntimeInvocationService {
             })
           : readRunnerSecrets(),
         deriveHostedWorkspaceSnapshotPathHashSecret(configSource),
-        input.commandBudget
-          ? runRuntimeProcessingCommandStep({
-              budget: input.commandBudget,
-              operation: prepareSnapshotRestore,
-              stepTimeoutMs: this.input.env.webControlTimeoutMs,
-            })
-          : prepareSnapshotRestore(),
+        runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
+          budget: input.commandBudget ?? null,
+          onBudgetTimeout: emitSnapshotRestorePreparationUnavailableLog,
+          operation: prepareSnapshotRestore,
+          stepTimeoutMs: this.input.env.webControlTimeoutMs,
+        }),
       ]);
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource,
@@ -876,6 +878,37 @@ export class RuntimeInvocationService {
     } catch {
       return true;
     }
+  }
+}
+
+// Budget-aware wrapper for `prepareHostedWorkspaceSnapshotRestore`. A
+// control-plane stall that exceeds the per-command budget must not clear the
+// runner write fence: warm-clean checkpoint markers can restore without R2
+// access, key unwrap, or a prepared URL. The fenced cold path still fails
+// closed because it re-attempts the same reads under the fence. Runner-secret
+// preparation intentionally stays fatal — the container cannot start without
+// it — so this wrapper is snapshot-prep specific.
+export async function runHostedWorkspaceSnapshotRestorePreparationWithinBudget(input: {
+  budget: RuntimeProcessingCommandBudget | null;
+  onBudgetTimeout: (error: unknown) => void;
+  operation: () => Promise<HostedWorkspaceSnapshotPreparedRestore | null>;
+  stepTimeoutMs: number;
+}): Promise<HostedWorkspaceSnapshotPreparedRestore | null> {
+  if (!input.budget) {
+    return await input.operation();
+  }
+  try {
+    return await runRuntimeProcessingCommandStep({
+      budget: input.budget,
+      operation: input.operation,
+      stepTimeoutMs: input.stepTimeoutMs,
+    });
+  } catch (error) {
+    if (isRuntimeProcessingCommandBudgetTimeout(error)) {
+      input.onBudgetTimeout(error);
+      return null;
+    }
+    throw error;
   }
 }
 

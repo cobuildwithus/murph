@@ -28,6 +28,13 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import {
+  createRuntimeProcessingCommandBudget,
+  RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE,
+} from "../src/user-runner/runtime-command-budget.ts";
+import {
+  runHostedWorkspaceSnapshotRestorePreparationWithinBudget,
+} from "../src/user-runner/runtime-invocation.ts";
+import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
 } from "../src/workspace-snapshot-restore-preparation.ts";
@@ -355,6 +362,77 @@ describe("workspace snapshot restore preparation", () => {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
     }
+  });
+});
+
+describe("runHostedWorkspaceSnapshotRestorePreparationWithinBudget", () => {
+  it("runs the operation directly when no budget is configured", async () => {
+    const onBudgetTimeout = vi.fn();
+    const expected: HostedWorkspaceSnapshotPreparedRestore = {
+      dataKey: "00".repeat(32),
+      getUrl: "https://r2.example.test/object.enc?X-Amz-Date=20260623T000000Z&X-Amz-Expires=60",
+      snapshotFingerprint: "a".repeat(64),
+    };
+
+    await expect(runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
+      budget: null,
+      onBudgetTimeout,
+      operation: async () => expected,
+      stepTimeoutMs: 60_000,
+    })).resolves.toBe(expected);
+    expect(onBudgetTimeout).not.toHaveBeenCalled();
+  });
+
+  it("treats a budget step timeout as preparation unavailable instead of clearing the fence", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-24T00:00:00.000Z"));
+      const onBudgetTimeout = vi.fn();
+      const budget = createRuntimeProcessingCommandBudget({
+        commandTimeoutMs: null,
+        startedAtMs: Date.now(),
+        // Margin is 1000ms, so an effective deadline of +2ms keeps the step's
+        // setTimeout small enough to fire deterministically under fake timers.
+        webControlTimeoutMs: 1002,
+      });
+
+      const promise = runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
+        budget,
+        onBudgetTimeout,
+        operation: () => new Promise<HostedWorkspaceSnapshotPreparedRestore>(() => {}),
+        stepTimeoutMs: 60_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+
+      await expect(promise).resolves.toBeNull();
+      expect(onBudgetTimeout).toHaveBeenCalledOnce();
+      expect(onBudgetTimeout.mock.calls[0]?.[0]).toMatchObject({
+        message: RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("propagates non-budget errors from the operation", async () => {
+    const onBudgetTimeout = vi.fn();
+    const innerError = new Error("inner-prep-failure");
+    const budget = createRuntimeProcessingCommandBudget({
+      commandTimeoutMs: null,
+      startedAtMs: Date.now(),
+      webControlTimeoutMs: 60_000,
+    });
+
+    await expect(runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
+      budget,
+      onBudgetTimeout,
+      operation: async () => {
+        throw innerError;
+      },
+      stepTimeoutMs: 60_000,
+    })).rejects.toBe(innerError);
+    expect(onBudgetTimeout).not.toHaveBeenCalled();
   });
 });
 
