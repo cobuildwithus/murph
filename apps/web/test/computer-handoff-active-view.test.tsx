@@ -89,7 +89,7 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(track).toHaveBeenCalledWith("handoff_completed");
 });
 
-test("ComputerHandoffActiveView focuses the iframe when it loads", async () => {
+test("ComputerHandoffActiveView focuses the iframe each time the keyboard button is pressed", async () => {
   const { cleanup, container, window } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
       doneEndpoint: "/api/computer/handoff/handoff-token/done",
@@ -102,14 +102,32 @@ test("ComputerHandoffActiveView focuses the iframe when it loads", async () => {
   const iframe = container.querySelector("iframe");
   assert.ok(iframe);
   const iframeFocus = vi.fn();
-  (iframe as unknown as { focus: () => void }).focus = iframeFocus;
+  (iframe as unknown as { focus: (options?: FocusOptions) => void }).focus = iframeFocus;
+
+  const focusButton = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Focus the private page so the keyboard and paste work"]',
+  );
+  assert.ok(focusButton);
+  expect(focusButton.textContent).toContain("Keyboard");
+  expect(focusButton.getAttribute("aria-pressed")).toBeNull();
 
   await act(async () => {
-    iframe.dispatchEvent(new window.Event("load", { bubbles: false }));
+    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   await flushReact();
 
+  expect(iframeFocus).toHaveBeenCalledWith({ preventScroll: true });
   expect(iframeFocus).toHaveBeenCalledOnce();
+
+  await act(async () => {
+    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushReact();
+
+  expect(iframeFocus).toHaveBeenCalledTimes(2);
+  expect(
+    vi.mocked(track).mock.calls.filter(([name]) => name === "live_view_focus_enabled"),
+  ).toHaveLength(1);
 });
 
 test("ComputerHandoffActiveView fires handoff_abandoned on pagehide while idle", async () => {
