@@ -3221,7 +3221,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
-          runtimeWakeSignal.notify();
+          runtimeWakeSignal.notify({
+            orchestration: {
+              activeWakeAccepted: true,
+              activeWakeFinishedAtEpochMs: 1_777_000_001_005,
+              activeWakeStartedAtEpochMs: 1_777_000_001_000,
+              userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
+            },
+          });
           await waitForCondition(() => importedSeqs.includes("2"));
           return {
             checkpointReason: "canonical_runtime_commit",
@@ -3234,6 +3241,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       const wake = foregroundMilestones.value?.phaseBreakdown?.wake;
+      const orchestration = foregroundMilestones.value?.phaseBreakdown?.orchestration;
+      assert.deepEqual(orchestration, {
+        activeWakeAccepted: true,
+        activeWakeFinishedAtEpochMs: 1_777_000_001_005,
+        activeWakeStartedAtEpochMs: 1_777_000_001_000,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
+      });
       assert.ok(wake);
       const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;
       const foregroundWaitResolvedAtEpochMs = wake.foregroundWaitResolvedAtEpochMs;

@@ -743,6 +743,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
         foregroundWakeOrdinal: wakeOrdinal,
         foregroundWaitResolvedAtEpochMs: waitResolvedAtEpochMs,
+        orchestration: notification.orchestration ?? null,
         runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
@@ -872,11 +873,13 @@ function hostedWorkspaceRunnerWakeIsImmediate(
 function createHostedForegroundMailboxImportLatencyMilestones(input: {
   foregroundWakeOrdinal: number;
   foregroundWaitResolvedAtEpochMs: number;
+  orchestration?: HostedRuntimeLatencyPhaseBreakdown["orchestration"] | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs: number | null;
 }): HostedRuntimeLatencyTraceStagedMilestones {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
+    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     wake: {
       ...(input.runtimeWakeNotifiedAtEpochMs === null
         ? {}
