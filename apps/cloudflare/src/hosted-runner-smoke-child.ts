@@ -855,7 +855,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     const result = readCodexCommandExecResult(message.result);
     if (result.exitCode !== 0) {
       throw new Error(
-        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")} stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`,
       );
     }
 
