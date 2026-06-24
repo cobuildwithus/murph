@@ -1,16 +1,27 @@
-import {
-  type BrowserVaultQueryClient,
-  type OverviewExperiment,
+import type {
+  BrowserVaultQueryClient,
+  OverviewExperiment,
 } from "@murphai/query/browser-overview";
 
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
-import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
-import type { ExperimentProtocol, ExperimentRunProjection } from "@/src/types/experiments";
+import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
+import type {
+  ExperimentProtocol,
+  ExperimentRunProjection,
+  ExperimentSignal,
+  TrendData,
+} from "@/src/types/experiments";
 
-export type ExperimentCardStatusVariant = "default" | "secondary" | "outline" | "destructive";
+export type ExperimentCardStatusVariant = "default" | "secondary" | "destructive" | "outline";
 
-export type ExperimentRunStatus = ExperimentRunProjection["status"];
+export interface ExperimentRunCardSummary {
+  completionPercent?: number;
+  dateRange?: string;
+  day?: number;
+  primarySignal?: ExperimentSignal;
+  primaryTrend?: TrendData;
+}
 
 export interface ExperimentLibraryCard {
   id: string;
@@ -26,196 +37,243 @@ export interface ExperimentLibraryCard {
   statusVariant?: ExperimentCardStatusVariant;
   description: string;
   hasPrivateData: boolean;
-  runStatus?: ExperimentRunStatus;
+  runStatus?: ExperimentRunProjection["status"];
+  runSummary?: ExperimentRunCardSummary;
   searchText: string;
   startedOn?: string | null;
   trackedExperimentId?: string;
 }
 
-/**
- * Splits the member's own run cards into in-progress and history buckets.
- * History is sorted most recently started first so display caps keep the
- * runs that are most likely to matter.
- */
-export function splitHomeExperimentCards(cards: ExperimentLibraryCard[]): {
-  history: ExperimentLibraryCard[];
-  inProgress: ExperimentLibraryCard[];
-} {
-  const inProgress: ExperimentLibraryCard[] = [];
-  const history: ExperimentLibraryCard[] = [];
-
-  for (const card of cards) {
-    if (!card.hasPrivateData) {
-      continue;
-    }
-
-    if (card.runStatus === "active" || card.runStatus === "paused") {
-      inProgress.push(card);
-    } else {
-      history.push(card);
-    }
-  }
-
-  history.sort((left, right) =>
-    startedOnSortKey(right.startedOn).localeCompare(startedOnSortKey(left.startedOn))
-  );
-
-  return { history, inProgress };
-}
-
-function startedOnSortKey(startedOn: string | null | undefined): string {
-  // Tracked runs can carry non-date placeholders such as "Undated"; only a
-  // leading ISO date may win the most-recent-first ordering.
-  return startedOn && /^\d{4}-\d{2}-\d{2}/u.test(startedOn) ? startedOn : "";
+interface BuildExperimentLibraryCardsInput {
+  client: BrowserVaultQueryClient | null;
+  protocols: readonly ExperimentProtocol[];
+  trackedExperiments: readonly OverviewExperiment[];
 }
 
 export function buildExperimentLibraryCards({
   client,
   protocols,
   trackedExperiments,
-}: {
-  client: BrowserVaultQueryClient | null;
-  protocols: ExperimentProtocol[];
-  trackedExperiments: OverviewExperiment[];
-}): ExperimentLibraryCard[] {
+}: BuildExperimentLibraryCardsInput): ExperimentLibraryCard[] {
+  const matchedTrackedIds = new Set<string>();
   const protocolCards = protocols.map((protocol) => {
-    const privateRun = resolveBrowserVaultExperimentRun({ client, protocol });
-    return protocolToCard(protocol, privateRun);
-  });
-  const matchedTrackedExperimentIds = new Set(
-    protocolCards.flatMap((card) => card.trackedExperimentId ? [card.trackedExperimentId] : []),
-  );
-  const trackedOnlyCards = trackedExperiments
-    .filter((entry) => !matchedTrackedExperimentIds.has(entry.id))
-    .map(trackedExperimentToCard);
+    const match = trackedExperiments.find((entry) => matchesProtocol(entry, protocol));
 
-  return [...protocolCards, ...trackedOnlyCards].sort(compareExperimentCards);
+    if (match) {
+      matchedTrackedIds.add(match.id);
+    }
+
+    return protocolToCard(protocol, client, match);
+  });
+  const selectedImage = protocols[0]?.image ?? "/design-assets/hero-mountain.png";
+  const trackedOnlyCards = trackedExperiments
+    .filter((entry) => !matchedTrackedIds.has(entry.id))
+    .map((entry) => trackedExperimentToCard(entry, selectedImage));
+
+  return [...protocolCards, ...trackedOnlyCards].sort((left, right) => {
+    if (left.hasPrivateData !== right.hasPrivateData) {
+      return left.hasPrivateData ? -1 : 1;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
 }
 
 function protocolToCard(
   protocol: ExperimentProtocol,
-  privateRun: ExperimentRunProjection | null,
+  client: BrowserVaultQueryClient | null,
+  trackedExperiment: OverviewExperiment | undefined,
 ): ExperimentLibraryCard {
-  const statusLabel = privateRun?.statusLabel;
-  const startedOn = privateRun?.startedOn;
-  const protocolDays = formatProtocolDays(protocol);
+  const privateRun = protocol.protocolContractVersion === CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION
+    ? resolveBrowserVaultExperimentRun({
+        client,
+        protocol,
+      })
+    : null;
+  const runStatus = privateRun?.status ?? runStatusForTrackedExperiment(trackedExperiment);
+  const privateDescription = privateRun?.summaryDetail ?? privateRun?.summary;
+  const statusLabel = privateRun?.statusLabel
+    ?? (trackedExperiment?.status ? formatStatusLabel(trackedExperiment.status) : undefined);
+  const startedOn = privateRun?.startedOn ?? trackedExperiment?.startedOn ?? null;
+  const activeDays = Math.max(1, protocol.durationDays - protocol.baselineDays);
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
-    `${protocolDays} days`,
+    formatProtocolDays(activeDays),
     protocol.researchSummaryLabel,
-  ].filter((part): part is string => part !== null).join(" · ");
-  const description = privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description;
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
 
   return {
-    id: protocol.id,
-    title: protocol.title,
     category: protocol.category,
-    image: protocol.image,
+    description: privateDescription ?? protocol.description,
+    durationDays: activeDays,
+    hasPrivateData: Boolean(privateRun || trackedExperiment),
     href: `/experiments/${protocol.id}`,
+    id: protocol.id,
+    image: protocol.image,
     matchPercent: protocol.matchPercent,
-    durationDays: protocolDays,
     metadata,
-    privateBadgeLabel: privateRun ? "Private data" : undefined,
-    statusLabel,
-    statusVariant: privateRun ? statusVariantForRunStatus(privateRun.status) : undefined,
-    description,
-    hasPrivateData: privateRun !== null,
-    runStatus: privateRun?.status,
-    startedOn,
-    trackedExperimentId: privateRun?.id,
+    privateBadgeLabel: privateRun || trackedExperiment ? "Private data" : undefined,
+    runStatus,
+    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
     searchText: [
       protocol.title,
       protocol.category,
-      protocol.description,
-      protocol.commons?.key,
-      protocol.commons?.slug,
-      ...(protocol.commons?.aliases ?? []),
-      privateRun?.title,
-      privateRun?.summary,
+      privateDescription ?? protocol.description,
+      statusLabel,
+      trackedExperiment?.summary,
       ...(privateRun?.tags ?? []),
-    ].filter((value): value is string => typeof value === "string").join(" "),
+      ...(trackedExperiment?.tags ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase(),
+    startedOn,
+    statusLabel,
+    statusVariant: statusVariantForRun(runStatus),
+    title: protocol.title,
+    trackedExperimentId: trackedExperiment?.id,
   };
 }
 
-function formatProtocolDays(protocol: ExperimentProtocol): number {
-  return Math.max(1, protocol.durationDays - protocol.baselineDays);
-}
-
-function trackedExperimentToCard(entry: OverviewExperiment): ExperimentLibraryCard {
-  const statusLabel = formatStatusLabel(entry.status);
-  const title = entry.title || entry.slug || entry.id;
-  const category = "Private";
+function trackedExperimentToCard(
+  entry: OverviewExperiment,
+  image: string,
+): ExperimentLibraryCard {
   const startedOn = entry.startedOn;
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
-    "Private run only",
-  ].filter((part): part is string => part !== null).join(" · ");
+    entry.status ? formatStatusLabel(entry.status) : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
+  const statusLabel = entry.status ? formatStatusLabel(entry.status) : "Private run";
   const runStatus = runStatusForTrackedExperiment(entry);
 
   return {
-    id: entry.id,
-    title,
-    category,
-    image: selectTrackedExperimentImage(entry),
-    href: null,
-    privateBadgeLabel: "Private only",
-    metadata,
-    statusLabel,
-    statusVariant: statusVariantForRunStatus(runStatus),
-    description: entry.summary ?? "This experiment has private data in your browser vault, but it does not currently match a public protocol page.",
+    category: "Private run",
+    description: entry.summary ?? "Private experiment details from your local vault.",
     hasPrivateData: true,
+    href: null,
+    id: entry.id,
+    image,
+    metadata,
+    privateBadgeLabel: "Private only",
     runStatus,
+    searchText: [entry.title, entry.status, entry.summary, ...entry.tags]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase(),
     startedOn,
-    searchText: [entry.id, entry.slug, entry.title, entry.summary, ...entry.tags]
-      .filter((value): value is string => typeof value === "string")
-      .join(" "),
+    statusLabel,
+    statusVariant: statusVariantForRun(runStatus),
+    title: entry.title,
+    trackedExperimentId: entry.id,
   };
 }
 
-function compareExperimentCards(left: ExperimentLibraryCard, right: ExperimentLibraryCard): number {
-  if (left.hasPrivateData !== right.hasPrivateData) {
-    return left.hasPrivateData ? -1 : 1;
-  }
+function buildExperimentRunCardSummary(
+  privateRun: ExperimentRunProjection,
+): ExperimentRunCardSummary {
+  const primaryTrend = privateRun.trends.find(
+    (trend) => trend.baseline.length > 0 || trend.active.length > 0,
+  );
+  const primarySignal = (primaryTrend
+    ? privateRun.signals.find((signal) => signal.label === primaryTrend.label)
+    : undefined) ?? privateRun.signals[0];
 
-  return left.title.localeCompare(right.title);
+  return {
+    completionPercent: privateRun.completionPercent,
+    dateRange: privateRun.dateRange,
+    day: privateRun.day,
+    primarySignal,
+    primaryTrend,
+  };
 }
 
-function statusVariantForRunStatus(status: ExperimentRunStatus): ExperimentCardStatusVariant {
-  if (status === "active") {
-    return "default";
-  }
+function matchesProtocol(entry: OverviewExperiment, protocol: ExperimentProtocol): boolean {
+  const protocolIds = new Set([
+    protocol.id,
+    protocol.commons?.key,
+    protocol.commons?.routeId,
+    protocol.commons?.slug,
+    ...(protocol.commons?.aliases ?? []),
+  ].filter((value): value is string => Boolean(value)));
+  const trackedIds = [
+    entry.slug,
+    entry.commonsProtocolRef,
+    entry.protocolRef,
+    entry.effectiveProtocolSnapshot?.protocolId,
+  ].filter((value): value is string => Boolean(value));
 
-  if (status === "paused") {
-    return "secondary";
-  }
+  return trackedIds.some((value) => protocolIds.has(value));
+}
 
-  if (status === "stopped") {
-    return "destructive";
-  }
+function formatProtocolDays(durationDays: number): string {
+  return `${durationDays} day${durationDays === 1 ? "" : "s"}`;
+}
 
+function runStatusForTrackedExperiment(
+  entry: OverviewExperiment | undefined,
+): ExperimentRunProjection["status"] | undefined {
+  if (!entry) return undefined;
+
+  const status = entry.status?.trim().toLowerCase();
+  if (status === "active" || status === "running" || status === "in_progress" || status === "planned") {
+    return "active";
+  }
+  if (status === "paused") return "paused";
+  if (status === "stopped" || status === "cancelled" || status === "closed") return "stopped";
+  return "finished";
+}
+
+function statusVariantForRun(
+  status: ExperimentRunProjection["status"] | undefined,
+): ExperimentCardStatusVariant | undefined {
+  if (!status) return undefined;
+  if (status === "active") return "default";
+  if (status === "paused") return "secondary";
+  if (status === "stopped") return "destructive";
   return "outline";
 }
 
-function runStatusForTrackedExperiment(entry: OverviewExperiment): ExperimentRunStatus {
-  return normalizeExperimentRunStatus({
-    fallback: "finished",
-    status: entry.status,
-  });
+const HOME_HISTORY_CARD_LIMIT = 6;
+
+export interface HomeExperimentCards {
+  history: ExperimentLibraryCard[];
+  inProgress: ExperimentLibraryCard[];
 }
 
-function selectTrackedExperimentImage(entry: OverviewExperiment): string {
-  const lookup = [entry.id, entry.slug, entry.title, entry.summary, ...entry.tags]
-    .filter((value): value is string => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
+export function splitHomeExperimentCards(
+  cards: readonly ExperimentLibraryCard[],
+): HomeExperimentCards {
+  const privateCards = cards.filter((card) => card.hasPrivateData && card.runStatus);
+  const inProgress = privateCards.filter(
+    (card) => card.runStatus === "active" || card.runStatus === "paused",
+  );
+  const history = privateCards
+    .filter((card) => card.runStatus !== "active" && card.runStatus !== "paused")
+    .sort((left, right) => compareStartedOnDescending(left.startedOn, right.startedOn))
+    .slice(0, HOME_HISTORY_CARD_LIMIT);
 
-  if (lookup.includes("red") || lookup.includes("sleep") || lookup.includes("circadian")) {
-    return "/design-assets/hero-02.png";
-  }
+  return { history, inProgress };
+}
 
-  if (lookup.includes("4x4") || lookup.includes("cardio") || lookup.includes("exercise")) {
-    return "/design-assets/hero-03.png";
-  }
+function compareStartedOnDescending(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): number {
+  const leftTime = parseStartedOn(left);
+  const rightTime = parseStartedOn(right);
+  if (leftTime === null && rightTime === null) return 0;
+  if (leftTime === null) return 1;
+  if (rightTime === null) return -1;
+  return rightTime - leftTime;
+}
 
-  return "/design-assets/hero-sauna.png";
+function parseStartedOn(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
