@@ -834,7 +834,7 @@ function buildBrowserVaultReplicaRefUpdateFilter(
     : { equals: toNullablePrismaJson(current) };
 }
 
-function readHostedWorkspaceBrowserVaultSourceStateHash(
+export function readHostedWorkspaceBrowserVaultSourceStateHash(
   snapshotRefValue: Prisma.JsonValue | null,
 ): string | null {
   const snapshotRef = parseHostedExecutionSnapshotRef(

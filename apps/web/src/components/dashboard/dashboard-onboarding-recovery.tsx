@@ -27,7 +27,6 @@ export function DashboardOnboardingRecoveryRedirect({
     }
 
     let cancelled = false;
-    setFailed(false);
 
     async function recoverDashboardOnboarding() {
       try {
@@ -80,7 +79,10 @@ export function DashboardOnboardingRecoveryRedirect({
       <p className="text-muted-foreground">Could not reopen checkout.</p>
       <button
         className="mt-3 rounded-md border border-border px-3 py-1.5 text-foreground"
-        onClick={() => setRetryNonce((value) => value + 1)}
+        onClick={() => {
+          setFailed(false);
+          setRetryNonce((value) => value + 1);
+        }}
         type="button"
       >
         Try again

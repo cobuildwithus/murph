@@ -18,7 +18,7 @@ import {
   stopLinqChatTypingIndicator,
 } from '@murphai/operator-config/linq-runtime'
 import {
-  generateElevenLabsSpeech,
+  generateElevenLabsVoiceMemoAudio,
   resolveElevenLabsApiKey,
   type ElevenLabsFetch,
 } from '@murphai/operator-config/elevenlabs-runtime'
@@ -54,6 +54,7 @@ import type {
 import type {
   AssistantMessageReaction,
   AssistantResponseMedia,
+  AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeOptionalText } from './helpers.js'
 
@@ -309,12 +310,10 @@ export async function sendTelegramImageMessage(
 export async function sendTelegramVoiceMemoMessage(
   input: {
     filename: string
+    generation: AssistantVoiceMemoGeneration
     idempotencyKey?: string | null
-    modelId: string
     replyToMessageId?: string | null
     target: string
-    transcript: string
-    voiceId: string
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<{
@@ -335,11 +334,8 @@ export async function sendTelegramVoiceMemoMessage(
 export async function prepareTelegramVoiceMemoMessage(
   input: {
     filename: string
-    idempotencyKey?: string | null
-    modelId: string
+    generation: AssistantVoiceMemoGeneration
     target: string
-    transcript: string
-    voiceId: string
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<PreparedTelegramVoiceMemoMessage> {
@@ -380,31 +376,29 @@ export async function prepareTelegramVoiceMemoMessage(
     '',
   )
   const target = parseTelegramTargetOrThrow(input.target)
-  const speech = await generateElevenLabsSpeech({
+  const audio = await generateElevenLabsVoiceMemoAudio({
     apiKey,
     fetchImplementation: createTelegramElevenLabsFetchAdapter(fetchImplementation),
-    modelId: input.modelId,
+    generation: input.generation,
     signal: dependencies.signal,
-    text: input.transcript,
-    voiceId: input.voiceId,
   })
   if (
-    speech.bytes.byteLength === 0 ||
-    speech.bytes.byteLength > TELEGRAM_MAX_VOICE_MEMO_BYTES
+    audio.bytes.byteLength === 0 ||
+    audio.bytes.byteLength > TELEGRAM_MAX_VOICE_MEMO_BYTES
   ) {
     throw new VaultCliError(
       'ASSISTANT_TELEGRAM_VOICE_MEMO_AUDIO_INVALID',
       'Telegram voice memo generation returned invalid audio data.',
       {
-        sizeBytes: speech.bytes.byteLength,
+        sizeBytes: audio.bytes.byteLength,
       },
     )
   }
 
   return {
     baseUrl,
-    bytes: speech.bytes,
-    contentType: speech.contentType,
+    bytes: audio.bytes,
+    contentType: audio.contentType,
     fetchImplementation,
     filename: normalizeTelegramVoiceMemoFilename(input.filename),
     target,

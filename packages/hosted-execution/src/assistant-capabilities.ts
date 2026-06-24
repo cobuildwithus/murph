@@ -1,4 +1,4 @@
-const HOSTED_ELEVENLABS_TTS_ENV = {
+const HOSTED_ELEVENLABS_ENV = {
   forwardedConfig: [
     "MURPH_ELEVENLABS_MODEL_ID",
     "MURPH_ELEVENLABS_VOICE_ID",
@@ -52,9 +52,9 @@ const HOSTED_WHATSAPP_DELIVERY_ENV = {
   ],
 } as const;
 
-export const HOSTED_ELEVENLABS_TTS_ENV_NAMES = [
-  ...HOSTED_ELEVENLABS_TTS_ENV.workerSecrets,
-  ...HOSTED_ELEVENLABS_TTS_ENV.forwardedConfig,
+export const HOSTED_ELEVENLABS_ENV_NAMES = [
+  ...HOSTED_ELEVENLABS_ENV.workerSecrets,
+  ...HOSTED_ELEVENLABS_ENV.forwardedConfig,
 ] as const;
 
 export const HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES = [
@@ -79,7 +79,7 @@ export const HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES = [
 ] as const;
 
 export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
-  ...HOSTED_ELEVENLABS_TTS_ENV.workerSecrets,
+  ...HOSTED_ELEVENLABS_ENV.workerSecrets,
   ...HOSTED_EXA_SEARCH_ENV.codexShellWorkerSecrets,
   ...HOSTED_MAPBOX_ROUTES_ENV.codexShellWorkerSecrets,
   ...HOSTED_LINQ_DELIVERY_ENV.workerSecrets,
@@ -88,7 +88,7 @@ export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
 ] as const;
 
 export const HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES = [
-  ...HOSTED_ELEVENLABS_TTS_ENV.forwardedConfig,
+  ...HOSTED_ELEVENLABS_ENV.forwardedConfig,
   ...HOSTED_LINQ_DELIVERY_ENV.forwardedConfig,
   ...HOSTED_TELEGRAM_DELIVERY_ENV.forwardedConfig,
   ...HOSTED_WHATSAPP_DELIVERY_ENV.forwardedConfig,

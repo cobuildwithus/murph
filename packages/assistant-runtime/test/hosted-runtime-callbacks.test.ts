@@ -165,18 +165,11 @@ function createHostedVoiceMemoMedia(
   return {
     filename: "memo.mp3",
     kind: "voice_memo",
-    mimeType: "audio/mpeg",
-    modelId: "eleven_multilingual_v2",
-    sizeBytes: 128,
-    source: "elevenlabs",
-    transcript: "Short memo",
-    transportRefs: {
-      linq: {
-        attachmentId: "attachment_voice_1",
-      },
+    transcript: null,
+    transport: {
+      attachmentId: "attachment_voice_1",
+      kind: "linq_attachment",
     },
-    url: null,
-    voiceId: "voice_murph",
     ...overrides,
   };
 }
@@ -4273,11 +4266,15 @@ describe("hosted runtime callbacks", () => {
     const effect = createEffect({
       media: [
         createHostedVoiceMemoMedia({
-          sizeBytes: null,
-          transportRefs: {
-            telegram: {
-              sendMode: "generate_at_delivery",
+          transport: {
+            generation: {
+              kind: "elevenlabs_speech",
+              modelId: "eleven_multilingual_v2",
+              outputFormat: "mp3_44100_128",
+              text: "Short memo",
+              voiceId: "voice_murph",
             },
+            kind: "telegram_generation",
           },
         }),
       ],

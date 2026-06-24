@@ -105,18 +105,11 @@ describe("hosted assistant delivery contracts", () => {
       {
         filename: "memo.mp3",
         kind: "voice_memo" as const,
-        mimeType: "audio/mpeg" as const,
-        modelId: "eleven_multilingual_v2",
-        sizeBytes: 128,
-        source: "elevenlabs" as const,
-        transcript: "Short memo.",
-        transportRefs: {
-          linq: {
-            attachmentId: "attachment_voice_1",
-          },
+        transcript: null,
+        transport: {
+          attachmentId: "attachment_voice_1",
+          kind: "linq_attachment" as const,
         },
-        url: null,
-        voiceId: "voice_murph",
       },
     ];
     const payload = [{
@@ -130,23 +123,22 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
-  it("parses Telegram assistant-delivery voice memo media without audio bytes", () => {
+  it("parses Telegram assistant-delivery voice memo media via the speech generation transport", () => {
     const payload = createHostedAssistantDeliveryPayload({
       media: [{
         filename: "memo.mp3",
         kind: "voice_memo",
-        mimeType: "audio/mpeg",
-        modelId: "eleven_multilingual_v2",
-        sizeBytes: null,
-        source: "elevenlabs",
         transcript: "Short memo.",
-        transportRefs: {
-          telegram: {
-            sendMode: "generate_at_delivery",
+        transport: {
+          generation: {
+            kind: "elevenlabs_speech",
+            modelId: "eleven_multilingual_v2",
+            outputFormat: "mp3_44100_128",
+            text: "Short memo.",
+            voiceId: "voice_murph",
           },
+          kind: "telegram_generation",
         },
-        url: null,
-        voiceId: "voice_murph",
       }],
       message: "",
     });
@@ -160,30 +152,37 @@ describe("hosted assistant delivery contracts", () => {
     ).toEqual(payload);
   });
 
-  it("rejects assistant-delivery voice memo media without a transport ref", () => {
-    expect(() =>
+  it("parses Telegram assistant-delivery song media via the music generation transport", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      media: [{
+        filename: "song.mp3",
+        kind: "voice_memo",
+        transcript: null,
+        transport: {
+          generation: {
+            durationMs: 30_000,
+            forceInstrumental: true,
+            kind: "elevenlabs_music",
+            modelId: "music_v2",
+            outputFormat: "mp3_48000_192",
+            prompt: "Upbeat lo-fi piano motif",
+          },
+          kind: "telegram_generation",
+        },
+      }],
+      message: "",
+    });
+
+    expect(
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
         effectId: "intent-1",
-        payload: createHostedAssistantDeliveryPayload({
-          media: [{
-            filename: "memo.mp3",
-            kind: "voice_memo",
-            mimeType: "audio/mpeg",
-            modelId: "eleven_multilingual_v2",
-            sizeBytes: 128,
-            source: "elevenlabs",
-            transcript: "Short memo.",
-            transportRefs: {},
-            url: null,
-            voiceId: "voice_murph",
-          } as unknown as HostedAssistantDeliveryMedia],
-        }),
-      }),
-    ).toThrow("payload.media[0].transportRefs must include linq or telegram.");
+        payload,
+      }).payload,
+    ).toEqual(payload);
   });
 
-  it("rejects assistant-delivery voice memo URL media", () => {
+  it("rejects assistant-delivery voice memo media with an unknown transport kind", () => {
     expect(() =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
@@ -192,22 +191,73 @@ describe("hosted assistant delivery contracts", () => {
           media: [{
             filename: "memo.mp3",
             kind: "voice_memo",
-            mimeType: "audio/mpeg",
-            modelId: "eleven_multilingual_v2",
-            sizeBytes: 128,
-            source: "elevenlabs",
-            transcript: "Short memo.",
-            transportRefs: {
-              linq: {
-                attachmentId: "attachment_voice_1",
-              },
+            transcript: null,
+            transport: {
+              kind: "unsupported_kind",
             },
-            url: "https://cdn.example.test/memo.mp3",
-            voiceId: "voice_murph",
           } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
-    ).toThrow("payload.media[0].url must be null.");
+    ).toThrow(/transport.kind must be linq_attachment or telegram_generation/);
+  });
+
+  it("accepts assistant-delivery voice memo media without a transcript (migration-safe)", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      media: [{
+        filename: "memo.mp3",
+        kind: "voice_memo",
+        transport: {
+          attachmentId: "attachment_voice_1",
+          kind: "linq_attachment",
+        },
+      } as unknown as HostedAssistantDeliveryMedia],
+      message: "",
+    });
+
+    expect(
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload,
+      }).payload.media[0],
+    ).toMatchObject({ kind: "voice_memo", transcript: null });
+  });
+
+  it("rejects assistant-delivery voice memo media that is missing transport (the real required field)", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            filename: "memo.mp3",
+            kind: "voice_memo",
+            transcript: null,
+          } as unknown as HostedAssistantDeliveryMedia],
+        }),
+      }),
+    ).toThrow(/missing required fields: transport/);
+  });
+
+  it("rejects assistant-delivery voice memo media with extra top-level fields", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            filename: "memo.mp3",
+            kind: "voice_memo",
+            transcript: null,
+            transport: {
+              attachmentId: "attachment_voice_1",
+              kind: "linq_attachment",
+            },
+            sourceMetadata: "Should not be here.",
+          } as unknown as HostedAssistantDeliveryMedia],
+        }),
+      }),
+    ).toThrow(/unsupported fields: sourceMetadata/);
   });
 
   it("parses media-only assistant delivery with an empty message", () => {
@@ -215,18 +265,11 @@ describe("hosted assistant delivery contracts", () => {
       media: [{
         filename: "memo.mp3",
         kind: "voice_memo",
-        mimeType: "audio/mpeg",
-        modelId: "eleven_multilingual_v2",
-        sizeBytes: 128,
-        source: "elevenlabs",
-        transcript: "Short memo.",
-        transportRefs: {
-          linq: {
-            attachmentId: "attachment_voice_1",
-          },
+        transcript: null,
+        transport: {
+          attachmentId: "attachment_voice_1",
+          kind: "linq_attachment",
         },
-        url: null,
-        voiceId: "voice_murph",
       }],
       message: "",
     });

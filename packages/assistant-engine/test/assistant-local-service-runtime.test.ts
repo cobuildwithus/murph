@@ -195,18 +195,17 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
   const voiceMemoMedia: AssistantResponseMedia = {
     filename: 'voice-memo.mp3',
     kind: 'voice_memo',
-    mimeType: 'audio/mpeg',
-    modelId: 'eleven_multilingual_v2',
-    sizeBytes: null,
-    source: 'elevenlabs',
     transcript: 'Voice-only reply.',
-    transportRefs: {
-      telegram: {
-        sendMode: 'generate_at_delivery',
+    transport: {
+      generation: {
+        kind: 'elevenlabs_speech',
+        modelId: 'eleven_multilingual_v2',
+        outputFormat: 'mp3_44100_128',
+        text: 'Voice-only reply.',
+        voiceId: 'voice-test',
       },
+      kind: 'telegram_generation',
     },
-    url: null,
-    voiceId: 'voice-test',
   }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     deliveryOutcome: {

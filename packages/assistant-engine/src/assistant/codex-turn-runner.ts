@@ -15,7 +15,6 @@ import {
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
 import {
-  resolveAssistantCurrentAudienceDeliveryFields,
   supportsAssistantCurrentAudienceMessageReaction,
 } from './delivery-service.js'
 import type {
@@ -422,10 +421,8 @@ async function executeAssistantCodexAttempt(input: {
       routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
-    const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
-      attemptPlan,
-      executionPlan,
-    })
+    const voiceMemoDeliveryChannel =
+      attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
@@ -648,43 +645,6 @@ async function executeAssistantCodexAttempt(input: {
       usageAttribution,
     }
   }
-}
-
-function resolveAssistantVoiceMemoDeliveryChannel(input: {
-  attemptPlan: AssistantCodexAttemptPlan
-  executionPlan: AssistantCodexTurnExecutionPlan
-}): 'linq' | 'telegram' | null {
-  if (!input.executionPlan.input.deliverResponse) {
-    return null
-  }
-
-  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
-    input: input.executionPlan.input,
-    session: input.attemptPlan.session,
-    sharedPlan: input.executionPlan.sharedPlan,
-  })
-  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
-  if (channel === 'linq') {
-    const bindingTarget =
-      deliveryFields.bindingDelivery?.kind === 'thread'
-        ? normalizeNullableString(deliveryFields.bindingDelivery.target)
-        : null
-    const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
-    return bindingTarget !== null &&
-      (explicitTarget === null || explicitTarget === bindingTarget)
-      ? 'linq'
-      : null
-  }
-  if (channel === 'telegram') {
-    return (
-      normalizeNullableString(deliveryFields.explicitTarget) !== null ||
-      normalizeNullableString(deliveryFields.bindingDelivery?.target) !== null
-    )
-      ? 'telegram'
-      : null
-  }
-
-  return null
 }
 
 function normalizeAssistantProviderAttemptMetadata(

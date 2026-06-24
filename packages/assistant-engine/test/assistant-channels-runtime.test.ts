@@ -634,11 +634,15 @@ describe('assistant channels runtime seam', () => {
       sendTelegramVoiceMemoMessage(
         {
           filename: 'memo',
-          modelId: 'eleven_multilingual_v2',
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128',
+            text: 'Short memo.',
+            voiceId: 'voice_murph',
+          },
           replyToMessageId: ' 42 ',
           target: '123:topic:9',
-          transcript: 'Short memo.',
-          voiceId: 'voice_murph',
         },
         {
           env: {
@@ -701,11 +705,15 @@ describe('assistant channels runtime seam', () => {
     const deliveryPromise = sendTelegramVoiceMemoMessage(
       {
         filename: 'memo',
-        modelId: 'eleven_multilingual_v2',
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
         replyToMessageId: null,
         target: '123',
-        transcript: 'Short memo.',
-        voiceId: 'voice_murph',
       },
       {
         env: {
@@ -742,11 +750,15 @@ describe('assistant channels runtime seam', () => {
       sendTelegramVoiceMemoMessage(
         {
           filename: 'memo',
-          modelId: 'eleven_multilingual_v2',
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128',
+            text: 'Short memo.',
+            voiceId: 'voice_murph',
+          },
           replyToMessageId: null,
           target: '123',
-          transcript: 'Short memo.',
-          voiceId: 'voice_murph',
         },
         {
           env: {
@@ -790,11 +802,15 @@ describe('assistant channels runtime seam', () => {
     const deliveryPromise = sendTelegramVoiceMemoMessage(
       {
         filename: 'memo',
-        modelId: 'eleven_multilingual_v2',
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
         replyToMessageId: null,
         target: '123',
-        transcript: 'Short memo.',
-        voiceId: 'voice_murph',
       },
       {
         env: {

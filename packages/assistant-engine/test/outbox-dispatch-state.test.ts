@@ -97,18 +97,11 @@ describe('assistant outbox dispatch-state', () => {
       const media = [
         {
           kind: 'voice_memo' as const,
-          url: null,
-          mimeType: 'audio/mpeg' as const,
           filename: 'memo.mp3',
-          sizeBytes: 128,
-          transcript: 'Short memo',
-          source: 'elevenlabs' as const,
-          voiceId: 'voice_murph',
-          modelId: 'eleven_multilingual_v2',
-          transportRefs: {
-            linq: {
-              attachmentId: 'attachment_voice_1',
-            },
+          transcript: null,
+          transport: {
+            attachmentId: 'attachment_voice_1',
+            kind: 'linq_attachment' as const,
           },
         },
       ]

@@ -50,6 +50,7 @@ function executeCodexAppServerTurn(
       productFeedbackAvailable:
         typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
       progressUpdatesAvailable: input.progressDelivery != null,
+      voiceMemoGenerationAvailable: input.voiceMemoRuntime != null,
     }),
   })
 }
@@ -152,6 +153,14 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
       }),
     ),
   }
+  const voiceMemoRuntime = {
+    elevenLabs: {
+      apiKeyAvailable: true,
+      modelId: 'eleven_multilingual_v2',
+      voiceId: 'voice_murph',
+    },
+    kind: 'telegram' as const,
+  }
 
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
@@ -200,6 +209,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
             'attach_response_media',
             'finish_without_reply',
             'generate_image',
+            'generate_song',
             'generate_voice_memo',
             'send_progress_update',
           ],
@@ -226,6 +236,10 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(generateVoiceMemoTool.namespace, 'murph')
         assertDynamicToolDescription(generateVoiceMemoTool)
         assertDynamicToolInputSchema(generateVoiceMemoTool)
+        const generateSongTool = requireDynamicTool(dynamicTools, 'generate_song')
+        assert.equal(generateSongTool.namespace, 'murph')
+        assertDynamicToolDescription(generateSongTool)
+        assertDynamicToolInputSchema(generateSongTool)
         const finishWithoutReplyTool = requireDynamicTool(
           dynamicTools,
           'finish_without_reply',
@@ -395,6 +409,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     progressDelivery,
     reasoningEffort: 'high',
     sandbox: 'workspace-write',
+    voiceMemoRuntime,
     workingDirectory,
   })
 

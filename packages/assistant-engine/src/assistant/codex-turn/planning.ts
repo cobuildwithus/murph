@@ -85,6 +85,10 @@ import {
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
+import {
+  resolveAssistantVoiceMemoDeliveryChannel,
+  type AssistantVoiceMemoDeliveryChannel,
+} from '../voice-memo-delivery.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -104,6 +108,7 @@ export interface AssistantRouteTurnPlan {
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
   turnContextPrompt: string | null
+  voiceMemoDeliveryChannel?: AssistantVoiceMemoDeliveryChannel | null
   workingDirectory: string
 }
 
@@ -418,6 +423,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
+  const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
+    messageInput: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
@@ -540,6 +550,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+    voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
@@ -660,6 +671,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
+    voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,
     turnContextPrompt,
