@@ -195,6 +195,7 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
   const voiceMemoMedia: AssistantResponseMedia = {
     filename: 'voice-memo.mp3',
     kind: 'voice_memo',
+    transcript: 'Voice-only reply.',
     transport: {
       generation: {
         kind: 'elevenlabs_speech',

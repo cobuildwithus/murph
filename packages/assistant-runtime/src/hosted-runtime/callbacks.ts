@@ -2154,6 +2154,7 @@ function normalizeHostedAssistantDeliveryMedia(
     return {
       filename: item.filename,
       kind: "voice_memo",
+      transcript: item.transcript ?? null,
       transport: item.transport,
     };
   });

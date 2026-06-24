@@ -264,6 +264,7 @@ describe('assistant CLI delivery contracts', () => {
     ).toEqual({
       kind: 'voice_memo',
       filename: 'memo.mp3',
+      transcript: null,
       transport: {
         attachmentId: 'attachment_123',
         kind: 'linq_attachment',
@@ -274,6 +275,7 @@ describe('assistant CLI delivery contracts', () => {
       assistantResponseMediaSchema.parse({
         kind: 'voice_memo',
         filename: ' telegram-memo.mp3 ',
+        transcript: ' Telegram memo transcript. ',
         transport: {
           generation: {
             kind: 'elevenlabs_speech',
@@ -288,6 +290,7 @@ describe('assistant CLI delivery contracts', () => {
     ).toEqual({
       kind: 'voice_memo',
       filename: 'telegram-memo.mp3',
+      transcript: 'Telegram memo transcript.',
       transport: {
         generation: {
           kind: 'elevenlabs_speech',
@@ -319,6 +322,7 @@ describe('assistant CLI delivery contracts', () => {
     ).toEqual({
       kind: 'voice_memo',
       filename: 'song.mp3',
+      transcript: null,
       transport: {
         generation: {
           durationMs: 30_000,

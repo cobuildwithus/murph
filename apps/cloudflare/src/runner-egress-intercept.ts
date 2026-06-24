@@ -1321,7 +1321,7 @@ async function maybeHandleElevenLabsRequest(input: {
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
-          providerRequestId: response.headers.get("song-id"),
+          providerRequestId: response.headers.get("request-id"),
         });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(usageRecording);

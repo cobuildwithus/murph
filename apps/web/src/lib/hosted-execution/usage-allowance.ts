@@ -258,7 +258,7 @@ export function priceHostedAiUsageForAllowance(
   }
 
   if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
     return priceHostedAiUsageElevenLabsTtsForAllowance({
       counted,
       credentialSource,
@@ -267,7 +267,7 @@ export function priceHostedAiUsageForAllowance(
   }
 
   if (isHostedAiUsageAllowanceElevenLabsMusicRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsMusicTokenPricingBasis(tokenPricingBasis);
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
     return priceHostedAiUsageElevenLabsMusicForAllowance({
       counted,
       credentialSource,
@@ -376,12 +376,12 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
   }
 
   if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
     return tokenPricingBasis;
   }
 
   if (isHostedAiUsageAllowanceElevenLabsMusicRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsMusicTokenPricingBasis(tokenPricingBasis);
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
     return tokenPricingBasis;
   }
 
@@ -1329,22 +1329,13 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   }
 }
 
-function assertHostedAiUsageAllowanceElevenLabsMusicTokenPricingBasis(
+function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
+  feature: "TTS" | "Music",
 ): void {
   if (basis !== "standard") {
     throw new TypeError(
-      "ElevenLabs Music hosted AI usage must use standard token pricing basis.",
-    );
-  }
-}
-
-function assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(
-  basis: AssistantUsageTokenPricingBasis,
-): void {
-  if (basis !== "standard") {
-    throw new TypeError(
-      "ElevenLabs TTS hosted AI usage must use standard token pricing basis.",
+      `ElevenLabs ${feature} hosted AI usage must use standard token pricing basis.`,
     );
   }
 }
@@ -1571,7 +1562,6 @@ function isHostedAiUsageAllowanceElevenLabsMusicRecord(
     && record.reasoningTokens === null
     && record.totalTokens === null
     && readHostedAiUsageDurationMs(record) !== null
-    && readHostedAiUsageDurationMs(record) !== 0n
     && resolveHostedAiUsageAllowanceElevenLabsMusicModel(record).model !== null;
 }
 

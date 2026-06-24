@@ -40,25 +40,24 @@ export function isAllowedElevenLabsRequest(
   if (request.method !== "POST") {
     return false;
   }
+  const requiredOutputFormat = requiredOutputFormatFor(pathnameSuffix);
+  if (requiredOutputFormat === null) {
+    return false;
+  }
+  const keys = [...url.searchParams.keys()];
+  return keys.length === 1
+    && keys[0] === "output_format"
+    && url.searchParams.get("output_format") === requiredOutputFormat;
+}
 
+function requiredOutputFormatFor(pathnameSuffix: string): string | null {
   if (/^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)) {
-    const keys = [...url.searchParams.keys()];
-    return keys.every((key) => key === "output_format")
-      && keys.filter((key) => key === "output_format").length <= 1
-      && (
-        url.searchParams.get("output_format") === null
-        || url.searchParams.get("output_format") === "mp3_44100_128"
-      );
+    return "mp3_44100_128";
   }
-
   if (pathnameSuffix === "/v1/music") {
-    const keys = [...url.searchParams.keys()];
-    return keys.length === 1
-      && keys[0] === "output_format"
-      && url.searchParams.get("output_format") === "mp3_48000_192";
+    return "mp3_48000_192";
   }
-
-  return false;
+  return null;
 }
 
 export function parseHostedElevenLabsRequestBody(input: {

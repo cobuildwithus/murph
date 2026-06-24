@@ -105,6 +105,7 @@ describe("hosted assistant delivery contracts", () => {
       {
         filename: "memo.mp3",
         kind: "voice_memo" as const,
+        transcript: null,
         transport: {
           attachmentId: "attachment_voice_1",
           kind: "linq_attachment" as const,
@@ -127,6 +128,7 @@ describe("hosted assistant delivery contracts", () => {
       media: [{
         filename: "memo.mp3",
         kind: "voice_memo",
+        transcript: "Short memo.",
         transport: {
           generation: {
             kind: "elevenlabs_speech",
@@ -155,6 +157,7 @@ describe("hosted assistant delivery contracts", () => {
       media: [{
         filename: "song.mp3",
         kind: "voice_memo",
+        transcript: null,
         transport: {
           generation: {
             durationMs: 30_000,
@@ -188,6 +191,7 @@ describe("hosted assistant delivery contracts", () => {
           media: [{
             filename: "memo.mp3",
             kind: "voice_memo",
+            transcript: null,
             transport: {
               kind: "unsupported_kind",
             },
@@ -197,7 +201,7 @@ describe("hosted assistant delivery contracts", () => {
     ).toThrow(/transport.kind must be linq_attachment or telegram_generation/);
   });
 
-  it("rejects assistant-delivery voice memo media with extra top-level fields", () => {
+  it("rejects assistant-delivery voice memo media with missing required fields", () => {
     expect(() =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
@@ -210,7 +214,27 @@ describe("hosted assistant delivery contracts", () => {
               attachmentId: "attachment_voice_1",
               kind: "linq_attachment",
             },
-            transcript: "Should not be here.",
+          } as unknown as HostedAssistantDeliveryMedia],
+        }),
+      }),
+    ).toThrow(/is missing required fields: transcript/);
+  });
+
+  it("rejects assistant-delivery voice memo media with extra top-level fields", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            filename: "memo.mp3",
+            kind: "voice_memo",
+            transcript: null,
+            transport: {
+              attachmentId: "attachment_voice_1",
+              kind: "linq_attachment",
+            },
+            sourceMetadata: "Should not be here.",
           } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
@@ -222,6 +246,7 @@ describe("hosted assistant delivery contracts", () => {
       media: [{
         filename: "memo.mp3",
         kind: "voice_memo",
+        transcript: null,
         transport: {
           attachmentId: "attachment_voice_1",
           kind: "linq_attachment",

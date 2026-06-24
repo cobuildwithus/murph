@@ -1822,16 +1822,11 @@ function buildAssistantResponseMediaTranscriptText(
   media: readonly AssistantResponseMedia[] | null | undefined,
 ): string | null {
   const transcripts = (media ?? [])
-    .map((item) => {
-      if (
-        item.kind !== 'voice_memo' ||
-        item.transport.kind !== 'telegram_generation' ||
-        item.transport.generation.kind !== 'elevenlabs_speech'
-      ) {
-        return null
-      }
-      return normalizeNullableString(item.transport.generation.text)
-    })
+    .map((item) =>
+      item.kind === 'voice_memo'
+        ? normalizeNullableString(item.transcript)
+        : null,
+    )
     .filter((text): text is string => text !== null)
 
   return transcripts.length > 0 ? transcripts.join('\n\n') : null

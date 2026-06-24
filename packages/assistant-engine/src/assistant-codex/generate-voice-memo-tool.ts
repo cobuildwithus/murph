@@ -88,10 +88,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     return unavailableVoiceMemoResult('voice memo')
   }
 
-  const preflight = validateGeneratedVoiceMemoPreconditions({
-    label: 'voice memo',
-    runtime,
-  })
+  const preflight = validateElevenLabsApiKeyPrecondition(runtime, 'voice memo')
   if (preflight) {
     return preflight
   }
@@ -123,7 +120,6 @@ export async function executeGenerateVoiceMemoTool(input: {
       text: input.args.text,
       voiceId,
     },
-    label: 'voice memo',
     runtime,
     signal: input.abortSignal ?? null,
   })
@@ -148,10 +144,7 @@ export async function executeGenerateSongTool(input: {
     return unavailableVoiceMemoResult('song')
   }
 
-  const preflight = validateGeneratedVoiceMemoPreconditions({
-    label: 'song',
-    runtime,
-  })
+  const preflight = validateElevenLabsApiKeyPrecondition(runtime, 'song')
   if (preflight) {
     return preflight
   }
@@ -166,7 +159,6 @@ export async function executeGenerateSongTool(input: {
       outputFormat: assistantVoiceMemoMusicOutputFormat,
       prompt: input.args.prompt,
     },
-    label: 'song',
     runtime,
     signal: input.abortSignal ?? null,
   })
@@ -175,10 +167,11 @@ export async function executeGenerateSongTool(input: {
 async function executeGeneratedVoiceMemo(input: {
   filenameBase: string
   generation: AssistantVoiceMemoGeneration
-  label: 'song' | 'voice memo'
   runtime: VoiceMemoToolRuntime
   signal: AbortSignal | null
 }): Promise<GenerateVoiceMemoToolResult> {
+  const label = voiceMemoGenerationLabel(input.generation)
+  const transcript = voiceMemoGenerationTranscript(input.generation)
   const filename = `${input.filenameBase}.mp3`
   if (input.runtime.kind === 'telegram') {
     return {
@@ -186,6 +179,7 @@ async function executeGeneratedVoiceMemo(input: {
         {
           kind: 'voice_memo',
           filename,
+          transcript,
           transport: {
             generation: input.generation,
             kind: 'telegram_generation',
@@ -193,7 +187,7 @@ async function executeGeneratedVoiceMemo(input: {
         },
       ],
       rpcSuccess: true,
-      rpcText: `generated ${input.label} attached to the final response`,
+      rpcText: `generated ${label} attached to the final response`,
     }
   }
 
@@ -219,7 +213,7 @@ async function executeGeneratedVoiceMemo(input: {
     }
     return {
       rpcSuccess: false,
-      rpcText: `${input.label} generated but Linq attachment upload failed`,
+      rpcText: `${label} generated but Linq attachment upload failed`,
     }
   }
 
@@ -228,6 +222,7 @@ async function executeGeneratedVoiceMemo(input: {
       {
         kind: 'voice_memo',
         filename: upload.filename,
+        transcript,
         transport: {
           attachmentId: upload.attachmentId,
           kind: 'linq_attachment',
@@ -235,13 +230,15 @@ async function executeGeneratedVoiceMemo(input: {
       },
     ],
     rpcSuccess: true,
-    rpcText: `generated ${input.label} attached to the final response`,
+    rpcText: `generated ${label} attached to the final response`,
   }
 }
 
+type VoiceMemoGenerationLabel = 'song' | 'voice memo'
+
 function rejectIfResponseMediaConflicts(
   currentResponseMedia: readonly AssistantResponseMedia[],
-  label: 'song' | 'voice memo',
+  label: VoiceMemoGenerationLabel,
 ): GenerateVoiceMemoToolResult | null {
   if (currentResponseMedia.length === 0) {
     return null
@@ -252,22 +249,27 @@ function rejectIfResponseMediaConflicts(
   }
 }
 
-function validateGeneratedVoiceMemoPreconditions(input: {
-  label: 'song' | 'voice memo'
-  runtime: VoiceMemoToolRuntime
-}): GenerateVoiceMemoToolResult | null {
-  if (!input.runtime.elevenLabs.apiKeyAvailable) {
+function validateElevenLabsApiKeyPrecondition(
+  runtime: VoiceMemoToolRuntime,
+  label: VoiceMemoGenerationLabel,
+): GenerateVoiceMemoToolResult | null {
+  if (!runtime.elevenLabs.apiKeyAvailable) {
     return {
       rpcSuccess: false,
-      rpcText: `ELEVENLABS_API_KEY is required for ${input.label} generation`,
+      rpcText: `ELEVENLABS_API_KEY is required for ${label} generation`,
     }
   }
-
   return null
 }
 
+function voiceMemoGenerationTranscript(
+  generation: AssistantVoiceMemoGeneration,
+): string | null {
+  return generation.kind === 'elevenlabs_speech' ? generation.text : null
+}
+
 function unavailableVoiceMemoResult(
-  label: 'song' | 'voice memo',
+  label: VoiceMemoGenerationLabel,
 ): GenerateVoiceMemoToolResult {
   return {
     rpcSuccess: false,
@@ -313,18 +315,18 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
     elevenLabs,
     kind: 'linq',
     generateAndUpload: async (request) => {
+      const label = voiceMemoGenerationLabel(request.generation)
       if (!apiKey) {
         throw new VoiceMemoToolConfigurationError(
-          `ELEVENLABS_API_KEY is required for ${voiceMemoGenerationLabel(request.generation)} generation`,
+          `ELEVENLABS_API_KEY is required for ${label} generation`,
         )
       }
       const linqApiToken = resolveLinqApiToken(input.env)
       if (!linqApiToken) {
         throw new VoiceMemoToolConfigurationError(
-          `LINQ_API_TOKEN is required for ${voiceMemoGenerationLabel(request.generation)} attachment upload`,
+          `LINQ_API_TOKEN is required for ${label} attachment upload`,
         )
       }
-      const label = voiceMemoGenerationLabel(request.generation)
 
       let audio: Awaited<ReturnType<typeof generateElevenLabsVoiceMemoAudio>>
       try {
@@ -422,6 +424,6 @@ function isAbortError(error: unknown): boolean {
 
 function voiceMemoGenerationLabel(
   generation: AssistantVoiceMemoGeneration,
-): 'song' | 'voice memo' {
+): VoiceMemoGenerationLabel {
   return generation.kind === 'elevenlabs_music' ? 'song' : 'voice memo'
 }

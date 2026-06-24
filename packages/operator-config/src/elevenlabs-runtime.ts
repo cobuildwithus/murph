@@ -203,6 +203,7 @@ async function requestElevenLabsAudio(input: {
   const url = new URL(input.path, DEFAULT_ELEVENLABS_API_BASE_URL)
   url.searchParams.set('output_format', input.outputFormat)
   const timeout = createTimeoutAbortController(input.signal, input.timeoutMs)
+  const startedAtMs = Date.now()
   try {
     const response = await fetchImplementation(url.toString(), {
       body: JSON.stringify(input.body),
@@ -250,6 +251,7 @@ async function requestElevenLabsAudio(input: {
         ? `ElevenLabs ${input.operation} request timed out after ${input.timeoutMs}ms.`
         : `ElevenLabs ${input.operation} request failed before a response was returned.`,
       {
+        elapsedMs: Date.now() - startedAtMs,
         failureStage: 'transport',
         operation: input.operation,
         provider: 'elevenlabs',

@@ -165,6 +165,7 @@ function createHostedVoiceMemoMedia(
   return {
     filename: "memo.mp3",
     kind: "voice_memo",
+    transcript: null,
     transport: {
       attachmentId: "attachment_voice_1",
       kind: "linq_attachment",

@@ -3611,6 +3611,7 @@ function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[num
   return {
     kind: 'voice_memo',
     filename: 'memo.mp3',
+    transcript: null,
     transport: {
       attachmentId: 'attachment_voice_1',
       kind: 'linq_attachment',

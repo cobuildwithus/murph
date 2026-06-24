@@ -98,6 +98,7 @@ describe('assistant outbox dispatch-state', () => {
         {
           kind: 'voice_memo' as const,
           filename: 'memo.mp3',
+          transcript: null,
           transport: {
             attachmentId: 'attachment_voice_1',
             kind: 'linq_attachment' as const,

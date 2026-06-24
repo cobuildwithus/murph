@@ -365,6 +365,7 @@ const assistantVoiceMemoResponseMediaSchema = z
   .object({
     kind: z.literal('voice_memo'),
     filename: z.string().trim().min(1).max(255),
+    transcript: z.string().trim().min(1).max(4000).nullable().default(null),
     transport: assistantVoiceMemoTransportSchema,
   })
   .strict()

@@ -79,6 +79,7 @@ export type HostedAssistantDeliveryVoiceMemoTransport =
 export interface HostedAssistantDeliveryVoiceMemoMedia {
   filename: string;
   kind: "voice_memo";
+  transcript: string | null;
   transport: HostedAssistantDeliveryVoiceMemoTransport;
 }
 
@@ -715,11 +716,22 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
   record: Record<string, unknown>,
   label: string,
 ): HostedAssistantDeliveryVoiceMemoMedia {
-  requireExactHostedVoiceMemoObjectKeys(record, ["filename", "kind", "transport"], label);
+  requireExactObjectKeys(
+    record,
+    ["filename", "kind", "transcript", "transport"],
+    label,
+  );
 
   return {
-    filename: requireHostedVoiceMemoBoundedTrimmedString(record.filename, `${label}.filename`, 255),
+    filename: requireBoundedTrimmedString(record.filename, `${label}.filename`, 255),
     kind: "voice_memo",
+    transcript: record.transcript === null
+      ? null
+      : requireBoundedTrimmedString(
+          record.transcript,
+          `${label}.transcript`,
+          4_000,
+        ),
     transport: parseHostedAssistantDeliveryVoiceMemoTransport(
       record.transport,
       `${label}.transport`,
@@ -734,9 +746,9 @@ function parseHostedAssistantDeliveryVoiceMemoTransport(
   const record = requireObject(value, label);
   const kind = requireString(record.kind, `${label}.kind`);
   if (kind === "linq_attachment") {
-    requireExactHostedVoiceMemoObjectKeys(record, ["attachmentId", "kind"], label);
+    requireExactObjectKeys(record, ["attachmentId", "kind"], label);
     return {
-      attachmentId: requireHostedVoiceMemoBoundedTrimmedString(
+      attachmentId: requireBoundedTrimmedString(
         record.attachmentId,
         `${label}.attachmentId`,
         200,
@@ -745,7 +757,7 @@ function parseHostedAssistantDeliveryVoiceMemoTransport(
     };
   }
   if (kind === "telegram_generation") {
-    requireExactHostedVoiceMemoObjectKeys(record, ["generation", "kind"], label);
+    requireExactObjectKeys(record, ["generation", "kind"], label);
     return {
       generation: parseHostedAssistantDeliveryVoiceMemoGeneration(
         record.generation,
@@ -765,7 +777,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
   const record = requireObject(value, label);
   const kind = requireString(record.kind, `${label}.kind`);
   if (kind === "elevenlabs_speech") {
-    requireExactHostedVoiceMemoObjectKeys(
+    requireExactObjectKeys(
       record,
       ["kind", "modelId", "outputFormat", "text", "voiceId"],
       label,
@@ -775,14 +787,14 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
     }
     return {
       kind,
-      modelId: requireHostedVoiceMemoBoundedTrimmedString(record.modelId, `${label}.modelId`, 200),
+      modelId: requireBoundedTrimmedString(record.modelId, `${label}.modelId`, 200),
       outputFormat: "mp3_44100_128",
-      text: requireHostedVoiceMemoBoundedTrimmedString(record.text, `${label}.text`, 4_000),
-      voiceId: requireHostedVoiceMemoBoundedTrimmedString(record.voiceId, `${label}.voiceId`, 200),
+      text: requireBoundedTrimmedString(record.text, `${label}.text`, 4_000),
+      voiceId: requireBoundedTrimmedString(record.voiceId, `${label}.voiceId`, 200),
     };
   }
   if (kind === "elevenlabs_music") {
-    requireExactHostedVoiceMemoObjectKeys(
+    requireExactObjectKeys(
       record,
       [
         "durationMs",
@@ -801,7 +813,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
       throw new TypeError(`${label}.outputFormat must be mp3_48000_192.`);
     }
     return {
-      durationMs: requireHostedVoiceMemoIntegerInRange(
+      durationMs: requireIntegerInRange(
         record.durationMs,
         `${label}.durationMs`,
         3_000,
@@ -814,26 +826,32 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
       kind,
       modelId: "music_v2",
       outputFormat: "mp3_48000_192",
-      prompt: requireHostedVoiceMemoBoundedTrimmedString(record.prompt, `${label}.prompt`, 4_100),
+      prompt: requireBoundedTrimmedString(record.prompt, `${label}.prompt`, 4_100),
     };
   }
 
   throw new TypeError(`${label}.kind must be elevenlabs_speech or elevenlabs_music.`);
 }
 
-function requireExactHostedVoiceMemoObjectKeys(
+function requireExactObjectKeys(
   record: Record<string, unknown>,
-  allowedKeys: readonly string[],
+  requiredKeys: readonly string[],
   label: string,
 ): void {
-  const allowed = new Set(allowedKeys);
-  const unknown = Object.keys(record).filter((key) => !allowed.has(key));
+  const required = new Set(requiredKeys);
+  const presentKeys = Object.keys(record);
+  const present = new Set(presentKeys);
+  const unknown = presentKeys.filter((key) => !required.has(key)).sort();
+  const missing = requiredKeys.filter((key) => !present.has(key)).sort();
+  if (missing.length > 0) {
+    throw new TypeError(`${label} is missing required fields: ${missing.join(", ")}.`);
+  }
   if (unknown.length > 0) {
-    throw new TypeError(`${label} contains unsupported fields: ${unknown.sort().join(", ")}.`);
+    throw new TypeError(`${label} contains unsupported fields: ${unknown.join(", ")}.`);
   }
 }
 
-function requireHostedVoiceMemoBoundedTrimmedString(
+function requireBoundedTrimmedString(
   value: unknown,
   label: string,
   maxLength: number,
@@ -845,7 +863,7 @@ function requireHostedVoiceMemoBoundedTrimmedString(
   return normalized;
 }
 
-function requireHostedVoiceMemoIntegerInRange(
+function requireIntegerInRange(
   value: unknown,
   label: string,
   minimum: number,

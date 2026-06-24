@@ -3,15 +3,17 @@ import { z } from 'zod'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  buildSafeToolCallValidationDigest,
-  type SafeToolCallValidationDigest,
-} from '../../assistant/tool-validation-digest.js'
+import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateVoiceMemoTool,
   type GenerateVoiceMemoToolArgs,
   type VoiceMemoToolRuntime,
 } from '../generate-voice-memo-tool.js'
+import {
+  parseDynamicToolArguments,
+  wrapVoiceMemoToolResult,
+  type DynamicToolResult,
+} from './voice-memo-tool-wrapper.js'
 
 export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   namespace: 'murph',
@@ -53,24 +55,11 @@ export function parseGenerateVoiceMemoArguments(
 ):
   | { ok: true; args: GenerateVoiceMemoToolArgs }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = generateVoiceMemoArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildSafeToolCallValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        requestedToolName: 'murph.generate_voice_memo',
-        schemaName: 'murph.generate_voice_memo.input',
-        schemaRootKeys: Object.keys(generateVoiceMemoArgumentsSchema.shape),
-        toolName: 'murph.generate_voice_memo',
-      }),
-    }
-  }
-  return {
-    args: parsed.data,
-    ok: true,
-  }
+  return parseDynamicToolArguments({
+    schema: generateVoiceMemoArgumentsSchema,
+    toolName: 'murph.generate_voice_memo',
+    value,
+  })
 }
 
 export async function executeGenerateVoiceMemoDynamicTool(input: {
@@ -78,41 +67,13 @@ export async function executeGenerateVoiceMemoDynamicTool(input: {
   args: GenerateVoiceMemoToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
-}): Promise<{
-  responseMediaPatch?: {
-    media: AssistantResponseMedia[]
-    op: 'append'
-  }
-  rpcResult: {
-    contentItems: { text: string; type: 'inputText' }[]
-    success: boolean
-  }
-  usageDraft: null
-}> {
-  const result = await executeGenerateVoiceMemoTool({
-    abortSignal: input.abortSignal ?? null,
-    args: input.args,
-    currentResponseMedia: input.currentResponseMedia ?? [],
-    runtime: input.voiceMemoRuntime ?? null,
-  })
-  return {
-    ...(result.responseMedia && result.responseMedia.length > 0
-      ? {
-          responseMediaPatch: {
-            media: result.responseMedia,
-            op: 'append' as const,
-          },
-        }
-      : {}),
-    rpcResult: {
-      success: result.rpcSuccess,
-      contentItems: [
-        {
-          type: 'inputText',
-          text: result.rpcText,
-        },
-      ],
-    },
-    usageDraft: null,
-  }
+}): Promise<DynamicToolResult> {
+  return wrapVoiceMemoToolResult(
+    await executeGenerateVoiceMemoTool({
+      abortSignal: input.abortSignal ?? null,
+      args: input.args,
+      currentResponseMedia: input.currentResponseMedia ?? [],
+      runtime: input.voiceMemoRuntime ?? null,
+    }),
+  )
 }

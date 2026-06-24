@@ -457,7 +457,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
-export function resolveMurphDynamicTools(input: {
+export interface MurphDynamicToolAvailability {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
@@ -465,47 +465,48 @@ export function resolveMurphDynamicTools(input: {
   connectedAppsAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
-}): readonly MurphDynamicTool[] {
-  return MURPH_DYNAMIC_TOOLS.filter((tool) => {
-    if (tool === MURPH_SEND_PROGRESS_UPDATE_TOOL) {
-      return input.progressUpdatesAvailable !== false
-    }
+}
 
-    if (tool === MURPH_FINISH_WITHOUT_REPLY_TOOL) {
-      return input.allowFinishWithoutReply !== false
-    }
+type AvailabilityPredicate = (
+  availability: MurphDynamicToolAvailability,
+) => boolean
 
-    if (tool === MURPH_REACT_TO_MESSAGE_TOOL) {
-      return input.allowMessageReactions === true
-    }
+const ALWAYS_AVAILABLE: AvailabilityPredicate = () => true
 
-    if (tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL) {
-      return input.productFeedbackAvailable === true
-    }
+// Two default semantics, kept explicit so each tool's gate is obvious:
+//   defaultOn  → the tool is available unless the caller passes `false`.
+//   defaultOff → the tool is available only if the caller passes `true`.
+const defaultOn = (
+  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
+): AvailabilityPredicate => (a) => read(a) !== false
+const defaultOff = (
+  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
+): AvailabilityPredicate => (a) => read(a) === true
 
-    if (
-      tool === MURPH_GENERATE_VOICE_MEMO_TOOL ||
-      tool === MURPH_GENERATE_SONG_TOOL
-    ) {
-      return input.voiceMemoGenerationAvailable === true
-    }
+const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
+  new Map<MurphDynamicTool, AvailabilityPredicate>([
+    [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
+    [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
+    [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
+      (tool) =>
+        [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
+    ),
+    ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.map(
+      (tool) =>
+        [tool, defaultOff((a) => a.connectedAppsAvailable)] as const,
+    ),
+  ])
 
-    if (
-      MURPH_COMPUTER_DYNAMIC_TOOLS.some((computerTool) => computerTool === tool)
-    ) {
-      return input.computerToolsAvailable === true
-    }
-
-    if (
-      MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.some(
-        (connectedAppsTool) => connectedAppsTool === tool,
-      )
-    ) {
-      return input.connectedAppsAvailable === true
-    }
-
-    return true
-  })
+export function resolveMurphDynamicTools(
+  availability: MurphDynamicToolAvailability,
+): readonly MurphDynamicTool[] {
+  return MURPH_DYNAMIC_TOOLS.filter((tool) =>
+    (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
+  )
 }
 
 export function listMurphDynamicToolNames(): string[] {

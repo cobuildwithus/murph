@@ -65,6 +65,7 @@ describe('assistant response media', () => {
       {
         kind: 'voice_memo',
         filename: 'memo-1.mp3',
+        transcript: null,
         transport: {
           attachmentId: 'attachment_1',
           kind: 'linq_attachment',
@@ -73,6 +74,7 @@ describe('assistant response media', () => {
       {
         kind: 'voice_memo',
         filename: 'memo-2.mp3',
+        transcript: null,
         transport: {
           attachmentId: 'attachment_2',
           kind: 'linq_attachment',
