@@ -954,6 +954,160 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput).not.toHaveProperty('turnContext')
   })
 
+  it('honors an explicit Linq replyToMessageId even after the watermark consumed a newer matching delivery', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-anchored-target',
+        message: 'older anchored reminder',
+        providerMessageId: 'linq-msg-anchored',
+        sentAt: '2026-04-08T00:04:00.000Z',
+        sessionId: 'session-automation',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-newer-consumed',
+        message: 'newer consumed reminder',
+        providerMessageId: 'linq-msg-newer',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createConsumedCrossSessionReceipt({
+        intentId: 'intent-newer-consumed',
+        updatedAt: '2026-04-08T00:06:30.000Z',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-anchored',
+        service: null,
+      },
+      text: 'yes do that one',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('older anchored reminder')
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-anchored-target',
+    }))
+  })
+
+  it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-anchored-target',
+        message: 'older anchored reminder',
+        providerMessageId: 'linq-msg-anchored',
+        sentAt: '2026-04-08T00:04:00.000Z',
+        sessionId: 'session-automation',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-newer-unrelated',
+        message: 'newer unrelated reminder',
+        providerMessageId: 'linq-msg-newer',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const unanchoredCandidate = createAssistantInputCandidate({
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-04-08T00:09:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: null,
+      },
+      text: 'thinking about it',
+      threadIsDirect: true,
+    })
+    const anchoredCandidate = createAssistantInputCandidate({
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-anchored',
+        service: null,
+      },
+      text: 'yes do that one',
+      threadIsDirect: true,
+    })
+    const context = createAssistantAutoReplyGroupContext([
+      {
+        inputCandidate: unanchoredCandidate,
+        summary: assistantAutomationInputSummaryFromCandidate(unanchoredCandidate),
+        telegramMetadata: null,
+      },
+      {
+        inputCandidate: anchoredCandidate,
+        summary: assistantAutomationInputSummaryFromCandidate(anchoredCandidate),
+        telegramMetadata: null,
+      },
+    ])
+    if (!context) {
+      throw new Error('expected auto-reply group context')
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('older anchored reminder')
+    expect(sendInput.turnContext).not.toContain('newer unrelated reminder')
+  })
+
   it('suppresses cross-session context in hosted queue-only mode via receipt metadata', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

@@ -159,7 +159,6 @@ interface AssistantAutoReplyPrimaryInput {
   occurredAt: string
   receivedAt: string | null
   replyTarget: AssistantAutoReplyPromptInput['replyTarget']
-  replyToMessageId: string | null
   source: string
   text: string | null
 }
@@ -1112,6 +1111,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
+      // Pick the anchor from the newest grouped input that carries a native
+      // reply, not from the bookkeeping primary (which is the oldest item).
+      // Otherwise a later native reply to M1 in the same group is ignored
+      // and the assistant interprets the user against the wrong assistant
+      // message.
+      replyToMessageId: readPromptInputsCrossSessionReplyToMessageId(
+        promptInputs,
+      ),
       session: existingSession,
       vault: input.vault,
     })
@@ -1219,13 +1226,28 @@ function createAssistantAutoReplyPrimaryInput(
     occurredAt: input.occurredAt,
     receivedAt: input.receivedAt,
     replyTarget: input.replyTarget,
-    replyToMessageId:
-      input.sourceMetadata?.kind === 'linq'
-        ? input.sourceMetadata.replyToMessageId ?? null
-        : null,
     source: input.source,
     text: input.text,
   }
+}
+
+function readPromptInputsCrossSessionReplyToMessageId(
+  inputs: readonly AssistantAutoReplyPromptInput[],
+): string | null {
+  for (let index = inputs.length - 1; index >= 0; index -= 1) {
+    const metadata = inputs[index]?.sourceMetadata
+    if (metadata?.kind === 'linq' && metadata.replyToMessageId) {
+      return metadata.replyToMessageId
+    }
+  }
+  return null
+}
+
+function promptInputCarriesNativeReplyReference(
+  candidate: AssistantInputCandidate,
+): boolean {
+  const metadata = candidate.event.sourceMetadata
+  return metadata?.kind === 'linq' && metadata.replyToMessageId !== null
 }
 
 interface HostedAutoReplyDeliveryIdempotency {
@@ -1549,6 +1571,17 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       signal: admissionInput.signal,
     })
     if (lateInputs.inputs.length === 0) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+    // Cross-session turn context is resolved once before the active-turn
+    // hooks install. A late native reply (provider replyToMessageId) anchors
+    // to a specific prior message that may differ from the current turn's
+    // context, so folding it into the live turn would interpret it against
+    // the wrong assistant message. Defer the whole admission cycle — the
+    // next automation scan re-evaluates context with the right anchor.
+    if (lateInputs.inputs.some(promptInputCarriesNativeReplyReference)) {
       return {
         kind: 'no-new-input',
       }
@@ -3230,6 +3263,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   consumedIntentIds: ReadonlySet<string>
   deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
+  replyToMessageId: string | null
   session: AssistantSession | null
   vault: string
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
@@ -3241,10 +3275,8 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     return null
   }
 
-  const replyToMessageId = normalizeNullableString(
-    input.input.replyToMessageId,
-  )
-  const sorted = (
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  const eligible = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       input: input.input,
@@ -3252,40 +3284,38 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     })
   )
     .filter((delivery) => delivery.sentAtMs <= causalUpperBoundMs)
+    .filter((delivery) =>
+      input.session === null || delivery.sessionId !== input.session.sessionId,
+    )
     .sort((left, right) =>
       left.sentAtMs === right.sentAtMs
         ? left.intentId.localeCompare(right.intentId)
         : left.sentAtMs - right.sentAtMs,
     )
-
-  // Once a delivery has been used as turn context, no earlier delivery from
-  // the same route should resurface. Skip everything at or before the
-  // newest consumed match.
-  let firstFreshIndex = 0
-  for (let index = 0; index < sorted.length; index++) {
-    if (input.consumedIntentIds.has(sorted[index]!.intentId)) {
-      firstFreshIndex = index + 1
-    }
-  }
-  const fresh = sorted.slice(firstFreshIndex).filter((delivery) =>
-    input.session === null || delivery.sessionId !== input.session.sessionId,
-  )
-  if (fresh.length === 0) {
+  if (eligible.length === 0) {
     return null
   }
 
-  // When the native message reply chain identifies a specific prior message,
-  // require an exact provider-message-id match. Falling back to "latest sent"
-  // would risk injecting the wrong prior message as turn context.
+  // Explicit native reply: the user is anchoring to a specific prior message
+  // identified by provider message id. An earlier consumed delivery that
+  // moved the watermark past it must not hide that explicit anchor.
   if (replyToMessageId) {
     return (
-      fresh.find((delivery) =>
+      eligible.find((delivery) =>
         delivery.providerMessageIds.includes(replyToMessageId),
       ) ?? null
     )
   }
 
-  return fresh.at(-1) ?? null
+  // Unanchored fallback: once a delivery has been used as turn context, no
+  // earlier delivery from the same route should resurface as "latest".
+  let firstFreshIndex = 0
+  for (let index = 0; index < eligible.length; index++) {
+    if (input.consumedIntentIds.has(eligible[index]!.intentId)) {
+      firstFreshIndex = index + 1
+    }
+  }
+  return eligible.slice(firstFreshIndex).at(-1) ?? null
 }
 
 function readAssistantAutoReplyConsumedCrossSessionIntentIds(
