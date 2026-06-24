@@ -547,8 +547,8 @@ test("rebuildRuntimeFromVault restores canonical captures and remains idempotent
   });
 
   const runtime = await openInboxRuntime({ vaultRoot });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
 
   const capture = runtime.getCapture(captureId);
   assert.ok(capture);
@@ -595,7 +595,7 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
   });
 
   const runtime = await openInboxRuntime({ vaultRoot });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
 
   const capture = runtime.getCapture(captureId);
   assert.ok(capture);
@@ -685,16 +685,16 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   assert.equal(countRows(runtime.databasePath, "capture"), 2);
   assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "succeeded");
 
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
 
   const rebuilt = runtime.getCapture(captureId);
   assert.ok(rebuilt);
   assert.deepEqual(runtime.getCursor("email", "self"), { messageId: "msg-rebuild-reset" });
   assert.equal(runtime.getCapture(staleCaptureId), null);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
   assert.equal(countRows(runtime.databasePath, "capture_mutation_tombstone"), 1);
-  assert.equal(rebuilt.attachments[0]?.parseState, "pending");
+  assert.equal(rebuilt.attachments[0]?.parseState ?? null, null);
   assert.equal(rebuilt.attachments[0]?.parserProviderId ?? null, null);
   assert.equal(rebuilt.attachments[0]?.derivedPath ?? null, null);
   assert.equal(rebuilt.attachments[0]?.extractedText ?? null, null);
@@ -722,6 +722,91 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   );
 
   runtime.close();
+});
+
+test("rebuildRuntimeFromVault preserves nonterminal parser jobs for replayed captures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-pending-parser-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-pending-parser-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const audioPath = await writeExternalFile(sourceRoot, "pending-parser.m4a", "pending audio");
+  const inbound = createCapture({
+    externalId: "msg-rebuild-pending-parser",
+    occurredAt: "2026-03-13T11:09:00.000Z",
+    text: "Pending parser capture",
+    attachments: [
+      {
+        externalId: "att-rebuild-pending-parser",
+        kind: "audio",
+        mime: "audio/mp4",
+        originalPath: audioPath,
+        fileName: "pending-parser.m4a",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RD",
+    input: inbound,
+    storedAt: "2026-03-13T11:09:30.000Z",
+  });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    runtime.enqueueDerivedJobs({
+      captureId,
+      stored: persisted.stored,
+    });
+    const before = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+    assert.equal(before.length, 1);
+    assert.equal(before[0]?.state, "pending");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "pending");
+
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+
+    const after = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+    assert.equal(after.length, 1);
+    assert.equal(after[0]?.jobId, before[0]?.jobId);
+    assert.equal(after[0]?.state, "pending");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "pending");
+    assert.equal(countRows(runtime.databasePath, "capture"), 1);
+    assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+    const running = runtime.claimNextAttachmentParseJob({ captureId });
+    assert.ok(running);
+    assert.equal(running.jobId, before[0]?.jobId);
+    assert.equal(running.state, "running");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "running");
+
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+
+    const afterRunning = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+    assert.equal(afterRunning.length, 1);
+    assert.equal(afterRunning[0]?.jobId, before[0]?.jobId);
+    assert.equal(afterRunning[0]?.state, "running");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "running");
+    assert.equal(countRows(runtime.databasePath, "capture"), 1);
+    assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+    await rebuildRuntimeFromVault({ enqueueParserJobs: true, vaultRoot, runtime });
+
+    const replayed = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+    assert.equal(replayed.length, 1);
+    assert.equal(replayed[0]?.state, "pending");
+    assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "pending");
+    assert.equal(countRows(runtime.databasePath, "capture"), 1);
+    assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+    const replayedClaim = runtime.claimNextAttachmentParseJob({ captureId });
+    assert.ok(replayedClaim);
+    assert.equal(replayedClaim.jobId, replayed[0]?.jobId);
+    assert.equal(replayedClaim.state, "running");
+  } finally {
+    runtime.close();
+  }
 });
 
 test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts to a different shard", async () => {
@@ -1116,8 +1201,8 @@ test("rebuildRuntimeFromVault chooses one canonical capture record for duplicate
   });
 
   const runtime = await openInboxRuntime({ vaultRoot });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
 
   const captures = runtime.listCaptures({ limit: 10 });
   assert.equal(captures.length, 1);

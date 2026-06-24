@@ -89,6 +89,7 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 export type RuntimeInvocationInput = {
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
+  processingMode?: "default" | "inbox_media_retention" | null;
   userId: string;
 };
 
@@ -143,6 +144,7 @@ export class RuntimeInvocationService {
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
+      processingMode: input.input.processingMode ?? null,
       token,
       userId: input.input.userId,
       workspace: workspaceRead.workspace,
@@ -551,6 +553,7 @@ export class RuntimeInvocationService {
 
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
+    processingMode?: "default" | "inbox_media_retention" | null;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -650,6 +653,9 @@ export class RuntimeInvocationService {
         attemptId: input.token.attemptId,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
+        ...(input.processingMode
+          ? { processingMode: input.processingMode }
+          : {}),
         providerEgressToken: input.token.providerEgressToken,
         userId: input.userId,
         workspace: input.workspace,

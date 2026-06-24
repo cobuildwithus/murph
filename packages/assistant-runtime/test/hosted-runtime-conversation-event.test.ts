@@ -164,8 +164,70 @@ function mockOpenInboxRuntimeWithParseJobs(input: {
       [...pendingJobs, ...failedJobs].map((job) => job.attachmentId),
     ),
   );
-  mocks.openInboxRuntime.mockResolvedValueOnce({
+  const runningJobs: AttachmentParseJobRecord[] = [];
+  const filterJobs = (
+    jobs: AttachmentParseJobRecord[],
+    filters: { attachmentId?: string; captureId?: string; limit?: number } = {},
+  ) => {
+    const filtered = jobs.filter((job) =>
+      (filters.captureId === undefined || job.captureId === filters.captureId)
+        && (filters.attachmentId === undefined || job.attachmentId === filters.attachmentId)
+    );
+    return filtered.slice(0, filters.limit ?? filtered.length);
+  };
+  const runtime = {
+    claimNextAttachmentParseJob: vi.fn((filters: { captureId?: string } = {}) => {
+      const pendingJobIndex = pendingJobs.findIndex((job) => {
+        const kind = attachmentKinds[job.attachmentId] ?? "audio";
+        return (filters.captureId === undefined || job.captureId === filters.captureId)
+          && (kind === "audio" || kind === "video");
+      });
+      if (pendingJobIndex < 0) {
+        return null;
+      }
+      const [pendingJob] = pendingJobs.splice(pendingJobIndex, 1);
+      if (!pendingJob) {
+        return null;
+      }
+      const runningJob: AttachmentParseJobRecord = {
+        ...pendingJob,
+        attempts: pendingJob.attempts + 1,
+        state: "running",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      };
+      runningJobs.push(runningJob);
+      return runningJob;
+    }),
     close: vi.fn(),
+    failAttachmentParseJob: vi.fn((input: {
+      attempt: number;
+      errorCode?: string | null;
+      errorMessage: string;
+      jobId: string;
+    }) => {
+      const runningJobIndex = runningJobs.findIndex(
+        (job) => job.jobId === input.jobId && job.attempts === input.attempt,
+      );
+      if (runningJobIndex < 0) {
+        throw new Error("Expected a claimed parser job to fail.");
+      }
+      const [runningJob] = runningJobs.splice(runningJobIndex, 1);
+      if (!runningJob) {
+        throw new Error("Expected a claimed parser job to fail.");
+      }
+      const failedJob: AttachmentParseJobRecord = {
+        ...runningJob,
+        errorCode: input.errorCode ?? null,
+        errorMessage: input.errorMessage,
+        finishedAt: "2026-04-08T00:00:02.000Z",
+        state: "failed",
+      };
+      failedJobs.push(failedJob);
+      return {
+        applied: true,
+        job: failedJob,
+      };
+    }),
     getCapture: vi.fn((captureId: string) => ({
       attachments: attachmentIds.map((attachmentId, index) => ({
         attachmentId,
@@ -174,16 +236,26 @@ function mockOpenInboxRuntimeWithParseJobs(input: {
       })),
       captureId,
     })),
-    listAttachmentParseJobs: vi.fn((filters: { state?: string } = {}) => {
+    listAttachmentParseJobs: vi.fn((filters: {
+      attachmentId?: string;
+      captureId?: string;
+      limit?: number;
+      state?: string;
+    } = {}) => {
       if (filters.state === "pending") {
-        return pendingJobs;
+        return filterJobs(pendingJobs, filters);
+      }
+      if (filters.state === "running") {
+        return filterJobs(runningJobs, filters);
       }
       if (filters.state === "failed") {
-        return failedJobs;
+        return filterJobs(failedJobs, filters);
       }
       return [];
     }),
-  });
+  };
+  mocks.openInboxRuntime.mockResolvedValueOnce(runtime);
+  return runtime;
 }
 
 beforeEach(() => {
@@ -218,6 +290,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
@@ -717,6 +790,8 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
   });
 
   it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
     const order: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
@@ -740,7 +815,22 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
-    mockOpenInboxRuntimeWithParseJobs();
+    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs({
+      pendingJobs: [
+        createParseJobRecord({
+          attachmentId: "attachment_123",
+          captureId: "capture_after_parser_setup_failure",
+          jobId: "job_123",
+          state: "pending",
+        }),
+        createParseJobRecord({
+          attachmentId: "attachment_456",
+          captureId: "capture_after_parser_setup_failure",
+          jobId: "job_456",
+          state: "pending",
+        }),
+      ],
+    });
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
@@ -767,12 +857,14 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
     expect(order).toEqual(["processCapture"]);
     expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
+      nextWakeAt: "2026-04-08T00:01:00.000Z",
       parserProcessed: 0,
     });
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
     expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+    expect(inboxRuntime.claimNextAttachmentParseJob).not.toHaveBeenCalled();
+    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
     expect(logRequests).toHaveLength(1);
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
@@ -784,6 +876,147 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCode: "runtime_error",
+          nextWakeAtPresent: true,
+          parserTerminalizedPendingJobs: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        },
+      }),
+    ]);
+
+    mocks.openInboxRuntime.mockResolvedValueOnce(inboxRuntime);
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: vi.fn(),
+      processCapture: vi.fn(async () => {
+        order.push("processCaptureRetry");
+        return {
+          captureId: "capture_after_parser_setup_failure",
+          createdAt: "2026-04-08T00:01:00.000Z",
+          deduped: false,
+          envelopePath: "raw/inbox/linq/capture_after_parser_setup_failure/envelope.json",
+          eventId: "evt_capture_after_parser_setup_failure_retry",
+        };
+      }),
+      runtime: input.runtime,
+    }));
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const retryResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: {
+        ...createRuntimeWithLogPort(logRequests),
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_setup_failure_retry",
+        linqMessage: {
+          chatId: "chat_after_parser_setup_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:01:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(order).toEqual(["processCapture", "processCaptureRetry"]);
+    expect(retryResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 2,
+    });
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(2);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
+    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
+  });
+
+  it("keeps pending parser jobs retryable when parser drain throws", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    const order: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: vi.fn(),
+      processCapture: vi.fn(async () => {
+        order.push("processCapture");
+        return {
+          captureId: "capture_after_parser_drain_failure",
+          createdAt: "2026-04-08T00:00:00.000Z",
+          deduped: false,
+          envelopePath: "raw/inbox/linq/capture_after_parser_drain_failure/envelope.json",
+          eventId: "evt_capture_after_parser_drain_failure",
+        };
+      }),
+      runtime: input.runtime,
+    }));
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain: vi.fn(async () => {
+        throw new Error("parser drain failed");
+      }),
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs({
+      pendingJobs: [
+        createParseJobRecord({
+          attachmentId: "attachment_123",
+          captureId: "capture_after_parser_drain_failure",
+          jobId: "job_123",
+          state: "pending",
+        }),
+      ],
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: {
+        ...createRuntimeWithLogPort(logRequests),
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_drain_failure",
+        linqMessage: {
+          chatId: "chat_after_parser_drain_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(order).toEqual(["processCapture"]);
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: "2026-04-08T00:01:00.000Z",
+      parserProcessed: 0,
+    });
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
+    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
+    expect(logRequests).toHaveLength(1);
+    expect(logRequests[0]?.entries).toEqual([
+      expect.objectContaining({
+        component: "mailbox",
+        errorCode: "runtime_error",
+        eventCode: "mailbox.parser_drain_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: true,
+          errorCode: "runtime_error",
+          nextWakeAtPresent: true,
+          parserTerminalizedPendingJobs: 0,
           safeErrorMessage: "Hosted execution runtime failed.",
         },
       }),
@@ -830,6 +1063,62 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
     expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+  });
+
+  it("initializes parser tooling when legacy non-media jobs sort before pending media", async () => {
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+    const legacyDocumentJobs = Array.from({ length: 20 }, (_, index) =>
+      createParseJobRecord({
+        attachmentId: `attachment-document-${String(index).padStart(2, "0")}`,
+        captureId: "capture_123",
+        jobId: `job_document_${String(index).padStart(2, "0")}`,
+        state: "pending",
+      })
+    );
+    mockOpenInboxRuntimeWithParseJobs({
+      attachmentKinds: {
+        ...Object.fromEntries(
+          legacyDocumentJobs.map((job) => [job.attachmentId, "document"] as const),
+        ),
+        "attachment-media": "audio",
+      },
+      pendingJobs: [
+        ...legacyDocumentJobs,
+        createParseJobRecord({
+          attachmentId: "attachment-media",
+          captureId: "capture_123",
+          jobId: "job_media",
+          state: "pending",
+        }),
+      ],
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: createRuntime(),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_media_after_legacy_document_jobs",
+        linqMessage: {
+          chatId: "chat_media_after_legacy_document_jobs",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 2,
+    });
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
   });
 
   it("logs aggregate parser job failures without exposing attachment paths", async () => {

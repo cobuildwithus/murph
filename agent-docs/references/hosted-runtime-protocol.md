@@ -632,10 +632,10 @@ an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
 publishing, inbox projection and audio/video transcript enrichment, provider cleanup and read
-acknowledgement, usage record, telemetry, log export, post-checkpoint
-system-mailbox acknowledgement, billing/customer decoration, and device-connect
-context enrichment may record degraded status or request a later wake. They
-must not prevent mailbox
+acknowledgement, usage record, telemetry, log export, inbox media retention,
+post-checkpoint system-mailbox acknowledgement, billing/customer decoration,
+and device-connect context enrichment may record degraded status or request a
+later wake. They must not prevent mailbox
 import, assistant admission, outbox intent checkpointing, or reply delivery when
 the user-message trust boundary is otherwise valid. Hard failures remain
 appropriate for wrong-user authority, invalid auth, undecryptable mailbox
@@ -681,7 +681,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
-- runtime timers and next wake projection
+- runtime timers, assistant next wake projection, and inbox media retention wake
+  projection
 - checkpoint timing
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
@@ -734,9 +735,11 @@ outbox truth, or per-user runner coordination.
 
 ## Runtime Timers
 
-Private runtime timers live in local runtime state and surface only as a
-redacted due-time projection on the workspace/status surface. Web does not
-materialize timer rows, and Cloudflare does not persist timer work items.
+Private runtime timers live in local runtime state and surface only as redacted
+due-time projection on the workspace/status surface. Assistant work uses
+`nextWakeAt` and `nextWakeReason`; inbox media retention uses the independent
+`inboxMediaRetentionWakeAt` field. Web does not materialize timer rows, and
+Cloudflare does not persist timer work items.
 
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a

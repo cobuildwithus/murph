@@ -145,6 +145,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-recipe",
   "frontmatter-scheduled-log",
   "frontmatter-workout-format",
+  "inbox-attachment-retention-record",
   "inbox-capture-record",
   "integration-ingest-record",
   "metric-sample-record",

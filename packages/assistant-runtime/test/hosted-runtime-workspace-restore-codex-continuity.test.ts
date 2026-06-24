@@ -33,6 +33,9 @@ import type {
 import { describe, test } from "vitest";
 
 import {
+  materializeLegacyWorkspaceRefsForV2Snapshot,
+} from "../src/hosted-runtime/legacy-snapshot-materialization.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
@@ -1770,6 +1773,36 @@ describe("hosted workspace restore Codex continuity", () => {
         await readFile(path.join(restoredVaultRoot, lazyProviderRelativePath), "utf8"),
         "{\"provider\":\"lazy\"}\n",
       );
+      await rm(path.join(restoredVaultRoot, lazyRelativePath));
+      await materializeLegacyWorkspaceRefsForV2Snapshot({
+        artifactStore: platform.artifactStore,
+        operatorHomeRoot: liveRestored.operatorHomeRoot,
+        plan: {
+          currentSnapshotRefPresent: true,
+          legacyBundleRefPresent: true,
+          preservedInlineFileCount: 1,
+          preservedState: {
+            inlineFiles: [{
+              bytes: lazyBytes,
+              path: lazyRelativePath,
+              root: "vault",
+              sha256: lazyArtifactHash,
+              size: lazyBytes.byteLength,
+            }],
+          },
+          skippedInlineFiles: [{
+            path: lazyRelativePath,
+            root: "vault",
+            sha256: lazyArtifactHash,
+            size: lazyBytes.byteLength,
+          }],
+          skippedInlineFileCount: 1,
+        },
+        vaultRoot: restoredVaultRoot,
+      });
+      await assert.rejects(readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), {
+        code: "ENOENT",
+      });
 
       const nextSourceVaultRoot = path.join(workspaceRoot, "next-base-vault");
       await mkdir(path.dirname(path.join(nextSourceVaultRoot, lazyRelativePath)), { recursive: true });

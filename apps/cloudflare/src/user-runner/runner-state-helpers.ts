@@ -5,6 +5,7 @@ import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   DurableObjectSqlValue,
+  RunnerRuntimeProcessingMode,
   RunnerWriteFenceKind,
   RunnerStateRecord,
 } from "./types.js";
@@ -62,6 +63,7 @@ export function projectRunnerStateRecord(input: {
         expiresAt: null,
         generation: writeFenceGeneration,
         kind: writeFenceKind,
+        processingMode: readRunnerRuntimeProcessingMode(input.meta.active_reason),
         runnerContainerName: readRunnerContainerNameOrNull(input.meta.active_runner_container_name),
         startedAt: input.meta.active_started_at,
         workspaceVersion: input.meta.active_workspace_version,
@@ -191,4 +193,10 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
 
 export function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
   return value === "runtime" ? value : null;
+}
+
+export function readRunnerRuntimeProcessingMode(
+  value: unknown,
+): RunnerRuntimeProcessingMode {
+  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
 }

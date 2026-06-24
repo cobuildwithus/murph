@@ -19,6 +19,7 @@ import {
 
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
+  processingMode?: "default" | "inbox_media_retention" | null;
   userId: string;
 }
 
@@ -34,6 +35,7 @@ export async function ensureRuntimeProcessing(
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
+    ...(parsedRequest.processingMode ? { processingMode: parsedRequest.processingMode } : {}),
   });
 
   return observeHostedTemporalActivity({
@@ -76,6 +78,7 @@ function parseEnsureRuntimeProcessingInput(
   const record = value;
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
+    "processingMode",
     "userId",
   ]);
 
@@ -84,11 +87,32 @@ function parseEnsureRuntimeProcessingInput(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
     ),
+    ...(record.processingMode === undefined
+      ? {}
+      : {
+          processingMode: parseNullableProcessingMode(
+            record.processingMode,
+            "Hosted runtime ensure-processing Activity input processingMode",
+          ),
+        }),
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
+}
+
+function parseNullableProcessingMode(
+  value: unknown,
+  label: string,
+): "default" | "inbox_media_retention" | null {
+  if (value === null) {
+    return null;
+  }
+  if (value === "default" || value === "inbox_media_retention") {
+    return value;
+  }
+  throw new TypeError(`${label} is not supported.`);
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {

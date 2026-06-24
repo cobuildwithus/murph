@@ -96,6 +96,7 @@ export interface HostedWorkspaceCheckpointMetadata {
 export interface HostedWorkspaceSnapshotCheckpointMetadata {
   attemptId: string;
   expectedWorkspaceVersion: string;
+  inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
@@ -121,6 +122,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
+    inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -357,10 +359,20 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
+  // The builder owns every field of checkpoint metadata that
+  // buildHostedWorkspaceSnapshotCheckpointRequest falls back to. Mirroring the
+  // committed workspace here after a successful checkpoint prevents a later
+  // pass that omits one of these fields (e.g. a mailbox checkpoint after an
+  // idle retention checkpoint) from resurrecting a stale process-start value.
   const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse): void => {
-    if (response.checkpointed) {
-      input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    if (!response.checkpointed) {
+      return;
     }
+    input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    input.metadata.inboxMediaRetentionWakeAt =
+      response.workspace.inboxMediaRetentionWakeAt ?? null;
+    input.metadata.nextWakeAt = response.workspace.nextWakeAt ?? null;
+    input.metadata.nextWakeReason = response.workspace.nextWakeReason ?? null;
   };
 
   return {
@@ -417,6 +429,9 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
+    inboxMediaRetentionWakeAt: Object.hasOwn(input.requestInput, "inboxMediaRetentionWakeAt")
+      ? input.requestInput.inboxMediaRetentionWakeAt ?? null
+      : input.metadata.inboxMediaRetentionWakeAt ?? null,
     leaseGeneration: input.metadata.leaseGeneration,
     nextWakeAt: Object.hasOwn(input.requestInput, "nextWakeAt")
       ? input.requestInput.nextWakeAt ?? null

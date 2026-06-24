@@ -1,5 +1,7 @@
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 
+export type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -44,6 +46,7 @@ export interface RunnerWriteFenceRecord {
   expiresAt: string | null;
   generation: number;
   kind: RunnerWriteFenceKind;
+  processingMode: RunnerRuntimeProcessingMode;
   runnerContainerName: string | null;
   startedAt: string;
   workspaceVersion: string | null;

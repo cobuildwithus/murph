@@ -1194,6 +1194,7 @@ export interface HostedWorkspaceState {
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   checkpointedAt?: string | null;
   createdAt: string;
+  inboxMediaRetentionWakeAt?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -1237,6 +1238,7 @@ export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;
+  inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
@@ -1248,6 +1250,7 @@ export interface HostedWorkspaceCheckpointRequest {
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
   checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
+  replacedSnapshotRef?: HostedExecutionSnapshotRefState;
   workspace: HostedWorkspaceState;
 }
 
@@ -1446,11 +1449,20 @@ export interface HostedWorkspaceInvocationBudget {
   maxRuntimeMs?: number | null;
 }
 
+export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
+  "default",
+  "inbox_media_retention",
+] as const;
+
+export type HostedWorkspaceInvocationProcessingMode =
+  (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
+
 export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
   idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;
   userId: string;
   workspace?: HostedWorkspaceState | null;

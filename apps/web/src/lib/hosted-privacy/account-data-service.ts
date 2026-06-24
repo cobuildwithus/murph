@@ -127,7 +127,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_workspace",
     label: "Hosted workspace state",
     deletion: "live-delete",
-    note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, and redacted status.",
+    note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, inbox media-retention wake state, and redacted status.",
   },
   {
     slug: "prisma.hosted_computer_run",

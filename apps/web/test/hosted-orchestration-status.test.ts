@@ -273,6 +273,7 @@ function buildFacts() {
       },
     ],
     workspace: {
+      inboxMediaRetentionWakeAt: null,
       nextWakeAt: "2026-05-21T12:05:00.000Z",
       nextWakeReason: "assistant_due",
       version: "8",
@@ -301,6 +302,7 @@ function buildRunnerStatus() {
     userId: MEMBER_ID,
     workspace: {
       createdAt: "2026-05-21T11:00:00.000Z",
+      inboxMediaRetentionWakeAt: null,
       nextWakeAt: "2026-05-21T12:05:00.000Z",
       nextWakeReason: "assistant_due",
       redactedStatus: {
@@ -331,6 +333,7 @@ function buildRunnerStatusProjection() {
     workspace: {
       browserVaultReplicaRefPresent: false,
       createdAt: "2026-05-21T11:00:00.000Z",
+      inboxMediaRetentionWakeAt: null,
       nextWakeAt: "2026-05-21T12:05:00.000Z",
       nextWakeReason: "assistant_due",
       redactedStatusPresent: true,

@@ -1,5 +1,6 @@
 import type { EventRecord } from "@murphai/contracts";
 import {
+  collectEventRawReferencePaths,
   EVENT_KINDS,
   eventRecordSchema,
   isStrictIsoDate,
@@ -373,31 +374,7 @@ export async function loadEventLedgerShardsById(
 }
 
 function extractRetainedPaths(record: EventRecord): string[] {
-  const retained = new Set<string>();
-
-  for (const attachment of record.attachments ?? []) {
-    retained.add(attachment.relativePath);
-  }
-
-  uniqueTrimmedStringList(record.rawRefs)?.forEach((relativePath) => retained.add(relativePath));
-
-  const mediaSources = [
-    (record as { media?: Array<{ relativePath?: unknown }> }).media,
-    (record as { workout?: { media?: Array<{ relativePath?: unknown }> } }).workout?.media,
-  ];
-  for (const mediaList of mediaSources) {
-    if (!Array.isArray(mediaList)) {
-      continue;
-    }
-    for (const entry of mediaList) {
-      const relativePath = valueAsString(entry?.relativePath);
-      if (relativePath) {
-        retained.add(relativePath);
-      }
-    }
-  }
-
-  return [...retained].sort((left, right) => left.localeCompare(right));
+  return collectEventRawReferencePaths(record);
 }
 
 function canWriteEventKind(input: {
