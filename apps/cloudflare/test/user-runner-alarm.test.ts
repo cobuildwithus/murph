@@ -13,9 +13,11 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
+  createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  wrapHostedWorkspaceSnapshotV2DataKey,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
@@ -29,6 +31,7 @@ import {
   hostedBundleUserPrefix,
   hostedEmailRawMessageUserPrefix,
   hostedRunnerSecretsObjectKey,
+  hostedWorkspaceSnapshotObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
@@ -47,7 +50,10 @@ import {
 } from "../src/workspace-snapshot-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
-import { createTestHostedRuntimeCryptoContext } from "./hosted-runtime-crypto-fixtures.ts";
+import {
+  createTestHostedRuntimeCryptoContext,
+  getTestHostedRuntimeRootKey,
+} from "./hosted-runtime-crypto-fixtures.ts";
 import { createTestSqlStorage, type TestSqlStorageLike } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
@@ -586,6 +592,52 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     }));
     expect(preparedLog?.details).not.toHaveProperty("runnerContainerName");
+  });
+
+  it("invokes the runner without prepared snapshot restore data when cold-restore acquisition is unavailable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const snapshotId = "snapshot_warm";
+    const snapshotRef = await createWorkspaceSnapshotV2RefWithRuntimeRootForTest({
+      objectKey: await hostedWorkspaceSnapshotObjectKey({
+        snapshotId,
+        userId: TEST_USER_ID,
+      }),
+      snapshotId,
+    });
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({
+        snapshotRef,
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job).not.toHaveProperty("preparedSnapshotRestore");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeSnapshotRestorePreparationFailureCode: "type_error",
+          workspaceAttemptId: expect.stringMatching(/^runtime-write-/u),
+          workspaceVersion: "5",
+        }),
+        level: "warn",
+        message: "Hosted workspace snapshot restore preparation unavailable.",
+      }),
+    );
   });
 
   it("reuses cached runner stores when applying a caller command budget", async () => {
@@ -2744,6 +2796,51 @@ function createWorkspaceSnapshotV2RefForTest(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: TEST_USER_ID,
   } satisfies HostedWorkspaceSnapshotV2Ref;
+}
+
+async function createWorkspaceSnapshotV2RefWithRuntimeRootForTest(input: {
+  objectKey: string;
+  snapshotId: string;
+}): Promise<HostedWorkspaceSnapshotV2Ref> {
+  const aad = buildHostedWorkspaceSnapshotV2Aad({
+    objectKey: input.objectKey,
+    snapshotId: input.snapshotId,
+    userId: TEST_USER_ID,
+  });
+  const rootKeyId = "udrk:runtime:test-root";
+  const dataKey = createHostedWorkspaceSnapshotV2DataKey();
+  const wrappedDataKey = await wrapHostedWorkspaceSnapshotV2DataKey({
+    aad,
+    dataKey,
+    rootKey: getTestHostedRuntimeRootKey("runtime"),
+    rootKeyId,
+  });
+  dataKey.fill(0);
+
+  return {
+    archive: {
+      compression: "zstd",
+      encryptedByteSize: 128,
+      encryptedObjectSha256: "b".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "a".repeat(64),
+      totalPlainBytes: 64,
+    },
+    createdAt: FIXED_NOW,
+    encryption: {
+      aad,
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId,
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey,
+    },
+    objectKey: input.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId: input.snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: TEST_USER_ID,
+  };
 }
 
 function createWorkspaceSnapshotUploadSessionForTest(input: {

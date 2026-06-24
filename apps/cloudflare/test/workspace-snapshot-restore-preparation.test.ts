@@ -141,6 +141,61 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
+  it("keeps crypto validation fail-closed while treating presign acquisition as best effort", async () => {
+    const fixture = await createSnapshotFixture();
+    try {
+      const onUnavailable = vi.fn();
+      await expect(prepareHostedWorkspaceSnapshotRestore({
+        configSource: {},
+        crypto: fixture.cryptoContext,
+        onPreparationUnavailable: onUnavailable,
+        userId: TEST_USER_ID,
+        workspace: fixture.workspace,
+      })).resolves.toBeNull();
+      expect(onUnavailable).toHaveBeenCalledOnce();
+
+      const onMissingRootUnavailable = vi.fn();
+      await expect(prepareHostedWorkspaceSnapshotRestore({
+        configSource: createPresignConfig(),
+        crypto: {
+          ...fixture.cryptoContext,
+          async resolveKeyById() {
+            return null;
+          },
+          rootKeyId: "root_key_missing_from_runtime_context",
+        },
+        onPreparationUnavailable: onMissingRootUnavailable,
+        userId: TEST_USER_ID,
+        workspace: fixture.workspace,
+      })).rejects.toThrow("Hosted workspace snapshot root key is unavailable.");
+      expect(onMissingRootUnavailable).not.toHaveBeenCalled();
+
+      const onFatalUnavailable = vi.fn();
+      await expect(prepareHostedWorkspaceSnapshotRestore({
+        configSource: createPresignConfig(),
+        crypto: fixture.cryptoContext,
+        onPreparationUnavailable: onFatalUnavailable,
+        userId: TEST_USER_ID,
+        workspace: {
+          ...fixture.workspace,
+          snapshotRef: {
+            ...fixture.ref,
+            encryption: {
+              ...fixture.ref.encryption,
+              rootKeyId: "root_key_mismatch",
+            },
+          },
+        },
+      })).rejects.toThrow(
+        "Hosted workspace snapshot wrapped data key root did not match its ref.",
+      );
+      expect(onFatalUnavailable).not.toHaveBeenCalled();
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
   it("uses prepared restore data without calling unwrap or presign control routes", async () => {
     const fixture = await createSnapshotFixture();
     const getUrl = createPreparedGetUrl("prepared-snapshot.enc");

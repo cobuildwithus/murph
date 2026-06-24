@@ -581,6 +581,21 @@ export class RuntimeInvocationService {
       await prepareHostedWorkspaceSnapshotRestore({
         configSource,
         crypto: stores.crypto,
+        onPreparationUnavailable: (error) => {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              runtimeSnapshotRestorePreparationFailureCode:
+                deriveHostedExecutionErrorCode(error),
+              workspaceAttemptId: input.token.attemptId,
+              workspaceVersion: input.workspaceVersion,
+            },
+            level: "warn",
+            message: "Hosted workspace snapshot restore preparation unavailable.",
+            phase: "wake.running",
+            userId: input.userId,
+          });
+        },
         userId: input.userId,
         workspace: input.workspace,
       });

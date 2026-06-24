@@ -36,9 +36,14 @@ export interface HostedWorkspaceSnapshotPreparedRestore {
   snapshotFingerprint: string;
 }
 
+type HostedWorkspaceSnapshotPresignResult =
+  | { ok: true; url: string }
+  | { error: unknown; ok: false };
+
 export async function prepareHostedWorkspaceSnapshotRestore(input: {
   configSource: Readonly<Record<string, string | undefined>>;
   crypto: HostedUserCryptoContext;
+  onPreparationUnavailable?: (error: unknown) => void;
   userId: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceSnapshotPreparedRestore | null> {
@@ -59,7 +64,6 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
     throw new Error("Hosted workspace snapshot wrapped data key root did not match its ref.");
   }
 
-  const presignEnvironment = readHostedR2PresignEnvironment(input.configSource);
   const dataKeyPromise = (async () => {
     const rootKey = ref.encryption.rootKeyId === input.crypto.rootKeyId
       ? input.crypto.rootKey
@@ -79,15 +83,28 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
       dataKey.fill(0);
     }
   })();
-  const presignedGetPromise = createHostedR2PresignedGetUrl({
-    environment: presignEnvironment,
-    expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS,
-    key: ref.objectKey,
-  });
+  const presignedGetPromise = (async (): Promise<HostedWorkspaceSnapshotPresignResult> => {
+    try {
+      const presignEnvironment = readHostedR2PresignEnvironment(input.configSource);
+      const presignedGet = await createHostedR2PresignedGetUrl({
+        environment: presignEnvironment,
+        expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_EXPIRES_SECONDS,
+        key: ref.objectKey,
+      });
+
+      return { ok: true, url: presignedGet.url };
+    } catch (error) {
+      return { error, ok: false };
+    }
+  })();
   const [dataKey, presignedGet] = await Promise.all([
     dataKeyPromise,
     presignedGetPromise,
   ]);
+  if (!presignedGet.ok) {
+    input.onPreparationUnavailable?.(presignedGet.error);
+    return null;
+  }
 
   return {
     dataKey,
