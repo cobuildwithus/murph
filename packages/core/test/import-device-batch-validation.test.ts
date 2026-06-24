@@ -88,7 +88,7 @@ describe("importDeviceBatch", () => {
     });
   });
 
-  it("rejects non-array rawArtifacts instead of silently dropping them", async () => {
+  it("rejects non-array evidenceParts instead of silently dropping them", async () => {
     const vaultRoot = await createTestVaultRoot();
 
     await expect(
@@ -96,7 +96,7 @@ describe("importDeviceBatch", () => {
         vaultRoot,
         provider: "oura",
         events: [VALID_DEVICE_EVENT],
-        rawArtifacts: invalidTestValue<typeof VALID_DEVICE_RAW_ARTIFACT[]>({ role: "provider-snapshot" }),
+        evidenceParts: invalidTestValue<typeof VALID_DEVICE_RAW_ARTIFACT[]>({ role: "provider-snapshot" }),
       }),
     ).rejects.toMatchObject({
       code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",

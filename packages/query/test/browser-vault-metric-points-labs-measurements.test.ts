@@ -9,6 +9,7 @@ import {
 } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
@@ -797,7 +798,7 @@ async function createMetricPointProjectionVault(): Promise<string> {
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
       {
-        formatVersion: 1,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
         title: "Metric points test vault",
         timezone: "America/New_York",

@@ -468,7 +468,40 @@ function parseHostedSystemMailboxRecordRequest(
     };
   }
 
+  if (record.kind === "codex-auth.updated") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["attemptId", "kind", "phase"],
+      "hosted system mailbox Codex auth postCheckpointRecord",
+    );
+    if (record.phase !== "connected" && record.phase !== "disconnected") {
+      throw new TypeError(
+        "hosted system mailbox Codex auth postCheckpointRecord phase is invalid.",
+      );
+    }
+    return {
+      attemptId: readRequiredString(
+        record.attemptId,
+        "hosted system mailbox Codex auth postCheckpointRecord attemptId",
+      ),
+      kind: "codex-auth.updated",
+      phase: record.phase,
+    };
+  }
+
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+}
+
+function assertHostedSystemMailboxRecordKeys(
+  record: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  label: string,
+): void {
+  const allowed = new Set(allowedKeys);
+  const unsupported = Object.keys(record).find((key) => !allowed.has(key));
+  if (unsupported) {
+    throw new TypeError(`${label} contains unsupported field ${unsupported}.`);
+  }
 }
 
 function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(

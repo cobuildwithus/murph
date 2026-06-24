@@ -10,6 +10,9 @@
       "@murphai/runtime-state/assistant-ids": [
         "./src/assistant-ids.ts"
       ],
+      "@murphai/runtime-state/hosted-codex-subscription-auth": [
+        "./src/hosted-codex-subscription-auth.ts"
+      ],
       "@murphai/runtime-state/node": [
         "./src/node/index.ts"
       ],

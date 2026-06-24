@@ -114,6 +114,32 @@ const junctionWorkoutHeartRateZoneRepairResultSchema = z.object({
   auditPath: pathSchema.nullable(),
 })
 
+const integrationIngestRepairResultSchema = z.object({
+  mode: z.enum(['dry-run', 'apply']),
+  storedFormatVersion: z.number().int().nonnegative(),
+  hasWork: z.boolean(),
+  hasMore: z.boolean(),
+  candidateBundleCount: z.number().int().nonnegative(),
+  copiedBundleCount: z.number().int().nonnegative(),
+  detachedBundleCount: z.number().int().nonnegative(),
+  deletableFileCount: z.number().int().nonnegative(),
+  sourceBytes: z.number().int().nonnegative(),
+  journalBytes: z.number().int().nonnegative(),
+  blockerCount: z.number().int().nonnegative(),
+  blockersByCode: z.record(z.string(), z.number().int().nonnegative()),
+  blockerExamples: z.array(z.object({
+    code: z.string().min(1),
+    relativePath: pathSchema.optional(),
+    message: z.string().min(1),
+  })),
+  mutated: z.boolean(),
+  appendedBundleCount: z.number().int().nonnegative(),
+  detachedEventRowCount: z.number().int().nonnegative(),
+  deletedFileCount: z.number().int().nonnegative(),
+  finalized: z.boolean(),
+  auditPaths: z.array(pathSchema),
+})
+
 function installVaultCommandArgvContext(cli: Cli.Cli): void {
   if (vaultCommandArgvInstalled.has(cli)) {
     return
@@ -325,6 +351,46 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         apply: options.apply,
+      })
+    },
+  })
+
+  vaultGroup.command('repair-integration-ingests', {
+    description:
+      'Dry-run or apply the v1-to-v2 integration ingest journal migration for legacy device raw bundles.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show migration work without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Apply one bounded migration pass.'),
+      finalize: z.boolean().default(true).describe('Advance the vault to the current format after all legacy work is gone. Pass --no-finalize to stage multiple apply passes.'),
+      maxBundles: z.number().int().positive().max(500).optional().describe('Maximum legacy integration bundles to process in one apply pass.'),
+      maxBytes: z.number().int().positive().optional().describe('Maximum legacy source bytes to inspect in one pass.'),
+    }),
+    output: integrationIngestRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Integration ingest migration apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for integration ingest migration, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      return services.core.repairIntegrationIngests({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        apply: options.apply,
+        finalize: options.finalize,
+        maxBundles: options.maxBundles,
+        maxBytes: options.maxBytes,
       })
     },
   })

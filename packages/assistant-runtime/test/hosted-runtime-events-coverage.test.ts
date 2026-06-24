@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimePlatform,
+} from "../src/hosted-runtime/platform.ts";
 
 const mocks = vi.hoisted(() => ({
+  executeCodexManagedAccountOperation: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
   scheduleDeviceActivityTriggeredAutomations: vi.fn(),
@@ -27,6 +35,7 @@ vi.mock("@murphai/assistant-engine", async () => {
 
   return {
     ...actual,
+    executeCodexManagedAccountOperation: mocks.executeCodexManagedAccountOperation,
     scheduleDeviceActivityTriggeredAutomations: mocks.scheduleDeviceActivityTriggeredAutomations,
     sendAssistantNotification: mocks.sendAssistantNotification,
   };
@@ -49,7 +58,9 @@ const executionContext = {
   },
 } as const;
 
-function createRuntime() {
+function createRuntime(
+  platformOverrides: Partial<HostedRuntimePlatform> = {},
+) {
   return {
     commitTimeoutMs: null,
     forwardedEnv: {},
@@ -63,6 +74,7 @@ function createRuntime() {
       deviceSyncPort: null,
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageRecordPort: null,
+      ...platformOverrides,
     },
     platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),
@@ -73,7 +85,10 @@ function createRuntime() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.prepareHostedWakeContext.mockResolvedValue(null);
+    mocks.prepareHostedWakeContext.mockResolvedValue(null);
+  mocks.executeCodexManagedAccountOperation.mockResolvedValue({
+    kind: "disconnected",
+  });
   mocks.scheduleDeviceActivityTriggeredAutomations.mockResolvedValue({
     matched: 0,
     nextWakeAt: null,
@@ -305,6 +320,94 @@ describe("hosted runtime event coverage", () => {
         processedRevision: "rev_123",
       },
     });
+  });
+
+  it("fails Codex auth connect wakes without starting hosted OAuth", async () => {
+    const update = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+    const runtime = createRuntime({
+      codexAuthPort: { update },
+    });
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "connect",
+      attemptId: "hca_abcdefghijklmnop",
+      eventId: "runtime-control:codex-auth",
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      executionContext,
+      operatorHomeRoot: "/tmp/assistant-runtime-events-operator",
+      runtime,
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events-coverage",
+      wake,
+    });
+
+    expect(result).toMatchObject({
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+    });
+    expect(result.postCheckpointRecord).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "failed",
+    });
+    expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
+  });
+
+  it("deletes local Codex auth when remote disconnect fails", async () => {
+    const operatorHomeRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-codex-auth-disconnect-"),
+    );
+    const authPath = path.join(operatorHomeRoot, ".codex-hosted", "auth.json");
+    const update = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+    mocks.executeCodexManagedAccountOperation.mockRejectedValueOnce(
+      new Error("synthetic disconnect failure"),
+    );
+    const runtime = createRuntime({
+      codexAuthPort: { update },
+    });
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "disconnect",
+      attemptId: "hca_disconnectattempt",
+      eventId: "runtime-control:codex-auth-disconnect",
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_123",
+    });
+
+    try {
+      await mkdir(path.dirname(authPath), { recursive: true });
+      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
+
+      await expect(
+        executeHostedMailboxEvent({
+          executionContext,
+          operatorHomeRoot,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: "/tmp/assistant-runtime-events-coverage",
+          wake,
+        }),
+      ).resolves.toMatchObject({
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: {
+          attemptId: "hca_disconnectattempt",
+          kind: "codex-auth.updated",
+          phase: "disconnected",
+        },
+      });
+      await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      await rm(operatorHomeRoot, { force: true, recursive: true });
+    }
   });
 
   it("fails closed on unexpected wake kinds", async () => {

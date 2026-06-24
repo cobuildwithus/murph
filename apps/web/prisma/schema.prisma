@@ -350,12 +350,25 @@ model HostedMember {
   webSessions                    HostedWebSession[]
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
+  codexAuthConnection            HostedCodexAuthConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   productFeedback                HostedProductFeedback[]
 
   @@index([billingStatus])
   @@map("hosted_member")
+}
+
+model HostedCodexAuthConnection {
+  memberId        String       @id @map("member_id")
+  state           String
+  attemptId       String       @map("attempt_id")
+  verificationUrl String?      @map("verification_url")
+  userCode        String?      @map("user_code")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  member          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_codex_auth_connection")
 }
 
 model HostedProductFeedback {

@@ -1,3 +1,6 @@
+import { rm } from "node:fs/promises";
+import path from "node:path";
+
 import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
@@ -45,6 +48,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+
+const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
+const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 
 export {
   resolveHostedSystemMailboxNextWakeAt,
@@ -250,6 +256,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   item: HostedSystemMailboxPendingItem;
+  operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   vaultRoot: string;
 }): Promise<{
@@ -268,6 +275,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
 
   try {
     const recordResult = await recordHostedSystemMailboxPostCheckpointRecord({
+      operatorHomeRoot: input.operatorHomeRoot ?? null,
       record: input.item.postCheckpointRecord,
       runtime: input.runtime,
     });
@@ -412,18 +420,37 @@ export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
-  return await recordHostedSystemMailboxPostCheckpointRecord(input);
+  return await recordHostedSystemMailboxPostCheckpointRecord({
+    ...input,
+    operatorHomeRoot: null,
+  });
 }
 
 async function recordHostedSystemMailboxPostCheckpointRecord(input: {
+  operatorHomeRoot: string | null;
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
-  if (!input.runtime.platform.deviceSyncPort) {
-    throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
-  }
-
   switch (input.record.kind) {
+    case "codex-auth.updated": {
+      const port = input.runtime.platform.codexAuthPort;
+      if (!port) {
+        throw new Error("Hosted Codex auth checkpoint requires a configured Codex auth port.");
+      }
+      const phase = input.record.phase === "connected" ? "failed" : input.record.phase;
+      if (input.record.phase === "connected") {
+        await removeHostedCodexAuthJson(input.operatorHomeRoot);
+      }
+      const response = await port.update({
+        attemptId: input.record.attemptId,
+        phase,
+      });
+      return {
+        nextWakeAt: null,
+        recorded: response.status === "superseded" ? 0 : 1,
+        stillDirty: false,
+      };
+    }
     case "device-sync.dirty-processed":
       return await recordHostedDeviceSyncDirtyProcessedRecords({
         records: [input.record],
@@ -436,6 +463,18 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         runtime: input.runtime,
       });
   }
+}
+
+async function removeHostedCodexAuthJson(
+  operatorHomeRoot: string | null,
+): Promise<void> {
+  if (!operatorHomeRoot) {
+    return;
+  }
+  await rm(
+    path.join(operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME, HOSTED_CODEX_AUTH_FILE_NAME),
+    { force: true },
+  );
 }
 
 async function recordHostedDeviceSyncDirtyProcessedRecords(input: {

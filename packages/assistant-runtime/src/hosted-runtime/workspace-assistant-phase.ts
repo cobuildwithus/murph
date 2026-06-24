@@ -81,6 +81,7 @@ import {
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
+  type HostedSystemMailboxPendingItem,
 } from "./system-mailbox.ts";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -928,6 +929,46 @@ function mergeHostedAssistantPhaseResults(
   });
 }
 
+function mergePendingAssistantInputMaintenanceResult(input: {
+  pendingAttemptResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  systemMailboxResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  return mergeContinuingSystemMailboxAssistantPhaseResult({
+    assistantResult: input.pendingAttemptResult,
+    systemMailboxResult: stripHostedAssistantPhaseWake(input.systemMailboxResult),
+  });
+}
+
+function stripHostedAssistantPhaseWake(
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null,
+): HostedWorkspaceRunnerAssistantPhaseResult | null {
+  if (!result) {
+    return null;
+  }
+
+  const stripped: HostedWorkspaceRunnerAssistantPhaseResult = { ...result };
+  delete stripped.nextWakeAt;
+  delete stripped.nextWakeReason;
+  if (result.afterCheckpoint) {
+    stripped.afterCheckpoint = async () =>
+      stripHostedAssistantPostCheckpointWake(await result.afterCheckpoint?.());
+  }
+  return stripped;
+}
+
+function stripHostedAssistantPostCheckpointWake(
+  result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void,
+): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
+  if (!result) {
+    return null;
+  }
+
+  const stripped: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = { ...result };
+  delete stripped.nextWakeAt;
+  delete stripped.nextWakeReason;
+  return stripped;
+}
+
 function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   assistantResult: HostedWorkspaceRunnerAssistantPhaseResult;
   systemMailboxResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -1118,6 +1159,25 @@ interface DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
   redactedStatus: HostedRuntimeRedactedJson;
 }
 
+interface DeferredHostedSystemMailboxPostCheckpointRecord {
+  afterDurableCheckpoint: NonNullable<
+    HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"]
+  >;
+  redactedStatus: HostedRuntimeRedactedJson;
+  statusCallback: {
+    failed: number;
+    nextWakeAt: string | null;
+    nextWakeReason?: string | null;
+    recorded: number;
+  };
+}
+
+function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
+  input: HostedSystemMailboxPendingItem,
+): boolean {
+  return input.postCheckpointRecord?.kind === "codex-auth.updated";
+}
+
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
   typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
 >[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
@@ -1162,6 +1222,39 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
       hostedDeviceSyncDirtyAckDeferred: true,
       hostedDeviceSyncDirtyAckRecorded: false,
       hostedDeviceSyncDirtyStillPending: true,
+    },
+  };
+}
+
+function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
+  typeof recordHostedSystemMailboxItemAfterCheckpoint
+>[0] & {
+  followUpWakeAt: string;
+}): DeferredHostedSystemMailboxPostCheckpointRecord {
+  const { followUpWakeAt, ...recordInput } = input;
+  return {
+    afterDurableCheckpoint: async () => {
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint(recordInput);
+      if (result.failed > 0) {
+        return {
+          nextWakeAt: result.nextWakeAt,
+          nextWakeReason: result.nextWakeReason ?? "assistant",
+          requiresFollowUpCheckpoint: true,
+        };
+      }
+      return {
+        nextWakeAt: followUpWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    },
+    redactedStatus: {
+      hostedSystemMailboxRecordDeferred: true,
+    },
+    statusCallback: {
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 0,
     },
   };
 }
@@ -2318,17 +2411,34 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   });
 
   if ("item" in input.systemMailboxPreparation) {
-    const statusCallback = await recordHostedSystemMailboxItemAfterCheckpoint({
+    const statusCallbackInput = {
       item: input.systemMailboxPreparation.item,
+      operatorHomeRoot: input.input.restored.operatorHomeRoot,
       runtime: input.input.runtime,
       vaultRoot: input.input.restored.vaultRoot,
-    });
+    };
+    const deferredSystemMailboxRecord =
+      shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
+        input.systemMailboxPreparation.item,
+      )
+        ? deferHostedSystemMailboxPostCheckpointRecord({
+            ...statusCallbackInput,
+            followUpWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+          })
+        : null;
+    const statusCallback = deferredSystemMailboxRecord
+      ? deferredSystemMailboxRecord.statusCallback
+      : await recordHostedSystemMailboxItemAfterCheckpoint(statusCallbackInput);
     const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics?.postCheckpointRecord
       ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
           record: input.dirtyDeviceSyncMetrics.postCheckpointRecord,
           runtime: input.input.runtime,
         })
       : null;
+    const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
+      deferredSystemMailboxRecord?.afterDurableCheckpoint ?? null,
+      dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
+    );
     const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
     const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
       assistantCronWake,
@@ -2364,6 +2474,8 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     const dirtyRedactedStatus: HostedRuntimeRedactedJson = dirtyPostCheckpoint
       ? dirtyPostCheckpoint.redactedStatus
       : {};
+    const systemMailboxRecordRedactedStatus: HostedRuntimeRedactedJson =
+      deferredSystemMailboxRecord?.redactedStatus ?? {};
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
       input: input.input,
@@ -2371,12 +2483,12 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       recorded: statusCallback.recorded,
       recordFailed: statusCallback.failed,
       routeAction: input.systemMailboxPreparation.item.routeAction,
-      status: "recorded",
+      status: deferredSystemMailboxRecord ? "recording" : "recorded",
       wakeKind: input.systemMailboxPreparation.item.wake.kind,
     });
     if (input.systemMailboxDeliveryEffects.length > 0 || input.initialProviderCleanupDue) {
       return await drainHostedPostCheckpointDelivery({
-        afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
+        afterDurableCheckpoint,
         assistantDeliveryEffects: input.systemMailboxDeliveryEffects,
         assistantDeliveryPreparation: input.systemMailboxDeliveryPreparation,
         baseNextWake: {
@@ -2393,6 +2505,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         },
         redactedStatus: {
           ...dirtyRedactedStatus,
+          ...systemMailboxRecordRedactedStatus,
           hostedSystemMailboxRecordFailed: statusCallback.failed,
           hostedSystemMailboxRecorded: statusCallback.recorded,
         },
@@ -2400,14 +2513,13 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       });
     }
     return {
-      ...(dirtyPostCheckpoint
-        ? { afterDurableCheckpoint: dirtyPostCheckpoint.afterDurableCheckpoint }
-        : {}),
+      ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: statusNextWakeAt,
       nextWakeReason: statusNextWakeReason,
       redactedStatus: {
         ...dirtyRedactedStatus,
+        ...systemMailboxRecordRedactedStatus,
         hostedSystemMailboxRecordFailed: statusCallback.failed,
         hostedSystemMailboxRecorded: statusCallback.recorded,
       },
@@ -3008,6 +3120,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     if (preparation.status === "recording") {
       const record = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: preparation.item,
+        operatorHomeRoot: input.input.restored.operatorHomeRoot,
         runtime: input.input.runtime,
         vaultRoot: input.input.restored.vaultRoot,
       });

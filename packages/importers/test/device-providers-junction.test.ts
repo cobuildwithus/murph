@@ -38,10 +38,9 @@ function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workou
 }
 
 function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
-  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
-  assert.ok(artifact);
-  const receipt = artifact.content as WearableRawIngestReceipt;
-  assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
+  const receipt = payload.ingestReceipt as WearableRawIngestReceipt | undefined;
+  assert.ok(receipt);
+  assert.equal(receipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
   return receipt;
 }
 
@@ -77,13 +76,13 @@ function findJunctionCompactTimeseriesArtifacts(
   payload: DeviceBatchImportPayload,
   resourceSlug: string,
 ) {
-  return (payload.rawArtifacts ?? [])
+  return (payload.evidenceParts ?? [])
     .filter((artifact) => artifact.role.startsWith(`junction-timeseries-daily-${resourceSlug}:`));
 }
 
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
-    (payload.rawArtifacts ?? []).some((artifact) =>
+    (payload.evidenceParts ?? []).some((artifact) =>
       /^junction-timeseries-(?!daily-|reading-blood-pressure:)/u.test(artifact.role)
     ),
     false,
@@ -91,7 +90,7 @@ function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPaylo
 }
 
 function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPayload) {
-  return (payload.rawArtifacts ?? [])
+  return (payload.evidenceParts ?? [])
     .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-blood-pressure:"));
 }
 
@@ -114,10 +113,10 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
 }
 
 function assertEventRawArtifactRolesExist(payload: DeviceBatchImportPayload): void {
-  const stagedRoles = new Set((payload.rawArtifacts ?? []).map((artifact) => artifact.role));
+  const stagedRoles = new Set((payload.evidenceParts ?? []).map((artifact) => artifact.role));
   for (const event of payload.events ?? []) {
-    for (const role of event.rawArtifactRoles ?? []) {
-      assert.equal(stagedRoles.has(role), true, `missing raw artifact role: ${role}`);
+    for (const role of event.evidenceRoles ?? []) {
+      assert.equal(stagedRoles.has(role), true, `missing evidence part role: ${role}`);
     }
   }
 }
@@ -357,8 +356,8 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
     "stress_level",
     "glucose",
   ]);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role.includes("heartrate")), false);
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-activity"));
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role.includes("heartrate")), false);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 1);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
@@ -487,8 +486,8 @@ test("Junction stress level aggregates pass the canonical device import contract
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
     assertNoFullJunctionTimeseriesArtifacts(payload);
     assertEventRawArtifactRolesExist(payload);
-    assert.ok(result.rawArtifacts.length >= 1);
-    assert.notEqual(result.manifestPath, "");
+    assert.ok(result.evidencePartCount >= 1);
+    assert.notEqual(result.ingestShardPath, "");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -541,8 +540,8 @@ test("Junction blood pressure readings pass the canonical device import contract
     assert.equal(findJunctionBloodPressureReadingArtifacts(payload).length, 1);
     assertNoFullJunctionTimeseriesArtifacts(payload);
     assertEventRawArtifactRolesExist(payload);
-    assert.ok(result.rawArtifacts.length >= 1);
-    assert.notEqual(result.manifestPath, "");
+    assert.ok(result.evidencePartCount >= 1);
+    assert.notEqual(result.ingestShardPath, "");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -636,9 +635,9 @@ test("Junction snapshot adapter fails closed on glucose values outside the mmol/
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(payload.events?.length ?? 0, 0);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-glucose"), false);
   assert.equal(
-    payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
+    payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
     true,
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
@@ -860,7 +859,7 @@ test("Junction normalizer emits Cronometer meal events with summed nutrition tot
     confidence: "high",
     sourceDetail: "junction:cronometer:meal",
   });
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-meal"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-meal"));
   assert.deepEqual(payload.provenance?.summaryResources, ["meal"]);
   assertEventRawArtifactRolesExist(payload);
 });
@@ -1147,8 +1146,8 @@ test("Junction tier-2 summary events pass the canonical device import contract",
       ironMg: 4,
       vitaminCMg: 30,
     });
-    assert.ok(result.rawArtifacts.length >= 1);
-    assert.notEqual(result.manifestPath, "");
+    assert.ok(result.evidencePartCount >= 1);
+    assert.notEqual(result.ingestShardPath, "");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1453,7 +1452,9 @@ test("Junction meal import writes canonical nutrition into a vault", async () =>
     assert.equal(mealEvent.nutrition?.totals?.calories, 400);
     assert.equal(mealEvent.nutrition?.totals?.proteinGrams, 10);
     assert.equal(mealEvent.nutrition?.provenance?.sourceDetail, "junction:cronometer:meal");
-    assert.ok(result.rawArtifacts.some((artifact) => artifact.relativePath.includes("junction-summary-meal")));
+    const ingest = await coreRuntime.readIntegrationIngestById(vaultRoot, result.ingestId);
+    assert.ok(ingest);
+    assert.ok(ingest.record.parts.some((part) => part.role === "junction-summary-meal"));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1559,7 +1560,7 @@ test("Junction raw-only timeseries source device changes are dropped", () => {
   assertNoFullJunctionTimeseriesArtifacts(secondPayload);
 });
 
-test("Junction raw-only timeseries resources do not emit raw artifacts", () => {
+test("Junction raw-only timeseries resources do not emit evidence parts", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     timeseries: {
@@ -1642,7 +1643,7 @@ test("Junction normalizer drops grouped raw-only dense timeseries payloads", () 
   assert.deepEqual(payload.provenance?.timeseriesResources, []);
 
   const samples = payload.samples ?? [];
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts ?? []);
+  const rawArtifactText = JSON.stringify(payload.evidenceParts ?? []);
 
   assert.equal(samples.length, 0);
   assert.deepEqual(payload.events, []);
@@ -1697,7 +1698,7 @@ test("Junction normalizer compacts respiratory rate timeseries into daily averag
     });
 
     const event = payload.events?.find((entry) => entry.fields?.metric === "respiratory-rate");
-    const rawRespiratoryRateArtifact = payload.rawArtifacts?.find((artifact) =>
+    const rawRespiratoryRateArtifact = payload.evidenceParts?.find((artifact) =>
       artifact.role === "junction-timeseries-respiratory-rate"
     );
 
@@ -1712,7 +1713,7 @@ test("Junction normalizer compacts respiratory rate timeseries into daily averag
     assert.equal(rawRespiratoryRateArtifact, undefined);
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
     assertNoFullJunctionTimeseriesArtifacts(payload);
-    assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+    assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   }
 });
 
@@ -2045,7 +2046,7 @@ test("Junction blood pressure evidence is replay- and order-idempotent", () => {
   const second = reading("2026-04-22T20:30:00Z", 118, 79);
 
   // Exact duplicate rows inside one payload collapse to one event and one
-  // raw artifact instead of staging duplicate evidence.
+  // evidence part instead of staging duplicate evidence.
   const withDuplicate = snapshot([first, { ...first }, second]);
   assert.equal(
     (withDuplicate.events ?? []).filter((event) => event.kind === "measurement").length,
@@ -2183,13 +2184,13 @@ test("Junction compact timeseries with no valid samples avoids provider-snapshot
 
   const [compactArtifact] = findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen");
   const compactArtifactContent = compactArtifact?.content as Record<string, unknown> | undefined;
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts ?? []);
+  const rawArtifactText = JSON.stringify(payload.evidenceParts ?? []);
 
   assert.ok(compactArtifact);
   assert.equal(compactArtifactContent?.status, "no_valid_samples");
   assert.equal(compactArtifactContent?.sampleCount, 0);
   assert.deepEqual(payload.events, []);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertJsonOmits(rawArtifactText, [
     "\"value\":120",
@@ -2296,8 +2297,8 @@ test("Junction blood oxygen aggregates pass the canonical device import contract
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 1);
     assertNoFullJunctionTimeseriesArtifacts(payload);
     assertEventRawArtifactRolesExist(payload);
-    assert.ok(result.rawArtifacts.length >= 1);
-    assert.notEqual(result.manifestPath, "");
+    assert.ok(result.evidencePartCount >= 1);
+    assert.notEqual(result.ingestShardPath, "");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -2423,12 +2424,8 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   });
 
   const rawReceipt = readRawReceiptArtifact(payload);
-  const rawReceiptArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role === `wearable-raw-receipt:${rawReceipt.id}`
-  );
   const rawReceiptText = JSON.stringify(rawReceipt);
-  const rawReceiptArtifactText = JSON.stringify(rawReceiptArtifact?.content);
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const rawArtifactText = JSON.stringify(payload.evidenceParts);
   const rawIdentifierSentinels = [
     "Timeseries Oura Ring",
     "timeseries-device-oura-ring-1",
@@ -2462,7 +2459,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
 
   assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
   assert.equal(rawReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
-  assert.ok(rawReceiptArtifact);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")), false);
   assert.deepEqual(rawReceipt.rawArtifactRoles, [
     "junction-summary-profile",
     "junction-summary-activity",
@@ -2470,8 +2467,6 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(rawReceipt.rawArtifactCount, 2);
   assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
   assertJsonOmits(rawReceiptText, [...rawIdentifierSentinels, "\"sourceProviderSlug\"", "\"sourceType\"", "\"value\":123"]);
-  assert.equal(rawReceiptArtifact?.content, rawReceipt);
-  assertJsonOmits(rawReceiptArtifactText, [...rawIdentifierSentinels, "\"sourceProviderSlug\"", "\"sourceType\"", "\"value\":123"]);
   assertJsonOmits(rawArtifactText, rawIdentifierSentinels);
   assert.match(rawReceiptText, /"provider":"junction"/u);
   assert.match(rawArtifactText, /"sourceProviderSlug":"oura"/u);
@@ -2509,7 +2504,7 @@ test("Junction importer drops floating-timestamp glucose records without retaini
   });
 
   const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
-  const glucoseArtifact = payload.rawArtifacts?.find((artifact) =>
+  const glucoseArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-timeseries-glucose"
   );
 
@@ -2518,11 +2513,11 @@ test("Junction importer drops floating-timestamp glucose records without retaini
   assert.equal(glucoseSamples.length, 0);
   assert.equal(glucoseArtifact, undefined);
   assert.equal(
-    payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
+    payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
     true,
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
-  assert.doesNotMatch(JSON.stringify(payload.rawArtifacts), /"value":101|"value":102/u);
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"value":101|"value":102/u);
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
@@ -2553,7 +2548,7 @@ test("Junction importer skips source-specific floating summary records instead o
     },
   });
 
-  const bodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
+  const bodyArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-body");
   assert.deepEqual(payload.provenance?.summaryResources, ["body"]);
   assert.deepEqual(payload.events, []);
   assert.ok(bodyArtifact);
@@ -2680,7 +2675,7 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
   const sleepScore = payload.events?.find((event) => event.fields?.metric === "sleep-score");
   const respiratoryRate = payload.events?.find((event) => event.fields?.metric === "respiratory-rate");
-  const respiratoryArtifact = payload.rawArtifacts?.find((artifact) =>
+  const respiratoryArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-timeseries-respiratory-rate"
   );
 
@@ -2695,8 +2690,8 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assert.equal(respiratoryRate?.dayKey, "2026-05-20");
   assert.deepEqual(payload.provenance?.summaryResources, ["activity", "sleep"]);
   assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-activity"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.equal(respiratoryArtifact, undefined);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
@@ -2799,11 +2794,11 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("heartrate"), false);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("weight"), false);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   for (const dailyResourceSlug of [
     "blood-oxygen",
     "hrv",
@@ -2842,7 +2837,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   });
 
   assert.deepEqual(sparseProfilePayload.provenance?.summaryResources, ["profile"]);
-  assert.ok(sparseProfilePayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(sparseProfilePayload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.equal(sparseProfilePayload.events?.length ?? 0, 0);
 });
 
@@ -2904,7 +2899,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   const measurementEvents = events.filter((event) => event.kind === "measurement");
   const readMeasurement = (event: (typeof events)[number] | undefined) =>
     (event?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0];
-  const rawCycleArtifact = payload.rawArtifacts?.find((artifact) =>
+  const rawCycleArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-summary-menstrual-cycle"
   );
 
@@ -2994,7 +2989,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /protection_used/u);
-  assertJsonOmits(JSON.stringify(payload.rawArtifacts), [
+  assertJsonOmits(JSON.stringify(payload.evidenceParts), [
     "raw-cycle-source-app",
     "raw-cycle-source-name",
   ]);
@@ -3067,7 +3062,7 @@ test("Junction normalizer maps electrocardiogram summaries to per-recording even
     },
   }]);
   assert.notEqual(first?.externalRef?.resourceId, second?.externalRef?.resourceId);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
   assertEventRawArtifactRolesExist(payload);
 });
 
@@ -3131,11 +3126,11 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
     },
   });
   assert.equal((noTimestampPayload.events ?? []).length, 0);
-  assert.ok(noTimestampPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(noTimestampPayload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-profile"));
 
   // The raw profile artifact stays identity-sanitized even though the
   // normalized events carry the structured fields.
-  const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
+  const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
 
   // An "unknown" sex enum value carries no information and stays raw-only.
@@ -3279,7 +3274,7 @@ test("Junction ECG summaries drop negative metrics and cap qualifier lengths", (
   assert.equal(measurement?.value, 64);
   assert.equal(qualifiers?.classification, oversizedClassification.slice(0, 80));
   assert.equal(qualifiers?.classification?.length, 80);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
 });
 
 test("Junction partial profiles land height-only and reject non-boolean wheelchair use", () => {
@@ -3348,9 +3343,9 @@ test("Junction normalizer ignores unsupported timeseries and workout stream reso
   assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-workout-distance"), false);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-distance"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
 });
 
 test("Junction import receipt does not retain unsupported-only clinical summaries", async () => {
@@ -3376,14 +3371,15 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
     },
   });
 
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const rawArtifactText = JSON.stringify(payload.evidenceParts);
 
   assert.deepEqual(payload.provenance?.summaryResources, []);
   assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.ok(payload.ingestReceipt);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")), false);
   assert.doesNotMatch(rawArtifactText, /unsupported_clinical_value|electrocardiogram_voltage/u);
 });
 
@@ -3418,13 +3414,13 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
 
   const emptyReceipt = readRawReceiptArtifact(emptyPayload);
   const unsupportedReceipt = readRawReceiptArtifact(unsupportedPayload);
-  const unsupportedArtifactText = JSON.stringify(unsupportedPayload.rawArtifacts);
+  const unsupportedArtifactText = JSON.stringify(unsupportedPayload.evidenceParts);
 
   assert.equal(unsupportedReceipt.payloadHash, emptyReceipt.payloadHash);
   assert.equal(unsupportedReceipt.id, emptyReceipt.id);
   assert.deepEqual(unsupportedPayload.provenance?.summaryResources, []);
   assert.deepEqual(unsupportedPayload.provenance?.timeseriesResources, []);
-  assert.equal(unsupportedPayload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.equal(unsupportedPayload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assertJsonOmits(unsupportedArtifactText, [
     "unsupported_clinical_value",
     "workout_stream",
@@ -3474,7 +3470,7 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
 
   const supportedReceipt = readRawReceiptArtifact(supportedPayload);
   const mixedReceipt = readRawReceiptArtifact(mixedPayload);
-  const mixedArtifactText = JSON.stringify(mixedPayload.rawArtifacts);
+  const mixedArtifactText = JSON.stringify(mixedPayload.evidenceParts);
 
   assert.equal(mixedReceipt.payloadHash, supportedReceipt.payloadHash);
   assert.equal(mixedReceipt.id, supportedReceipt.id);
@@ -3528,7 +3524,7 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assert.equal(payload.events?.some((event) => event.externalRef?.resourceType === "junction-garmin-hypnogram"), false);
@@ -3591,14 +3587,14 @@ test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () 
     },
   });
   const samples = payload.samples ?? [];
-  const rawSleepCycleArtifact = payload.rawArtifacts?.find((artifact) =>
+  const rawSleepCycleArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-summary-sleep-cycle"
   );
   const rawSleepCycleArtifactText = JSON.stringify(rawSleepCycleArtifact?.content);
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
   assert.equal(
-    payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
+    payload.evidenceParts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
     1,
   );
   assert.equal(rawSleepCycleArtifact?.role, "junction-summary-sleep-cycle");
@@ -3669,7 +3665,7 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
   assert.deepEqual(samples.map((sample) => sample.unit), ["stage", "stage"]);
   assert.deepEqual(samples.map((sample) => sample.sample.stage), ["awake", "deep"]);
   assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [12, 30]);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.equal(samples.some((sample) => sample.externalRef?.resourceType.includes("hypnogram")), false);
   assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
   assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
@@ -3716,7 +3712,7 @@ test("Junction normalizer merges canonical and alias resource payloads before im
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
   assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.equal(
-    payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
+    payload.evidenceParts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
     1,
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
@@ -3756,7 +3752,7 @@ test("Junction normalizer does not inherit device attribution from non-unique pr
   assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "oura");
   assert.equal(stepEvent?.dataOrigin?.sourceInstanceId, undefined);
 
-  const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
+  const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assert.deepEqual(profileArtifact?.content, {
     sourceProviderSlug: "oura",
   });
@@ -3975,8 +3971,8 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
   ) ?? [];
   assert.deepEqual(workoutMetrics, []);
 
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workouts"));
 });
 
 test("Junction normalizer maps numeric workout heart-rate zone buckets by array index", () => {
@@ -4274,7 +4270,7 @@ test("Junction normalizer maps documented activity and body summary scalar field
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const metricValue = (metric: string) =>
     observations.find((event) => event.fields?.metric === metric)?.fields?.value;
-  const rawBodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
+  const rawBodyArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-body");
 
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
@@ -4467,7 +4463,7 @@ test("Junction normalizer ignores aggregator provider and ambiguous type provena
   assert.equal(workoutEvent?.fields?.activityType, "run");
   assert.equal(workoutEvent?.externalRef?.resourceType, "junction-oura-workouts");
 
-  const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
+  const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assert.deepEqual(profileArtifact?.content, {
     sourceProviderSlug: "oura",
     sourceType: "cloud-provider",

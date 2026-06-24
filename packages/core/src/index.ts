@@ -285,3 +285,6 @@ export type {
   UpsertEventPayloadInput,
   UpsertEventResult,
 } from "./domains/events.ts";
+
+export * from "./integration-ingests.ts";
+export * from "./integration-ingest-migration.ts";

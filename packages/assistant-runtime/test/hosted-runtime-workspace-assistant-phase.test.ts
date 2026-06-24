@@ -1794,6 +1794,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       item: expect.objectContaining({
         itemId: "system_mailbox_item_processed",
       }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -5117,6 +5118,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: manualRuntimeItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -5151,6 +5153,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: browserVaultRefreshItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -5163,6 +5166,91 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedSystemMailboxPrepared: 1,
       }),
     }));
+  });
+
+  it("records maintenance runtime-control receipts without assistant automation", async () => {
+    const maintenanceItem = createMaintenanceSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: maintenanceItem,
+      itemId: "system_mailbox_item_runtime_maintenance",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: maintenanceItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxPrepared: 1,
+      }),
+    }));
+    expect(result.redactedStatus).not.toHaveProperty("hostedBrowserVaultReplicaRefreshRequested");
+  });
+
+  it("defers Codex auth terminal receipts until after the durable checkpoint", async () => {
+    const codexAuthItem = createCodexAuthSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: codexAuthItem,
+      itemId: "system_mailbox_item_codex_auth",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecordDeferred: true,
+        hostedSystemMailboxRecorded: 0,
+      }),
+    }));
+
+    const effects = postCheckpoint?.afterDurableCheckpoint;
+    const effect = typeof effects === "function" ? effects : effects?.[0];
+    if (!effect) {
+      throw new Error("Expected deferred Codex auth durable checkpoint effect.");
+    }
+    await expect(effect()).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      nextWakeReason: "assistant",
+      requiresFollowUpCheckpoint: true,
+    });
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: codexAuthItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
   });
 
   it("defers cleanup for assistant input ids even when imported count is zero", async () => {
@@ -5524,6 +5612,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       item: expect.objectContaining({
         itemId: "system_mailbox_item_processed",
       }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -5722,6 +5811,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: manualRuntimeItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -6758,6 +6848,43 @@ function createBrowserVaultRefreshSystemMailboxItem() {
     wake: {
       eventId: "evt_runtime_browser_vault_refresh_control",
       kind: "runtime.browser-vault-refresh-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createMaintenanceSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_runtime_maintenance",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_runtime_maintenance",
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "evt_runtime_maintenance_control",
+      kind: "runtime.maintenance-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createCodexAuthSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_codex_auth",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_codex_auth",
+    postCheckpointRecord: {
+      attemptId: "hca_abcdefghijklmnop",
+      kind: "codex-auth.updated" as const,
+      phase: "connected" as const,
+    },
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      action: "connect" as const,
+      attemptId: "hca_abcdefghijklmnop",
+      eventId: "runtime-control:codex-auth",
+      kind: "runtime.codex-auth-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },
