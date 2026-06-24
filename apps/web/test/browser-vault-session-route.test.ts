@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   signalHostedBrowserVaultRefreshRuntime: vi.fn(),
   verifyAndConsumeSensitiveActionChallenge: vi.fn(),
+  verifySensitiveActionChallenge: vi.fn(),
+  consumeSensitiveActionChallenge: vi.fn(),
+  readHostedWorkspaceBrowserVaultSourceStateHash: vi.fn<(snapshotRef: unknown) => string | null>(() => null),
 }));
 
 vi.mock("next/server", async (importOriginal) => {
@@ -67,11 +70,15 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
+  readHostedWorkspaceBrowserVaultSourceStateHash:
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash,
 }));
 
 vi.mock("@/src/lib/sensitive-actions/server", () => ({
   buildSettingsSensitiveActionBinding: vi.fn(() => "a".repeat(64)),
   verifyAndConsumeSensitiveActionChallenge: mocks.verifyAndConsumeSensitiveActionChallenge,
+  verifySensitiveActionChallenge: mocks.verifySensitiveActionChallenge,
+  consumeSensitiveActionChallenge: mocks.consumeSensitiveActionChallenge,
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", () => ({
@@ -120,6 +127,15 @@ describe("browser vault session route", () => {
       sessionId: "session_123",
     });
     mocks.verifyAndConsumeSensitiveActionChallenge.mockResolvedValue(undefined);
+    mocks.verifySensitiveActionChallenge.mockResolvedValue({
+      bindingHash: "a".repeat(64),
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      kind: "vault.export",
+      memberId: "member_123",
+      tokenHash: "b".repeat(64),
+    });
+    mocks.consumeSensitiveActionChallenge.mockResolvedValue(undefined);
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(null);
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: null,
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -218,10 +234,11 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("uses authenticated privacy access, not active billing access, for Settings vault export sessions", async () => {
+  it("verifies and only then consumes the one-time challenge after the encrypted replica is in hand", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
-      browserVaultReplicaRef: createReplicaRef(),
+      browserVaultReplicaRef: replicaRef,
       createdAt: "2026-04-20T08:00:00.000Z",
       checkpointedAt: "2026-04-20T08:00:00.000Z",
       redactedStatusJson: {},
@@ -232,11 +249,12 @@ describe("browser vault session route", () => {
       userId: "member_123",
       version: "1",
     });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(replicaRef.sourceBundleHash);
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
       replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: createReplicaRef(),
+      replicaRef,
       state: "ready",
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
@@ -252,14 +270,13 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
-    expect(mocks.verifyAndConsumeSensitiveActionChallenge).toHaveBeenCalledWith({
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledWith({
       authorization: {
         signature: `0x${"11".repeat(65)}`,
         token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -271,9 +288,15 @@ describe("browser vault session route", () => {
       privyUserId: "privy-user-123",
     });
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    // Consume must happen after the encrypted replica is fetched, so a fetch
+    // failure aborts the response without releasing the one-time challenge.
+    expect(
+      mocks.consumeSensitiveActionChallenge.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(createBrowserVaultSession.mock.invocationCallOrder[0]);
   });
 
-  it("refuses Settings vault export sessions before consuming the challenge when the replica is not fresh", async () => {
+  it("refuses Settings vault export sessions without consuming the challenge when the replica is missing", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
@@ -289,7 +312,8 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {
@@ -297,6 +321,79 @@ describe("browser vault session route", () => {
         retryable: true,
       },
     });
+  });
+
+  it("refuses Settings vault export sessions without consuming the challenge when the replica source state has moved", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("c".repeat(64));
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses Settings vault export sessions without consuming the challenge when dirty-state lookup fails", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(replicaRef.sourceBundleHash);
+    mocks.hasPendingDirtyConnectionForUser.mockRejectedValueOnce(
+      new Error("dirty connection lookup failed"),
+    );
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
   });
 
   it("rejects disallowed browser vault origins before reading app session state", async () => {

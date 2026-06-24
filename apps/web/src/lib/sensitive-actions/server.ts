@@ -72,7 +72,15 @@ export async function createSensitiveActionChallenge(input: {
   };
 }
 
-export async function verifyAndConsumeSensitiveActionChallenge(input: {
+export interface VerifiedSensitiveActionChallenge {
+  bindingHash: string;
+  expiresAt: Date;
+  kind: SensitiveActionKind;
+  memberId: string;
+  tokenHash: string;
+}
+
+export async function verifySensitiveActionChallenge(input: {
   authorization: SensitiveActionAuthorization | unknown;
   bindingHash: string;
   kind: SensitiveActionKind;
@@ -80,7 +88,7 @@ export async function verifyAndConsumeSensitiveActionChallenge(input: {
   now?: Date;
   prisma: PrismaClient;
   privyUserId: string;
-}): Promise<void> {
+}): Promise<VerifiedSensitiveActionChallenge> {
   assertBindingHash(input.bindingHash);
   const authorization = parseSensitiveActionAuthorization(input.authorization);
   if (!authorization) {
@@ -144,24 +152,55 @@ export async function verifyAndConsumeSensitiveActionChallenge(input: {
     throw sensitiveActionInvalidSignature();
   }
 
+  return {
+    bindingHash: challenge.bindingHash,
+    expiresAt: challenge.expiresAt,
+    kind: challenge.kind as SensitiveActionKind,
+    memberId: challenge.memberId,
+    tokenHash,
+  };
+}
+
+export async function consumeSensitiveActionChallenge(input: {
+  challenge: VerifiedSensitiveActionChallenge;
+  now?: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
   const consumedAt = input.now ?? new Date();
-  if (challenge.expiresAt <= consumedAt) {
+  if (input.challenge.expiresAt <= consumedAt) {
     throw sensitiveActionUnavailable();
   }
 
   const consumed = await input.prisma.hostedSensitiveActionChallenge.deleteMany({
     where: {
-      bindingHash: input.bindingHash,
+      bindingHash: input.challenge.bindingHash,
       expiresAt: { gt: consumedAt },
-      kind: input.kind,
-      memberId: input.memberId,
-      tokenHash,
+      kind: input.challenge.kind,
+      memberId: input.challenge.memberId,
+      tokenHash: input.challenge.tokenHash,
     },
   });
 
   if (consumed.count !== 1) {
     throw sensitiveActionUnavailable();
   }
+}
+
+export async function verifyAndConsumeSensitiveActionChallenge(input: {
+  authorization: SensitiveActionAuthorization | unknown;
+  bindingHash: string;
+  kind: SensitiveActionKind;
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+  privyUserId: string;
+}): Promise<void> {
+  const challenge = await verifySensitiveActionChallenge(input);
+  await consumeSensitiveActionChallenge({
+    challenge,
+    now: input.now,
+    prisma: input.prisma,
+  });
 }
 
 export function buildSettingsSensitiveActionBinding(input: {

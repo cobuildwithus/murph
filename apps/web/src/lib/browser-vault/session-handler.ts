@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
@@ -15,7 +14,6 @@ import {
 import {
   requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
-  type HostedAppSession,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -34,13 +32,7 @@ import { browserVaultReplicaRefsMatch } from "./ref";
 const BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 
 export function createBrowserVaultSessionRoute(input: {
-  authorize?: (context: {
-    auth: HostedAppSession;
-    body: Record<string, unknown>;
-    prisma: PrismaClient;
-  }) => Promise<void>;
   requireActiveAccess: boolean;
-  requireFreshReplica?: boolean;
 }) {
   return withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
@@ -72,34 +64,6 @@ export function createBrowserVaultSessionRoute(input: {
       ).catch(() => false),
     ]);
 
-    if (input.requireFreshReplica) {
-      const candidateReplicaRef = parseHostedBrowserVaultReplicaRef(
-        workspace?.browserVaultReplicaRef ?? null,
-        "Hosted browser vault session workspace replica ref",
-      );
-      const candidateFreshness = assessBrowserVaultReplicaFreshness({
-        now: new Date().toISOString(),
-        replicaRef: candidateReplicaRef,
-      });
-      const isFresh =
-        candidateReplicaRef !== null
-        && candidateFreshness.freshness === "fresh"
-        && !candidateFreshness.shouldRefresh
-        && !deviceSyncImportPending;
-      if (!isFresh) {
-        scheduleAfterResponseOrFireAndForget(() =>
-          scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
-        );
-        throw hostedOnboardingError({
-          code: "BROWSER_VAULT_SESSION_NOT_FRESH",
-          httpStatus: 409,
-          message: "Your vault is still being prepared. Try the export again in a moment.",
-          retryable: true,
-        });
-      }
-    }
-
-    await input.authorize?.({ auth, body, prisma });
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       workspace?.browserVaultReplicaRef ?? null,
       "Hosted browser vault session workspace replica ref",
