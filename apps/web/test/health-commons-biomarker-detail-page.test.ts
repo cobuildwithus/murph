@@ -15,6 +15,7 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   biomarkerLayoutClient: vi.fn(),
+  getHostedDashboardPageAuthSnapshot: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -26,6 +27,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   redirect: mocks.redirect,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedDashboardPageAuthSnapshot,
 }));
 
 vi.mock("../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
@@ -72,6 +77,12 @@ const changesPath = path.join(repoRoot, "packages/health-commons/content/changes
 describe("BiomarkerPage", () => {
   beforeEach(() => {
     mocks.biomarkerLayoutClient.mockClear();
+    mocks.getHostedDashboardPageAuthSnapshot.mockReset();
+    mocks.getHostedDashboardPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: null,
+      session: null,
+    });
     mocks.notFound.mockClear();
     mocks.redirect.mockClear();
   });

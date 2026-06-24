@@ -36,7 +36,6 @@ beforeEach(() => {
   mocks.getHostedSidebarAuthSnapshot.mockResolvedValue({
     authenticated: false,
     label: null,
-    requiresDashboardRecovery: false,
   });
 });
 
@@ -66,11 +65,10 @@ test("the dashboard layout is the single shell owner for biomarker pages", async
   expect(mocks.getHostedSidebarAuthSnapshot).toHaveBeenCalledWith();
 });
 
-test("dashboard layout does not render child pages while onboarding recovery is required", async () => {
+test("dashboard layout leaves access decisions to dashboard pages", async () => {
   mocks.getHostedSidebarAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     label: null,
-    requiresDashboardRecovery: true,
   });
 
   const markup = renderToStaticMarkup(
@@ -84,5 +82,5 @@ test("dashboard layout does not render child pages while onboarding recovery is 
   );
 
   assert.match(markup, /data-dashboard-sidebar="true"/);
-  assert.doesNotMatch(markup, /data-dashboard-child="true"/);
+  assert.match(markup, /data-dashboard-child="true"/);
 });

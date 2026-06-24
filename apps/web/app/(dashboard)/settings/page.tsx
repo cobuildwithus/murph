@@ -20,7 +20,7 @@ import {
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -30,7 +30,8 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function SettingsPage() {
-  const { authenticated, authenticatedMember, session } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember, session } =
+    await getHostedDashboardPageAuthSnapshot();
 
   if (!authenticated) {
     redirect("/");
