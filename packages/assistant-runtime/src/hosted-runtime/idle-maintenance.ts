@@ -14,6 +14,11 @@ import {
   resolveHostedAiUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+  emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+} from "@murphai/hosted-execution";
+import {
   runInboxMediaRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
@@ -116,7 +121,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           });
         }
         // Retention is opportunistic maintenance; a cleanup miss must not block
-        // checkpointing or member-visible wake handling.
+        // checkpointing or member-visible wake handling. Emit the failure
+        // through the shared structured-log boundary so the cause is not
+        // silently dropped (Observability And Logging invariant: error logs
+        // must include both a stable code and a redacted cause).
+        emitInboxMediaRetentionFailureLog({
+          error,
+          memberId: input.memberId,
+        });
         retentionWake = resolveInboxMediaRetentionFailureWake();
       }
     }
@@ -252,6 +264,38 @@ function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
     nextWakeAt: new Date(Date.now() + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS).toISOString(),
     nextWakeReason: "inbox_media_retention",
   };
+}
+
+function emitInboxMediaRetentionFailureLog(input: {
+  error: unknown;
+  memberId: string;
+}): void {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "inbox_media_retention_failed",
+      ...(typeof diagnostics?.errorCode === "string"
+        ? { failureErrorCode: diagnostics.errorCode }
+        : {}),
+      ...(typeof diagnostics?.errorName === "string"
+        ? { failureErrorName: diagnostics.errorName }
+        : {}),
+      failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+      ...(typeof diagnostics?.errorStatus === "number"
+        ? { failureErrorStatus: diagnostics.errorStatus }
+        : {}),
+      failureMessagePresent:
+        input.error instanceof Error && input.error.message.trim().length > 0,
+      failureName: readHostedExecutionSafeErrorName(input.error) ?? null,
+    },
+    error: input.error,
+    level: "warn",
+    message:
+      "Hosted idle maintenance could not run inbox media retention; retrying at the failure-backoff wake.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
 }
 
 function resolveInboxMediaRetentionImmediateWake(): HostedIdleMaintenanceWake {

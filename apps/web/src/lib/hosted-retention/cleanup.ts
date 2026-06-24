@@ -3,6 +3,9 @@ import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 
 const DAY_MS = 86_400_000;
 
@@ -83,7 +86,13 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
   try {
     signalRuntimeRecheck =
       input.signalRuntimeRecheck ?? await readDefaultHostedRuntimeRecheckSignal();
-  } catch {
+  } catch (error) {
+    console.error("Hosted inbox media retention signal module load failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "inbox_media_retention_signal_module_load_failed",
+      }),
+      failureCount: workspaces.length,
+    });
     return { failures: workspaces.length, sent: 0 };
   }
 
@@ -154,7 +163,14 @@ async function signalRuntimeRecheckWithDeadline(input: {
     userId: input.userId,
   }).then(
     () => "sent" as const,
-    () => "failed" as const,
+    (error: unknown) => {
+      console.error("Hosted inbox media retention runtime signal failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "inbox_media_retention_runtime_signal_failed",
+        }),
+      });
+      return "failed" as const;
+    },
   );
   const result = await Promise.race([signalPromise, timeoutPromise]);
   if (timeout) {
