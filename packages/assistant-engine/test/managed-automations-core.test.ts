@@ -170,6 +170,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
+    expect(researchScoutRecord?.instructions).toContain('vault-cli research payload-schema --format json')
+    expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
+    expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
 
     const productUpdatesRecord = await showAutomation({

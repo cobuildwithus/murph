@@ -4331,6 +4331,10 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "scout": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4341,19 +4345,15 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Do not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Use bucket fields: topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, activeExperiments. Do not include raw labs, names, dates of birth, full notes, or medical records."
                         },
                         "since": {
                           "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                          "description": "Inclusive lower publication date bound as an ISO timestamp."
+                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
                         },
                         "until": {
                           "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                          "description": "Inclusive upper publication date bound as an ISO timestamp."
+                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
                         },
                         "maxCandidates": {
                           "default": 12,
