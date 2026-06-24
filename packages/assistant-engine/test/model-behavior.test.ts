@@ -175,57 +175,60 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
-  it('allows only sparing native emphasis on Linq and Telegram messaging routes', () => {
+  it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {
     const linqPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       channel: 'linq',
     }))
 
     expect(linqPrompt).toContain(
-      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+      'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
     expect(linqPrompt).toContain('Prefer plain text')
     expect(linqPrompt).toContain(
-      'Use bold or italic only when it materially improves comprehension or scannability',
+      'Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability',
     )
     expect(linqPrompt).toContain(
-      'use underscore italics only for short multi-word asides, never for exact tokens, identifiers, paths, URLs, codes, or values',
+      'use only simple, non-nested spans: `**key phrase**`, `*short aside*`, `++underlined phrase++`, or `~~removed phrase~~`',
     )
     expect(linqPrompt).toContain(
-      'Use Markdown-style emphasis only where later channel guidance explicitly allows native emphasis conversion',
+      'Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values',
+    )
+    expect(linqPrompt).toContain(
+      'Use Markdown-style text markers only where later channel guidance explicitly allows native text-style conversion',
     )
     expect(linqPrompt).toContain('No Markdown tables, Markdown headers, fenced code blocks')
     expect(linqPrompt).not.toContain(
-      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+      'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
 
     const telegramPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       channel: 'telegram',
     }))
     expect(telegramPrompt).toContain(
-      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+      'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
     expect(telegramPrompt).toContain(
-      'Use bold or italic only when it materially improves comprehension or scannability',
+      'Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability',
     )
     expect(telegramPrompt).not.toContain(
-      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+      'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
 
     const emailPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       channel: 'email',
     }))
     expect(emailPrompt).toContain(
-      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+      'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
 
     const whatsappPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       channel: 'whatsapp',
     }))
     expect(whatsappPrompt).toContain(
-      'Do not wrap words in double asterisks or underscores for bold or italic emphasis',
+      'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
     expect(whatsappPrompt).not.toContain(
-      'For Linq/iMessage and Telegram, native emphasis is supported by the delivery layer',
+      'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
   })
 
@@ -876,7 +879,7 @@ describe('assistant user-facing wording guidance', () => {
       'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
     )
     expect(prompt).toContain(
-      'Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use Markdown bold or italic markers only when the bound channel guidance explicitly allows native emphasis conversion',
+      'Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
     )
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
@@ -1089,7 +1092,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '82cfd390c7d8a7749380c3c13b0108133e89a57130b5320228037d686b4ad1f0',
+      '324c23f6a91623c901d26569a5e8aff56c73bc19a03071cbe9f051f81b21fbfc',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1292,6 +1295,24 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'For broad or ambiguous requests, run `vault-cli commons protocol explore <query> --format json`',
+    )
+  })
+
+  it('includes post-action follow-through guidance for completed real-world actions', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Post-action follow-through:')
+    expect(prompt).toContain(
+      "When Murph has reliable evidence that a user-authorized real-world action succeeded",
+    )
+    expect(prompt).toContain('Then offer one concrete next step.')
+    expect(prompt).toContain('Make at most one proactive offer per completed action.')
+    expect(prompt).toContain('Do not re-offer after the user declines.')
+    expect(prompt).toContain(
+      'A clear "yes" to a concrete offer counts as confirmation for that exact follow-up',
+    )
+    expect(prompt).toContain(
+      'For supplements and other health products, keep the follow-up observational',
     )
   })
 

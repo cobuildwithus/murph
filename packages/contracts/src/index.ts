@@ -32,3 +32,5 @@ export {
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
 } from "./health-entities.ts";
+
+export * from "./integration-ingest.ts";

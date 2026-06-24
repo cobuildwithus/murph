@@ -50,7 +50,12 @@ import {
   normalizeGatewayConversationRoute,
   resolveGatewayConversationRouteKey,
 } from '../src/routes.ts'
-import { isoTimestampSchema, normalizeNullableString } from '../src/shared.ts'
+import {
+  isGatewayIsoTimestamp,
+  isoTimestampSchema,
+  normalizeNullableString,
+  parseGatewayTimestampMs,
+} from '../src/shared.ts'
 
 const encodeOpaqueEnvelope = (prefix: string, envelope: unknown): string =>
   `${prefix}${Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64url')}`
@@ -60,7 +65,13 @@ test('shared helpers normalize nullable strings and ISO timestamps', () => {
   assert.equal(normalizeNullableString('   '), null)
   assert.equal(normalizeNullableString(undefined), null)
   assert.equal(isoTimestampSchema.parse('2026-04-08T12:34:56.000Z'), '2026-04-08T12:34:56.000Z')
-  assert.throws(() => isoTimestampSchema.parse('not-an-iso-timestamp'), /Expected an ISO timestamp\./u)
+  assert.equal(isoTimestampSchema.parse('2026-04-08T12:34:56+01:00'), '2026-04-08T12:34:56+01:00')
+  assert.equal(isGatewayIsoTimestamp('2026-04-08T12:34:56.000Z'), true)
+  assert.equal(parseGatewayTimestampMs('2026-04-08T01:00:00+01:00'), Date.parse('2026-04-08T00:00:00.000Z'))
+  assert.equal(Number.isNaN(parseGatewayTimestampMs('2026-04-08T12:34:56.000')), true)
+  assert.equal(Number.isNaN(parseGatewayTimestampMs('2026-02-30T12:34:56.000Z')), true)
+  assert.throws(() => isoTimestampSchema.parse('2026-04-08T12:34:56.000'), /explicit offset/u)
+  assert.throws(() => isoTimestampSchema.parse('not-an-iso-timestamp'), /explicit offset/u)
 })
 
 test('gateway contract schemas apply their current defaults', () => {

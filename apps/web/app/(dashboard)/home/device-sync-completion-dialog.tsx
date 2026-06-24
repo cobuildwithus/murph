@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircleIcon,
+  Link2,
   MessageCircleIcon,
   RefreshCwIcon,
   SendIcon,
@@ -21,6 +22,11 @@ import {
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import { cn } from "@/src/lib/utils";
 
+// Keys are duplicated here (rather than imported from the server-only
+// resolver modules) so this client component does not pull `server-only` into
+// the client bundle. The lists must stay in sync with the two redirect
+// builders in `device-sync/connect-completion.ts` and
+// `connected-apps/connect-completion.ts`.
 const COMPLETION_QUERY_KEYS = [
   "deviceSyncCompletion",
   "source",
@@ -29,6 +35,10 @@ const COMPLETION_QUERY_KEYS = [
   "deviceSyncStatus",
   "deviceSyncProvider",
   "deviceSyncError",
+  "connectedAppCompletion",
+  "toolkit",
+  "alias",
+  "connectedAppStatus",
 ] as const;
 
 export function DeviceSyncCompletionDialog({
@@ -56,7 +66,7 @@ export function DeviceSyncCompletionDialog({
         <DialogHeader className="items-center gap-4 text-center">
           <span
             aria-hidden="true"
-            data-device-sync-icon={model.failed ? "alert" : "watch"}
+            data-device-sync-icon={resolveHeaderIconKind(model)}
             className={cn(
               "flex size-16 items-center justify-center rounded-2xl",
               model.failed
@@ -66,6 +76,8 @@ export function DeviceSyncCompletionDialog({
           >
             {model.failed ? (
               <AlertCircleIcon className="size-8" />
+            ) : model.kind === "connected-app" ? (
+              <Link2 className="size-8" />
             ) : (
               <WatchCheckIcon className="size-10" />
             )}
@@ -120,6 +132,15 @@ export function DeviceSyncCompletionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function resolveHeaderIconKind(
+  model: DeviceSyncCompletionDialogModel,
+): "alert" | "watch" | "link" {
+  if (model.failed) {
+    return "alert";
+  }
+  return model.kind === "connected-app" ? "link" : "watch";
 }
 
 function stripCompletionQueryParams() {

@@ -240,7 +240,7 @@ describe('assistant session resolution', () => {
       approvalPolicy: 'never',
       oss: false,
       profile: null,
-      reasoningEffort: 'medium',
+      reasoningEffort: 'low',
       maxSessionAgeMs: null,
     })
     expect(result).not.toHaveProperty('allowBindingRebind')
@@ -248,7 +248,7 @@ describe('assistant session resolution', () => {
       adapter: 'codex-cli',
       approvalPolicy: null,
       model: 'gpt-5-codex',
-      reasoningEffort: 'medium',
+      reasoningEffort: 'low',
       sandbox: null,
     })
   })
@@ -326,7 +326,7 @@ describe('assistant session resolution', () => {
       model: null,
       oss: false,
       profile: null,
-      reasoningEffort: 'medium',
+      reasoningEffort: 'low',
       sandbox: 'danger-full-access',
     })
 

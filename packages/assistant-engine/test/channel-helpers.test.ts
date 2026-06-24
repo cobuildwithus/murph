@@ -23,6 +23,7 @@ import { inferAssistantBindingDelivery } from '../src/assistant/channels/registr
 import type { AssistantChannelActivityHandle } from '../src/assistant/channels/types.ts'
 
 const FIXED_NOW = new Date('2026-04-08T12:34:56.000Z')
+type ImageMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
 type VoiceMemoMedia = Extract<AssistantResponseMedia, { kind: 'voice_memo' }>
 
 beforeEach(() => {
@@ -590,11 +591,15 @@ describe('channel helper seams', () => {
         identityId: null,
         media: [
           createVoiceMemoMedia({
-            sizeBytes: null,
-            transportRefs: {
-              telegram: {
-                sendMode: 'generate_at_delivery',
+            transport: {
+              generation: {
+                kind: 'elevenlabs_speech',
+                modelId: 'eleven_multilingual_v2',
+                outputFormat: 'mp3_44100_128',
+                text: 'Short memo',
+                voiceId: 'voice_murph',
               },
+              kind: 'telegram_generation',
             },
           }),
         ],
@@ -616,10 +621,15 @@ describe('channel helper seams', () => {
       ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
         media: [
           createVoiceMemoMedia({
-            transportRefs: {
-              telegram: {
-                sendMode: 'generate_at_delivery',
+            transport: {
+              generation: {
+                kind: 'elevenlabs_speech',
+                modelId: 'eleven_multilingual_v2',
+                outputFormat: 'mp3_44100_128',
+                text: 'Short memo',
+                voiceId: 'voice_murph',
               },
+              kind: 'telegram_generation',
             },
           }),
         ],
@@ -766,6 +776,71 @@ describe('channel helper seams', () => {
     })
   })
 
+  it('routes Telegram image media through the dedicated image sender', async () => {
+    const sendTelegram = vi.fn()
+    const sendTelegramImage = vi.fn().mockResolvedValue({
+      cleanupMessages: [
+        { messageId: '  telegram-photo-1  ', target: '  telegram-chat  ' },
+      ],
+      providerMessageId: '  telegram-photo-1  ',
+      target: '  telegram-chat  ',
+      targetKind: 'thread',
+    })
+    const media: ImageMedia[] = [
+      {
+        alt: 'Example image',
+        kind: 'image',
+        source: 'test',
+        url: 'https://cdn.example.test/example.png',
+      },
+    ]
+
+    expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
+        media,
+        message: 'Here is the image.',
+      }),
+    ).toBe(false)
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: '  telegram-image-key  ',
+        identityId: null,
+        media,
+        message: 'Here is the image.',
+        replyToMessageId: '  reply-photo  ',
+      },
+      {
+        sendTelegram,
+        sendTelegramImage,
+      },
+    )
+
+    expect(sendTelegram).not.toHaveBeenCalled()
+    expect(sendTelegramImage).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-image-key',
+      media,
+      message: 'Here is the image.',
+      replyToMessageId: 'reply-photo',
+      target: 'telegram-chat',
+    })
+    expect(delivery).toMatchObject({
+      channel: 'telegram',
+      cleanupMessages: [
+        { messageId: 'telegram-photo-1', target: 'telegram-chat' },
+      ],
+      idempotencyKey: 'telegram-image-key',
+      messageLength: 18,
+      providerMessageId: 'telegram-photo-1',
+      providerThreadId: null,
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
+  })
+
   it('prepares Telegram voice memo audio before sending accompanying text', async () => {
     const sendTelegram = vi.fn(async () => {
       throw new Error('Telegram text should not be sent before audio is prepared.')
@@ -788,11 +863,15 @@ describe('channel helper seams', () => {
           identityId: null,
           media: [
             createVoiceMemoMedia({
-              sizeBytes: null,
-              transportRefs: {
-                telegram: {
-                  sendMode: 'generate_at_delivery',
+              transport: {
+                generation: {
+                  kind: 'elevenlabs_speech',
+                  modelId: 'eleven_multilingual_v2',
+                  outputFormat: 'mp3_44100_128',
+                  text: 'Short memo',
+                  voiceId: 'voice_murph',
                 },
+                kind: 'telegram_generation',
               },
             }),
           ],
@@ -835,18 +914,11 @@ describe('channel helper seams', () => {
     const media = [
       {
         kind: 'voice_memo' as const,
-        url: null,
-        mimeType: 'audio/mpeg' as const,
         filename: 'memo.mp3',
-        sizeBytes: 128,
-        transcript: 'Short memo',
-        source: 'elevenlabs' as const,
-        voiceId: 'voice_murph',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_voice_1',
-          },
+        transcript: null,
+        transport: {
+          attachmentId: 'attachment_voice_1',
+          kind: 'linq_attachment' as const,
         },
       },
     ]
@@ -990,10 +1062,9 @@ describe('channel helper seams', () => {
             ...media,
             createVoiceMemoMedia({
               filename: 'memo-2.mp3',
-              transportRefs: {
-                linq: {
-                  attachmentId: 'attachment_voice_2',
-                },
+              transport: {
+                attachmentId: 'attachment_voice_2',
+                kind: 'linq_attachment' as const,
               },
             }),
           ],
@@ -1047,10 +1118,18 @@ describe('channel helper seams', () => {
           idempotencyKey: null,
           identityId: null,
           media: [
-            ({
-              ...createVoiceMemoMedia(),
-              transportRefs: {},
-            } as ReturnType<typeof createVoiceMemoMedia>),
+            createVoiceMemoMedia({
+              transport: {
+                generation: {
+                  kind: 'elevenlabs_speech',
+                  modelId: 'eleven_multilingual_v2',
+                  outputFormat: 'mp3_44100_128',
+                  text: 'Short memo',
+                  voiceId: 'voice_murph',
+                },
+                kind: 'telegram_generation',
+              },
+            }),
           ],
           message: '',
           replyToMessageId: null,
@@ -1227,18 +1306,11 @@ function createVoiceMemoMedia(
 function createVoiceMemoMediaBase(): VoiceMemoMedia {
   return {
     kind: 'voice_memo' as const,
-    url: null,
-    mimeType: 'audio/mpeg' as const,
     filename: 'memo.mp3',
-    sizeBytes: 128,
-    transcript: 'Short memo',
-    source: 'elevenlabs' as const,
-    voiceId: 'voice_murph',
-    modelId: 'eleven_multilingual_v2',
-    transportRefs: {
-      linq: {
-        attachmentId: 'attachment_voice_1',
-      },
+    transcript: null,
+    transport: {
+      attachmentId: 'attachment_voice_1',
+      kind: 'linq_attachment' as const,
     },
   }
 }

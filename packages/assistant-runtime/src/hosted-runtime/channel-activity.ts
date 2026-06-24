@@ -12,7 +12,7 @@ import {
   isHostedLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+  HOSTED_ELEVENLABS_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   markLinqChatRead,
@@ -83,7 +83,7 @@ export function buildHostedTelegramVoiceMemoChannelEnv(input: {
   };
   return {
     ...pickHostedChannelEnv(source, HOSTED_TELEGRAM_CHANNEL_ENV_KEYS),
-    ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_TTS_ENV_NAMES),
+    ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_ENV_NAMES),
   };
 }
 

@@ -23,6 +23,7 @@ describe("hosted execution wake guards", () => {
     expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
+    expect(isHostedExecutionWakeKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
     expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
     expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
@@ -86,7 +87,7 @@ describe("hosted execution wake guards", () => {
     });
     const controlWake = buildHostedExecutionRuntimeControlWake({
       eventId: "runtime-control-wake-1",
-      kind: "runtime.manual-requested",
+      kind: "runtime.maintenance-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user_guard",
     });

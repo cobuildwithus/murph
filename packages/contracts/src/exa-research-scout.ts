@@ -10,7 +10,6 @@ export const EXA_RESEARCH_SCOUT_MODE = "deep-reasoning";
 export const EXA_RESEARCH_SCOUT_CATEGORY = "research paper";
 export const DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS = 60_000;
 export const MAX_RESEARCH_SCOUT_CANDIDATES = 12;
-export const EXA_RESEARCH_SCOUT_RECENT_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
 
 export const EXA_RESEARCH_SCOUT_SYSTEM_PROMPT = [
   "Find high-quality recent human health research.",
@@ -23,7 +22,7 @@ export const EXA_RESEARCH_SCOUT_SYSTEM_PROMPT = [
 ].join("\n");
 
 const EXA_RESEARCH_SCOUT_QUERY_PREFIX_LINES = [
-  "Find high-quality new human health research from the last 60 days.",
+  "Find high-quality new human health research.",
   "Research should relate to this non-identifying health interest profile.",
   "",
 ] as const;
@@ -202,27 +201,6 @@ export const researchScoutEvidenceStrengthSchema = z.enum([
 
 export const researchScoutHypeRiskSchema = z.enum(["low", "medium", "high"]);
 
-export const researchCandidateSchema = z
-  .object({
-    title: z.string().min(1).max(300),
-    sourceUrl: z.string().url(),
-    sourceName: z.string().max(120).optional(),
-    publishedAt: z.string().max(80).optional(),
-    doi: z.string().max(120).optional(),
-    pmid: z.string().max(80).optional(),
-    studyType: researchScoutStudyTypeSchema,
-    topics: z.array(tagSchema).max(16),
-    matchedProfileTags: z.array(longerTagSchema).max(16),
-    keyFinding: z.string().min(1).max(700),
-    whyItMayMatter: z.string().min(1).max(700),
-    evidenceStrength: researchScoutEvidenceStrengthSchema,
-    actionOrQuestion: z.string().min(1).max(500),
-    doNotOverinterpret: z.string().min(1).max(500),
-    clinicianDiscussionOnly: z.boolean(),
-    hypeRisk: researchScoutHypeRiskSchema,
-  })
-  .strict();
-
 export const researchScoutResultSchema = z
   .object({
     provider: z
@@ -232,7 +210,6 @@ export const researchScoutResultSchema = z
         mode: z.literal(EXA_RESEARCH_SCOUT_MODE),
       })
       .strict(),
-    candidates: z.array(researchCandidateSchema).max(MAX_RESEARCH_SCOUT_CANDIDATES),
     privacy: z
       .object({
         tokenSource: z.literal("env"),
@@ -241,7 +218,7 @@ export const researchScoutResultSchema = z
         rawVaultValuesSent: z.literal(false),
       })
       .strict(),
-    warnings: z.array(z.string().max(240)).max(8),
+    response: z.unknown(),
   })
   .strict();
 
@@ -298,9 +275,10 @@ export interface ExaResearchScoutOutputSchema {
 export interface ExaResearchScoutParsedRequest {
   numResults: number;
   profile: ResearchScoutProfile;
+  since: string;
+  until: string;
 }
 
-export type ResearchCandidate = z.infer<typeof researchCandidateSchema>;
 export type ResearchScoutInput = z.infer<typeof researchScoutInputSchema>;
 export type ResearchScoutProfile = z.infer<typeof researchScoutProfileSchema>;
 export type ResearchScoutResult = z.infer<typeof researchScoutResultSchema>;
@@ -406,16 +384,31 @@ export function buildExaResearchScoutOutputSchema(
   };
 }
 
-export function createExaResearchScoutPublishedWindow(now: Date): {
+export const EXA_RESEARCH_SCOUT_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+export function clampExaResearchScoutPublishedWindow(input: {
+  now: Date;
   since: string;
   until: string;
-} {
-  const until = new Date(now.getTime()).toISOString();
-  const since = new Date(now.getTime() - EXA_RESEARCH_SCOUT_RECENT_WINDOW_MS).toISOString();
-  return {
-    since,
-    until,
-  };
+}): { since: string; until: string } | null {
+  if (
+    !isCanonicalUtcIsoTimestamp(input.since)
+    || !isCanonicalUtcIsoTimestamp(input.until)
+  ) {
+    return null;
+  }
+  const sinceMs = Date.parse(input.since);
+  const untilMs = Date.parse(input.until);
+  const nowMs = input.now.getTime();
+  if (
+    !Number.isFinite(sinceMs)
+    || !Number.isFinite(untilMs)
+    || sinceMs >= untilMs
+    || untilMs > nowMs + EXA_RESEARCH_SCOUT_FUTURE_CLOCK_SKEW_MS
+  ) {
+    return null;
+  }
+  return { since: input.since, until: input.until };
 }
 
 export function parseExaResearchScoutRequestBody(
@@ -455,6 +448,8 @@ export function parseExaResearchScoutRequestBody(
   return {
     numResults,
     profile,
+    since: parsed.startPublishedDate,
+    until: parsed.endPublishedDate,
   };
 }
 
@@ -516,7 +511,7 @@ export function parseResearchScoutQuery(value: unknown): ResearchScoutProfile | 
   return parsed.success ? parsed.data : null;
 }
 
-export function isCanonicalUtcIsoTimestamp(value: unknown): boolean {
+export function isCanonicalUtcIsoTimestamp(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 40 || !isStrictIsoDateTime(value)) {
     return false;
   }

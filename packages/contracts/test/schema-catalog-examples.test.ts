@@ -19,6 +19,9 @@ import {
 } from "../src/examples.ts";
 import { automationFrontmatterSchema as automationFrontmatterContract } from "../src/automation.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
+import {
+  integrationIngestRecordSchema as integrationIngestRecordContract,
+} from "../src/integration-ingest.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
@@ -75,6 +78,7 @@ import {
   goalFrontmatterSchema,
   inboxAttachmentRetentionRecordSchema,
   inboxCaptureRecordSchema,
+  integrationIngestRecordSchema,
   journalDayFrontmatterSchema,
   memoryDocumentFrontmatterSchema,
   metricSampleRecordSchema,
@@ -104,6 +108,7 @@ const schemaFixtures = [
     inboxAttachmentRetentionRecordContract,
   ],
   ["inbox-capture-record", inboxCaptureRecordSchema, inboxCaptureRecordContract],
+  ["integration-ingest-record", integrationIngestRecordSchema, integrationIngestRecordContract],
   ["metric-sample-record", metricSampleRecordSchema, metricSampleRecordContract],
   ["frontmatter-allergy", allergyFrontmatterSchema, allergyFrontmatterContract],
   ["frontmatter-automation", automationFrontmatterSchema, automationFrontmatterContract],

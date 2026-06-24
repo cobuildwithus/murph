@@ -153,6 +153,12 @@ export type HostedSystemMailboxPostCheckpointRecord =
       kind: "device-sync.dirty-processed-batch";
       nextWakeAt?: string | null;
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+    }
+  | {
+      attemptId: string;
+      kind: "codex-auth.updated";
+      nextWakeAt?: null;
+      phase: "connected" | "disconnected";
     };
 
 export interface HostedConversationWakeMetrics {

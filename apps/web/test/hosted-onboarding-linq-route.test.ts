@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   finishHostedOnboardingTiming: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
     startedAtMs: 0,
@@ -36,6 +37,7 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
     ...actual,
     deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
     finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
     startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
   };
 });
@@ -55,6 +57,10 @@ describe("hosted onboarding Linq webhook route", () => {
     mocks.handleHostedOnboardingLinqWebhook.mockResolvedValue({
       ok: true,
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("does not expose a public GET health handler", () => {
@@ -118,6 +124,65 @@ describe("hosted onboarding Linq webhook route", () => {
         rawBodyBytes: JSON.stringify({ ok: true }).length,
         reason: null,
         signalAbortedBeforeReturn: false,
+      }),
+    );
+  });
+
+  it("logs redacted Linq ingress timing deltas for message webhooks", async () => {
+    const routeStartedAtMs = Date.parse("2026-06-24T18:46:10.522Z");
+    vi.spyOn(Date, "now").mockReturnValue(routeStartedAtMs);
+    mocks.handleHostedOnboardingLinqWebhook.mockResolvedValueOnce({
+      duplicate: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const rawBody = JSON.stringify({
+      api_version: "v3",
+      created_at: "2026-06-24T18:46:09.900Z",
+      data: {
+        received_at: "2026-06-24T18:46:04.780Z",
+        sent_at: "2026-06-24T18:46:04.700Z",
+      },
+      event_id: "evt_392aa7",
+      event_type: "message.received",
+      trace_id: "trace_abcdef",
+    });
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        body: rawBody,
+        headers: {
+          "x-webhook-signature": "sha256=test",
+          "x-webhook-timestamp": String(Date.parse("2026-06-24T18:46:10.000Z") / 1000),
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.route.linq-webhook.ingress",
+      expect.objectContaining({
+        diagnosticSchemaVersion: 1,
+        duplicate: false,
+        eventCreatedAtParsed: true,
+        eventCreatedAtPresent: true,
+        eventCreatedMinusMessageTimestampMs: 5120,
+        eventIdSuffix: "392aa7",
+        eventType: "message.received",
+        messageTimestampParsed: true,
+        messageTimestampSource: "received_at",
+        payloadParsed: true,
+        rawBodyBytes: new TextEncoder().encode(rawBody).byteLength,
+        responseReason: "wake-appended-active-member",
+        routeStartMinusEventCreatedAtMs: 622,
+        routeStartMinusMessageTimestampMs: 5742,
+        routeStartMinusWebhookTimestampMs: 522,
+        signalAbortedBeforeDiagnostic: false,
+        traceIdSuffix: "abcdef",
+        webhookTimestampMinusMessageTimestampMs: 5220,
+        webhookTimestampParsed: true,
+        webhookTimestampPresent: true,
       }),
     );
   });

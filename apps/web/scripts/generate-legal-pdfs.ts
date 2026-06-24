@@ -84,11 +84,11 @@ const DOCUMENTS = [
     effectiveDate: "2026-04-09",
     id: "privacy-policy",
     input: "apps/web/legal/privacy-policy.md",
-    lastUpdated: "2026-04-29",
+    lastUpdated: "2026-06-24",
     latestOutput: "apps/web/public/legal/privacy.pdf",
     slug: "privacy",
     title: "Murph Privacy Policy",
-    version: "2026-04-29",
+    version: "2026-06-24",
   },
   {
     effectiveDate: "2026-04-29",

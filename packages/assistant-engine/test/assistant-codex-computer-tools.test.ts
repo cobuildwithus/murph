@@ -59,6 +59,7 @@ describe("murph computer dynamic tools", () => {
     );
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
+    expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
     const startTool = computerTools.find((tool) =>
       tool.name === "computer_start_run"
     );
@@ -79,6 +80,44 @@ describe("murph computer dynamic tools", () => {
     );
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("message");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
+  });
+
+  it("instructs the model toward macro-step computer_act calls and gated computer_observe", () => {
+    // The 2026-06-24 rollout analysis showed the assistant burning ~$1+ per
+    // turn by running 20-30 single-action computer_act calls plus an observe
+    // before/after each one. The tool descriptions are the only surface that
+    // teaches Codex how to batch those into coherent macro-steps. If this
+    // copy drifts back toward "one click per call" wording the fingerprint
+    // gate alone won't save us — pin the macro-step + gated-observe wording
+    // here and force the team to think about it on any future rewrite.
+    const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
+    const observeTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_observe");
+    const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
+    const actDescription = actTool?.description ?? "";
+    const observeDescription = observeTool?.description ?? "";
+    const osControlDescription = osControlTool?.description ?? "";
+
+    // computer_act must teach the macro-step contract.
+    expect(actDescription).toMatch(/macro-step/iu);
+    expect(actDescription).toMatch(/combine.*verification/iu);
+    expect(actDescription).toMatch(/locator\.waitFor|waitForURL|waitForLoadState/u);
+    expect(actDescription).toMatch(/return\s+compact/iu);
+    // The pre-2026-06-24 wording is now an anti-pattern — it taught the model
+    // to call computer_observe before AND after every computer_act, which is
+    // how we got to 20+ round-trips per turn.
+    expect(actDescription).not.toMatch(/computer_observe.*before.*after/iu);
+
+    // computer_observe must teach the gated-use contract — only at run
+    // start/resume, after an unknown-outcome failure, or when an act
+    // couldn't return enough state.
+    expect(observeDescription).toMatch(/starting or resuming/iu);
+    expect(observeDescription).toMatch(/(unknown.outcome|could not return)/iu);
+    expect(observeDescription).toMatch(/do not routinely observe/iu);
+
+    // computer_os_control must reflect the new gating too: only observe
+    // AFTER an OS-level action with an unknown outcome, not routinely.
+    expect(osControlDescription).toMatch(/unknown outcome/iu);
+    expect(osControlDescription).not.toMatch(/computer_observe.*before.*after/iu);
   });
 
   it("advertises computer tools only when execution transport is available", () => {
@@ -870,31 +909,20 @@ describe("murph computer dynamic tools", () => {
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
   });
 
-  it("cancels the run if pause transport outcome is unknown before user delivery", async () => {
+  it("preserves the run if pause transport outcome is unknown before user delivery", async () => {
     const controller = new AbortController();
     controller.abort();
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
-      init?: RequestInit,
     ): Promise<Response> => {
-      if (String(url).endsWith("/pause-for-user")) {
-        throw new Error("network timeout");
+      expect(String(url)).toBe(
+        "http://web-control.worker/api/internal/computer/runs/run_123/pause-for-user",
+      );
+      if (!String(url).endsWith("/pause-for-user")) {
+        throw new Error("unexpected finish call");
       }
 
-      expect(String(url)).toBe(
-        "http://web-control.worker/api/internal/computer/runs/run_123/finish",
-      );
-      expect(JSON.parse(String(init?.body))).toEqual({
-        outcome: "failed",
-        summary: null,
-      });
-      expect(init?.signal).not.toBe(controller.signal);
-      expect(init?.signal?.aborted).toBe(false);
-      return jsonResponse({
-        ok: true,
-        runId: "run_123",
-        status: "failed",
-      });
+      throw new Error("network timeout");
     });
     const hostedToolContext = createHostedToolContext();
 
@@ -919,10 +947,11 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step; computer run was canceled",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step",
     );
+    expect(result.computerRunPausedForUser).toBe(true);
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("pauses even when required user-message delivery is unavailable", async () => {

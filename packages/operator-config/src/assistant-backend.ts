@@ -6,6 +6,7 @@ import {
   type AssistantModelTarget,
 } from './assistant-cli-contracts.js'
 import {
+  DEFAULT_MURPH_CODEX_REASONING_EFFORT,
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
@@ -30,7 +31,7 @@ export function createDefaultLocalAssistantModelTarget(): AssistantModelTarget {
     modelProvider: null,
     oss: false,
     profile: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: DEFAULT_MURPH_CODEX_REASONING_EFFORT,
     sandbox: 'danger-full-access',
   })
 }

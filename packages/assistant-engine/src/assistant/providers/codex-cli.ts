@@ -12,9 +12,6 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
-  resolveMurphDynamicTools,
-} from '../../assistant-codex/dynamic-tools.js'
-import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -199,8 +196,8 @@ export async function executeCodexAssistantTurnAttempt(
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
     allowMessageReactions: input.allowMessageReactions ?? false,
     approvalPolicy,
-    connectedAppsAvailable: input.connectedAppsAvailable ?? false,
     developerInstructions,
+    dynamicTools: input.dynamicTools,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: mergeCodexConfigOverrides({
@@ -509,16 +506,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
       ? `Conversation context:\n${conversationContextLines.join('\n')}`
       : null
   const conversationContextPresent = conversationContextPrompt !== null
-  const dynamicTools = resolveMurphDynamicTools({
-    allowFinishWithoutReply: input.input.allowFinishWithoutReply,
-    allowMessageReactions: input.input.allowMessageReactions,
-    computerToolsAvailable:
-      input.input.hostedToolContext?.computerToolsAvailable === true,
-    progressUpdatesAvailable: input.input.progressDelivery != null,
-    connectedAppsAvailable: input.input.connectedAppsAvailable === true,
-    productFeedbackAvailable:
-      typeof input.input.productFeedbackRecorder?.recordProductFeedback === 'function',
-  })
+  const dynamicTools = input.input.dynamicTools
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
   )
@@ -542,6 +530,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         messageReactionsAvailable:
           input.input.allowMessageReactions === true,
         reactionDynamicToolAvailable,
+        voiceMemoGenerationAvailable: input.input.voiceMemoDeliveryChannel != null,
         conversationHistoryCount,
         conversationHistoryPresent: conversationHistoryCount > 0,
         conversationContextBytes: byteLength(conversationContextPrompt),

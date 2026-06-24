@@ -33,7 +33,8 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionWhatsAppConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionRuntimeControlWakeKind,
+  HostedExecutionPlainRuntimeControlWakeKind,
+  HostedCodexAuthAction,
 } from "./contracts.ts";
 import type {
   HostedExecutionLogLevel,
@@ -48,6 +49,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionConversationMessageWake,
+  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -124,6 +126,8 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
+  parseHostedCodexAuthUpdate,
+  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeLatencyTraceEvent,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
@@ -246,12 +250,29 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "runtime.manual-requested":
+    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":
       return buildHostedExecutionRuntimeControlWake({
         eventId,
         kind,
+        occurredAt,
+        userId: wireUserId,
+      });
+    case "runtime.codex-auth-requested":
+      assertExactHostedCodexAuthKeys(record, [
+        "action",
+        "attemptId",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution runtime.codex-auth-requested wake");
+      return buildHostedExecutionCodexAuthRequestedWake({
+        action: parseHostedCodexAuthAction(record.action),
+        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
+        eventId,
         occurredAt,
         userId: wireUserId,
       });
@@ -741,11 +762,25 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "runtime.manual-requested":
+    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":
       return {
-        kind: kind as HostedExecutionRuntimeControlWakeKind,
+        kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
+        userId,
+      };
+    case "runtime.codex-auth-requested":
+      assertExactHostedCodexAuthKeys(record, [
+        "action",
+        "attemptId",
+        "kind",
+        "userId",
+      ], "Hosted execution runtime.codex-auth-requested event");
+      return {
+        action: parseHostedCodexAuthAction(record.action),
+        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
+        kind,
         userId,
       };
     default:
@@ -956,6 +991,35 @@ function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExec
     throw new TypeError(`${label} is invalid.`);
   }
   return kind;
+}
+
+function parseHostedCodexAuthAction(value: unknown): HostedCodexAuthAction {
+  const action = requireString(value, "Hosted Codex auth action");
+  if (action === "connect" || action === "disconnect") {
+    return action;
+  }
+  throw new TypeError("Hosted Codex auth action is invalid.");
+}
+
+function parseHostedCodexAuthAttemptId(value: unknown): string {
+  const attemptId = requireString(value, "Hosted Codex auth attemptId");
+  if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
+    throw new TypeError("Hosted Codex auth attemptId is invalid.");
+  }
+  return attemptId;
+}
+
+function assertExactHostedCodexAuthKeys(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+  label: string,
+): void {
+  const allowed = new Set(keys);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+    }
+  }
 }
 
 function parseHostedConversationMessageChannel(

@@ -1,4 +1,4 @@
-import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+import { canonicalizeWearableProviderSlug } from "@murphai/health-metrics";
 
 import { dedupeExactMetricCandidates } from "./dedupe.ts";
 import {
@@ -420,7 +420,7 @@ function scoreJunctionSourcePolicy(
     return JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST;
   }
 
-  const sourceProvider = canonicalizeDeviceProviderSlug(sourceProviderSlug);
+  const sourceProvider = canonicalizeWearableProviderSlug(sourceProviderSlug);
   const directCandidateExists = candidates.some((other) => {
     const provider = normalizeLowercaseString(other.provider);
     if (
@@ -431,7 +431,7 @@ function scoreJunctionSourcePolicy(
       return false;
     }
 
-    return canonicalizeDeviceProviderSlug(provider) === sourceProvider;
+    return canonicalizeWearableProviderSlug(provider) === sourceProvider;
   });
   return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }

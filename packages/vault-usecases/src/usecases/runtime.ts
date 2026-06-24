@@ -75,6 +75,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
       "validateVault",
       "repairVault",
       "repairJunctionWorkoutHeartRateZones",
+      "runIntegrationIngestMigration",
       "detectWearableStorageMigrationCandidates",
       "runWearableStorageMigrationPass",
       "addMeal",

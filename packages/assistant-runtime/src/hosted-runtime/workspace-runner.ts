@@ -75,6 +75,7 @@ import {
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
+  HOSTED_ASSISTANT_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
@@ -172,6 +173,7 @@ export interface HostedWorkspaceRunnerPlatform
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
+  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
@@ -179,6 +181,11 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
+}
+
+export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
+  nextWakeAt: string;
+  nextWakeReason: string | null;
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
@@ -190,6 +197,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
+  deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; gates the durable conversation
   // consumed-watermark ack (only a clean pass with zero failed replies and no
@@ -222,6 +230,7 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
 export interface HostedWorkspaceDurableCheckpointEffectResult {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  requiresFollowUpCheckpoint?: boolean;
 }
 
 export type HostedWorkspaceDurableCheckpointEffect =
@@ -561,6 +570,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
     await foregroundMailboxImportLoop.stop();
+    if (foregroundConversationWorkObserved) {
+      // stop() drains any foreground import already in flight. Preserve the
+      // selected durable wake, but nudge the outer dirty loop to run the new
+      // foreground pass before idle checkpointing when there is assistant work
+      // queued from that import.
+      await notifyPendingForegroundAssistantInputWake({
+        now: input.now,
+        runtimeWakeSignal: input.runtimeWakeSignal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
     try {
       postCheckpoint = await withHostedCanonicalWritePort(
@@ -585,8 +605,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           platform: input.platform,
           runtimeLogContext: input.runtimeLogContext,
         });
-        projectedWakeRequiresCheckpoint = true;
-        mergeDeferredPostCheckpointWake({
+        projectedWakeRequiresCheckpoint = mergeDeferredPostCheckpointWake({
           assistantPhaseResult,
           postCheckpoint,
         });
@@ -617,6 +636,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
       now: input.now,
+      projectedWakeRequiresCheckpoint,
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
@@ -1472,14 +1492,22 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 async function reconcilePendingAssistantInputWake(input: {
   foregroundConversationWorkObserved: boolean;
   now?: (() => string) | null;
+  projectedWakeRequiresCheckpoint: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
 }): Promise<void> {
-  if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
-    return;
+  if (input.result.nextWakeAt) {
+    const nextWakeReason = input.result.nextWakeReason ?? "assistant";
+    if (
+      input.projectedWakeRequiresCheckpoint
+      ||
+      nextWakeReason !== "assistant"
+      || !hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now)
+    ) {
+      return;
+    }
   }
-
-  const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
+  const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
     now: input.now,
     vaultRoot: input.vaultRoot,
   });
@@ -1487,18 +1515,40 @@ async function reconcilePendingAssistantInputWake(input: {
     return;
   }
 
-  // Fresh foreground input was not in the assistant's original candidate set.
-  // Older pending input may retain a future wake that paces a retry.
-  if (
-    !input.foregroundConversationWorkObserved
-    && input.result.nextWakeAt
-    && !hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now)
-  ) {
+  input.result.nextWakeAt = wakeAt;
+  input.result.nextWakeReason = "assistant";
+}
+
+async function notifyPendingForegroundAssistantInputWake(input: {
+  now?: (() => string) | null;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+  vaultRoot: string;
+}): Promise<void> {
+  if (!input.runtimeWakeSignal) {
+    return;
+  }
+  const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!wakeAt) {
     return;
   }
 
-  input.result.nextWakeAt = wakeAt;
-  input.result.nextWakeReason = "assistant";
+  input.runtimeWakeSignal.notify();
+}
+
+async function resolvePendingForegroundAssistantInputWakeAt(input: {
+  now?: (() => string) | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
+    return null;
+  }
+  return await resolveHostedPendingAssistantInputWakeAt({
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 function canSkipPendingAssistantInputProbe(vaultRoot: string): boolean {
@@ -2016,33 +2066,45 @@ function requireHostedWorkspaceAssistantPhaseCheckpointReason(
 function mergeDeferredPostCheckpointWake(input: {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
-}): void {
+}): boolean {
   if (input.assistantPhaseResult.progressed !== true) {
-    return;
+    return false;
   }
 
   if (!Object.hasOwn(input.postCheckpoint, "nextWakeAt")) {
-    return;
+    return false;
   }
 
+  const previousWake = createHostedRuntimeWakeCandidate(
+    input.assistantPhaseResult.nextWakeAt ?? null,
+    input.assistantPhaseResult.nextWakeReason ?? null,
+  );
   if (input.postCheckpoint.nextWakeAt === null || input.postCheckpoint.nextWakeAt === undefined) {
     input.assistantPhaseResult.nextWakeAt = null;
     input.assistantPhaseResult.nextWakeReason = null;
-    return;
+    return false;
   }
 
+  const postCheckpointWake = createHostedRuntimeWakeCandidate(
+    input.postCheckpoint.nextWakeAt ?? null,
+    input.postCheckpoint.nextWakeReason ?? null,
+  );
   const selectedWake = selectHostedRuntimeWakeCandidate([
-    createHostedRuntimeWakeCandidate(
-      input.assistantPhaseResult.nextWakeAt ?? null,
-      input.assistantPhaseResult.nextWakeReason ?? null,
-    ),
-    createHostedRuntimeWakeCandidate(
-      input.postCheckpoint.nextWakeAt ?? null,
-      input.postCheckpoint.nextWakeReason ?? null,
-    ),
+    previousWake,
+    postCheckpointWake,
   ]);
   input.assistantPhaseResult.nextWakeAt = selectedWake.at;
   input.assistantPhaseResult.nextWakeReason = selectedWake.reason;
+  if (
+    selectedWake.at !== postCheckpointWake.at
+    || selectedWake.reason !== postCheckpointWake.reason
+  ) {
+    return false;
+  }
+
+  return selectedWake.at !== previousWake.at
+    || selectedWake.reason !== previousWake.reason
+    || postCheckpointWake.reason !== HOSTED_ASSISTANT_WAKE_REASON;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {

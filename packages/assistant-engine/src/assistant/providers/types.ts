@@ -1,9 +1,7 @@
 import type {
-  AssistantApprovalPolicy,
   AssistantChatProvider,
   AssistantMessageReaction,
   AssistantResponseMedia,
-  AssistantSandbox,
   AssistantSessionBinding,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
@@ -11,6 +9,7 @@ import type {
 } from '../provider-traces.js'
 import type {
   AssistantProviderConfig,
+  AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import type {
   AssistantProviderProgressEvent as SharedAssistantProviderProgressEvent,
@@ -82,23 +81,25 @@ export interface AssistantProviderConversationMessage {
  */
 export type AssistantProviderServiceTier = 'flex'
 
-export interface AssistantProviderTurnInput {
+export interface AssistantProviderDynamicTool {
+  readonly description: string
+  readonly inputSchema: object
+  readonly name: string
+  readonly namespace: string
+}
+
+export interface AssistantProviderTurn {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
-  connectedAppsAvailable?: boolean | null
-  approvalPolicy?: AssistantApprovalPolicy | null
-  codexCommand?: string | null
-  codexHome?: string | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
+  dynamicTools: readonly AssistantProviderDynamicTool[]
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  model?: string | null
-  modelProvider?: string | null
   onCodexThreadHistoryUnsafe?: ((event?: {
     deliveryContextOrdinal?: number
   }) => Promise<void> | void) | null
@@ -108,18 +109,13 @@ export interface AssistantProviderTurnInput {
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  oss?: boolean | null
-  profile?: string | null
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
-  provider?: AssistantChatProvider | null
-  reasoningEffort?: string | null
   publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
-  sandbox?: AssistantSandbox | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -134,6 +130,11 @@ export interface AssistantProviderTurnInput {
   usageAttribution?: AssistantUsageAttribution | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   workingDirectory: string
+}
+
+export interface AssistantProviderTurnInput {
+  providerConfig: AssistantProviderConfigLike
+  turn: AssistantProviderTurn
 }
 
 export interface AssistantProviderFreshThreadFallbackInput {
@@ -153,49 +154,8 @@ export interface AssistantProviderCodexResume {
   prepareFreshThreadFallback: AssistantProviderFreshThreadFallbackResolver
 }
 
-export interface AssistantProviderTurnExecutionInput {
-  activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
-  activeTurnId?: string | null
-  activeTurnSessionId?: string | null
-  allowFinishWithoutReply?: boolean | null
-  allowMessageReactions?: boolean | null
-  abortSignal?: AbortSignal
-  connectedAppsAvailable?: boolean | null
-  conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
-  env?: NodeJS.ProcessEnv
-  developerInstructions?: string | null
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
-  onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
-  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
-  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  prompt?: string | null
-  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
+export type AssistantProviderTurnExecutionInput = AssistantProviderTurn & {
   providerConfig: AssistantProviderConfig
-  providerFetch?: typeof fetch | null
-  providerRequestOrdinal?: number | null
-  publicInternetFetch?: typeof fetch | null
-  requireGeneratedImageUploader?: boolean | null
-  resume?: AssistantProviderCodexResume | null
-  serviceTier?: AssistantProviderServiceTier | null
-  sessionContext?: {
-    binding?: AssistantSessionBinding | null
-  }
-  showThinkingTraces?: boolean
-  systemPrompt?: string | null
-  progressDelivery?: AssistantProgressDelivery | null
-  hostedToolContext?: AssistantHostedToolContext | null
-  turnContextPrompt?: string | null
-  userPrompt?: string | null
-  userMessageContent?: AssistantUserMessageContentPart[] | null
-  usageAttribution?: AssistantUsageAttribution | null
-  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
-  workingDirectory: string
 }
 
 export interface AssistantProviderUsage {

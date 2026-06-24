@@ -5,3 +5,4 @@ export * from "./event-log.ts";
 export * from "./snapshot.ts";
 export * from "./opaque-ids.ts";
 export * from "./errors.ts";
+export { isGatewayIsoTimestamp, parseGatewayTimestampMs } from "./shared.ts";

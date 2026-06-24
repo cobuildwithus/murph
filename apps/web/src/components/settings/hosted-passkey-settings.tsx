@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  type User,
-  useCreateWallet,
-  useLinkWithPasskey,
-  useMfaEnrollment,
-  usePrivy,
-} from "@privy-io/react-auth";
 import { Fingerprint } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
 import { Button } from "@/src/components/ui/button";
 import { cn } from "@/src/lib/utils";
 
@@ -21,89 +13,24 @@ export function HostedPasskeySettings({ authenticated }: { authenticated: boolea
     return null;
   }
 
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
-
-  if (!appId) {
-    return null;
-  }
-
-  return (
-    <HostedPrivyProvider appId={appId} clientId={clientId}>
-      <PasskeySetup />
-    </HostedPrivyProvider>
-  );
+  return <PasskeySetup />;
 }
 
-type SetupStep = "create-passkey" | "create-wallet" | "enroll-mfa";
-
 function PasskeySetup() {
-  const { user, ready } = usePrivy();
-  const { linkWithPasskey } = useLinkWithPasskey();
-  const { createWallet } = useCreateWallet();
-  const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
-
-  // The setup handler chains Privy calls and reads `user` after each one to advance.
-  // The `user` captured by the handler closure is stale after an `await`, so a ref
-  // tracks committed Privy user updates while the polling helper waits.
-  const userRef = useRef<User | null>(user);
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
-
-  const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const hasPasskeyMfa = user?.mfaMethods.includes("passkey") ?? false;
-  const isRunning = activeStep !== null;
-  const showAction = ready && !hasPasskeyMfa;
-  const valueText = hasPasskeyMfa
+  const {
+    configured,
+    ensureConfigured,
+    error,
+    pendingLabel,
+    ready,
+  } = usePasskeyWalletMfa();
+  const isRunning = pendingLabel !== null;
+  const showAction = ready && !configured;
+  const valueText = configured
     ? "Enabled"
     : !ready
       ? "Checking…"
       : "Not configured";
-
-  async function handleSetup() {
-    setError(null);
-    try {
-      if (!findPasskey(userRef.current)) {
-        setActiveStep("create-passkey");
-        await linkWithPasskey();
-        await waitForUserState(
-          userRef,
-          (u) => findPasskey(u) !== undefined,
-          stepLabel("create-passkey"),
-        );
-      }
-      if (!hasEmbeddedWallet(userRef.current)) {
-        setActiveStep("create-wallet");
-        await createWallet();
-        await waitForUserState(
-          userRef,
-          hasEmbeddedWallet,
-          stepLabel("create-wallet"),
-        );
-      }
-      if (!userRef.current?.mfaMethods.includes("passkey")) {
-        setActiveStep("enroll-mfa");
-        const passkey = findPasskey(userRef.current);
-        if (!passkey) {
-          throw new Error("Passkey not found after creation.");
-        }
-        await initEnrollmentWithPasskey();
-        await submitEnrollmentWithPasskey(
-          { credentialIds: [passkey.credentialId] },
-          // Keeps the passkey usable as a login method too. Switch to true only after we
-          // also gate enrollment on "user has at least one non-passkey login method".
-          { removeForLogin: false },
-        );
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Setup failed. Try again.");
-    } finally {
-      setActiveStep(null);
-    }
-  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -111,7 +38,7 @@ function PasskeySetup() {
         <Fingerprint
           className={cn(
             "size-[18px] shrink-0",
-            hasPasskeyMfa ? "text-[#7a8c6e]" : "text-muted-foreground",
+            configured ? "text-[#7a8c6e]" : "text-muted-foreground",
           )}
           strokeWidth={1.6}
           aria-hidden="true"
@@ -123,7 +50,7 @@ function PasskeySetup() {
           <p
             className={cn(
               "break-words font-serif text-base tracking-tight",
-              hasPasskeyMfa ? "text-foreground" : "text-muted-foreground",
+              configured ? "text-foreground" : "text-muted-foreground",
             )}
           >
             {valueText}
@@ -137,7 +64,7 @@ function PasskeySetup() {
                   size="default"
                   variant="default"
                   disabled={isRunning}
-                  onClick={() => void handleSetup()}
+                  onClick={() => void ensureConfigured().catch(() => undefined)}
                 >
                   {isRunning ? "Setting up…" : "Set up"}
                 </Button>
@@ -147,49 +74,9 @@ function PasskeySetup() {
       </div>
       {error
         ? <SettingsStatusLine message={error} tone="destructive" />
-        : activeStep
-          ? <SettingsStatusLine message={`${stepLabel(activeStep)}…`} tone="neutral" />
+        : pendingLabel
+          ? <SettingsStatusLine message={pendingLabel} tone="neutral" />
           : null}
     </div>
   );
-}
-
-function stepLabel(step: SetupStep): string {
-  switch (step) {
-    case "create-passkey":
-      return "Creating passkey";
-    case "create-wallet":
-      return "Setting up secure container";
-    case "enroll-mfa":
-      return "Enrolling passkey as MFA factor";
-  }
-}
-
-function findPasskey(user: User | null) {
-  return user?.linkedAccounts.find(
-    (account): account is typeof account & { type: "passkey"; credentialId: string } =>
-      account.type === "passkey",
-  );
-}
-
-function hasEmbeddedWallet(user: User | null): boolean {
-  return user?.linkedAccounts.some((account) => account.type === "wallet") ?? false;
-}
-
-async function waitForUserState(
-  userRef: { current: User | null },
-  predicate: (user: User) => boolean,
-  label: string,
-  timeoutMs = 5_000,
-  intervalMs = 50,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const current = userRef.current;
-    if (current && predicate(current)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`${label} took too long. Please try again.`);
 }

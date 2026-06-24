@@ -1,10 +1,8 @@
 import { z } from 'zod'
 
 import {
-  HOSTED_CONNECTED_APPS_PATH,
   hostedConnectedAppsExecuteInputSchema,
   hostedConnectedAppsManageInputSchema,
-  hostedConnectedAppsResponseSchema,
   hostedConnectedAppsSearchInputSchema,
   type HostedConnectedAppsExecuteInput,
   type HostedConnectedAppsManageInput,
@@ -12,12 +10,26 @@ import {
   type HostedConnectedAppsSearchInput,
 } from '@murphai/hosted-execution/connected-apps'
 
+import type {
+  AssistantConnectedAppsPort,
+} from '../../assistant/connected-apps-port.js'
+
 import {
-  buildSafeToolCallValidationDigest,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
+import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const CONNECTED_APPS_RESULT_MAX_BYTES = 120_000
+
+// Composio tool results commonly include raw HTML email bodies (Gmail
+// FETCH_MESSAGE_BY_MESSAGE_ID) and similar markup-heavy payloads. The model
+// processes plain text just as well and pays per token for every markup
+// character, so strip HTML to text before serializing. Only strings that look
+// HTML-shaped get touched; everything else (descriptions, slugs, schemas)
+// passes through unchanged.
+const CONNECTED_APPS_HTML_MIN_LENGTH = 200
+const CONNECTED_APPS_HTML_TAG_SENTINEL =
+  /<(?:!doctype|html|body|head|table|div|p|span|br|a\s|img|h[1-6]|td|tr|style|script)\b/iu
 
 export const MURPH_CONNECTED_APPS_MANAGE_TOOL = {
   namespace: 'murph',
@@ -73,89 +85,50 @@ export function readConnectedAppsDynamicToolRequest(input: {
 }): ConnectedAppsDynamicToolRequest | null {
   switch (input.tool) {
     case MURPH_CONNECTED_APPS_MANAGE_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsManageInputSchema,
-        schemaName: 'murph.connected_apps_manage.input',
         schemaRootKeys: ['action', 'toolkit', 'alias', 'account'],
         toolName: 'murph.connected_apps_manage',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-manage' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-manage' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     case MURPH_CONNECTED_APPS_SEARCH_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsSearchInputSchema,
-        schemaName: 'murph.connected_apps_search.input',
-        schemaRootKeys: Object.keys(hostedConnectedAppsSearchInputSchema.shape),
         toolName: 'murph.connected_apps_search',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-search' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-search' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     case MURPH_CONNECTED_APPS_EXECUTE_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsExecuteInputSchema,
-        schemaName: 'murph.connected_apps_execute.input',
-        schemaRootKeys: Object.keys(hostedConnectedAppsExecuteInputSchema.shape),
         toolName: 'murph.connected_apps_execute',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-execute' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-execute' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     default:
       return null
   }
 }
 
-function parseConnectedAppsArguments<T>(input: {
-  argumentsValue: unknown
-  schema: z.ZodType<T>
-  schemaName: string
-  schemaRootKeys: readonly string[]
-  toolName: string
-}):
-  | { data: T; ok: true }
-  | {
-      ok: false
-      request: Extract<
-        ConnectedAppsDynamicToolRequest,
-        { kind: 'invalid-connected-apps-arguments' }
-      >
-    } {
-  const parsed = input.schema.safeParse(input.argumentsValue)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      request: {
-        kind: 'invalid-connected-apps-arguments',
-        validationDigest: buildSafeToolCallValidationDigest({
-          error: parsed.error,
-          rawInput: input.argumentsValue,
-          requestedToolName: input.toolName,
-          schemaName: input.schemaName,
-          schemaRootKeys: input.schemaRootKeys,
-          toolName: input.toolName,
-        }),
-      },
-    }
-  }
-
-  return {
-    data: parsed.data,
-    ok: true,
-  }
+function invalidConnectedAppsArgumentsRequest(
+  validationDigest: SafeToolCallValidationDigest,
+): ConnectedAppsDynamicToolRequest {
+  return { kind: 'invalid-connected-apps-arguments', validationDigest }
 }
 
 export async function executeConnectedAppsDynamicTool(input: {
   abortSignal?: AbortSignal | null
-  available: boolean
-  fetchImpl: typeof fetch
+  connectedApps: AssistantConnectedAppsPort
   request: Exclude<
     ConnectedAppsDynamicToolRequest,
     { kind: 'invalid-connected-apps-arguments' }
@@ -166,41 +139,14 @@ export async function executeConnectedAppsDynamicTool(input: {
     success: boolean
   }
 }> {
-  if (!input.available) {
-    return connectedAppsTextResult(
-      false,
-      'connected apps are unavailable without hosted connected-app transport',
-    )
-  }
-
   const requestBody: HostedConnectedAppsRequest = toHostedConnectedAppsRequest(input.request)
 
   try {
-    const response = await input.fetchImpl(
-      new URL(HOSTED_CONNECTED_APPS_PATH, 'http://web-control.worker').toString(),
-      {
-        body: JSON.stringify(requestBody),
-        headers: {
-          'content-type': 'application/json',
-        },
-        method: 'POST',
-        signal: input.abortSignal ?? undefined,
-      },
-    )
-
-    if (!response.ok) {
-      return connectedAppsTextResult(
-        false,
-        await readConnectedAppsApiError(response),
-      )
-    }
-
-    const parsed = hostedConnectedAppsResponseSchema.safeParse(await response.json())
-    if (!parsed.success) {
-      return connectedAppsTextResult(false, 'connected apps returned an invalid response')
-    }
-
-    const text = serializeConnectedAppsResult(parsed.data.result)
+    const response = await input.connectedApps.request(requestBody, {
+      signal: input.abortSignal ?? null,
+    })
+    const compacted = compactConnectedAppsResult(response.result)
+    const text = serializeConnectedAppsResult(compacted)
     if (!text) {
       return connectedAppsTextResult(
         false,
@@ -238,30 +184,87 @@ function serializeConnectedAppsResult(value: unknown): string | null {
   }
 }
 
-async function readConnectedAppsApiError(response: Response): Promise<string> {
-  const fallback = `connected apps API failed with status ${response.status}`
-  try {
-    const value = await response.json()
-    const record = asRecord(value)
-    const error = asRecord(record?.error)
-    const code = typeof error?.code === 'string' ? error.code : null
-    const message = typeof error?.message === 'string' ? error.message : null
-    if (code && message) {
-      return `${fallback}: ${code}: ${message}`
-    }
-    if (code) {
-      return `${fallback}: ${code}`
-    }
-  } catch {
-    // Internal route errors are JSON; keep a bounded fallback for transport drift.
+// Walks the provider result and replaces any HTML-shaped string with its
+// stripped plain-text equivalent. Non-string values, short strings, and
+// strings without HTML tag markers pass through untouched, so this only
+// affects payloads that would otherwise burn tokens on markup (chiefly Gmail
+// message bodies). Exported for the unit test.
+export function compactConnectedAppsResult(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length < CONNECTED_APPS_HTML_MIN_LENGTH) return value
+    if (!CONNECTED_APPS_HTML_TAG_SENTINEL.test(value)) return value
+    return stripHtmlForConnectedAppsResult(value)
   }
-  return fallback
+  if (Array.isArray(value)) {
+    return value.map((item) => compactConnectedAppsResult(item))
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = compactConnectedAppsResult(v)
+    }
+    return out
+  }
+  return value
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+function stripHtmlForConnectedAppsResult(value: string): string {
+  return value
+    // Drop noise: style/script/head blocks carry no model-useful signal and
+    // they account for most of the markup volume in Gmail HTML envelopes.
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, ' ')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/giu, ' ')
+    // Preserve the most semantically important attributes: a hyperlink's
+    // href (tracking links, order URLs, calendar invites, unsubscribe) and
+    // an image's alt text. The opening-tag pattern uses a quote-aware
+    // tokenizer (`[^>"']` OR a complete `"..."` / `'...'` string) so that
+    // attribute values containing literal `>` (`<a title="Reply >>"...>`,
+    // common in marketing email and table-of-contents emails) do not abort
+    // the match and silently drop the href. href and alt are then extracted
+    // from the captured opening tag with a separate regex so both single-
+    // and double-quoted forms work without nested capture-group plumbing.
+    .replace(
+      /<a\b(?:[^>"']|"[^"]*"|'[^']*')*?>([\s\S]*?)<\/a>/giu,
+      (match, inner: string) => {
+        const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const href = hrefMatch ? (hrefMatch[1] ?? hrefMatch[2] ?? null) : null
+        const label = inner.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
+        if (!href) return label
+        if (!label) return href
+        return label === href ? href : `${label} (${href})`
+      },
+    )
+    .replace(
+      /<img\b(?:[^>"']|"[^"]*"|'[^']*')*?>/giu,
+      (match) => {
+        const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const alt = altMatch ? (altMatch[1] ?? altMatch[2] ?? null) : null
+        return alt ? `[image: ${alt}]` : ' '
+      },
+    )
+    // Block-level breaks become real newlines so flowing prose survives.
+    .replace(/<br\s*\/?>/giu, '\n')
+    .replace(/<\/(?:p|div|li|tr|h[1-6])>/giu, '\n')
+    // Every remaining tag goes; we've already pulled out the bits that
+    // carried information beyond their text content.
+    .replace(/<[^>]+>/gu, ' ')
+    .replace(/&nbsp;/giu, ' ')
+    .replace(/&amp;/giu, '&')
+    .replace(/&lt;/giu, '<')
+    .replace(/&gt;/giu, '>')
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;/giu, "'")
+    .replace(/&#(\d+);/gu, (_match, code: string) => {
+      const num = Number(code)
+      return Number.isInteger(num) && num >= 32 && num <= 0x10ffff
+        ? String.fromCodePoint(num)
+        : ' '
+    })
+    .replace(/\s+\n/gu, '\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .replace(/[ \t]{2,}/gu, ' ')
+    .trim()
 }
 
 function connectedAppsTextResult(success: boolean, text: string) {

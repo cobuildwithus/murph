@@ -2,6 +2,7 @@ import type {
   AssistantInputCandidate,
   AssistantInputConversationRef,
 } from '../input-source.js'
+import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutomationInputSummary {
   inputId: string
@@ -13,6 +14,10 @@ export interface AssistantAutomationInputSummary {
   text: string | null
   attachmentCount: number
   actorIsSelf: boolean
+  // Provider-level native reply target (Linq only today). Carried on the
+  // summary so adjacent-grouping can split across reply-anchor boundaries
+  // without re-reading source metadata.
+  replyToMessageId: string | null
 }
 
 export function assistantAutomationInputSummaryFromCandidate(
@@ -26,6 +31,9 @@ export function assistantAutomationInputSummaryFromCandidate(
     threadId: input.event.inputId,
     threadIsDirect: null,
   }
+  const sourceMetadata = input.event.sourceMetadata
+  const replyToMessageId =
+    sourceMetadata?.kind === 'linq' ? sourceMetadata.replyToMessageId ?? null : null
 
   return {
     inputId: input.event.inputId,
@@ -37,6 +45,7 @@ export function assistantAutomationInputSummaryFromCandidate(
     text: input.event.transcriptText ?? input.event.text,
     attachmentCount: input.event.attachmentCount,
     actorIsSelf: conversation.actorIsSelf,
+    replyToMessageId,
   }
 }
 
@@ -49,5 +58,5 @@ export function compareAssistantInputSummaryOrder(
 
   return leftTimestamp === rightTimestamp
     ? left.inputId.localeCompare(right.inputId)
-    : leftTimestamp.localeCompare(rightTimestamp)
+    : compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
 }

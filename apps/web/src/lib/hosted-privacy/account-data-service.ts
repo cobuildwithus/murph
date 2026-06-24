@@ -41,8 +41,6 @@ import {
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
-  HOSTED_DATA_EXPORT_SCHEMA,
 } from "./account-data-shared";
 
 export type HostedAccountStoreDeletionMode =
@@ -51,17 +49,10 @@ export type HostedAccountStoreDeletionMode =
   | "local-reference-delete"
   | "documented-retention";
 
-export type HostedAccountStoreExportMode =
-  | "decoded-redacted-data"
-  | "metadata-and-counts"
-  | "not-exported-secret"
-  | "documented-only";
-
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
   readonly label: string;
   readonly deletion: HostedAccountStoreDeletionMode;
-  readonly export: HostedAccountStoreExportMode;
   readonly note: string;
 }
 
@@ -70,315 +61,276 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_member",
     label: "Prisma hosted member record",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
   },
   {
     slug: "prisma.hosted_web_session",
     label: "Hosted web app sessions",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes.",
+  },
+  {
+    slug: "prisma.hosted_sensitive_action_challenge",
+    label: "Short-lived sensitive-action challenges",
+    deletion: "live-delete",
+    note: "Deletes short-lived hashed approval challenges. User exports omit challenge rows, token hashes, signatures, and wallet authorization material.",
   },
   {
     slug: "prisma.hosted_member_identity",
     label: "Privy identity and encrypted contact hints",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Confirmed export includes decrypted user-facing phone, Privy, and wallet identity fields while omitting lookup keys and active phone-code attempt IDs.",
   },
   {
     slug: "prisma.hosted_member_routing",
     label: "Linq, Telegram, reply-alias routing bindings",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Confirmed export includes decrypted user-facing Linq and Telegram routing IDs and pending Linq participant contacts while omitting lookup keys used for inbound traffic matching.",
   },
   {
     slug: "prisma.hosted_member_email_authorization",
     label: "Email authorization state",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Confirmed export includes verified-email and direct-public-sender addresses when available while omitting address lookup keys.",
   },
   {
     slug: "prisma.hosted_member_billing_ref",
     label: "Local Stripe billing references",
     deletion: "local-reference-delete",
-    export: "decoded-redacted-data",
     note: "Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
     label: "Hosted mailbox envelopes",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes lane items, inline ciphertext, payload refs, dedupe keys, and sequence counters. Export includes mailbox envelope metadata and omits decoded payload bodies.",
   },
   {
     slug: "prisma.hosted_mailbox_payload",
     label: "Hosted mailbox payload ciphertext",
     deletion: "live-delete",
-    export: "not-exported-secret",
     note: "Deletes encrypted payload blobs. Export reports payload presence and bytes while omitting ciphertext and decoded arbitrary payload JSON.",
   },
   {
     slug: "prisma.hosted_mailbox_lane_counter",
     label: "Hosted mailbox lane counters",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes per-lane sequence counters so deleted users cannot resume mailbox lanes.",
   },
   {
     slug: "prisma.hosted_ingress_latency_trace",
     label: "Hosted ingress latency traces",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes hosted ingress timing rows. Export includes aggregate counts only and omits internal correlation identifiers.",
   },
   {
     slug: "prisma.hosted_workspace",
     label: "Hosted workspace state",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, inbox media-retention wake state, and redacted status.",
   },
   {
     slug: "prisma.hosted_computer_run",
     label: "Hosted computer-use runs",
     deletion: "live-delete",
-    export: "metadata-and-counts",
-    note: "Deletes Kernel browser sessions and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits live-view URLs, Kernel session ids, and Kernel profile names.",
+    note: "Deletes Kernel browser sessions, Managed Auth connections, and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits credentials, auth connection ids, live-view URLs, Kernel session ids, and Kernel profile names.",
   },
   {
     slug: "prisma.hosted_computer_handoff",
     label: "Hosted computer-use handoffs",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes short-lived handoff rows and token hashes. Export includes handoff status metadata and omits token hashes.",
   },
   {
     slug: "prisma.hosted_runtime_log",
     label: "Runtime logs",
     deletion: "live-delete",
-    export: "documented-only",
     note: "Deletes per-user hosted runtime logs and redacted runtime JSON. Export omits runtime log rows and counts.",
   },
   {
     slug: "prisma.hosted_user_crypto_envelope",
     label: "Hosted crypto domain root envelopes",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes signed per-user domain root envelopes. Export reports counts only and omits signed envelope JSON.",
   },
   {
     slug: "prisma.hosted_user_crypto_audit",
     label: "Hosted crypto audit rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes per-user hosted crypto provisioning audit rows. Export reports counts only and omits recipient and root-key audit payloads.",
   },
   {
     slug: "prisma.hosted_ai_usage",
     label: "AI usage and metering rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes member-scoped usage rows. Already-submitted external billing/metering data may remain under vendor retention.",
   },
   {
     slug: "prisma.hosted_ai_usage_period",
     label: "AI usage allowance period rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes member-scoped included-allowance spend aggregates used by the hosted AI usage gate.",
   },
   {
     slug: "prisma.hosted_product_feedback",
     label: "Hosted product feedback rows",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
     label: "Linq daily message counters",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes member-scoped Linq daily inbound/outbound quota counters.",
   },
   {
     slug: "prisma.hosted_invite",
     label: "Hosted invite records",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes invite codes and channel metadata owned by the member.",
   },
   {
     slug: "prisma.hosted_consent_event",
     label: "Hosted consent event records",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Deletes member-scoped consent audit events before the member row; export includes scope/action/version metadata without secrets.",
   },
   {
     slug: "prisma.hosted_consent_grant",
     label: "Hosted consent grant records",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Deletes the member's current consent grants before the member row; export includes scope/status/version metadata.",
   },
   {
     slug: "prisma.hosted_vault_share",
     label: "Hosted vault share grants",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
     note: "Deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed; export includes share rows where the member is grantor or destination.",
   },
   {
     slug: "prisma.device_connection",
     label: "Device provider connections and tokens",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
   },
   {
     slug: "prisma.hosted_connected_apps_session",
     label: "Connected-app Tool Router sessions",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Revokes provider access through Composio before local Tool Router session references are deleted.",
   },
   {
     slug: "prisma.hosted_connected_app_connect_intent",
     label: "Connected-app connection intents",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes short-lived connected-app connection claims and account ids after provider revocation has been attempted.",
   },
   {
     slug: "prisma.device_sync_dirty_connection",
     label: "Device sync dirty state",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes pending per-connection dirty sync metadata before device connection rows so deletion does not rely on cascades.",
   },
   {
     slug: "prisma.device_sync_dirty_payload",
     label: "Device sync dirty payload rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes pending provider payload jobs before dirty-state and connection rows so raw provider payload retention is bounded.",
   },
   {
     slug: "prisma.device_token_audit",
     label: "Device token audit rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes token audit history by user before device connection rows are removed.",
   },
   {
     slug: "prisma.device_sync_signal",
     label: "Device sync signal rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes pre-existing per-user wake/sync signal history. Deletion-time provider revocation does not enqueue new disconnect or wake work.",
   },
   {
     slug: "prisma.device_oauth_session",
     label: "Device OAuth sessions",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes pending provider OAuth state rows for the member.",
   },
   {
     slug: "prisma.device_connect_intent",
     label: "Hosted device connect intents",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes short-lived hosted wearable connection claims for the member.",
   },
   {
     slug: "prisma.device_agent_session",
     label: "Local device agent sessions",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes agent bearer-token hashes and session metadata for local device sync agents.",
   },
   {
     slug: "prisma.device_browser_assertion_nonce",
     label: "Device browser assertion nonces",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes outstanding browser assertion nonces for the member.",
   },
   {
     slug: "prisma.hosted_web_internal_request_nonce",
     label: "Hosted web internal request nonces",
     deletion: "live-delete",
-    export: "metadata-and-counts",
     note: "Deletes per-user internal anti-replay nonces.",
   },
   {
     slug: "prisma.device_webhook_trace",
     label: "Provider webhook trace rows",
     deletion: "live-delete",
-    export: "documented-only",
     note: "Deletes webhook trace rows for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage.",
   },
   {
     slug: "cloudflare.runner_durable_object",
     label: "Cloudflare runner Durable Object state",
     deletion: "best-effort-delete",
-    export: "documented-only",
     note: "Best-effort call to hosted execution control clears user runner SQL state and alarms when Cloudflare control is configured.",
   },
   {
     slug: "cloudflare.r2_user_artifacts",
     label: "Cloudflare R2 user bundles, vault replicas, artifacts, runner secrets, and raw email",
     deletion: "best-effort-delete",
-    export: "documented-only",
     note: "Best-effort hosted execution control deletes opaque per-user runtime and ingress R2 objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres.",
   },
   {
     slug: "temporal.per_user_runtime_workflow",
     label: "Hosted per-user Temporal runtime workflow",
     deletion: "best-effort-delete",
-    export: "documented-only",
     note: "Best-effort Temporal termination neutralizes sleeping per-user workflow flags and runtime-result wake state after account deletion commits.",
   },
   {
     slug: "providers.oura_whoop_strava",
     label: "Oura, WHOOP, and Strava provider revocation",
     deletion: "best-effort-delete",
-    export: "metadata-and-counts",
     note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
   },
   {
     slug: "providers.composio_connected_apps",
     label: "Composio connected-app provider revocation",
     deletion: "best-effort-delete",
-    export: "documented-only",
     note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
     label: "Linq, Telegram, and email message data",
     deletion: "local-reference-delete",
-    export: "metadata-and-counts",
     note: "Deletes Murph-hosted mailbox/routing records. It does not delete copies already stored in external carrier, Telegram, Linq, or email provider systems.",
   },
   {
     slug: "providers.stripe_privy",
     label: "Stripe and Privy vendor accounts",
     deletion: "best-effort-delete",
-    export: "documented-only",
     note: "Cancels the Stripe subscription before local deletion (fail-closed), then deletes the Stripe customer and Privy user after local rows are removed; results are reported in the deletion result.",
   },
   {
     slug: "backups",
     label: "Backups and restore media",
     deletion: "documented-retention",
-    export: "documented-only",
     note: "Live data is deleted immediately. Backup copies age out under infrastructure retention and must not be restored except under documented recovery controls.",
   },
 ] as const satisfies readonly HostedAccountDataStoreCoverageEntry[];
@@ -436,18 +388,6 @@ export interface HostedAccountDeletionResult {
   vendorAccounts: HostedAccountVendorAccountDeletions;
 }
 
-export type HostedDataExportJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | HostedDataExportJsonValue[]
-  | { [key: string]: HostedDataExportJsonValue };
-
-export type HostedDataExportJsonRecord = {
-  [key: string]: HostedDataExportJsonValue;
-};
-
 type HostedAccountDataPrisma = PrismaClient | Prisma.TransactionClient;
 
 type DeviceConnectionIdentity = {
@@ -459,28 +399,6 @@ type DeviceConnectionIdentity = {
     status: string;
   }[];
 };
-
-const HOSTED_DATA_EXPORT_REDACTIONS = [
-  "OAuth access and refresh tokens",
-  "agent session token hashes",
-  "Privy, Stripe, contact, Telegram, and device blind-index lookup keys",
-  "CSRF, browser assertion, internal request, and OAuth state nonces",
-  "active invite codes and recovery-style codes",
-  "arbitrary decoded mailbox payload bodies",
-  "hosted workspace snapshot and browser-replica object keys and bundle hashes",
-  "hosted computer-use live-view URLs, handoff token hashes, Kernel session ids, and Kernel profile names",
-  "encrypted private columns already represented as decrypted user-facing fields",
-  "API key environment variable names",
-] as const;
-
-const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
-  "DeviceOauthSession",
-  "DeviceBrowserAssertionNonce",
-  "HostedWebInternalRequestNonce",
-  "HostedStripeEvent",
-  "HostedAssistantRuntimeIssue",
-] as const;
-const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
@@ -502,1079 +420,6 @@ export function parseHostedAccountDeletionRequest(
   return {
     confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   };
-}
-
-export function parseHostedDataExportRequest(
-  body: Record<string, unknown>,
-): {
-  acknowledgedSensitiveDownload: true;
-  confirmationText: typeof HOSTED_DATA_EXPORT_CONFIRMATION_TEXT;
-} {
-  if (body.acknowledgedSensitiveDownload !== true) {
-    throw hostedOnboardingError({
-      code: "DATA_EXPORT_ACK_REQUIRED",
-      httpStatus: 400,
-      message: "Acknowledge that the export may contain sensitive account and message data before downloading it.",
-    });
-  }
-
-  if (body.confirmationText !== HOSTED_DATA_EXPORT_CONFIRMATION_TEXT) {
-    throw hostedOnboardingError({
-      code: "DATA_EXPORT_CONFIRMATION_REQUIRED",
-      httpStatus: 400,
-      message: `Type ${HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} exactly to export your Murph data.`,
-    });
-  }
-
-  return {
-    acknowledgedSensitiveDownload: true,
-    confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
-  };
-}
-
-export async function buildHostedDataExport(input: {
-  memberId: string;
-  prisma: HostedAccountDataPrisma;
-}): Promise<HostedDataExportJsonRecord> {
-  const prisma = input.prisma;
-  const memberId = input.memberId;
-  const generatedAt = new Date();
-
-  const [
-    memberSnapshot,
-    counts,
-    deviceConnections,
-    deviceAgentSessions,
-    deviceTokenAudits,
-    deviceSyncSignals,
-    mailboxItems,
-    mailboxLaneCounters,
-    workspace,
-    computerRuns,
-    computerHandoffs,
-    invites,
-    consentEvents,
-    consentGrants,
-    vaultShares,
-    aiUsage,
-    aiUsagePeriods,
-    productFeedback,
-    linqDailyStates,
-    connectedAppsSessions,
-    connectedAppConnectIntents,
-  ] = await Promise.all([
-    readHostedMemberSnapshot({ memberId, prisma }),
-    countHostedAccountData({ memberId, prisma }),
-    prisma.deviceConnection.findMany({
-      orderBy: { connectedAt: "desc" },
-      select: {
-        accessTokenExpiresAt: true,
-        connectedAt: true,
-        createdAt: true,
-        displayName: true,
-        id: true,
-        keyVersion: true,
-        lastErrorCode: true,
-        lastErrorMessage: true,
-        lastSyncCompletedAt: true,
-        lastSyncErrorAt: true,
-        lastSyncStartedAt: true,
-        lastWebhookAt: true,
-        metadataJson: true,
-        nextReconcileAt: true,
-        provider: true,
-        providerAccountBlindIndex: true,
-        scopesJson: true,
-        sources: {
-          orderBy: [
-            { status: "asc" },
-            { sourceProviderSlug: "asc" },
-          ],
-          select: {
-            sourceProviderSlug: true,
-            status: true,
-          },
-        },
-        status: true,
-        tokenVersion: true,
-        updatedAt: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.deviceAgentSession.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        createdAt: true,
-        expiresAt: true,
-        label: true,
-        lastSeenAt: true,
-        replacedBySessionId: true,
-        revokedAt: true,
-        revokeReason: true,
-        updatedAt: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.deviceTokenAudit.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        action: true,
-        channel: true,
-        connectionId: true,
-        createdAt: true,
-        expectedTokenVersion: true,
-        forceRefresh: true,
-        keyVersion: true,
-        provider: true,
-        refreshOutcome: true,
-        sessionId: true,
-        tokenVersion: true,
-        tokenVersionChanged: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.deviceSyncSignal.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        connectionId: true,
-        createdAt: true,
-        eventType: true,
-        kind: true,
-        nextReconcileAt: true,
-        occurredAt: true,
-        provider: true,
-        reason: true,
-        resourceCategory: true,
-        revokeWarningCode: true,
-        revokeWarningMessage: true,
-        traceId: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.hostedMailboxItem.findMany({
-      orderBy: [{ lane: "asc" }, { laneSeq: "asc" }],
-      select: {
-        createdAt: true,
-        expiresAt: true,
-        kind: true,
-        lane: true,
-        laneSeq: true,
-        occurredAt: true,
-        payload: {
-          select: {
-            payloadSchema: true,
-          },
-        },
-        payloadBytes: true,
-        payloadSchema: true,
-        updatedAt: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.hostedMailboxLaneCounter.findMany({
-      orderBy: { lane: "asc" },
-      select: {
-        lane: true,
-        nextSeq: true,
-        updatedAt: true,
-        userId: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
-    prisma.hostedWorkspace.findUnique({
-      select: {
-        browserVaultReplicaRef: true,
-        checkpointedAt: true,
-        createdAt: true,
-        inboxMediaRetentionWakeAt: true,
-        nextWakeAt: true,
-        nextWakeReason: true,
-        redactedStatusJson: true,
-        snapshotRef: true,
-        updatedAt: true,
-        userId: true,
-        version: true,
-      },
-      where: { userId: memberId },
-    }),
-    prisma.hostedComputerRun.findMany({
-      orderBy: { updatedAt: "desc" },
-      select: {
-        awaitingMessage: true,
-        awaitingReason: true,
-        completedAt: true,
-        createdAt: true,
-        expiresAt: true,
-        kernelLiveViewUrlEncrypted: true,
-        kernelProfileName: true,
-        kernelSessionId: true,
-        lastTitle: true,
-        lastUrl: true,
-        memberId: true,
-        pausedAt: true,
-        pendingHandoffId: true,
-        status: true,
-        suggestedReply: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedComputerHandoff.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        completedAt: true,
-        createdAt: true,
-        expiresAt: true,
-        memberId: true,
-        purpose: true,
-        runId: true,
-        status: true,
-        suggestedReply: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedInvite.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        channel: true,
-        createdAt: true,
-        expiresAt: true,
-        memberId: true,
-        sentAt: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedConsentEvent.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        action: true,
-        createdAt: true,
-        documentVersionsJson: true,
-        memberId: true,
-        metadataJson: true,
-        scope: true,
-        source: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedConsentGrant.findMany({
-      orderBy: { updatedAt: "desc" },
-      select: {
-        createdAt: true,
-        documentVersionsJson: true,
-        grantedAt: true,
-        lastEventId: true,
-        memberId: true,
-        revokedAt: true,
-        scope: true,
-        source: true,
-        status: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedVaultShare.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        createdAt: true,
-        destinationMemberId: true,
-        grantedAt: true,
-        grantorMemberId: true,
-        projectionKind: true,
-        revokedAt: true,
-        source: true,
-        status: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { OR: [{ grantorMemberId: memberId }, { destinationMemberId: memberId }] },
-    }),
-    prisma.hostedAiUsage.findMany({
-      orderBy: { occurredAt: "desc" },
-      select: {
-        allowanceAccountedAt: true,
-        allowanceCostUsdMicros: true,
-        allowanceCounted: true,
-        allowancePeriodEnd: true,
-        allowancePeriodStart: true,
-        allowancePricingSnapshotJson: true,
-        allowancePricingVersion: true,
-        apiKeyEnv: true,
-        attemptCount: true,
-        baseUrl: true,
-        cacheWriteTokens: true,
-        cachedInputTokens: true,
-        createdAt: true,
-        credentialSource: true,
-        featureKey: true,
-        gatewayTagsJson: true,
-        inputTokens: true,
-        memberId: true,
-        occurredAt: true,
-        outputTokens: true,
-        provider: true,
-        providerName: true,
-        reasoningTokens: true,
-        reportingUserId: true,
-        requestedModel: true,
-        routeId: true,
-        servedModel: true,
-        sessionId: true,
-        stripeMeterAttemptCount: true,
-        stripeMeteredAt: true,
-        stripeMeterError: true,
-        stripeMeterIdentifier: true,
-        stripeMeterLastAttemptedAt: true,
-        stripeMeterNextAttemptAt: true,
-        stripeMeterSource: true,
-        stripeMeterStatus: true,
-        surface: true,
-        totalTokens: true,
-        triggerKind: true,
-        turnId: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedAiUsagePeriod.findMany({
-      orderBy: { periodStart: "desc" },
-      select: {
-        billingPlanCode: true,
-        blockedAt: true,
-        createdAt: true,
-        limitUsdMicros: true,
-        memberId: true,
-        periodEnd: true,
-        periodStart: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedProductFeedback.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        createdAt: true,
-        kind: true,
-        memberId: true,
-        relatedChangelogItemIdsJson: true,
-        summary: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedLinqDailyState.findMany({
-      orderBy: { dayUtc: "desc" },
-      select: {
-        createdAt: true,
-        dayUtc: true,
-        firstSeenAt: true,
-        inboundCount: true,
-        lastSeenAt: true,
-        memberId: true,
-        onboardingLinkSentAt: true,
-        outboundCount: true,
-        quotaReplySentAt: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedConnectedAppsSession.findMany({
-      orderBy: { updatedAt: "desc" },
-      select: {
-        createdAt: true,
-        memberId: true,
-        policyRevision: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-    prisma.hostedConnectedAppConnectIntent.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        alias: true,
-        completedAt: true,
-        connectedAccountId: true,
-        createdAt: true,
-        expiresAt: true,
-        memberId: true,
-        startedAt: true,
-        toolkit: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
-  ]);
-
-  if (!memberSnapshot) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      httpStatus: 404,
-      message: "Your hosted member record was not found.",
-    });
-  }
-
-  const limitedDeviceConnections = limitRowsForExport(deviceConnections);
-  const limitedDeviceAgentSessions = limitRowsForExport(deviceAgentSessions);
-  const limitedDeviceTokenAudits = limitRowsForExport(deviceTokenAudits);
-  const limitedDeviceSyncSignals = limitRowsForExport(deviceSyncSignals);
-  const limitedMailboxItems = limitRowsForExport(mailboxItems);
-  const limitedMailboxLaneCounters = limitRowsForExport(mailboxLaneCounters);
-  const limitedComputerRuns = limitRowsForExport(computerRuns);
-  const limitedComputerHandoffs = limitRowsForExport(computerHandoffs);
-  const limitedInvites = limitRowsForExport(invites);
-  const limitedConsentEvents = limitRowsForExport(consentEvents);
-  const limitedConsentGrants = limitRowsForExport(consentGrants);
-  const limitedVaultShares = limitRowsForExport(vaultShares);
-  const limitedAiUsage = limitRowsForExport(aiUsage);
-  const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
-  const limitedConnectedAppsSessions = limitRowsForExport(connectedAppsSessions);
-  const limitedConnectedAppConnectIntents = limitRowsForExport(connectedAppConnectIntents);
-  const limitedProductFeedback = limitRowsForExport(productFeedback);
-  const aiUsagePeriodLedgerSpendByStartTime = new Map(
-    await Promise.all(limitedAiUsagePeriods.rows.map(async (period) => {
-      const ledgerSpend = await prisma.hostedAiUsage.aggregate({
-        _max: {
-          occurredAt: true,
-        },
-        _sum: {
-          allowanceCostUsdMicros: true,
-        },
-        where: {
-          allowanceAccountedAt: {
-            not: null,
-          },
-          allowanceCounted: true,
-          memberId,
-          occurredAt: {
-            gte: period.periodStart,
-            lt: period.periodEnd,
-          },
-        },
-      });
-
-      return [period.periodStart.getTime(), {
-        lastUsageAt: ledgerSpend._max.occurredAt ?? null,
-        spentUsdMicros: ledgerSpend._sum.allowanceCostUsdMicros ?? 0n,
-      }] as const;
-    })),
-  );
-  const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
-  const wearableProviderLabelByConnectionId = new Map(
-    limitedDeviceConnections.rows.map((connection) => [
-      connection.id,
-      resolveDeviceConnectionProviderLabel(connection),
-    ] as const),
-  );
-
-  return toExportRecord({
-    schema: HOSTED_DATA_EXPORT_SCHEMA,
-    generatedAt,
-    memberId,
-    counts,
-    limits: {
-      maxRowsPerStore: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
-      stores: {
-        consentEvents: limitedConsentEvents.meta,
-        consentGrants: limitedConsentGrants.meta,
-        deviceAgentSessions: limitedDeviceAgentSessions.meta,
-        deviceConnections: limitedDeviceConnections.meta,
-        deviceSyncSignals: limitedDeviceSyncSignals.meta,
-        deviceTokenAudits: limitedDeviceTokenAudits.meta,
-        computerHandoffs: limitedComputerHandoffs.meta,
-        computerRuns: limitedComputerRuns.meta,
-        invites: limitedInvites.meta,
-        linqDailyStates: limitedLinqDailyStates.meta,
-        mailboxItems: limitedMailboxItems.meta,
-        mailboxLaneCounters: limitedMailboxLaneCounters.meta,
-        aiUsage: limitedAiUsage.meta,
-        aiUsagePeriods: limitedAiUsagePeriods.meta,
-        connectedAppConnectIntents: limitedConnectedAppConnectIntents.meta,
-        connectedAppsSessions: limitedConnectedAppsSessions.meta,
-        productFeedback: limitedProductFeedback.meta,
-        vaultShares: limitedVaultShares.meta,
-      },
-    },
-    security: {
-      confirmation: "server-verified typed confirmation phrase",
-      delivery: "same-origin POST response as a no-store JSON attachment",
-      omittedInternalTables: HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES,
-      redactions: HOSTED_DATA_EXPORT_REDACTIONS,
-    },
-    account: projectAccountSnapshotForExport(memberSnapshot),
-    consent: {
-      events: limitedConsentEvents.rows.map((event) => ({
-        action: event.action,
-        createdAt: event.createdAt,
-        documentVersionsJson: event.documentVersionsJson,
-        idPresent: true,
-        memberId: event.memberId,
-        metadataPresent: event.metadataJson !== null,
-        scope: event.scope,
-        source: event.source,
-      })),
-      grants: limitedConsentGrants.rows.map((grant) => ({
-        createdAt: grant.createdAt,
-        documentVersionsJson: grant.documentVersionsJson,
-        grantedAt: grant.grantedAt,
-        lastEventIdPresent: Boolean(grant.lastEventId),
-        memberId: grant.memberId,
-        revokedAt: grant.revokedAt,
-        scope: grant.scope,
-        source: grant.source,
-        status: grant.status,
-        updatedAt: grant.updatedAt,
-      })),
-    },
-    messaging: {
-      invites: limitedInvites.rows.map((invite) => ({
-        channel: invite.channel,
-        createdAt: invite.createdAt,
-        expiresAt: invite.expiresAt,
-        idPresent: true,
-        inviteCodeOmitted: true,
-        memberId: invite.memberId,
-        sentAt: invite.sentAt,
-        updatedAt: invite.updatedAt,
-      })),
-      linqDailyStates: limitedLinqDailyStates.rows,
-      mailboxItems: limitedMailboxItems.rows.map((item) => ({
-        createdAt: item.createdAt,
-        dedupeKeyPresent: true,
-        expiresAt: item.expiresAt,
-        idPresent: true,
-        kind: item.kind,
-        lane: item.lane,
-        laneSeq: item.laneSeq,
-        occurredAt: item.occurredAt,
-        payload: summarizeMailboxPayloadForExport({
-          payloadBytes: item.payloadBytes,
-        }),
-        payloadBytes: item.payloadBytes,
-        payloadRefPresent: item.payload !== null,
-        payloadSchema: item.payload?.payloadSchema ?? item.payloadSchema,
-        payloadStorage: item.payload !== null ? "ref" : item.payloadBytes !== null ? "inline" : "missing",
-        updatedAt: item.updatedAt,
-        userId: item.userId,
-      })),
-      mailboxLaneCounters: limitedMailboxLaneCounters.rows,
-    },
-    vault: {
-      shares: limitedVaultShares.rows.map((share) => ({
-        createdAt: share.createdAt,
-        destinationMemberId: share.destinationMemberId,
-        grantedAt: share.grantedAt,
-        grantorMemberId: share.grantorMemberId,
-        idPresent: true,
-        projectionKind: share.projectionKind,
-        revokedAt: share.revokedAt,
-        source: share.source,
-        status: share.status,
-        updatedAt: share.updatedAt,
-      })),
-      workspace: projectHostedWorkspaceForExport(workspace),
-    },
-    productFeedback: {
-      entries: limitedProductFeedback.rows.map((entry) => ({
-        createdAt: entry.createdAt,
-        idPresent: true,
-        kind: entry.kind,
-        memberId: entry.memberId,
-        relatedChangelogItemIds: entry.relatedChangelogItemIdsJson,
-        summary: entry.summary,
-      })),
-    },
-    computerUse: {
-      handoffs: limitedComputerHandoffs.rows.map((handoff) => ({
-        completedAt: handoff.completedAt,
-        createdAt: handoff.createdAt,
-        expiresAt: handoff.expiresAt,
-        memberId: handoff.memberId,
-        purpose: handoff.purpose,
-        runIdPresent: Boolean(handoff.runId),
-        status: handoff.status,
-        suggestedReply: handoff.suggestedReply,
-        tokenHashOmitted: true,
-      })),
-      runs: limitedComputerRuns.rows.map((run) => ({
-        awaitingMessage: redactComputerHandoffLinksForExport(run.awaitingMessage),
-        awaitingReason: run.awaitingReason,
-        completedAt: run.completedAt,
-        createdAt: run.createdAt,
-        expiresAt: run.expiresAt,
-        kernelLiveViewUrlPresent: run.kernelLiveViewUrlEncrypted !== null,
-        kernelProfileNameOmitted: true,
-        kernelSessionIdPresent: run.kernelSessionId !== null,
-        lastTitle: run.lastTitle,
-        lastUrlOrigin: readSafeUrlOrigin(run.lastUrl),
-        lastUrlPresent: run.lastUrl !== null,
-        memberId: run.memberId,
-        pausedAt: run.pausedAt,
-        pendingHandoffPresent: run.pendingHandoffId !== null,
-        status: run.status,
-        suggestedReply: run.suggestedReply,
-        updatedAt: run.updatedAt,
-      })),
-    },
-    connectedApps: {
-      connectIntents: limitedConnectedAppConnectIntents.rows.map((intent) => ({
-        alias: intent.alias,
-        claimHashOmitted: true,
-        completedAt: intent.completedAt,
-        connectedAccountIdPresent: Boolean(intent.connectedAccountId),
-        createdAt: intent.createdAt,
-        expiresAt: intent.expiresAt,
-        memberId: intent.memberId,
-        startedAt: intent.startedAt,
-        toolkit: intent.toolkit,
-      })),
-      providerAccounts: {
-        exportMode: "documented-only",
-        note: "Provider-side connected account data is held by Composio and omitted from this export.",
-      },
-      sessions: limitedConnectedAppsSessions.rows.map((session) => ({
-        createdAt: session.createdAt,
-        memberId: session.memberId,
-        policyRevision: session.policyRevision,
-        remoteSessionIdOmitted: true,
-        updatedAt: session.updatedAt,
-      })),
-    },
-    wearables: {
-      deviceAgentSessions: limitedDeviceAgentSessions.rows.map((session) => ({
-        createdAt: session.createdAt,
-        expiresAt: session.expiresAt,
-        idPresent: true,
-        label: session.label,
-        lastSeenAt: session.lastSeenAt,
-        replacedBySessionIdPresent: Boolean(session.replacedBySessionId),
-        revokedAt: session.revokedAt,
-        revokeReason: session.revokeReason,
-        updatedAt: session.updatedAt,
-        userId: session.userId,
-      })),
-      deviceConnections: limitedDeviceConnections.rows.map((connection) => {
-        const providerLabel = resolveDeviceConnectionProviderLabel(connection);
-
-        return {
-          accessTokenExpiresAt: connection.accessTokenExpiresAt,
-          connectedAt: connection.connectedAt,
-          createdAt: connection.createdAt,
-          displayName: normalizeDeviceConnectionDisplayNameForExport(connection.displayName, {
-            provider: connection.provider,
-            providerLabel,
-          }),
-          idPresent: true,
-          lastErrorCode: connection.lastErrorCode,
-          lastErrorMessagePresent: Boolean(connection.lastErrorMessage),
-          lastSyncCompletedAt: connection.lastSyncCompletedAt,
-          lastSyncErrorAt: connection.lastSyncErrorAt,
-          lastSyncStartedAt: connection.lastSyncStartedAt,
-          lastWebhookAt: connection.lastWebhookAt,
-          metadataPresent: connection.metadataJson !== null,
-          nextReconcileAt: connection.nextReconcileAt,
-          providerAccountLinked: connection.providerAccountBlindIndex.length > 0,
-          providerLabel,
-          scopesPresent: connection.scopesJson !== null,
-          status: connection.status,
-          keyVersionPresent: Boolean(connection.keyVersion),
-          tokenVersionPresent: connection.tokenVersion !== null,
-          updatedAt: connection.updatedAt,
-          userId: connection.userId,
-        };
-      }),
-      deviceSyncSignals: limitedDeviceSyncSignals.rows.map((signal) => ({
-        connectionIdPresent: Boolean(signal.connectionId),
-        createdAt: signal.createdAt,
-        eventType: signal.eventType,
-        idPresent: true,
-        kind: signal.kind,
-        nextReconcileAt: signal.nextReconcileAt,
-        occurredAt: signal.occurredAt,
-        providerLabel: resolveDeviceRowProviderLabel({
-          connectionId: signal.connectionId,
-          provider: signal.provider,
-          providerLabelByConnectionId: wearableProviderLabelByConnectionId,
-        }),
-        reason: signal.reason,
-        resourceCategory: signal.resourceCategory,
-        revokeWarningCode: signal.revokeWarningCode,
-        revokeWarningMessagePresent: Boolean(signal.revokeWarningMessage),
-        traceIdPresent: Boolean(signal.traceId),
-        userId: signal.userId,
-      })),
-      deviceTokenAudits: limitedDeviceTokenAudits.rows.map((audit) => ({
-        action: audit.action,
-        channel: audit.channel,
-        connectionIdPresent: true,
-        createdAt: audit.createdAt,
-        expectedTokenVersionPresent: audit.expectedTokenVersion !== null,
-        forceRefresh: audit.forceRefresh,
-        idPresent: true,
-        keyVersionPresent: Boolean(audit.keyVersion),
-        providerLabel: resolveDeviceRowProviderLabel({
-          connectionId: audit.connectionId,
-          provider: audit.provider,
-          providerLabelByConnectionId: wearableProviderLabelByConnectionId,
-        }),
-        refreshOutcome: audit.refreshOutcome,
-        sessionIdPresent: Boolean(audit.sessionId),
-        tokenVersionChanged: audit.tokenVersionChanged,
-        tokenVersionPresent: audit.tokenVersion !== null,
-        userId: audit.userId,
-      })),
-    },
-    usage: {
-      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => {
-        const ledgerSpend = aiUsagePeriodLedgerSpendByStartTime.get(
-          period.periodStart.getTime(),
-        ) ?? {
-          lastUsageAt: null,
-          spentUsdMicros: 0n,
-        };
-
-        return {
-          billingPlanCode: period.billingPlanCode,
-          blockedAt: period.blockedAt,
-          createdAt: period.createdAt,
-          lastUsageAt: ledgerSpend.lastUsageAt,
-          limitUsdMicros: period.limitUsdMicros.toString(),
-          memberId: period.memberId,
-          periodEnd: period.periodEnd,
-          periodStart: period.periodStart,
-          spentUsdMicros: ledgerSpend.spentUsdMicros.toString(),
-          updatedAt: period.updatedAt,
-        };
-      }),
-      aiUsage: limitedAiUsage.rows.map((entry) => ({
-        allowanceAccountedAt: entry.allowanceAccountedAt,
-        allowanceCostUsdMicros: entry.allowanceCostUsdMicros.toString(),
-        allowanceCounted: entry.allowanceCounted,
-        allowancePeriodEnd: entry.allowancePeriodEnd,
-        allowancePeriodStart: entry.allowancePeriodStart,
-        allowancePricingSnapshotOmitted: entry.allowancePricingSnapshotJson !== null,
-        allowancePricingVersion: entry.allowancePricingVersion,
-        attemptCount: entry.attemptCount,
-        apiKeyEnvConfigured: Boolean(entry.apiKeyEnv),
-        baseUrlConfigured: Boolean(entry.baseUrl),
-        cacheWriteTokens: entry.cacheWriteTokens,
-        cachedInputTokens: entry.cachedInputTokens,
-        createdAt: entry.createdAt,
-        credentialSource: entry.credentialSource,
-        featureKey: entry.featureKey,
-        gatewayTagsOmitted: entry.gatewayTagsJson !== null,
-        idPresent: true,
-        inputTokens: entry.inputTokens,
-        memberId: entry.memberId,
-        occurredAt: entry.occurredAt,
-        outputTokens: entry.outputTokens,
-        provider: entry.provider,
-        providerName: entry.providerName,
-        reasoningTokens: entry.reasoningTokens,
-        requestedModel: entry.requestedModel,
-        routeIdPresent: Boolean(entry.routeId),
-        servedModel: entry.servedModel,
-        sessionIdPresent: Boolean(entry.sessionId),
-        stripeMeterAttemptCount: entry.stripeMeterAttemptCount,
-        stripeMeteredAt: entry.stripeMeteredAt,
-        stripeMeterErrorPresent: Boolean(entry.stripeMeterError),
-        stripeMeterIdentifierPresent: Boolean(entry.stripeMeterIdentifier),
-        stripeMeterLastAttemptedAt: entry.stripeMeterLastAttemptedAt,
-        stripeMeterNextAttemptAt: entry.stripeMeterNextAttemptAt,
-        stripeMeterSource: entry.stripeMeterSource,
-        stripeMeterStatus: entry.stripeMeterStatus,
-        surface: entry.surface,
-        totalTokens: entry.totalTokens,
-        triggerKind: entry.triggerKind,
-        turnIdPresent: Boolean(entry.turnId),
-        updatedAt: entry.updatedAt,
-      })),
-    },
-  });
-}
-
-function projectHostedWorkspaceForExport(workspace: {
-  browserVaultReplicaRef: Prisma.JsonValue | null;
-  checkpointedAt: Date | null;
-  createdAt: Date;
-  inboxMediaRetentionWakeAt: Date | null;
-  nextWakeAt: Date | null;
-  nextWakeReason: string | null;
-  redactedStatusJson: Prisma.JsonValue | null;
-  snapshotRef: Prisma.JsonValue | null;
-  updatedAt: Date;
-  userId: string;
-  version: bigint;
-} | null): HostedDataExportJsonRecord | null {
-  if (!workspace) {
-    return null;
-  }
-
-  return toExportRecord({
-    browserVaultReplicaRefPresent: workspace.browserVaultReplicaRef !== null,
-    checkpointedAt: workspace.checkpointedAt,
-    createdAt: workspace.createdAt,
-    inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
-    nextWakeAt: workspace.nextWakeAt,
-    nextWakeReason: workspace.nextWakeReason,
-    redactedStatusPresent: workspace.redactedStatusJson !== null,
-    snapshotRefPresent: workspace.snapshotRef !== null,
-    updatedAt: workspace.updatedAt,
-    userId: workspace.userId,
-    version: workspace.version,
-  });
-}
-
-function resolveDeviceConnectionProviderLabel(connection: {
-  metadataJson?: Prisma.JsonValue | null;
-  provider: string;
-  sources?: readonly {
-    sourceProviderSlug: string;
-    status: string;
-  }[];
-}): string {
-  return resolveHostedDeviceSyncBrowserProviderLabel({
-    metadata: connection.metadataJson,
-    provider: connection.provider,
-    upstreamSources: connection.sources ?? [],
-  });
-}
-
-function resolveDeviceRowProviderLabel(input: {
-  connectionId: string | null;
-  provider: string;
-  providerLabelByConnectionId: ReadonlyMap<string, string>;
-}): string {
-  const connectionLabel = input.connectionId
-    ? input.providerLabelByConnectionId.get(input.connectionId)
-    : null;
-
-  return connectionLabel ?? formatHostedDeviceSyncProviderLabel(input.provider);
-}
-
-function normalizeDeviceConnectionDisplayNameForExport(
-  value: string | null,
-  input: {
-    provider: string;
-    providerLabel: string;
-  },
-): string | null {
-  const normalized = value?.trim() ?? "";
-  if (!normalized) {
-    return null;
-  }
-
-  const hiddenLabels = new Set([
-    input.providerLabel.toLowerCase(),
-    formatHostedDeviceSyncProviderLabel(input.provider).toLowerCase(),
-    formatDeviceSyncProviderLabel(input.provider).toLowerCase(),
-  ]);
-
-  return hiddenLabels.has(normalized.toLowerCase()) ? null : normalized;
-}
-
-function projectAccountSnapshotForExport(
-  snapshot: HostedMemberSnapshot | null,
-): HostedDataExportJsonRecord | null {
-  if (!snapshot) {
-    return null;
-  }
-
-  return toExportRecord({
-    billingRef: snapshot.billingRef,
-    core: snapshot.core,
-    emailAuthorization: snapshot.emailAuthorization
-      ? {
-          directPublicSender: snapshot.emailAuthorization.directPublicSender
-            ? {
-                address: snapshot.emailAuthorization.directPublicSender.address,
-                authorizedAt: snapshot.emailAuthorization.directPublicSender.authorizedAt,
-              }
-            : null,
-          memberId: snapshot.emailAuthorization.memberId,
-          stripeCheckoutEmail: snapshot.emailAuthorization.stripeCheckoutEmail
-            ? {
-                address: snapshot.emailAuthorization.stripeCheckoutEmail.address,
-                collectedAt: snapshot.emailAuthorization.stripeCheckoutEmail.collectedAt,
-              }
-            : null,
-          verifiedEmail: snapshot.emailAuthorization.verifiedEmail
-            ? {
-                address: snapshot.emailAuthorization.verifiedEmail.address,
-                verifiedAt: snapshot.emailAuthorization.verifiedEmail.verifiedAt,
-              }
-            : null,
-        }
-      : null,
-    identity: snapshot.identity
-      ? {
-          maskedPhoneNumberHint: snapshot.identity.maskedPhoneNumberHint,
-          memberId: snapshot.identity.memberId,
-          phoneNumber: snapshot.identity.phoneNumber,
-          phoneNumberVerifiedAt: snapshot.identity.phoneNumberVerifiedAt,
-          privyUserId: snapshot.identity.privyUserId,
-          signupPhoneCodeSendAttemptPresent: snapshot.identity.signupPhoneCodeSendAttemptId !== null,
-          signupPhoneCodeSendAttemptStartedAt: snapshot.identity.signupPhoneCodeSendAttemptStartedAt,
-          signupPhoneCodeSentAt: snapshot.identity.signupPhoneCodeSentAt,
-          signupPhoneNumber: snapshot.identity.signupPhoneNumber,
-          walletAddress: snapshot.identity.walletAddress,
-          walletChainType: snapshot.identity.walletChainType,
-          walletCreatedAt: snapshot.identity.walletCreatedAt,
-          walletProvider: snapshot.identity.walletProvider,
-        }
-      : null,
-    routing: snapshot.routing
-      ? {
-          linqChatId: snapshot.routing.linqChatId,
-          linqRecipientPhone: snapshot.routing.linqRecipientPhone,
-          memberId: snapshot.routing.memberId,
-          pendingLinqChatId: snapshot.routing.pendingLinqChatId,
-          pendingLinqParticipantContact: snapshot.routing.pendingLinqParticipantContact
-            ? {
-                kind: snapshot.routing.pendingLinqParticipantContact.kind,
-                observedAt: snapshot.routing.pendingLinqParticipantContact.observedAt,
-                value: snapshot.routing.pendingLinqParticipantContact.value,
-              }
-            : null,
-          pendingLinqRecipientPhone: snapshot.routing.pendingLinqRecipientPhone,
-          telegramThreadId: snapshot.routing.telegramThreadId,
-          telegramUserId: snapshot.routing.telegramUserId,
-        }
-      : null,
-  });
-}
-
-function summarizeMailboxPayloadForExport(input: {
-  payloadBytes: number | null;
-}): HostedDataExportJsonRecord {
-  if (input.payloadBytes !== null) {
-    return {
-      decodedPayloadOmitted: true,
-      status: "present-omitted",
-    };
-  }
-
-  return {
-    decodedPayloadOmitted: false,
-    status: "missing",
-  };
-}
-
-function readSafeUrlOrigin(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-}
-
-function redactComputerHandoffLinksForExport(value: string | null): string | null {
-  if (!value) {
-    return value;
-  }
-
-  return value
-    .replace(
-      /https?:\/\/[^\s<>"']+\/computer\/handoff\/[A-Za-z0-9._~-]+(?:[?#][^\s<>"']*)?/gu,
-      "[computer handoff link omitted]",
-    )
-    .replace(
-      /\/computer\/handoff\/[A-Za-z0-9._~-]+(?:[?#][^\s<>"']*)?/gu,
-      "/computer/handoff/[omitted]",
-    );
-}
-
-function limitRowsForExport<T>(rows: readonly T[]): {
-  meta: HostedDataExportJsonRecord;
-  rows: T[];
-} {
-  const exportedRows = rows.slice(0, HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE);
-  return {
-    meta: {
-      exportedRows: exportedRows.length,
-      maxRows: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
-      truncated: rows.length > HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
-    },
-    rows: exportedRows,
-  };
-}
-
-function toExportRecord(value: object): HostedDataExportJsonRecord {
-  const result: HostedDataExportJsonRecord = {};
-
-  for (const [key, entryValue] of Object.entries(value)) {
-    if (entryValue === undefined) {
-      continue;
-    }
-
-    result[key] = toExportJsonValue(entryValue);
-  }
-
-  return result;
-}
-
-function toExportJsonValue(value: unknown): HostedDataExportJsonValue {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (typeof value === "string" || typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((entry) => toExportJsonValue(entry));
-  }
-
-  if (typeof value === "object") {
-    const result: HostedDataExportJsonRecord = {};
-
-    for (const [key, entryValue] of Object.entries(value)) {
-      if (entryValue !== undefined) {
-        result[key] = toExportJsonValue(entryValue);
-      }
-    }
-
-    return result;
-  }
-
-  return String(value);
 }
 
 export async function deleteHostedAccountData(input: {
@@ -2053,6 +898,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId } }));
   record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId } }));
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId } }));
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId } }));
@@ -2063,6 +909,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
   record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId } }));
@@ -2245,6 +1092,21 @@ async function lockDeviceWebhookTraceOwnersForAccountDeletionTx(input: {
       providerAccountBlindIndex: traceOwner.providerAccountBlindIndex,
     });
   }
+}
+
+function resolveDeviceConnectionProviderLabel(connection: {
+  metadataJson?: Prisma.JsonValue | null;
+  provider: string;
+  sources?: readonly {
+    sourceProviderSlug: string;
+    status: string;
+  }[];
+}): string {
+  return resolveHostedDeviceSyncBrowserProviderLabel({
+    metadata: connection.metadataJson,
+    provider: connection.provider,
+    upstreamSources: connection.sources ?? [],
+  });
 }
 
 async function revokeDeviceProvidersBestEffort(input: {

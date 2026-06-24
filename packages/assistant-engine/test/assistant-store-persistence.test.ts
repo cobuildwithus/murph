@@ -15,6 +15,7 @@ import {
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
 import {
   appendAssistantTranscriptEntriesWithRefs,
+  listAssistantSessionsLocal,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import {
@@ -620,6 +621,48 @@ describe('assistant store persistence seams', () => {
         }),
       ]),
     )
+  })
+
+  it('orders sessions and duplicate index rebuilds by instant when offsets differ', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-offset-order-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    const offsetOlder = createSession({
+      alias: 'older-alias',
+      conversationKey: 'linq:user-1:thread-shared',
+      sessionId: 'session-older',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:30:00+01:00',
+    })
+    const utcNewer = createSession({
+      alias: 'newer-alias',
+      conversationKey: 'linq:user-1:thread-shared',
+      sessionId: 'session-newer',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    })
+
+    await writeAssistantSession(paths, offsetOlder)
+    await writeAssistantSession(paths, utcNewer)
+
+    await expect(listAssistantSessionsLocal(context.vaultRoot)).resolves.toMatchObject([
+      { sessionId: 'session-newer' },
+      { sessionId: 'session-older' },
+    ])
+
+    await rm(paths.indexesPath, { force: true })
+    await expect(readAssistantIndexStore(paths)).resolves.toEqual({
+      version: 1,
+      aliases: {
+        'newer-alias': 'session-newer',
+        'older-alias': 'session-older',
+      },
+      conversationKeys: {
+        'linq:user-1:thread-shared': 'session-newer',
+      },
+    })
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {

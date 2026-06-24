@@ -70,6 +70,7 @@ type FreshRuntimeStartPreparation =
   | {
       kind: "ready";
       prepared: PreparedRuntimeInvocation;
+      runtimePreparationWaitAfterContainerReadyMs: number;
     }
   | {
       kind: "retry";
@@ -483,6 +484,8 @@ export class RuntimeProcessingController {
       details: {
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         runtimeProcessingAction: input.action,
+        runtimePreparationWaitAfterContainerReadyMs:
+          preparation.runtimePreparationWaitAfterContainerReadyMs,
         workspaceAttemptId: prepared.token.attemptId,
       },
       message: "Hosted runner runtime processing accepted.",
@@ -512,10 +515,16 @@ export class RuntimeProcessingController {
       runnerContainerName: input.runnerContainerName,
       token,
     });
-    const readinessResultPromise = readinessPromise.then((startupConfirmed) => ({
-      kind: "startup" as const,
-      startupConfirmed,
-    }));
+    let startupConfirmedAtMs: number | null = null;
+    const readinessResultPromise = readinessPromise.then((startupConfirmed) => {
+      if (startupConfirmed.confirmed) {
+        startupConfirmedAtMs = Date.now();
+      }
+      return {
+        kind: "startup" as const,
+        startupConfirmed,
+      };
+    });
     const preparationPromise = this.input.invocationService.prepareWithFence({
       commandBudget: input.commandBudget,
       input: executionInput,
@@ -581,9 +590,14 @@ export class RuntimeProcessingController {
     if (preparation.kind === "failed") {
       return await clearPreparationFailure(preparation.error);
     }
+    const runtimePreparationWaitAfterContainerReadyMs =
+      firstCompleted.kind === "startup" && startupConfirmedAtMs !== null
+        ? Math.max(0, Date.now() - startupConfirmedAtMs)
+        : 0;
     return {
       kind: "ready",
       prepared: preparation.prepared,
+      runtimePreparationWaitAfterContainerReadyMs,
     };
   }
 

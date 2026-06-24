@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  isHostedLocalUseOpenaiApiKey,
+  MURPH_DEV_USE_OPENAI_API_KEY_ENV,
   MURPH_HOSTED_LOCAL_CODEX_HOME_ENV,
   resolveHostedLocalCodexHome,
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
@@ -34,14 +36,17 @@ describe("shouldSeedHostedLocalCodexSubscriptionAuth", () => {
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: undefined,
       profileName: undefined,
+      useOpenaiApiKey: false,
     })).toBe(true);
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: "development",
       profileName: "dev",
+      useOpenaiApiKey: false,
     })).toBe(true);
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: "development",
       profileName: "worker-only",
+      useOpenaiApiKey: false,
     })).toBe(true);
   });
 
@@ -49,16 +54,64 @@ describe("shouldSeedHostedLocalCodexSubscriptionAuth", () => {
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: "test",
       profileName: "dev",
+      useOpenaiApiKey: false,
     })).toBe(false);
     // The profile gate holds even when NODE_ENV is not "test".
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: "development",
       profileName: "e2e:stub",
+      useOpenaiApiKey: false,
     })).toBe(false);
     expect(shouldSeedHostedLocalCodexSubscriptionAuth({
       nodeEnv: "development",
       profileName: "e2e:live",
+      useOpenaiApiKey: false,
     })).toBe(false);
+  });
+
+  it("bypasses the seed when the OPENAI_API_KEY opt-out is set, even on otherwise-seeded profiles", () => {
+    // The opt-out short-circuits before the profile/NODE_ENV gates so dev
+    // sessions can bill OPENAI_API_KEY when the Codex subscription is out.
+    expect(shouldSeedHostedLocalCodexSubscriptionAuth({
+      nodeEnv: "development",
+      profileName: "dev",
+      useOpenaiApiKey: true,
+    })).toBe(false);
+    expect(shouldSeedHostedLocalCodexSubscriptionAuth({
+      nodeEnv: undefined,
+      profileName: undefined,
+      useOpenaiApiKey: true,
+    })).toBe(false);
+    // Already-skipped profiles stay skipped.
+    expect(shouldSeedHostedLocalCodexSubscriptionAuth({
+      nodeEnv: "test",
+      profileName: "dev",
+      useOpenaiApiKey: true,
+    })).toBe(false);
+  });
+});
+
+describe("isHostedLocalUseOpenaiApiKey", () => {
+  it("returns false when the env var is missing or empty", () => {
+    expect(isHostedLocalUseOpenaiApiKey({})).toBe(false);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "" })).toBe(false);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "  " })).toBe(false);
+  });
+
+  it('accepts "1" and "true" (case-insensitive, trimmed)', () => {
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "1" })).toBe(true);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "true" })).toBe(true);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "TRUE" })).toBe(true);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: " 1 " })).toBe(true);
+  });
+
+  it("rejects other truthy-looking values to keep the opt-in explicit", () => {
+    // The dev-side default is subscription auth; an ambiguous "yes" / "on" /
+    // "0" must not silently flip billing to the API key.
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "0" })).toBe(false);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "false" })).toBe(false);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "yes" })).toBe(false);
+    expect(isHostedLocalUseOpenaiApiKey({ [MURPH_DEV_USE_OPENAI_API_KEY_ENV]: "on" })).toBe(false);
   });
 });
 

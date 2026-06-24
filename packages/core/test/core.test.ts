@@ -18,6 +18,7 @@ import {
   AUDIT_ACTORS as CONTRACT_AUDIT_ACTORS,
   AUDIT_STATUSES as CONTRACT_AUDIT_STATUSES,
   CONTRACT_SCHEMA_VERSION,
+  CURRENT_VAULT_FORMAT_VERSION,
   EVENT_KINDS as CONTRACT_EVENT_KINDS,
   EVENT_SOURCES as CONTRACT_EVENT_SOURCES,
   EXPERIMENT_STATUSES as CONTRACT_EXPERIMENT_STATUSES,
@@ -249,7 +250,7 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
     createdAt: "2026-03-12T12:00:00.000Z",
   });
 
-  assert.equal(initialized.metadata.formatVersion, 1);
+  assert.equal(initialized.metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
   assert.match(initialized.metadata.vaultId, /^vault_[0-9A-HJKMNP-TV-Z]{26}$/);
 
   const coreContent = await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8");
@@ -306,17 +307,17 @@ test("vault metadata helpers preserve the current format version and validate sc
   });
 
   assert.deepEqual(metadata, {
-    formatVersion: 1,
+    formatVersion: CURRENT_VAULT_FORMAT_VERSION,
     vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
     createdAt: "2026-03-12T12:00:00.000Z",
     title: "Baseline vault",
     timezone: "Australia/Melbourne",
   });
-  assert.equal(resolveVaultMetadataFormatVersion(metadata), 1);
-  assert.equal(detectVaultMetadataFormatVersion(metadata), 1);
+  assert.equal(resolveVaultMetadataFormatVersion(metadata), CURRENT_VAULT_FORMAT_VERSION);
+  assert.equal(detectVaultMetadataFormatVersion(metadata), CURRENT_VAULT_FORMAT_VERSION);
   assert.deepEqual(validateVaultMetadata(metadata, "VAULT_INVALID_METADATA", "broken"), {
     metadata,
-    storedFormatVersion: 1,
+    storedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
   });
 });
 
@@ -325,7 +326,7 @@ test("validateVaultMetadata remaps invalid schema details to the caller supplied
     () =>
       validateVaultMetadata(
         {
-          formatVersion: 1,
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
           vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
           createdAt: "2026-03-12T12:00:00.000Z",
           title: "",
@@ -743,7 +744,7 @@ test("repairVault recreates missing required directories when metadata is curren
 
   const loaded = await loadVault({ vaultRoot });
 
-  assert.equal(loaded.metadata.formatVersion, 1);
+  assert.equal(loaded.metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
   const validationBeforeRepair = await validateVault({ vaultRoot });
   assert.equal(validationBeforeRepair.valid, false);
   assert.equal(
@@ -1858,6 +1859,48 @@ test("listAssessmentResponses sorts by recordedAt and id", async () => {
   assert.deepEqual(actualOrder, [earlier.assessment.id, later.assessment.id]);
 });
 
+test("listAssessmentResponses sorts stored timestamp offsets by instant", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const shardPath = path.join(vaultRoot, "ledger/assessments/2026/2026-04.jsonl");
+  await fs.mkdir(path.dirname(shardPath), { recursive: true });
+  await fs.writeFile(
+    shardPath,
+    [
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:00:00.000Z",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/source.json",
+        responses: {},
+      },
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:30:00+01:00",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9/source.json",
+        responses: {},
+      },
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const records = await listAssessmentResponses({ vaultRoot });
+
+  assert.deepEqual(
+    records.map((record) => record.id),
+    [
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    ],
+  );
+});
+
 test("listAssessmentResponses rejects malformed stored assessment rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -2157,7 +2200,7 @@ test("validateVault reports invalid metadata before deeper validation", async ()
   await fs.writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify({
-      formatVersion: 1,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       title: "",
     }),
     "utf8",

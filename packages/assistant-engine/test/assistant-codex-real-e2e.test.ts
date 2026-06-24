@@ -5,7 +5,11 @@ import path from 'node:path'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { describe, expect, it } from 'vitest'
 
-import { executeCodexAppServerTurn } from '../src/assistant-codex.ts'
+import {
+  executeCodexAppServerTurn,
+  resolveMurphDynamicTools,
+  type CodexAppServerTurnInput,
+} from '../src/assistant-codex.ts'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -533,10 +537,24 @@ async function runResumeCacheProbeAttempt(input: {
 }
 
 async function executeRealCodexAppServerTurn(
-  input: Parameters<typeof executeCodexAppServerTurn>[0],
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+  },
 ): ReturnType<typeof executeCodexAppServerTurn> {
   try {
-    return await executeCodexAppServerTurn(input)
+    return await executeCodexAppServerTurn({
+      ...input,
+      dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+        allowFinishWithoutReply: input.allowFinishWithoutReply,
+        allowMessageReactions: input.allowMessageReactions,
+        computerToolsAvailable:
+          input.hostedToolContext?.computerToolsAvailable === true,
+        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        productFeedbackAvailable:
+          typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+        progressUpdatesAvailable: input.progressDelivery != null,
+      }),
+    })
   } catch (error) {
     throw new Error(buildRealCodexE2eFailureMessage(error))
   }

@@ -17,6 +17,7 @@ Help the user set up a bounded experiment that fits their life, then create the 
 - The user-facing plan preserves the result the user chose, distinguishes the primary outcome from adherence and supporting evidence, and does not promise more than the timeframe can show.
 - After creating a protocol-linked run, the user gets the matching experiment page link so they can open the protocol and later results view.
 - Reminder/support setup is handled explicitly: first-session instruction is resolved through the current reply or a one-shot first-session prep reminder; planned-session support is scheduled, declined, or concretely blocked; and recurring behavior support carries the compact follow-through loop when adherence or friction is likely to matter.
+- Lifecycle support stays bounded and visible: eligible runs get one day-four progress moment and one final results celebration unless saved assistant support explicitly opts out or the run ends early.
 
 ## Collaboration style
 
@@ -106,6 +107,13 @@ Use existing bounded one-shot automations. Prefer stable slugs such as `experime
 
 If sending, ask whether the planned session happened and collect only the missing subjective fields needed to log it. Keep it neutral and easy to answer.
 
+## Progress and completion moments
+
+- Murph-managed lifecycle seeds own these moments. Do not create duplicate manual automations during onboarding.
+- Eligible runs lasting at least four intervention days get one progress moment on day four. Read current progress, attach the `experiment progress-card`, celebrate completed work first, and describe metric changes only as early signals. Sparse or unchanged metrics are a caveat, not a reason to suppress the adherence card.
+- The morning after the intervention ends, persist the deterministic outcome, attach the progress card, open with genuine congratulations, and summarize adherence, the primary result, confidence, and confounders. End with one lightweight decision question: repeat it, adapt it, or leave it alone. An inconclusive result still deserves a clear finish.
+- Prefer the card plus warm text. A voice memo may replace the card only when the card cannot be attached; one reply must not try to carry both media types.
+
 ## Protocol resolution
 
 - Resolve the public protocol reference through Health Commons first: use `vault-cli commons protocol explore <query> --format json` for fuzzy, broad, or ambiguous discovery, `vault-cli commons protocol list --query <query> --format json` for protocol-only listing, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Prefer a same-family public protocol even when the user's dosage, schedule, metric, or variant differs. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.
@@ -130,6 +138,7 @@ If sending, ask whether the planned session happened and collect only the missin
 - Log confounders with typed flags: `vault-cli experiment context log <id> ...`
 - Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when it returns `skip`.
 - Progress: `vault-cli experiment progress <id> --format json`; inspect `setupReadiness`, `analysisReadiness`, and `dataCoverage` separately before saying wearable data is missing.
+- Progress cards: `vault-cli experiment progress-card <id> --format json`; attach the returned `url` with `murph.attach_response_media` when showing the run visually.
 - Outcomes: `vault-cli experiment outcome analyze <id> --format json`, persist with `vault-cli experiment outcome write <id> --format json`.
 - Automations: `vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>`. Missed-log checks are neutral, at most once per planned session, easy to decline.
 - Automation instructions carry purpose and skip conditions, not the message: do not embed routine content, walkthrough text, or report-back fields that live in the experiment or protocol records — the scheduled assistant composes the message fresh from current state. Embed exact wording only when the user dictated it.

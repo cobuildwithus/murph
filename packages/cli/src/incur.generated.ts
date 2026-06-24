@@ -235,6 +235,7 @@ declare module 'incur' {
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { requestId?: string; stoppedOn?: string } }
+      'research payload-schema': { args: {}; options: {} }
       'research scout': { args: {}; options: { input: string; since: string; until: string; maxCandidates: number } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
@@ -274,6 +275,7 @@ declare module 'incur' {
       'timeline': { args: {}; options: { requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { requestId?: string } }
       'vault repair': { args: {}; options: { requestId?: string } }
+      'vault repair-integration-ingests': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; finalize: boolean; maxBundles?: number; maxBytes?: number } }
       'vault repair-junction-hr-zones': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-wearable-storage': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; pruneDenseRaw: boolean; includeRecentDenseRaw: boolean; maxFiles?: number; maxBytes?: number } }
       'vault show': { args: {}; options: { requestId?: string } }

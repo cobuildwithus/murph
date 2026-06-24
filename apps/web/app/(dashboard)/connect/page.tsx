@@ -13,7 +13,7 @@ import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-m
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { ConnectSourcesGrid } from "./connect-page-client";
@@ -221,7 +221,7 @@ export default async function ConnectPage({
   searchParams?: Promise<ConnectPageSearchParams>;
 } = {}) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const auth = await getHostedPageAuthSnapshot();
+  const auth = await getHostedDashboardPageAuthSnapshot();
   const connectedSourceIds = new Set<string>();
   const reconnectSourceIds = new Set<string>();
   const reconnectProviderBySourceId = new Map<string, string>();

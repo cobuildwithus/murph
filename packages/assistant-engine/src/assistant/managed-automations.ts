@@ -9,6 +9,7 @@ import {
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
+  type AutomationStatus,
 } from '@murphai/contracts'
 import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -198,7 +199,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'A weekly scout for new studies, therapies, treatments, and health research that may relate to your current context.',
     schedule: {
       kind: 'cron',
-      expression: '0 13 * * 3',
+      expression: '30 19 * * 3',
     },
     continuityPolicy: 'fresh',
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
@@ -206,7 +207,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-health-research-scout',
     ],
     instructions: [
-      'Each Wednesday at 1:00 PM local time, produce a concise weekly health research scout for the configured automation route.',
+      'Each Wednesday at 7:30 PM local time, produce a concise weekly health research scout for the configured automation route.',
       '',
       'Goal:',
       "Find 0-3 new studies, therapies, treatments, clinical guidelines, or research insights from the last 60 days that clearly relate to the user's current health context.",
@@ -218,7 +219,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
       '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers to external providers.',
       '- Use only broad lowercase non-identifying category tags, such as sleep, metabolic health, glucose, hs-crp, resistance training, creatine, type 2 diabetes, better recovery, or morning light. Do not invent person, organization, location, event, or raw measurement tags.',
-      '- Use `vault-cli research scout` once with the compact profile.',
+      '- If unsure about the file body, run `vault-cli research payload-schema --format json` before the scout call.',
+      '- Use `vault-cli research scout` once with the compact profile. The `--input` body is the profile object itself with bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use a generic `tags` field. Example body: `{"topics":["sleep","recovery"],"behaviors":["exercise"]}`.',
+      '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last 60 days and cap `--maxCandidates` at 3 for this automation.',
       '- Do not perform an open-ended web browsing loop.',
       '- Deduplicate against prior `weekly-health-research-scout` sections.',
       '',
@@ -373,14 +376,30 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    if (isStaleMurphManagedOneShotSeed(seed, now)) {
+    if (!murphManagedAutomationSeedChanged(existing, seed)) {
       result.skipped += 1
       continue
     }
 
-    if (!murphManagedAutomationSeedChanged(existing, seed)) {
-      result.skipped += 1
-      continue
+    // Seed has changed. Reconcile in place. A one-shot whose desired
+    // occurrence already passed cannot fire at the new time, but if the
+    // legacy stored occurrence is also a one-shot still in the future,
+    // keep firing at the legacy time so the user still gets the moment
+    // with the new content. Archive only when neither the new desired nor
+    // a legacy one-shot occurrence can still fire. A recurring legacy
+    // schedule (cron/every/dailyLocal) under one-shot instructions would
+    // fire the final-review repeatedly, so it must be replaced with the
+    // new desired schedule (and archived if that is itself stale).
+    const newDesiredStale = isStaleOneShotSchedule(seed.schedule, now)
+    const legacyOneShotStillFires =
+      existing.schedule.kind === 'at' &&
+      !isStaleOneShotSchedule(existing.schedule, now)
+    let reconciledSchedule: MurphManagedAutomationSchedule = seed.schedule
+    let reconciledStatus: AutomationStatus = existing.status
+    if (newDesiredStale && legacyOneShotStillFires) {
+      reconciledSchedule = existing.schedule as MurphManagedAutomationSchedule
+    } else if (newDesiredStale) {
+      reconciledStatus = 'archived'
     }
 
     const summary = normalizeMurphManagedAutomationSummary(seed)
@@ -394,9 +413,9 @@ export async function applyMurphManagedAutomations(
       // Only the create path validates routes, because that is the only
       // point where this module chooses one.
       route: existing.route,
-      schedule: seed.schedule,
+      schedule: reconciledSchedule,
       slug: existing.slug,
-      status: existing.status,
+      status: reconciledStatus,
       ...(summary === null
         ? {}
         : { summary }),
@@ -597,11 +616,18 @@ function isStaleMurphManagedOneShotSeed(
   seed: MurphManagedAutomationSeed,
   now: Date,
 ): boolean {
-  if (seed.schedule.kind !== 'at') {
+  return isStaleOneShotSchedule(seed.schedule, now)
+}
+
+function isStaleOneShotSchedule(
+  schedule: AutomationSchedule,
+  now: Date,
+): boolean {
+  if (schedule.kind !== 'at') {
     return false
   }
 
-  const scheduledAtMs = Date.parse(seed.schedule.at)
+  const scheduledAtMs = Date.parse(schedule.at)
   const nowMs = now.getTime()
   if (!Number.isFinite(scheduledAtMs) || !Number.isFinite(nowMs)) {
     return true

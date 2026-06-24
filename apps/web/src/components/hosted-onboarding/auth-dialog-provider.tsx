@@ -17,6 +17,8 @@ import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
+const INTEGRATIONS_CONNECT_PATH_PATTERN =
+  /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -83,6 +85,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
   return (
     shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
+    || shouldResumeCurrentIntegrationsConnectUrl(payload)
   );
 }
 
@@ -121,6 +124,20 @@ function shouldResumeCurrentComputerHandoffUrl(
   }
 
   return COMPUTER_HANDOFF_PATH_PATTERN.test(window.location.pathname);
+}
+
+function shouldResumeCurrentIntegrationsConnectUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return INTEGRATIONS_CONNECT_PATH_PATTERN.test(window.location.pathname);
 }
 
 function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {

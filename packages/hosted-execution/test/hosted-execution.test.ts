@@ -474,7 +474,9 @@ describe("hosted execution coverage gaps", () => {
       "assistant.notification.requested",
       "device-sync.wake",
       "runtime.manual-requested",
+      "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
+      "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
@@ -562,7 +564,7 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
-    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
+    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
@@ -616,6 +618,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
+      "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
@@ -757,6 +760,16 @@ describe("hosted execution coverage gaps", () => {
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
     })).toThrow(/Hosted computer act request is invalid/u);
 
+    expect(parseHostedComputerPauseForUserRequest({
+      handoffPurpose: "managed_login",
+      reason: "login_needed",
+      suggestedReply: "done",
+    })).toEqual({
+      handoffPurpose: "managed_login",
+      pauseDeliveryContext: null,
+      reason: "login_needed",
+      suggestedReply: "done",
+    });
     expect(parseHostedComputerPauseForUserRequest({
       handoffPurpose: "manual_browser_help",
       reason: "final_confirmation",

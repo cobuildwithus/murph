@@ -214,6 +214,51 @@
                       }
                     }
                   }
+                },
+                "repair-integration-ingests": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show migration work without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply one bounded migration pass.",
+                          "type": "boolean"
+                        },
+                        "finalize": {
+                          "default": true,
+                          "description": "Advance the vault to the current format after all legacy work is gone. Pass --no-finalize to stage multiple apply passes.",
+                          "type": "boolean"
+                        },
+                        "maxBundles": {
+                          "description": "Maximum legacy integration bundles to process in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 500
+                        },
+                        "maxBytes": {
+                          "description": "Maximum legacy source bytes to inspect in one pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -4286,6 +4331,10 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "scout": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4296,23 +4345,19 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Do not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Use bucket fields: topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, activeExperiments. Do not include raw labs, names, dates of birth, full notes, or medical records."
                         },
                         "since": {
                           "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                          "description": "Inclusive lower publication date bound as an ISO timestamp."
+                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
                         },
                         "until": {
                           "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                          "description": "Inclusive upper publication date bound as an ISO timestamp."
+                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
                         },
                         "maxCandidates": {
                           "default": 12,
-                          "description": "Maximum research candidates to request and return.",
+                          "description": "Maximum research candidates to request from Exa.",
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 12

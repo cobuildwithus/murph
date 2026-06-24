@@ -1107,6 +1107,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:15:01.000Z"),
       userNotice: {
         code: "trial_conversion_pending",
+        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
@@ -1161,6 +1162,7 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "trial_expired_pending_billing",
       userNotice: {
         code: "trial_conversion_pending",
+        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();

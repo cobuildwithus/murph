@@ -32,6 +32,65 @@ test('message formatting renders simple emphasis spans with UTF-16 ranges', () =
   })
 })
 
+test('message formatting renders star italics and underline spans', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText(
+      'This should render as *italics* and ++underlined++.',
+    ),
+    {
+      decorations: [
+        {
+          range: [22, 29],
+          style: 'italic',
+        },
+        {
+          range: [34, 44],
+          style: 'underline',
+        },
+      ],
+      text: 'This should render as italics and underlined.',
+    },
+  )
+})
+
+test('message formatting accepts punctuation inside explicit decoration spans', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText(
+      'Choose **mobile/home/work**, *yes/no*, ++on/off++, or ~~old/new~~.',
+    ),
+    {
+      decorations: [
+        {
+          range: [7, 23],
+          style: 'bold',
+        },
+        {
+          range: [25, 31],
+          style: 'italic',
+        },
+        {
+          range: [33, 39],
+          style: 'underline',
+        },
+        {
+          range: [44, 51],
+          style: 'strikethrough',
+        },
+      ],
+      text: 'Choose mobile/home/work, yes/no, on/off, or old/new.',
+    },
+  )
+})
+
+test('message formatting leaves star and plus lookalikes untouched', () => {
+  const value = 'Keep C++, a++b++, counter++, standalone ++, and * bullet markers intact.'
+
+  assert.deepEqual(renderMarkdownMessageText(value), {
+    decorations: [],
+    text: value,
+  })
+})
+
 test('message formatting leaves ambiguous markdown-like text untouched', () => {
   assert.deepEqual(
     renderMarkdownMessageText(

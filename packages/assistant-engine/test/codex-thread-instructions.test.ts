@@ -41,6 +41,7 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
+        dynamicTools: [],
         env: {},
         developerInstructions: 'Stable Murph instructions.',
         systemPrompt: 'Stable Murph instructions.',
@@ -82,6 +83,7 @@ describe('Codex thread instructions', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      dynamicTools: [],
       env: {},
       developerInstructions: 'Stable Murph instructions.',
       resume: {
@@ -131,6 +133,7 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
+        dynamicTools: [],
         env: {},
         developerInstructions: 'Stable Murph instructions.',
         resume: {
@@ -196,6 +199,7 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
+        dynamicTools: [],
         env: {},
         developerInstructions: null,
         resume: {
@@ -246,6 +250,7 @@ describe('Codex thread instructions', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      dynamicTools: [],
       systemPrompt: 'Legacy full system prompt with dynamic runtime context.',
       userPrompt: 'Continue.',
       workingDirectory: '/tmp/provider-tests',

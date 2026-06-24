@@ -327,6 +327,19 @@ describe("event lifecycle seams", () => {
       compareEventRevisionPriority(
         {
           lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:30:00+01:00",
+        },
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    ).toBeLessThan(0);
+
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 1 },
           recordedAt: "2026-04-08T00:00:00.000Z",
           occurredAt: "2026-04-08T00:00:00.000Z",
           relativePath: "ledger/events/z.jsonl",

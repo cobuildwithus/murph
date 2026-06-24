@@ -34,13 +34,16 @@ import {
   buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
   compactWarmCodexThread,
-  executeCodexAppServerTurn,
+  executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
   snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
-import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
+import type {
+  CodexAppServerLiveTurn,
+  CodexAppServerTurnInput,
+} from '../src/assistant-codex.ts'
 import {
   buildRuntimeIssueInputForFailedCodexAction,
   CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
@@ -98,6 +101,26 @@ const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS = resolveMurphDynamicTo
 })
 
 const tempRoots: string[] = []
+
+function executeCodexAppServerTurn(
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+  },
+) {
+  return executeCodexAppServerTurnUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
+}
 
 function sentProgressResult(source: 'model' | 'system' = 'model') {
   return {
@@ -471,6 +494,7 @@ describe('assistant codex runtime', () => {
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       excludeResumeTurns: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
@@ -510,6 +534,7 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
         progressDelivery: {
           async send() {
             return sentProgressResult()
@@ -522,6 +547,7 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS,
         hostedToolContext: createHostedToolContext(),
       }),
     ).toMatchObject({
@@ -530,6 +556,7 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
         hostedToolContext: createHostedToolContext(),
         progressDelivery: {
           async send() {
@@ -559,6 +586,7 @@ describe('assistant codex runtime', () => {
       buildCodexThreadResumeParams({
         input: {
           ...baseInput,
+          dynamicTools: MURPH_DYNAMIC_TOOLS,
           progressDelivery: {
             async send() {
               return sentProgressResult()
@@ -1129,17 +1157,16 @@ describe('assistant codex runtime', () => {
         {
           filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
           kind: 'voice_memo',
-          mimeType: 'audio/mpeg',
-          modelId: 'eleven_multilingual_v2',
-          source: 'elevenlabs',
-          transcript: 'Voice-only reply.',
-          transportRefs: {
-            telegram: {
-              sendMode: 'generate_at_delivery',
+          transport: {
+            generation: {
+              kind: 'elevenlabs_speech',
+              modelId: 'eleven_multilingual_v2',
+              outputFormat: 'mp3_44100_128',
+              text: 'Voice-only reply.',
+              voiceId: 'voice_murph',
             },
+            kind: 'telegram_generation',
           },
-          url: null,
-          voiceId: 'voice_murph',
         },
       ],
     })
@@ -2734,6 +2761,7 @@ describe('assistant codex runtime', () => {
     })
     const baseInput = {
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       env: {
         PATH: '/custom/bin',
       },
@@ -4269,6 +4297,7 @@ describe('assistant codex runtime', () => {
     })
     const baseInput = {
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       env: {
         PATH: '/custom/bin',
       },

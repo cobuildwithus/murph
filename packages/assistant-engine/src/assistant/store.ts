@@ -22,6 +22,7 @@ import {
   conversationRefFromLocator,
 } from './conversation-ref.js'
 import {
+  compareAssistantTimestampsAscending,
   normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
@@ -368,7 +369,7 @@ export async function listAssistantSessionsLocal(
     }
 
     return sessions.sort((left, right) =>
-      right.updatedAt.localeCompare(left.updatedAt),
+      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
     )
   })
 }

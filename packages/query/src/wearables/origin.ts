@@ -1,5 +1,5 @@
 import type { DeviceDataOrigin } from "@murphai/contracts";
-import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+import { canonicalizeWearableProviderSlug } from "@murphai/health-metrics";
 
 import { normalizeLowercaseString } from "./shared.ts";
 import type { WearableExternalRef } from "./types.ts";
@@ -16,7 +16,7 @@ export function resolveWearablePublicSourceProvider(input: {
   useSourceInstanceFallback?: boolean;
   suppressJunctionSourceInstanceFallback?: boolean;
 } = {}): string {
-  return canonicalizeDeviceProviderSlug(resolveRawWearableSourceProvider(input, options));
+  return canonicalizeWearableProviderSlug(resolveRawWearableSourceProvider(input, options));
 }
 
 function resolveRawWearableSourceProvider(input: {

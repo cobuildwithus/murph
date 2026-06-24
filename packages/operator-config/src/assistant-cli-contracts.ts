@@ -170,13 +170,9 @@ export const assistantQuarantineArtifactKindValues = [
 ] as const
 
 export const assistantResponseMediaKindValues = ['image', 'voice_memo'] as const
-export const assistantResponseMediaVoiceMemoMimeTypeValues = [
-  'audio/mpeg',
-  'audio/x-m4a',
-  'audio/mp4',
-  'audio/aac',
-  'audio/wav',
-] as const
+export const assistantVoiceMemoSpeechOutputFormat = 'mp3_44100_128' as const
+export const assistantVoiceMemoMusicModelId = 'music_v2' as const
+export const assistantVoiceMemoMusicOutputFormat = 'mp3_48000_192' as const
 
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
@@ -328,41 +324,49 @@ const assistantImageResponseMediaSchema = z
   })
   .strict()
 
-const assistantVoiceMemoLinqTransportRefSchema = z
-  .object({
-    attachmentId: z.string().trim().min(1).max(200),
-  })
-  .strict()
+export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('elevenlabs_speech'),
+      modelId: z.string().trim().min(1).max(200),
+      outputFormat: z.literal(assistantVoiceMemoSpeechOutputFormat),
+      text: z.string().trim().min(1).max(4000),
+      voiceId: z.string().trim().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      durationMs: z.number().int().min(3_000).max(300_000),
+      forceInstrumental: z.boolean(),
+      kind: z.literal('elevenlabs_music'),
+      modelId: z.literal(assistantVoiceMemoMusicModelId),
+      outputFormat: z.literal(assistantVoiceMemoMusicOutputFormat),
+      prompt: z.string().trim().min(1).max(4100),
+    })
+    .strict(),
+])
 
-const assistantVoiceMemoTelegramTransportRefSchema = z
-  .object({
-    sendMode: z.literal('generate_at_delivery').default('generate_at_delivery'),
-  })
-  .strict()
-
-const assistantVoiceMemoTransportRefsSchema = z
-  .object({
-    linq: assistantVoiceMemoLinqTransportRefSchema.optional(),
-    telegram: assistantVoiceMemoTelegramTransportRefSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (refs) => refs.linq !== undefined || refs.telegram !== undefined,
-    'Assistant voice memo media requires a delivery transport reference.',
-  )
+export const assistantVoiceMemoTransportSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      attachmentId: z.string().trim().min(1).max(200),
+      kind: z.literal('linq_attachment'),
+    })
+    .strict(),
+  z
+    .object({
+      generation: assistantVoiceMemoGenerationSchema,
+      kind: z.literal('telegram_generation'),
+    })
+    .strict(),
+])
 
 const assistantVoiceMemoResponseMediaSchema = z
   .object({
     kind: z.literal('voice_memo'),
-    url: z.null().default(null),
-    mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
     filename: z.string().trim().min(1).max(255),
-    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024).nullable().default(null),
-    transcript: z.string().trim().min(1).max(4000),
-    source: z.literal('elevenlabs'),
-    voiceId: z.string().trim().min(1).max(200),
-    modelId: z.string().trim().min(1).max(200),
-    transportRefs: assistantVoiceMemoTransportRefsSchema,
+    transcript: z.string().trim().min(1).max(4000).nullable().default(null),
+    transport: assistantVoiceMemoTransportSchema,
   })
   .strict()
 
@@ -1354,6 +1358,12 @@ export type AssistantDeliverySource = z.infer<
 >
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
+>
+export type AssistantVoiceMemoGeneration = z.infer<
+  typeof assistantVoiceMemoGenerationSchema
+>
+export type AssistantVoiceMemoTransport = z.infer<
+  typeof assistantVoiceMemoTransportSchema
 >
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema

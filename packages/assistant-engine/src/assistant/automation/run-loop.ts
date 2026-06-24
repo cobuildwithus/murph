@@ -660,6 +660,7 @@ function createLocalCaptureAssistantInputSourceMetadata(
       kind: 'linq',
       partCount: readLocalLinqCapturePartCount(raw),
       reactionEligible: raw.reaction_eligible === true,
+      replyToMessageId: readLocalLinqCaptureReplyToMessageId(raw),
       service: normalizeLocalAssistantInputToken(raw.service, 'linq-service'),
     }
   }
@@ -690,6 +691,17 @@ function createLocalCaptureAssistantInputSourceMetadata(
     mediaGroupId,
     replyContext,
   }
+}
+
+function readLocalLinqCaptureReplyToMessageId(
+  raw: Record<string, unknown>,
+): string | null {
+  const value = raw.reply_to_message_id
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function readLocalLinqCapturePartCount(raw: Record<string, unknown>): number {

@@ -10,12 +10,19 @@ export interface HostedConnectedAppsConfig {
 }
 
 const DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev";
-const DEFAULT_CONNECTED_APP_TOOLKITS = ["gmail", "googlecalendar"] as const;
+const DEFAULT_CONNECTED_APP_TOOLKITS = [
+  "gmail",
+  "googlecalendar",
+  "outlook",
+  "zoho_mail",
+] as const;
 const MIN_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 2;
 const MAX_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 10;
 const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
   gmail: "Gmail",
   googlecalendar: "Google Calendar",
+  outlook: "Microsoft Outlook",
+  zoho_mail: "Zoho Mail",
 };
 
 const HOSTED_CONNECTED_APPS_POLICY_VERSION = 1;

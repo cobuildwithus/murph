@@ -9,6 +9,7 @@ import {
   resolveHealthCommonsExperimentResultsPublic,
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { ActiveRunSummaryClient } from "./active-run-summary-client";
 
@@ -38,6 +39,7 @@ export default async function ExperimentDetailPage({
 }: {
   params: Promise<{ experimentId: string }>;
 }) {
+  await getHostedDashboardPageAuthSnapshot();
   const { experimentId } = await params;
   const protocolTab = resolveHealthCommonsExperimentProtocolTab(experimentId);
 

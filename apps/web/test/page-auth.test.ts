@@ -3,9 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedAppSession: vi.fn(),
+  redirect: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   getHostedAppSession: mocks.getHostedAppSession,
@@ -126,6 +133,23 @@ describe("hosted sidebar auth", () => {
     });
   });
 
+  it("keeps checkout state out of sidebar auth", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.not_started,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      label: null,
+    });
+  });
+
   it("returns anonymous sidebar auth when the hosted session store is unreachable", async () => {
     mocks.getHostedAppSession.mockRejectedValue(Object.assign(
       new Error("Connection refused while opening a database connection."),
@@ -148,6 +172,65 @@ describe("hosted sidebar auth", () => {
     const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
     await expect(getHostedSidebarAuthSnapshot()).rejects.toBe(error);
+  });
+});
+
+describe("hosted dashboard page auth", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedAppSession.mockResolvedValue(null);
+  });
+
+  it("returns the current auth snapshot for active members", async () => {
+    const member = createHostedMember();
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      authenticatedMember: member,
+      session,
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.not_started,
+  ])("redirects %s members to the join resume route before dashboard loaders run", async (billingStatus) => {
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).rejects.toThrow("NEXT_REDIRECT:/join");
+    expect(mocks.redirect).toHaveBeenCalledWith("/join");
+  });
+
+  it("does not redirect anonymous dashboard reads", async () => {
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 });
 

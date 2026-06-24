@@ -167,6 +167,7 @@ function createInputSummary(
     text: capture.text,
     attachmentCount: capture.attachmentCount,
     actorIsSelf: capture.actorIsSelf,
+    replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
 

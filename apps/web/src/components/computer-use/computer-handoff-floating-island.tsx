@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import { cn } from "@/src/lib/utils";
 
@@ -48,17 +56,16 @@ export function ComputerHandoffFloatingIsland({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [offset, setOffset] = useState<Offset>(DEFAULT_OFFSET);
+  const storedOffset = useStoredOffset(persistKey);
+  const [offsetOverride, setOffsetOverride] = useState<Offset | null>(null);
   const [grabbing, setGrabbing] = useState(false);
-
-  useEffect(() => {
-    const storedOffset = readStoredOffset(persistKey);
-    if (!storedOffset) return;
-    const frame = window.requestAnimationFrame(() => {
-      setOffset(storedOffset);
+  const offset = offsetOverride ?? storedOffset;
+  const setOffset = useCallback((next: Offset | ((current: Offset) => Offset)) => {
+    setOffsetOverride((current) => {
+      const base = current ?? storedOffset;
+      return typeof next === "function" ? next(base) : next;
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [persistKey]);
+  }, [storedOffset]);
 
   const reclampToViewport = useCallback(() => {
     const el = rootRef.current;
@@ -78,7 +85,7 @@ export function ComputerHandoffFloatingIsland({
       if (x === current.x && y === current.y) return current;
       return { x, y };
     });
-  }, []);
+  }, [setOffset]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(reclampToViewport);
@@ -173,4 +180,44 @@ export function ComputerHandoffFloatingIsland({
       {children}
     </div>
   );
+}
+
+function useStoredOffset(persistKey: string | null): Offset {
+  const raw = useSyncExternalStore(
+    subscribeToStoredOffset,
+    () => readStoredOffsetRaw(persistKey),
+    () => null,
+  );
+  return useMemo(() => parseStoredOffset(raw), [raw]);
+}
+
+function subscribeToStoredOffset() {
+  return () => {};
+}
+
+function readStoredOffsetRaw(persistKey: string | null): string | null {
+  if (!persistKey || typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem(persistKey);
+  } catch {
+    // ignore corrupted storage
+  }
+  return null;
+}
+
+function parseStoredOffset(raw: string | null): Offset {
+  if (!raw) {
+    return DEFAULT_OFFSET;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<Offset>;
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // ignore corrupted storage
+  }
+  return DEFAULT_OFFSET;
 }

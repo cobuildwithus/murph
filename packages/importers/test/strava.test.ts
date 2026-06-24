@@ -53,14 +53,15 @@ describe("Strava importer adapter", () => {
 
     expect(payload.provider).toBe("strava");
     expect(payload.accountId).toBe("athlete-42");
-    expect(payload.rawArtifacts?.map((artifact) => artifact.role)).toEqual(
+    expect(payload.evidenceParts?.map((artifact) => artifact.role)).toEqual(
       expect.arrayContaining([
         "athlete",
         "activity:1001",
       ]),
     );
-    expect(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:"))).toBe(true);
-    expect(payload.rawArtifacts?.find((artifact) => artifact.role === "activity:1001")?.content).toMatchObject({
+    expect(payload.ingestReceipt).toBeTruthy();
+    expect(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:"))).toBe(false);
+    expect(payload.evidenceParts?.find((artifact) => artifact.role === "activity:1001")?.content).toMatchObject({
       device_name: "Garmin Forerunner",
     });
 
@@ -141,8 +142,8 @@ describe("Strava importer adapter", () => {
         }),
       ]),
     );
-    expect(payload.rawArtifacts?.[0]?.role).toMatch(/^deletion:activity:activity.delete:[0-9a-f]{64}$/u);
-    expect(payload.rawArtifacts?.[0]?.role).not.toContain("1001");
+    expect(payload.evidenceParts?.[0]?.role).toMatch(/^deletion:activity:activity.delete:[0-9a-f]{64}$/u);
+    expect(payload.evidenceParts?.[0]?.role).not.toContain("1001");
   });
 
   it("covers Strava fallback normalization paths and synthetic deletion ids", async () => {
@@ -194,7 +195,7 @@ describe("Strava importer adapter", () => {
       resourceId: "activity-42",
       resourceType: "activity",
     });
-    expect(payload.rawArtifacts?.find((artifact) => artifact.role === "activity:activity-1")?.content).toMatchObject({
+    expect(payload.evidenceParts?.find((artifact) => artifact.role === "activity:activity-1")?.content).toMatchObject({
       commute: "false",
       manual: "true",
       private: 0,

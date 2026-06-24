@@ -25,6 +25,7 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+  vi.useRealTimers();
 });
 
 test("ComputerHandoffActiveView renders the live view behind a takeover overlay", async () => {
@@ -152,7 +153,7 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   assert.ok(fallbackLink);
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");
   expect(fallbackLink.textContent).toContain("Open Murph");
-  expect(container.querySelector("iframe")).toBe(iframe);
+  expect(container.querySelector("iframe")).toBeNull();
   expect(track).toHaveBeenCalledWith("handoff_completed");
 });
 
