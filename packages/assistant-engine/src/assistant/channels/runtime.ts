@@ -466,30 +466,35 @@ export async function sendLinqMessage(
     )
   }
 
+  // Validate all local preconditions BEFORE loading or uploading vault-file
+  // bytes. Otherwise approved vault-file bytes leave the vault and reach Linq
+  // even when the send would fail closed on a missing target or sender phone.
   const target = input.target.trim()
-  const media = await prepareLinqMessageMedia(
-    input.media ?? [],
-    dependencies,
-  )
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
       'iMessage delivery requires an explicit chat id or a stored thread binding.',
     )
   }
+  const participantFromPhoneNumber = input.targetKind === 'participant'
+    ? normalizeOptionalText(input.fromPhoneNumber)
+    : null
+  if (input.targetKind === 'participant' && !participantFromPhoneNumber) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+      'Materializing an iMessage direct chat requires a sender phone number.',
+    )
+  }
 
-  if (input.targetKind === 'participant') {
-    const fromPhoneNumber = normalizeOptionalText(input.fromPhoneNumber)
-    if (!fromPhoneNumber) {
-      throw new VaultCliError(
-        'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
-        'Materializing an iMessage direct chat requires a sender phone number.',
-      )
-    }
+  const media = await prepareLinqMessageMedia(
+    input.media ?? [],
+    dependencies,
+  )
 
+  if (participantFromPhoneNumber) {
     const created = await createLinqChat(
       {
-        from: fromPhoneNumber,
+        from: participantFromPhoneNumber,
         idempotencyKey: input.idempotencyKey ?? null,
         message: input.message,
         ...(media.length > 0 ? { media } : {}),

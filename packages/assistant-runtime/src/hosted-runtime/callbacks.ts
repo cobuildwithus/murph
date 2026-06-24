@@ -91,6 +91,13 @@ import {
 import { compareHostedIsoTimestampsAscending } from "./timestamp-order.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
+// Bounds the per-collect approval reconciliation work so a backlog of
+// pending vault-file approvals cannot stall foreground delivery with an
+// unbounded series of web-control round trips. Preferred (current-turn)
+// intents are always reconciled; beyond those we additionally reconcile
+// only the N most-recently-updated `awaiting_approval` intents to catch
+// fresh user decisions on the shoulder-tap wake.
+const HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE = 4;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
@@ -130,20 +137,34 @@ export async function collectHostedAssistantDeliverySideEffects(
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
-  const intents: AssistantOutboxIntent[] = [];
-  const approvalBlockedIntentIds = new Set<string>();
+  const reconcileTargetIds = selectHostedAssistantApprovalReconcileTargets({
+    preferredIntentIds: request.preferredIntentIds,
+    storedIntents,
+  });
+  const reconciliationByIntentId = new Map<
+    string,
+    { blocked: boolean; intent: AssistantOutboxIntent }
+  >();
   for (const intent of storedIntents) {
+    if (!reconcileTargetIds.has(intent.intentId)) {
+      continue;
+    }
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
       intent,
       now,
       vaultRoot: request.vaultRoot,
     });
-    intents.push(reconciliation.intent);
-    if (reconciliation.blocked) {
-      approvalBlockedIntentIds.add(reconciliation.intent.intentId);
-    }
+    reconciliationByIntentId.set(reconciliation.intent.intentId, reconciliation);
   }
+  const intents: AssistantOutboxIntent[] = storedIntents.map((intent) =>
+    reconciliationByIntentId.get(intent.intentId)?.intent ?? intent,
+  );
+  const approvalBlockedIntentIds = new Set<string>(
+    Array.from(reconciliationByIntentId.values())
+      .filter((reconciliation) => reconciliation.blocked)
+      .map((reconciliation) => reconciliation.intent.intentId),
+  );
   const preferredIntentOrder = new Map(
     request.preferredIntentIds.map((intentId, index) => [intentId, index] as const),
   );
@@ -245,6 +266,33 @@ export async function collectHostedAssistantDeliverySideEffects(
   ];
 
   return effects;
+}
+
+/**
+ * Bounds the set of intents reconciled per collect. The dispatch-time gate in
+ * `preloadApprovedHostedAssistantVaultFiles` is the security invariant; this
+ * pass exists only so freshly-decided approvals transition out of
+ * `awaiting_approval` promptly. Reconciling every stored intent would add an
+ * O(n) sequence of web-control round trips to the foreground delivery path.
+ */
+function selectHostedAssistantApprovalReconcileTargets(input: {
+  preferredIntentIds: readonly string[];
+  storedIntents: readonly AssistantOutboxIntent[];
+}): Set<string> {
+  const targets = new Set<string>(input.preferredIntentIds);
+  const recent = [...input.storedIntents]
+    .filter((intent) =>
+      intent.status === "awaiting_approval"
+      && !targets.has(intent.intentId)
+    )
+    .sort((left, right) =>
+      compareHostedIsoTimestampsAscending(right.updatedAt, left.updatedAt)
+    )
+    .slice(0, HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE);
+  for (const intent of recent) {
+    targets.add(intent.intentId);
+  }
+  return targets;
 }
 
 async function reconcileHostedAssistantVaultFileApproval(input: {
