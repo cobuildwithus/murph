@@ -960,7 +960,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("keeps managed Codex auth when a terminal Codex auth update was already applied", async () => {
+  it("removes managed Codex auth when a terminal Codex auth update was already applied", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: true,
@@ -1021,7 +1021,7 @@ describe("hosted system mailbox notification execution context", () => {
         nextWakeAt: null,
         recorded: 1,
       });
-      await expect(access(authPath)).resolves.toBeUndefined();
+      await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await workspace.cleanup();
     }

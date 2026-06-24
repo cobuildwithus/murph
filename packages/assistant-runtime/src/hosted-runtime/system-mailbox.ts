@@ -825,7 +825,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         attemptId: input.record.attemptId,
         phase: input.record.phase,
       });
-      if (input.record.phase === "connected" && response.status === "superseded") {
+      if (input.record.phase === "connected") {
         await removeHostedCodexAuthJson(input.operatorHomeRoot);
       }
       return {

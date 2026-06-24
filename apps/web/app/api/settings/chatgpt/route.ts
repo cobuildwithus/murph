@@ -15,8 +15,6 @@ import {
   readHostedOnboardingJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
-import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_CODEX_AUTH_REQUEST_BODY_LIMIT_BYTES = 1_024;
 
@@ -30,24 +28,13 @@ export const GET = withJsonError(async (request: Request) => {
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   await assertEmptyHostedCodexAuthRequest(request);
-  const prisma = getPrisma();
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
-  await assertHostedLaunchRequiredConsentGranted({
-    memberId: auth.member.id,
-    prisma,
+  await requireActiveHostedAppSessionFromRequest(request);
+  throw hostedOnboardingError({
+    code: "HOSTED_CODEX_AUTH_UNAVAILABLE",
+    httpStatus: 503,
+    message: "ChatGPT connection is unavailable until hosted credential isolation is in place.",
+    retryable: false,
   });
-  const attempt = await beginHostedCodexAuthAttempt({
-    action: "connect",
-    memberId: auth.member.id,
-    prisma,
-  });
-  await signalHostedCodexAuthAttempt({
-    action: "connect",
-    attemptId: attempt.attemptId,
-    mailboxItemId: attempt.mailboxItemId,
-    memberId: auth.member.id,
-  });
-  return jsonOk(attempt.view);
 });
 
 export const DELETE = withJsonError(async (request: Request) => {

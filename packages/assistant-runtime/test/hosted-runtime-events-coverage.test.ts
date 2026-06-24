@@ -322,18 +322,11 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("runs Codex auth connect wakes through the runtime-control lane", async () => {
+  it("fails Codex auth connect wakes without starting hosted OAuth", async () => {
     const update = vi.fn(async () => ({
       applied: true,
       status: "applied" as const,
     }));
-    mocks.executeCodexManagedAccountOperation.mockImplementationOnce(async (input) => {
-      await input.onDeviceCode?.({
-        userCode: "ABCD-EFGH",
-        verificationUrl: "https://auth.openai.com/device",
-      });
-      return { kind: "connected" };
-    });
     const runtime = createRuntime({
       codexAuthPort: { update },
     });
@@ -345,37 +338,25 @@ describe("hosted runtime event coverage", () => {
       userId: "member_123",
     });
 
-    await expect(
-      executeHostedMailboxEvent({
-        executionContext,
-        operatorHomeRoot: "/tmp/assistant-runtime-events-operator",
-        runtime,
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events-coverage",
-        wake,
-      }),
-    ).resolves.toMatchObject({
+    const result = await executeHostedMailboxEvent({
+      executionContext,
+      operatorHomeRoot: "/tmp/assistant-runtime-events-operator",
+      runtime,
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events-coverage",
+      wake,
+    });
+
+    expect(result).toMatchObject({
       mailboxLane: "runtime-control",
       nextWakeAt: null,
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
     });
+    expect(result.postCheckpointRecord).toBeNull();
     expect(update).toHaveBeenCalledWith({
       attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
+      phase: "failed",
     });
-    expect(mocks.executeCodexManagedAccountOperation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "connect",
-        codexHome: "/tmp/assistant-runtime-events-operator/.codex-hosted",
-        workingDirectory: "/tmp/assistant-runtime-events-coverage",
-      }),
-    );
+    expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
   });
 
   it("deletes local Codex auth when remote disconnect fails", async () => {

@@ -23,13 +23,6 @@ import {
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 
-class HostedCodexAuthAttemptSupersededError extends Error {
-  constructor() {
-    super("Hosted Codex auth attempt was superseded.");
-    this.name = "HostedCodexAuthAttemptSupersededError";
-  }
-}
-
 class HostedCodexAuthLocalDeleteError extends Error {
   constructor(cause: unknown) {
     super("Hosted Codex auth local credential delete failed.", { cause });
@@ -55,32 +48,23 @@ export async function executeHostedCodexAuthWake(input: {
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME);
   try {
     if (input.wake.action === "connect") {
-      await executeCodexManagedAccountOperation({
-        action: "connect",
-        codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
-        codexHome,
-        env: { ...input.runtimeEnv },
-        onDeviceCode: async (deviceCode) => {
-          const response = await port.update({
-            attemptId: input.wake.attemptId,
-            phase: "device_code",
-            userCode: deviceCode.userCode,
-            verificationUrl: deviceCode.verificationUrl,
-          });
-          if (response.status === "superseded") {
-            throw new HostedCodexAuthAttemptSupersededError();
-          }
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          eventCode: "assistant.codex_auth_connect_disabled",
         },
-        workingDirectory: input.vaultRoot,
+        level: "warn",
+        message: "Hosted Codex account connect is disabled until credentials have an isolated control-plane owner.",
+        phase: "wake.running",
+        wake: input.wake,
+      });
+      await port.update({
+        attemptId: input.wake.attemptId,
+        phase: "failed",
       });
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
-        postCheckpointRecord: {
-          attemptId: input.wake.attemptId,
-          kind: "codex-auth.updated",
-          phase: "connected",
-        },
       });
     }
 
@@ -101,12 +85,6 @@ export async function executeHostedCodexAuthWake(input: {
       },
     });
   } catch (error) {
-    if (error instanceof HostedCodexAuthAttemptSupersededError) {
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "runtime-control",
-      });
-    }
     if (error instanceof HostedCodexAuthLocalDeleteError) {
       throw error;
     }

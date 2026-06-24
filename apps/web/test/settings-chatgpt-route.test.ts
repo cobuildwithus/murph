@@ -89,74 +89,22 @@ describe("ChatGPT settings route", () => {
     });
   });
 
-  it("starts a connect attempt after mutation origin, active session, and launch consent gates", async () => {
-    const response = await route.POST(jsonRequest("POST", {}));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      state: "connecting",
-      userCode: null,
-      verificationUrl: null,
-    });
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: { prisma: true },
-    });
-    expect(mocks.beginHostedCodexAuthAttempt).toHaveBeenCalledWith({
-      action: "connect",
-      memberId: "member_123",
-      prisma: { prisma: true },
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_codex_auth",
-    });
-  });
-
-  it("marks the connect attempt failed when runtime signaling is unavailable", async () => {
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("temporal offline"));
-
+  it("rejects connect while hosted credential isolation is unavailable", async () => {
     const response = await route.POST(jsonRequest("POST", {}));
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
-        message: "Could not start ChatGPT connection right now.",
-        retryable: true,
+        code: "HOSTED_CODEX_AUTH_UNAVAILABLE",
+        message: "ChatGPT connection is unavailable until hosted credential isolation is in place.",
+        retryable: false,
       },
     });
-    expect(mocks.markHostedCodexAuthAttemptError).toHaveBeenCalledWith({
-      attemptId: "hca_abcdefghijklmnop",
-      memberId: "member_123",
-    });
-  });
-
-  it("re-signals an existing attempt when the store recovers its mailbox item", async () => {
-    mocks.beginHostedCodexAuthAttempt.mockResolvedValueOnce({
-      attemptId: "hca_abcdefghijklmnop",
-      mailboxItemId: "mailbox_item_recovered",
-      view: {
-        state: "connecting",
-        userCode: "ABCD-EFGH",
-        verificationUrl: "https://auth.openai.com/device",
-      },
-    });
-
-    const response = await route.POST(jsonRequest("POST", {}));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      state: "connecting",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_recovered",
-    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.beginHostedCodexAuthAttempt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects non-empty mutation bodies before starting an attempt", async () => {

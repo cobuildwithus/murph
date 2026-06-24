@@ -4688,6 +4688,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await expect(effect()).resolves.toEqual({
       nextWakeAt: "2026-04-27T00:00:00.000Z",
       nextWakeReason: "assistant",
+      requiresFollowUpCheckpoint: true,
     });
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: codexAuthItem,

@@ -4071,7 +4071,7 @@ test("hosted full snapshots report config-only Codex home continuity", async () 
   }
 });
 
-test("hosted full snapshots preserve managed Codex ChatGPT auth", async () => {
+test("hosted full snapshots exclude managed Codex ChatGPT auth", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-auth-"));
 
   try {
@@ -4109,7 +4109,7 @@ test("hosted full snapshots preserve managed Codex ChatGPT auth", async () => {
         path: ".codex-hosted/auth.json",
         root: "operator-home",
       }),
-      managedAuthJson,
+      null,
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -4125,9 +4125,9 @@ test("hosted full snapshots preserve managed Codex ChatGPT auth", async () => {
       bundle: snapshot.bundle,
       workspaceRoot: path.join(workspaceRoot, "restore"),
     });
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "auth.json"), "utf8"),
-      managedAuthJson,
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "auth.json"), "utf8"),
+      { code: "ENOENT" },
     );
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "credentials.json"), "utf8"),

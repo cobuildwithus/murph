@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 
 import {
-  act,
   createElement,
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -50,82 +49,31 @@ describe("HostedChatGptSettings", () => {
     vi.clearAllMocks();
   });
 
-  test("shows connection failed status when runtime signaling fails after a connect attempt", async () => {
-    const [
-      { HostedOnboardingApiError },
-      { HostedChatGptSettings },
-    ] = await Promise.all([
-      import("@/src/components/hosted-onboarding/client-api"),
-      import("@/src/components/settings/hosted-chatgpt-settings"),
-    ]);
-    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
-      code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
-      message: "Could not start ChatGPT connection right now.",
-      retryable: true,
-    }));
+  test("shows connection failed status", async () => {
+    const { HostedChatGptSettings } =
+      await import("@/src/components/settings/hosted-chatgpt-settings");
     const rendered = await renderClientComponent(createElement(HostedChatGptSettings, {
-      initialConnection: { state: "disconnected" },
+      initialConnection: { state: "connect_error" },
     }));
-    const close = vi.fn();
-    rendered.open.mockReturnValueOnce({
-      close,
-      document: {
-        body: {},
-      },
-    } as unknown as Window);
 
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", {
-        bubbles: true,
-      }));
-    });
-
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "POST",
-      payload: {},
-      url: "/api/settings/chatgpt",
-    });
-    assert.equal(close.mock.calls.length, 1);
     const text = rendered.window.document.body.textContent ?? "";
     assert.match(text, /Connection failed/);
-    assert.match(text, /Could not start ChatGPT connection right now\./);
+    assert.match(text, /Could not finish ChatGPT sign in\. Try connecting again\./);
     assert.match(text, /Connect ChatGPT/);
     assert.doesNotMatch(text, /Connected/);
 
     await rendered.cleanup();
   });
 
-  test("shows disconnect failed status when runtime signaling fails after a disconnect attempt", async () => {
-    const [
-      { HostedOnboardingApiError },
-      { HostedChatGptSettings },
-    ] = await Promise.all([
-      import("@/src/components/hosted-onboarding/client-api"),
-      import("@/src/components/settings/hosted-chatgpt-settings"),
-    ]);
-    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
-      code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
-      message: "Could not disconnect ChatGPT right now.",
-      retryable: true,
-    }));
+  test("shows disconnect failed status", async () => {
+    const { HostedChatGptSettings } =
+      await import("@/src/components/settings/hosted-chatgpt-settings");
     const rendered = await renderClientComponent(createElement(HostedChatGptSettings, {
-      initialConnection: { state: "connected" },
+      initialConnection: { state: "disconnect_error" },
     }));
-
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", {
-        bubbles: true,
-      }));
-    });
-
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "DELETE",
-      payload: {},
-      url: "/api/settings/chatgpt",
-    });
     const text = rendered.window.document.body.textContent ?? "";
     assert.match(text, /Disconnect failed/);
-    assert.match(text, /Could not disconnect ChatGPT right now\./);
+    assert.match(text, /Could not disconnect ChatGPT\. Try disconnecting again\./);
     assert.match(text, /Disconnect/);
     assert.doesNotMatch(text, /Connected/);
 

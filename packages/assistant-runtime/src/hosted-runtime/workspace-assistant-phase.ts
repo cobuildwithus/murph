@@ -1292,11 +1292,13 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
         return {
           nextWakeAt: result.nextWakeAt,
           nextWakeReason: result.nextWakeReason ?? "assistant",
+          requiresFollowUpCheckpoint: true,
         };
       }
       return {
         nextWakeAt: followUpWakeAt,
         nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
       };
     },
     redactedStatus: {

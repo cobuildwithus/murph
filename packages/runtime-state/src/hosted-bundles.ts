@@ -36,13 +36,9 @@ import {
   type HostedBundleInlineRestoreInput,
   type HostedBundleSnapshotArchiveDiagnostics,
 } from "./hosted-bundle-node.ts";
-import { parseHostedLocalCodexSubscriptionHostAuth } from "./hosted-codex-subscription-auth.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
-const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
-const HOSTED_CODEX_AUTH_RELATIVE_PATH =
-  `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${HOSTED_CODEX_AUTH_FILE_NAME}`;
 const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
 export const HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH =
   "hosted-portable-workspace-manifest.json";
@@ -1528,9 +1524,6 @@ export async function pruneHostedCodexHomeToSessionReferencedRollouts(input: {
   const retainedRelativePaths = new Set(
     collection.entries.map((entry) => entry.codexRolloutRelativePath),
   );
-  if (await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)) {
-    retainedRelativePaths.add(HOSTED_CODEX_AUTH_FILE_NAME);
-  }
   await pruneHostedCodexHomeRoot({
     operatorHomeRoot: input.operatorHomeRoot,
     retainedRelativePaths,
@@ -1946,9 +1939,6 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
       )) {
         explicitOperatorHomeFiles.add(relativePath);
       }
-    }
-    if (await hasHostedCodexManagedAuthJson(operatorHomeRoot)) {
-      explicitOperatorHomeFiles.add(HOSTED_CODEX_AUTH_RELATIVE_PATH);
     }
 
   } else {
@@ -2689,11 +2679,8 @@ async function createHostedCodexSnapshotExplicitFiles(input: {
   collection: HostedCodexContinuityCollection;
   operatorHomeRoot: string;
 }): Promise<string[]> {
-  const files = createHostedCodexContinuitySnapshotExplicitFiles(input.collection);
-  if (await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)) {
-    files.push(HOSTED_CODEX_AUTH_RELATIVE_PATH);
-  }
-  return [...new Set(files)].sort((left, right) => left.localeCompare(right));
+  void input.operatorHomeRoot;
+  return createHostedCodexContinuitySnapshotExplicitFiles(input.collection);
 }
 
 function createHostedCodexContinuitySnapshotExplicitFiles(
@@ -2707,36 +2694,8 @@ function createHostedCodexContinuitySnapshotExplicitFiles(
 async function createHostedCodexHomeAuthRetainedRelativePaths(input: {
   operatorHomeRoot: string;
 }): Promise<Set<string>> {
-  return await hasHostedCodexManagedAuthJson(input.operatorHomeRoot)
-    ? new Set([HOSTED_CODEX_AUTH_FILE_NAME])
-    : new Set();
-}
-
-async function hasHostedCodexManagedAuthJson(operatorHomeRoot: string): Promise<boolean> {
-  let raw: string;
-  try {
-    raw = await readFile(
-      path.join(operatorHomeRoot, HOSTED_CODEX_AUTH_RELATIVE_PATH),
-      "utf8",
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-  return isHostedCodexManagedAuthJson(raw);
-}
-
-function isHostedCodexManagedAuthJson(raw: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-    parseHostedLocalCodexSubscriptionHostAuth(parsed);
-  } catch {
-    return false;
-  }
-  return true;
+  void input.operatorHomeRoot;
+  return new Set();
 }
 
 function createHostedCodexContinuitySnapshotArtifactPathSet(
