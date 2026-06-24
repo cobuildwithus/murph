@@ -181,13 +181,13 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     if (activeFence.processingMode !== requestedProcessingMode) {
-      const activeRuntimePresent =
+      const activeRuntimeState =
         await this.readActiveRuntimeFenceWithoutWake({
           activeFence,
           commandBudget: input.commandBudget,
           record,
         });
-      if (activeRuntimePresent === false) {
+      if (activeRuntimeState === "inactive") {
         return await this.replaceStartRequiredRuntimeFence({
           activeFence,
           commandBudget: input.commandBudget,
@@ -205,13 +205,13 @@ export class RuntimeProcessingController {
     }
 
     if (activeFence.processingMode === "inbox_media_retention") {
-      const activeRuntimePresent =
+      const activeRuntimeState =
         await this.readActiveRuntimeFenceWithoutWake({
           activeFence,
           commandBudget: input.commandBudget,
           record,
         });
-      if (activeRuntimePresent !== false) {
+      if (activeRuntimeState !== "inactive") {
         await this.syncRunnerAlarm(record);
         return {
           action: "already_running",
@@ -344,26 +344,21 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
-  }): Promise<boolean | null> {
+  }): Promise<"inactive" | "indeterminate" | "matching"> {
     if (!this.input.runnerContainerNamespace) {
-      return null;
+      return "indeterminate";
     }
 
-    const runnerContainerName =
-      input.activeFence.runnerContainerName
-      ?? resolveHostedExecutionRunnerContainerName({
-        source: this.input.runnerRuntimeEnvSource,
-        userId: input.record.userId,
-      });
+    const runnerContainerName = input.activeFence.runnerContainerName;
     if (!runnerContainerName) {
-      return null;
+      return "indeterminate";
     }
 
     const container = this.input.runnerContainerNamespace.getByName(
       runnerContainerName,
     );
     if (!container.readActiveRuntimeUserFence) {
-      return null;
+      return "indeterminate";
     }
 
     try {
@@ -372,10 +367,14 @@ export class RuntimeProcessingController {
         operation: async () => await container.readActiveRuntimeUserFence!(),
         stepTimeoutMs: this.input.env.webControlTimeoutMs,
       });
-      return activeRuntime.active
-        && activeRuntime.attemptId === input.activeFence.attemptId
+      if (!activeRuntime.active) {
+        return "inactive";
+      }
+      return activeRuntime.attemptId === input.activeFence.attemptId
         && activeRuntime.leaseGeneration === String(input.activeFence.generation)
-        && activeRuntime.userId === input.record.userId;
+        && activeRuntime.userId === input.record.userId
+        ? "matching"
+        : "indeterminate";
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -385,7 +384,7 @@ export class RuntimeProcessingController {
         phase: "scheduled",
         userId: input.record.userId,
       });
-      return null;
+      return "indeterminate";
     }
   }
 

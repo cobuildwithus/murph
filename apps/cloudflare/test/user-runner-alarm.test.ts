@@ -1390,6 +1390,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
       workspaceVersion: "7",
     });
 
@@ -1441,6 +1442,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
@@ -1455,6 +1457,104 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
+  it("keeps opposite-mode runtime busy when the active child identity does not match the fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: "attempt_different_runtime",
+      leaseGeneration: "2",
+      userId: TEST_USER_ID,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "default",
+      runnerContainerName: TEST_USER_ID,
+      startedAt: "2026-04-26T23:59:20.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-retention-behind-mismatched-default",
+      processingMode: "inbox_media_retention",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:36.000Z",
+    });
+
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
+  it("keeps opposite-mode runtime busy when the persisted fence has no container name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: false,
+      reason: "no_active_runtime",
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "default",
+      runnerContainerName: null,
+      startedAt: "2026-04-26T23:59:20.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-retention-behind-legacy-default",
+      processingMode: "inbox_media_retention",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:36.000Z",
+    });
+
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -1489,6 +1589,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "default",
+      runnerContainerName: TEST_USER_ID,
       startedAt: "2026-04-26T23:59:20.000Z",
       workspaceVersion: "7",
     });
@@ -1551,6 +1652,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
       startedAt: "2026-04-26T23:59:20.000Z",
       workspaceVersion: "7",
     });
@@ -1612,6 +1714,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
       startedAt: "2026-04-26T23:59:20.000Z",
       workspaceVersion: "7",
     });
@@ -3313,6 +3416,7 @@ function writeRuntimeFenceForTest(
     attemptId?: string;
     generation?: number;
     processingMode?: "default" | "inbox_media_retention";
+    runnerContainerName?: string | null;
     startedAt?: string;
     workspaceVersion?: string;
   } = {},
@@ -3328,6 +3432,7 @@ function writeRuntimeFenceForTest(
          active_generation = ?,
          active_kind = ?,
          active_reason = ?,
+         active_runner_container_name = ?,
          active_started_at = ?,
          active_workspace_version = ?
      WHERE singleton = 1`,
@@ -3335,6 +3440,7 @@ function writeRuntimeFenceForTest(
     generation,
     "runtime",
     input.processingMode ?? "nudge",
+    input.runnerContainerName ?? null,
     input.startedAt ?? FIXED_NOW,
     input.workspaceVersion ?? "7",
   );
