@@ -407,17 +407,31 @@ model HostedWebSession {
 }
 
 model HostedSensitiveActionChallenge {
-  tokenHash   String       @id @map("token_hash")
-  memberId    String       @map("member_id")
-  kind        String
-  bindingHash String       @map("binding_hash")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  expiresAt   DateTime     @map("expires_at")
-  member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tokenHash          String                                @id @map("token_hash")
+  memberId           String                                @map("member_id")
+  kind               String
+  bindingHash        String                                @map("binding_hash")
+  createdAt          DateTime                              @default(now()) @map("created_at")
+  expiresAt          DateTime                              @map("expires_at")
+  approvalKey        String?                               @unique @map("approval_key")
+  actionId           String?                               @map("action_id")
+  actionHash         String?                               @map("action_hash")
+  presentationTitle  String?                               @map("presentation_title")
+  presentationBody   String?                               @map("presentation_body")
+  approvalStatus     HostedSensitiveActionApprovalStatus?  @map("approval_status")
+  decidedAt          DateTime?                             @map("decided_at")
+  member             HostedMember                          @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, expiresAt])
   @@index([expiresAt])
+  @@index([memberId, approvalStatus, expiresAt], map: "hosted_sensitive_action_challenge_member_id_approval_status_expires_at_idx")
   @@map("hosted_sensitive_action_challenge")
+}
+
+enum HostedSensitiveActionApprovalStatus {
+  pending
+  approved
+  denied
 }
 
 model HostedConnectedAppsSession {
