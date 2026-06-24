@@ -108,6 +108,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
       source: state.connectedSource,
     }),
     failed,
+    kind: "device-sync",
     retryHref: failed ? "/connect" : null,
     title,
   };

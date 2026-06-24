@@ -22,6 +22,10 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import {
+  type ConnectedAppCompletionSearchParams,
+  resolveConnectedAppCompletionDialogModel,
+} from "@/src/lib/connected-apps/connect-completion";
+import {
   resolveDeviceSyncCompletionDialogModel,
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
@@ -40,9 +44,12 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Your personal health dashboard.",
 });
 
-type HomeSearchParams = DeviceSyncCompletionSearchParams & {
-  initialVisit?: string | string[] | undefined;
-};
+type HomeSearchParams =
+  & DeviceSyncCompletionSearchParams
+  & ConnectedAppCompletionSearchParams
+  & {
+    initialVisit?: string | string[] | undefined;
+  };
 
 export default async function HomePage({
   searchParams,
@@ -72,7 +79,8 @@ export default async function HomePage({
   const [
     showDeviceStep,
     usageGate,
-    completionDialog,
+    deviceSyncCompletionDialog,
+    connectedAppCompletionDialog,
     billingRef,
     initialVisitContactAction,
   ] = await Promise.all([
@@ -90,6 +98,10 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
+    resolveConnectedAppCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
     member
       ? readHostedMemberStripeBillingRef({
           memberId: member.id,
@@ -100,6 +112,9 @@ export default async function HomePage({
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
   ]);
+  // Each marker uses its own query key, so only one model is non-null per
+  // home load in normal use; device-sync wins the tiebreak if both fire.
+  const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
   const usageLimitNotice =
     usageGate && !usageGate.allowed && usageGate.userNotice
       ? usageGate.userNotice
