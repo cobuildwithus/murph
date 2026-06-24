@@ -3081,6 +3081,75 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("sends an action-oriented Linq trial-expiry reply without claiming a usage-limit period", async () => {
+    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
+      allowed: false,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      reason: "trial_expired_pending_billing",
+      remainingUsdMicros: 0n,
+      retryAfter: new Date("2026-04-08T12:15:00.000Z"),
+      spentUsdMicros: 4_500_000n,
+      userNotice: {
+        code: "trial_conversion_pending",
+        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+      },
+    });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_trial_expired",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-ai-usage-quota-reply",
+    });
+    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        idempotencyKey: "linq-message:evt_trial_expired",
+        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
   it("sends Linq AI usage quota replies to the current inbound chat when the stored route is stale", async () => {
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
@@ -3933,7 +4002,7 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 0n,
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended and billing is being updated. Try again shortly.",
+        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
       },
     });
     const prisma = asPrismaTransactionClient({

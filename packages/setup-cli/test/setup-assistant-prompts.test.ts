@@ -77,7 +77,7 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
     codexCommand: null,
     codexHome: null,
     profile: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'low',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     oss: false,

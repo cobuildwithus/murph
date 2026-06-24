@@ -10,6 +10,7 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
+import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -19,7 +20,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
   AssistantChannelDependencies,
-  'sendTelegram' | 'sendLinq' | 'sendLinqVoiceMemo' | 'sendEmail' | 'signal'
+  'sendTelegram' | 'sendTelegramImage' | 'sendLinq' | 'sendLinqVoiceMemo' | 'sendEmail' | 'signal'
 >
 
 export interface AssistantHostedDeviceConnectLink {
@@ -81,7 +82,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
-  connectedAppsAvailable?: boolean | null
+  connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   issueDeviceConnectLink?(
@@ -108,6 +109,7 @@ export function normalizeAssistantExecutionContext(
 ): AssistantExecutionContext {
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
+  const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
     hosted?.channelTypingDependencies,
@@ -133,9 +135,7 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
-      ...(hosted?.connectedAppsAvailable === true
-        ? { connectedAppsAvailable: true }
-        : {}),
+      ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
@@ -184,6 +184,18 @@ export function normalizeAssistantExecutionContext(
           .map((key) => normalizeNullableString(key))
           .filter((key): key is string => key !== null) ?? [],
     },
+  }
+}
+
+function normalizeAssistantConnectedAppsPort(
+  input: AssistantHostedExecutionContext['connectedApps'] | undefined,
+): AssistantConnectedAppsPort | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 
@@ -254,6 +266,9 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
   if (typeof input.sendTelegram === 'function') {
     dependencies.sendTelegram = input.sendTelegram
   }
+  if (typeof input.sendTelegramImage === 'function') {
+    dependencies.sendTelegramImage = input.sendTelegramImage
+  }
   if (typeof input.sendLinq === 'function') {
     dependencies.sendLinq = input.sendLinq
   }
@@ -267,6 +282,7 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
     input.signal &&
     (
       dependencies.sendTelegram ||
+      dependencies.sendTelegramImage ||
       dependencies.sendLinq ||
       dependencies.sendLinqVoiceMemo ||
       dependencies.sendEmail
@@ -277,6 +293,7 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
 
   return (
     dependencies.sendTelegram ||
+    dependencies.sendTelegramImage ||
     dependencies.sendLinq ||
     dependencies.sendLinqVoiceMemo ||
     dependencies.sendEmail

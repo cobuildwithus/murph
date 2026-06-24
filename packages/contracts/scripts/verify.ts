@@ -10,6 +10,7 @@ import {
   auditRecordSchema,
   conditionFrontmatterSchema,
   coreFrontmatterSchema,
+  CURRENT_VAULT_FORMAT_VERSION,
   type ContractSchema,
   exampleAssessmentResponses,
   exampleAuditRecords,
@@ -145,6 +146,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-scheduled-log",
   "frontmatter-workout-format",
   "inbox-capture-record",
+  "integration-ingest-record",
   "metric-sample-record",
   "preferences-document",
   "sample-record",
@@ -220,7 +222,7 @@ assert.equal(
     (schemaCatalog["vault-metadata"] as { properties?: Record<string, { const?: unknown }> }).properties
       ?.formatVersion
   )?.const,
-  1,
+  CURRENT_VAULT_FORMAT_VERSION,
 );
 assert.equal(isStrictIsoDate("2024-02-29"), true);
 assert.equal(isStrictIsoDate("2024-02-31"), false);

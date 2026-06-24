@@ -273,7 +273,7 @@ describe("hosted onboarding routes", () => {
     });
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
-      joinUrl: "https://join.example.test/join/invite-code",
+      joinUrl: "/join/invite-code",
       launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,

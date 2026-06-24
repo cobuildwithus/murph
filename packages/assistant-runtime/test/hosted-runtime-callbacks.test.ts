@@ -2155,6 +2155,48 @@ describe("hosted runtime callbacks", () => {
     vi.useRealTimers();
   });
 
+  it("preserves overdue retryable next attempts as stable wakes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:01:30.000Z"));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_linq",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_linq",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_linq",
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: {
+          code: "LINQ_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "hello linq",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_linq",
+      },
+    ]);
+
+    const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(wakeAt).toBe("2026-04-08T00:01:00.000Z");
+    vi.useRealTimers();
+  });
+
   it("keeps non-idempotent sending intents awake until stale reconciliation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:02:30.000Z"));

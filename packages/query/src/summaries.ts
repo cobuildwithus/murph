@@ -4,7 +4,7 @@ import {
   summarizeSampleSeries,
   type SampleSummaryProfile,
   type SampleWindowSummary,
-} from "@murphai/importers/sample-series-summary";
+} from "@murphai/health-metrics";
 import { isDisplayGradeMetricSampleEntity } from "./metrics/index.ts";
 
 export interface DailySampleSummary {

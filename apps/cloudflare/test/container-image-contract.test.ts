@@ -834,6 +834,8 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("python3", ["--version"])');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("rg", ["--version"])');
     expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
+    expect(hostedRunnerSmokeChild).toContain("cwd: input.vaultRoot");
+    expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
     expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.5"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 128000");

@@ -17,6 +17,10 @@ function isFrontmatterObject(value: unknown): value is FrontmatterObject {
   return isPlainRecord(value);
 }
 
+function stringNeedsQuotes(value: string): boolean {
+  return /^(?:null|true|false|[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?)$/u.test(value);
+}
+
 function stringifyScalar(value: FrontmatterValue): string {
   if (value === null) {
     return "null";
@@ -35,7 +39,7 @@ function stringifyScalar(value: FrontmatterValue): string {
       return "\"\"";
     }
 
-    if (/^[A-Za-z0-9_./:-]+$/.test(value)) {
+    if (/^[A-Za-z0-9_./:-]+$/.test(value) && !stringNeedsQuotes(value)) {
       return value;
     }
 

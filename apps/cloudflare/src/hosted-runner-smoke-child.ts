@@ -16,6 +16,9 @@ import type { Writable } from "node:stream";
 import { promisify } from "node:util";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
+} from "@murphai/contracts";
+import {
   decodeHostedBundleBase64,
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -697,6 +700,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   vaultWriteProofCount: number;
 }> {
   const child = spawn("codex", ["app-server"], {
+    cwd: input.vaultRoot,
     detached: process.platform !== "win32",
     env: {
       ...process.env,
@@ -941,6 +945,7 @@ function findExecutable(name) {
   return "";
 }
 const proof = {
+  cwdRebound: process.cwd() === expectedVaultRoot,
   murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY || process.env.VERCEL_AI_API_KEY),
   python3PathBytes: Buffer.byteLength(findExecutable("python3"), "utf8"),
@@ -978,6 +983,10 @@ function parseCodexEnvironmentProbe(
 
   if (record.vaultRootInherited !== true) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
+  }
+
+  if (record.cwdRebound !== true) {
+    throw new Error("Codex app-server shell env probe did not execute from the restored vault root.");
   }
 
   if (record.providerCredentialPresent === true) {
@@ -1027,7 +1036,7 @@ async function createExplicitVaultProofRoot(activeVaultRoot: string): Promise<st
     path.join(explicitVaultRoot, "vault.json"),
     `${JSON.stringify({
       createdAt: "2026-05-21T00:00:00Z",
-      formatVersion: 1,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       timezone: "UTC",
       title: "Explicit Vault Proof",
       vaultId: CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID,

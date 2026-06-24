@@ -65,6 +65,24 @@ import type {
 
 export { SqliteDeviceSyncStore } from "./store.ts";
 
+export function resolveDeviceSyncStoreNextWakeAt(input: {
+  stateDatabasePath?: string | null;
+  vaultRoot: string;
+}): string | null {
+  const store = new SqliteDeviceSyncStore(
+    input.stateDatabasePath ?? defaultStateDatabasePath(input.vaultRoot),
+  );
+
+  try {
+    return earliestIsoTimestamp(
+      store.readNextActiveReconcileAt(),
+      store.readNextJobWakeAt(),
+    );
+  } finally {
+    store.close();
+  }
+}
+
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;

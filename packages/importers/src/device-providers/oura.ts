@@ -7,14 +7,14 @@ import {
   asArray,
   asPlainObject,
   buildSyntheticDeletionResourceId,
-  createRawArtifact,
+  createEvidencePart,
   emitObservationMetrics,
   finiteNumber,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
-  pushRawArtifact,
+  pushEvidencePart,
   slugify,
   stringId,
   toIso,
@@ -24,7 +24,7 @@ import {
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -394,7 +394,7 @@ function buildOuraWorkoutMetrics(workout: PlainObject): WorkoutSessionMetrics | 
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -424,7 +424,7 @@ function pushDeletionObservation(
       sourceEventType,
       deletion,
     });
-  pushSharedDeletionObservation(events, rawArtifacts, {
+  pushSharedDeletionObservation(events, evidenceParts, {
     provider: "oura",
     providerDisplayName: "Oura",
     resourceType,
@@ -464,11 +464,11 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     .map((entry) => asPlainObject(entry))
     .filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const evidenceParts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ?? stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
 
-  pushRawArtifact(rawArtifacts, createRawArtifact("personal-info", "personal-info.json", personalInfo));
+  pushEvidencePart(evidenceParts, createEvidencePart("personal-info", "personal-info.json", personalInfo));
 
   for (const activity of dailyActivity) {
     const activityId = stringId(activity.id) ?? stringId(activity.day) ?? `daily-activity-${events.length + 1}`;
@@ -478,7 +478,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `daily-activity:${activityId}`;
     const version = firstIso(activity.timestamp);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-activity-${activityId}.json`, activity));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-activity-${activityId}.json`, activity));
 
     emitObservationMetrics(
       events,
@@ -488,7 +488,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [role],
+        evidenceRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-activity", activityId, version, facet),
       },
       OURA_DAILY_ACTIVITY_METRICS,
@@ -503,7 +503,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `daily-sleep:${summaryId}`;
     const version = firstIso(summary.timestamp);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-sleep-${summaryId}.json`, summary));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-sleep-${summaryId}.json`, summary));
 
     emitObservationMetrics(
       events,
@@ -513,7 +513,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [role],
+        evidenceRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-sleep", summaryId, version, facet),
       },
       OURA_DAILY_SLEEP_METRICS,
@@ -529,7 +529,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `daily-readiness:${readinessId}`;
     const version = firstIso(readiness.timestamp);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-readiness-${readinessId}.json`, readiness));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-readiness-${readinessId}.json`, readiness));
 
     emitObservationMetrics(
       events,
@@ -539,7 +539,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [role],
+        evidenceRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-readiness", readinessId, version, facet),
       },
       OURA_DAILY_READINESS_METRICS,
@@ -554,7 +554,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `daily-spo2:${spo2Id}`;
     const version = firstIso(spo2.timestamp);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-spo2-${spo2Id}.json`, spo2));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-spo2-${spo2Id}.json`, spo2));
 
     emitObservationMetrics(
       events,
@@ -564,7 +564,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [role],
+        evidenceRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-spo2", spo2Id, version, facet),
       },
       OURA_DAILY_SPO2_METRICS,
@@ -595,7 +595,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
 
     if (sleepType === "deleted") {
-      pushDeletionObservation(events, rawArtifacts, importedAt, {
+      pushDeletionObservation(events, evidenceParts, importedAt, {
         resource_type: "sleep",
         resource_id: sleepId,
         occurred_at: recordedAt,
@@ -604,7 +604,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       continue;
     }
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `sleep-${sleepId}.json`, sleep));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `sleep-${sleepId}.json`, sleep));
 
     if (sleepType !== "rest" && occurredAt && startAt && endAt && durationMinutes) {
       events.push(
@@ -615,7 +615,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           dayKey,
           source: "device",
           title: sleepType.includes("nap") ? "Oura nap" : "Oura sleep",
-          rawArtifactRoles: [role],
+          evidenceRoles: [role],
           externalRef: makeExternalRef("sleep", sleepId, version),
           fields: {
             startAt,
@@ -634,7 +634,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         recordedAt,
         dayKey,
         observationGrain: "summary",
-        rawArtifactRoles: [role],
+        evidenceRoles: [role],
         externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
       },
       OURA_SLEEP_OBSERVATION_METRICS,
@@ -658,7 +658,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `session:${sessionId}`;
     const version = firstIso(session.timestamp, session.updated_at, session.updatedAt);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `session-${sessionId}.json`, session));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `session-${sessionId}.json`, session));
 
     if (occurredAt && startAt && endAt && durationMinutes) {
       events.push(
@@ -669,7 +669,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           dayKey,
           source: "device",
           title: trimToLength(`Oura ${sessionType} session`, 160),
-          rawArtifactRoles: [role],
+          evidenceRoles: [role],
           externalRef: makeExternalRef("session", sessionId, version),
           fields: stripUndefined({
             activityType: sessionType,
@@ -712,7 +712,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const distanceMeters = firstNumber(workout.distance, workout.distance_meter, workout.distance_meters);
     const distanceKm = distanceMeters !== undefined ? distanceMeters / 1000 : undefined;
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `workout-${workoutId}.json`, workout));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `workout-${workoutId}.json`, workout));
 
     if (occurredAt && startAt && endAt && durationMinutes) {
       events.push(
@@ -723,7 +723,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           dayKey,
           source: "device",
           title: trimToLength(`Oura ${activityType}`, 160),
-          rawArtifactRoles: [role],
+          evidenceRoles: [role],
           externalRef: makeExternalRef("workout", workoutId, version),
           fields: stripUndefined({
             activityType,
@@ -745,7 +745,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
   }
 
   for (const deletion of deletions) {
-    pushDeletionObservation(events, rawArtifacts, importedAt, deletion);
+    pushDeletionObservation(events, evidenceParts, importedAt, deletion);
   }
 
   const provenance = stripEmptyObject({
@@ -768,7 +768,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     accountId,
     importedAt,
     events,
-    rawArtifacts,
+    evidenceParts,
     provenance,
   });
 }

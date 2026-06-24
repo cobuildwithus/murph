@@ -58,6 +58,7 @@ import type {
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
+const TELEGRAM_MAX_PHOTO_CAPTION_LENGTH = 1024
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
@@ -65,12 +66,18 @@ const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 2_000
 
 type TelegramParsedTarget = TelegramThreadTarget
-type TelegramSendOperation = 'sendMessage' | 'sendVoice'
+type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
+type TelegramImageResponseMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
 
 type TelegramMessageEntity = {
   length: number
   offset: number
   type: MessageTextDecoration['style']
+}
+
+type DecoratedTelegramPhotoCaption = {
+  entities: TelegramMessageEntity[]
+  text: string
 }
 
 interface TelegramCleanupMessage {
@@ -145,6 +152,158 @@ export async function sendTelegramMessage(
   target: string
 }> {
   return sendTelegramMessageDetailed(input, dependencies)
+}
+
+export async function sendTelegramImageMessage(
+  input: {
+    idempotencyKey?: string | null
+    media: readonly TelegramImageResponseMedia[]
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{
+  cleanupMessages?: TelegramCleanupMessage[]
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  providerMessageIds?: string[]
+  target: string
+}> {
+  const media = input.media.filter((item) => item.kind === 'image')
+  if (media.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_IMAGE_REQUIRED',
+      'Telegram image delivery requires at least one image.',
+    )
+  }
+
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_UNAVAILABLE',
+      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
+    )
+  }
+
+  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
+    /\/$/u,
+    '',
+  )
+  let target = parseTelegramTargetOrThrow(input.target)
+  let targetLabel = serializeTelegramThreadTarget(target)
+  let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
+  const cleanupMessages: TelegramCleanupMessage[] = []
+  const cleanupTargetAliases = new Set<string>()
+  const providerMessageIds: string[] = []
+  let lastProviderMessageId: string | null = null
+
+  const caption = buildTelegramPhotoCaption(input.message)
+  if (!caption && input.message.trim().length > 0) {
+    const deliveredText = await sendTelegramMessageDetailed(
+      {
+        idempotencyKey: input.idempotencyKey ?? null,
+        message: input.message,
+        replyToMessageId,
+        target: targetLabel,
+      },
+      dependencies,
+    )
+    for (const cleanupMessage of deliveredText.cleanupMessages ?? []) {
+      cleanupMessages.push(cleanupMessage)
+    }
+    for (const alias of deliveredText.cleanupTargetAliases ?? []) {
+      cleanupTargetAliases.add(alias)
+    }
+    if (deliveredText.providerMessageIds) {
+      providerMessageIds.push(...deliveredText.providerMessageIds)
+    } else if (deliveredText.providerMessageId) {
+      providerMessageIds.push(deliveredText.providerMessageId)
+    }
+    lastProviderMessageId = deliveredText.providerMessageId
+    target = parseTelegramTargetOrThrow(deliveredText.target)
+    targetLabel = deliveredText.target
+    replyToMessageId = null
+  }
+
+  for (let index = 0; index < media.length; index += 1) {
+    const image = media[index]!
+    try {
+      const delivered = await sendTelegramPhoto({
+        baseUrl,
+        caption: index === 0 ? caption : null,
+        fetchImplementation,
+        photoUrl: image.url,
+        replyToMessageId,
+        signal: dependencies.signal,
+        target,
+        targetLabel,
+        token,
+      })
+      target = delivered.target
+      targetLabel = delivered.targetLabel
+      lastProviderMessageId = delivered.providerMessageId
+      for (const alias of delivered.cleanupTargetAliases ?? []) {
+        cleanupTargetAliases.add(alias)
+      }
+      if (delivered.providerMessageId) {
+        cleanupMessages.push({
+          messageId: delivered.providerMessageId,
+          target: delivered.targetLabel,
+        })
+        providerMessageIds.push(delivered.providerMessageId)
+      }
+      replyToMessageId = null
+    } catch (error) {
+      if (providerMessageIds.length === 0) {
+        throw error
+      }
+
+      const rollbackError = await rollbackTelegramPartialDelivery({
+        cleanupMessages,
+        env,
+        fetchImplementation,
+      })
+      if (!rollbackError) {
+        throw error
+      }
+
+      throw createTelegramAmbiguousDeliveryFailure({
+        cleanupMessages,
+        cleanupTargetAliases: [...cleanupTargetAliases],
+        error,
+        providerMessageIds,
+        rollbackError,
+        target: targetLabel,
+      })
+    }
+  }
+
+  return {
+    ...(cleanupMessages.length > 0
+      ? {
+          cleanupMessages,
+        }
+      : {}),
+    ...(cleanupTargetAliases.size > 0
+      ? {
+          cleanupTargetAliases: [...cleanupTargetAliases],
+        }
+      : {}),
+    providerMessageId: lastProviderMessageId,
+    ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
+    target: targetLabel,
+  }
 }
 
 export async function sendTelegramVoiceMemoMessage(
@@ -1074,6 +1233,84 @@ async function sendTelegramTextChunk(input: {
   }
 }
 
+async function sendTelegramPhoto(input: {
+  baseUrl: string
+  caption: DecoratedTelegramPhotoCaption | null
+  fetchImplementation: TelegramFetchImplementation
+  photoUrl: string
+  replyToMessageId: string | null
+  signal?: AbortSignal
+  target: TelegramParsedTarget
+  targetLabel: string
+  token: string
+}): Promise<{
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  target: TelegramParsedTarget
+  targetLabel: string
+}> {
+  const cleanupTargetAliases = new Set<string>()
+  let retryCount = 0
+  let target = input.target
+  let targetLabel = input.targetLabel
+
+  while (true) {
+    const outcome = resolveTelegramSendAttemptOutcome({
+      operation: 'sendPhoto',
+      result: await sendTelegramPhotoOnce({
+        baseUrl: input.baseUrl,
+        caption: input.caption,
+        fetchImplementation: input.fetchImplementation,
+        photoUrl: input.photoUrl,
+        replyToMessageId: input.replyToMessageId,
+        signal: input.signal,
+        target,
+        targetLabel,
+        token: input.token,
+      }),
+      target,
+      targetLabel,
+    })
+
+    if (outcome.kind === 'delivered') {
+      return {
+        ...(cleanupTargetAliases.size > 0
+          ? {
+              cleanupTargetAliases: [...cleanupTargetAliases],
+            }
+          : {}),
+        providerMessageId: outcome.providerMessageId,
+        target,
+        targetLabel,
+      }
+    }
+
+    if (outcome.kind === 'migrated') {
+      cleanupTargetAliases.add(targetLabel)
+      target = outcome.target
+      targetLabel = outcome.targetLabel
+      continue
+    }
+
+    if (
+      outcome.kind === 'failed' ||
+      retryCount >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1
+    ) {
+      throw outcome.failure
+    }
+
+    await waitForTelegramRetryDelay(
+      retryCount,
+      outcome.retryAfterSeconds,
+      input.signal,
+    )
+    if (input.signal?.aborted) {
+      throw outcome.failure
+    }
+    retryCount += 1
+  }
+}
+
 async function sendTelegramVoiceMemo(input: {
   baseUrl: string
   bytes: Uint8Array
@@ -1219,7 +1456,7 @@ async function sendTelegramBotApiRequest(input: {
   fetchImplementation: TelegramFetchImplementation
   headers?: Record<string, string>
   method: 'POST'
-  operation: 'sendChatAction' | 'sendMessage' | 'sendVoice'
+  operation: 'sendChatAction' | 'sendMessage' | 'sendPhoto' | 'sendVoice'
   payload?: Record<string, unknown>
   signal?: AbortSignal
   token: string
@@ -1500,6 +1737,92 @@ function buildTelegramMessageEntities(
     offset: decoration.range[0],
     type: decoration.style,
   }))
+}
+
+function buildTelegramPhotoCaption(
+  message: string,
+): DecoratedTelegramPhotoCaption | null {
+  if (message.trim().length === 0) {
+    return null
+  }
+
+  const chunks = splitDecoratedMessageText(
+    renderMarkdownMessageText(message),
+    TELEGRAM_MAX_PHOTO_CAPTION_LENGTH,
+  )
+  if (chunks.length !== 1) {
+    return null
+  }
+
+  const chunk = chunks[0]!
+  return {
+    entities: buildTelegramMessageEntities(chunk.decorations),
+    text: chunk.text,
+  }
+}
+
+async function sendTelegramPhotoOnce(input: {
+  baseUrl: string
+  caption: DecoratedTelegramPhotoCaption | null
+  fetchImplementation: TelegramFetchImplementation
+  photoUrl: string
+  replyToMessageId: string | null
+  signal?: AbortSignal
+  target: TelegramParsedTarget
+  targetLabel: string
+  token: string
+}): Promise<TelegramSendAttemptResult> {
+  try {
+    const response = await sendTelegramBotApiRequest({
+      baseUrl: input.baseUrl,
+      fetchImplementation: input.fetchImplementation,
+      method: 'POST',
+      operation: 'sendPhoto',
+      payload: {
+        ...buildTelegramTargetPayload(input.target),
+        ...(input.caption
+          ? {
+              caption: input.caption.text,
+              ...(input.caption.entities.length > 0
+                ? {
+                    caption_entities: input.caption.entities,
+                  }
+                : {}),
+            }
+          : {}),
+        photo: input.photoUrl,
+        reply_to_message_id: input.replyToMessageId ? Number.parseInt(input.replyToMessageId, 10) : undefined,
+      },
+      signal: input.signal,
+      token: input.token,
+    })
+
+    return {
+      kind: 'response',
+      payload: await readTelegramResponsePayload(response),
+      response,
+    }
+  } catch (error) {
+    return {
+      kind: 'request-error',
+      failure: Object.assign(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+          'Outbound Telegram photo delivery could not be confirmed after calling the Bot API.',
+          {
+            error: describeUnknownError(error),
+            target: input.targetLabel,
+          },
+        ),
+        {
+          deliveryMayHaveSucceeded: true as const,
+          providerMessageId: null,
+          providerMessageIds: [] as [],
+          target: input.targetLabel,
+        },
+      ),
+    }
+  }
 }
 
 async function sendTelegramVoiceMemoOnce(input: {

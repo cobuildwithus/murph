@@ -9,13 +9,68 @@ describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
     expect(
       parseHostedExecutionEvent({
-        kind: "runtime.browser-vault-refresh-requested",
+        kind: "runtime.maintenance-requested",
         userId: "user-1",
       }),
     ).toEqual({
-      kind: "runtime.browser-vault-refresh-requested",
+      kind: "runtime.maintenance-requested",
       userId: "user-1",
     });
+  });
+
+  it("parses Codex auth runtime-control events with exact keys", () => {
+    expect(
+      parseHostedExecutionEvent({
+        action: "connect",
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "runtime.codex-auth-requested",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      action: "connect",
+      attemptId: "hca_abcdefghijklmnop",
+      kind: "runtime.codex-auth-requested",
+      userId: "user-1",
+    });
+    expect(() =>
+      parseHostedExecutionEvent({
+        action: "connect",
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "runtime.codex-auth-requested",
+        userCode: "ABCD-EFGH",
+        userId: "user-1",
+      })
+    ).toThrow(/unsupported field/u);
+  });
+
+  it("parses Codex auth runtime-control wakes with exact keys", () => {
+    expect(
+      parseHostedExecutionWake({
+        action: "disconnect",
+        attemptId: "hca_abcdefghijklmnop",
+        eventId: "runtime-control:codex-auth",
+        kind: "runtime.codex-auth-requested",
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      action: "disconnect",
+      attemptId: "hca_abcdefghijklmnop",
+      eventId: "runtime-control:codex-auth",
+      kind: "runtime.codex-auth-requested",
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "user-1",
+    });
+    expect(() =>
+      parseHostedExecutionWake({
+        action: "disconnect",
+        attemptId: "not-an-attempt",
+        eventId: "runtime-control:codex-auth",
+        kind: "runtime.codex-auth-requested",
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "user-1",
+      })
+    ).toThrow(/attemptId/u);
   });
 
   it("parses explicit member channel sync events", () => {
@@ -327,13 +382,13 @@ describe("parseHostedExecutionWake", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "evt_runtime_control",
-        kind: "runtime.manual-requested",
+        kind: "runtime.maintenance-requested",
         occurredAt: "2026-04-18T00:00:00.000Z",
         userId: "user-1",
       }),
     ).toEqual({
       eventId: "evt_runtime_control",
-      kind: "runtime.manual-requested",
+      kind: "runtime.maintenance-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",
     });

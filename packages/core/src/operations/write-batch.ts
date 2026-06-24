@@ -1685,6 +1685,7 @@ export class WriteBatch {
     targetRelativePath: string,
     options: {
       allowAppendOnlyJsonl?: boolean;
+      allowRaw?: boolean;
     } = {},
   ): Promise<string> {
     this.assertMutable();
@@ -1692,6 +1693,7 @@ export class WriteBatch {
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
       kind: "delete",
       allowAppendOnlyJsonl: options.allowAppendOnlyJsonl,
+      allowRaw: options.allowRaw,
       messages: {
         appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
         rawDisallowed: "Use stageRawCopy for raw artifacts.",

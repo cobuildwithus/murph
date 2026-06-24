@@ -25,13 +25,28 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
+  "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
+  "runtime.codex-auth-requested",
   "runtime.device-sync-recovery-requested",
   "runtime.mailbox-lag-observed",
 ] as const;
 
 export type HostedExecutionRuntimeControlWakeKind =
   (typeof HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS)[number];
+
+export const HOSTED_CODEX_AUTH_ACTIONS = [
+  "connect",
+  "disconnect",
+] as const;
+
+export type HostedCodexAuthAction =
+  (typeof HOSTED_CODEX_AUTH_ACTIONS)[number];
+
+export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
+  HostedExecutionRuntimeControlWakeKind,
+  "runtime.codex-auth-requested"
+>;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
@@ -188,10 +203,21 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
-export interface HostedExecutionRuntimeControlRequestedEvent
+export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
-  kind: HostedExecutionRuntimeControlWakeKind;
+  kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
+
+export interface HostedExecutionCodexAuthRequestedEvent
+  extends HostedExecutionBaseEvent {
+  action: HostedCodexAuthAction;
+  attemptId: string;
+  kind: "runtime.codex-auth-requested";
+}
+
+export type HostedExecutionRuntimeControlRequestedEvent =
+  | HostedExecutionPlainRuntimeControlRequestedEvent
+  | HostedExecutionCodexAuthRequestedEvent;
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
@@ -383,9 +409,19 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
-export interface HostedExecutionRuntimeControlWake extends HostedExecutionBaseWake {
-  kind: HostedExecutionRuntimeControlWakeKind;
+export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
+  kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
+
+export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBaseWake {
+  action: HostedCodexAuthAction;
+  attemptId: string;
+  kind: "runtime.codex-auth-requested";
+}
+
+export type HostedExecutionRuntimeControlWake =
+  | HostedExecutionPlainRuntimeControlWake
+  | HostedExecutionCodexAuthRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";

@@ -713,6 +713,32 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export type HostedCodexAuthUpdate =
+  | {
+      attemptId: string;
+      phase: "device_code";
+      userCode: string;
+      verificationUrl: string;
+    }
+  | {
+      attemptId: string;
+      phase: "connected" | "disconnected" | "failed";
+    };
+
+export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
+  "applied",
+  "already_applied",
+  "superseded",
+] as const;
+
+export type HostedCodexAuthUpdateResponseStatus =
+  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
+
+export interface HostedCodexAuthUpdateResponse {
+  applied: boolean;
+  status: HostedCodexAuthUpdateResponseStatus;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }
@@ -1235,6 +1261,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  "device-sync.wake_projection_failed",
   // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",
   "device-sync.reconnect_notice_duplicate",

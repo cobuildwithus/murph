@@ -38,7 +38,7 @@ const usageLimitBannerCopy: Record<
   },
   trial_conversion_pending: {
     action: "Open billing",
-    body: "Billing is still finishing up. Open it to keep Murph replying.",
+    body: "Start Pulse to keep Murph replying.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {

@@ -1375,6 +1375,7 @@ describe("deleteHostedAccountData", () => {
     ]);
     expect(result.deletedCounts["prisma.hosted_connected_app_connect_intent"]).toBe(1);
     expect(result.deletedCounts["prisma.hosted_connected_apps_session"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_codex_auth_connection"]).toBe(1);
   });
 
   it("blocks hosted account deletion when connected-app revocation fails", async () => {
