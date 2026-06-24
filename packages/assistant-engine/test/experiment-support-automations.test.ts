@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 const vaultServicesMocks = vi.hoisted(() => ({
   writeExperimentOutcome: vi.fn(),
+  showExperiment: vi.fn(),
 }))
 
 vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
@@ -14,11 +15,15 @@ vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
       core: {
         writeExperimentOutcome: vaultServicesMocks.writeExperimentOutcome,
       },
+      query: {
+        showExperiment: vaultServicesMocks.showExperiment,
+      },
     }),
   }
 })
 
 import { createExperiment, initializeVault, updateExperiment } from '@murphai/core'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   buildExperimentFinalResultsSeeds,
@@ -97,8 +102,14 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   })
   expect(progress?.automationId).toMatch(/^automation_[0-9A-F]{26}$/u)
   expect(progress?.tags).toEqual(expect.arrayContaining(['milestone', 'progress-card']))
-  expect(progress?.instructions).toContain('experiment progress sauna-rhr')
-  expect(progress?.instructions).toContain('experiment progress-card sauna-rhr')
+  // The progress + card commands must pin --as-of to the local milestone
+  // date so eastern time zones do not silently compute day three.
+  expect(progress?.instructions).toContain(
+    'experiment progress sauna-rhr --as-of 2026-04-11 --format json',
+  )
+  expect(progress?.instructions).toContain(
+    'experiment progress-card sauna-rhr --as-of 2026-04-11 --format json',
+  )
   expect(progress?.instructions).toContain('murph.attach_response_media')
   expect(progress?.instructions).toContain('opts out of scheduled summaries')
   expect(progress?.instructions).toContain('current intervention window no longer spans four days')
@@ -112,7 +123,11 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     summary: 'A celebratory final review after the experiment finishes.',
   })
   expect(finalResults?.tags).toEqual(expect.arrayContaining(['final-results', 'progress-card']))
-  expect(finalResults?.instructions).toContain('experiment progress-card sauna-rhr')
+  // Pin --as-of to interventionEnd so the card matches the persisted outcome
+  // and stays stable across cron retries.
+  expect(finalResults?.instructions).toContain(
+    'experiment progress-card sauna-rhr --as-of 2026-04-28 --format json',
+  )
   expect(finalResults?.instructions).toContain('opts out of scheduled summaries')
   // The LLM must NOT be asked to run the deterministic write itself —
   // persistence happens in code as a cron precondition so a storage
@@ -228,41 +243,63 @@ it('prefers the per-run schedule timezone over the vault timezone', async () => 
   expect(finalResults?.schedule).toEqual({ kind: 'at', at: '2026-04-28T21:00:00.000Z' })
 })
 
-it('persists the deterministic outcome before the final-results notification turn when the run is eligible', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'experiment-lifecycle-precondition-eligible-',
-  )
-  cleanupRoots.push(parentRoot)
-  await initializeVault({ vaultRoot })
+function buildShowExperimentResult(frontmatter: Record<string, unknown>) {
+  return {
+    vault: '/tmp/lifecycle-precondition/vault',
+    entity: {
+      id: frontmatter.experimentId,
+      kind: 'experiment',
+      title: frontmatter.title ?? null,
+      occurredAt: frontmatter.startedOn ?? null,
+      path: null,
+      markdown: null,
+      data: frontmatter,
+      links: [],
+    },
+  }
+}
 
-  const experiment = await createExperiment({
-    slug: 'sauna-rhr',
-    startedOn: '2026-04-01T09:00:00.000Z',
-    title: 'Sauna RHR',
-    vaultRoot,
-  })
-  await updateExperiment({
-    relativePath: experiment.experiment.relativePath,
-    runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-04-28' },
-    vaultRoot,
-  })
-
+function resetPreconditionMocks() {
   vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
+  vaultServicesMocks.showExperiment.mockReset()
+}
 
-  // Reverse the seed builder's ULID-based mapping
-  // (`experimentFinalResultsAutomationId`) so the precondition looks up the
-  // experiment via its stable id rather than the mutable automation slug.
-  const automationId = `automation_${experiment.experiment.id.replace(/^exp_/u, '')}`
+const FINAL_RESULTS_AUTOMATION_ID = 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+const FINAL_RESULTS_EXPERIMENT_ID = 'exp_X3GPAWV2CCHNCYHAAJ4CE2M144'
+
+const eligibleFrontmatter = {
+  schemaVersion: 'murph.frontmatter.experiment.v1' as const,
+  docType: 'experiment' as const,
+  experimentId: FINAL_RESULTS_EXPERIMENT_ID,
+  slug: 'sauna-rhr',
+  status: 'active' as const,
+  title: 'Sauna RHR',
+  startedOn: '2026-04-01',
+  runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-04-28' },
+}
+
+it('persists the deterministic outcome with a pinned asOf for an eligible final-results run', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+
   const result = await runExperimentLifecycleOutcomePrecondition({
-    automationId,
+    // Reverses the seed builder's ULID mapping
+    // (`experimentFinalResultsAutomationId`): the precondition looks up the
+    // experiment via its stable id rather than the mutable automation slug.
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results', 'progress-card'],
-    vault: vaultRoot,
+    vault: '/tmp/lifecycle-precondition/vault',
   })
 
   expect(result).toEqual({ kind: 'continue' })
   expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
-    vault: vaultRoot,
-    lookup: experiment.experiment.id,
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: FINAL_RESULTS_EXPERIMENT_ID,
+    // Pinned to interventionEnd so the outcomeId / filename are stable
+    // across cron retries crossing a UTC midnight boundary.
+    asOf: '2026-04-28',
     requestId: null,
   })
 })
@@ -270,121 +307,133 @@ it('persists the deterministic outcome before the final-results notification tur
 it('still resolves the outcome lookup via automationId when the managed automation slug has been user-edited', async () => {
   // Regression guard: the reconciler intentionally preserves user-edited
   // slugs, so the precondition must route on the immutable automationId.
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'experiment-lifecycle-precondition-slug-edit-',
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({ ...eligibleFrontmatter, slug: 'whatever-the-user-renamed-it' }),
   )
-  cleanupRoots.push(parentRoot)
-  await initializeVault({ vaultRoot })
 
-  const experiment = await createExperiment({
-    slug: 'edited-slug-run',
-    startedOn: '2026-04-01T09:00:00.000Z',
-    title: 'Edited Slug Run',
-    vaultRoot,
-  })
-  await updateExperiment({
-    relativePath: experiment.experiment.relativePath,
-    runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-04-28' },
-    vaultRoot,
-  })
-
-  vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
-
-  const automationId = `automation_${experiment.experiment.id.replace(/^exp_/u, '')}`
-  const result = await runExperimentLifecycleOutcomePrecondition({
-    automationId,
+  await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
-    vault: vaultRoot,
+    vault: '/tmp/lifecycle-precondition/vault',
   })
 
-  expect(result).toEqual({ kind: 'continue' })
-  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
-    vault: vaultRoot,
-    lookup: experiment.experiment.id,
+  expect(vaultServicesMocks.showExperiment).toHaveBeenCalledWith({
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: FINAL_RESULTS_EXPERIMENT_ID,
     requestId: null,
   })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
 })
 
-it('skips outright when the experiment is no longer in an active or completed state', async () => {
-  // Reachable production path: the user stops the run early after the
-  // automation was already reconciled. The precondition must read canonical
-  // state, return skip, and not persist a stray outcome for an ineligible
-  // run — otherwise the consumed one-shot leaves an orphaned outcome and no
-  // user-visible review.
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'experiment-lifecycle-precondition-skip-',
+it('skips when the run was stopped early (endedOn before interventionEnd)', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      // The normal stopExperiment path leaves status as completed but with
+      // an earlier endedOn — that combination must be filtered before write.
+      status: 'completed',
+      endedOn: '2026-04-15',
+    }),
   )
-  cleanupRoots.push(parentRoot)
-  await initializeVault({ vaultRoot })
 
-  const experiment = await createExperiment({
-    slug: 'abandoned-run',
-    startedOn: '2026-04-01T09:00:00.000Z',
-    status: 'abandoned',
-    title: 'Abandoned Run',
-    vaultRoot,
-  })
-
-  vaultServicesMocks.writeExperimentOutcome.mockReset()
-
-  const automationId = `automation_${experiment.experiment.id.replace(/^exp_/u, '')}`
   const result = await runExperimentLifecycleOutcomePrecondition({
-    automationId,
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
-    vault: vaultRoot,
+    vault: '/tmp/lifecycle-precondition/vault',
   })
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
 })
 
-it('skips when the targeted experiment is no longer present in the vault', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'experiment-lifecycle-precondition-missing-',
+it('skips when assistant support opts out of scheduled summaries', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      assistantSupport: { notificationStyle: 'skip_by_default' },
+    }),
   )
-  cleanupRoots.push(parentRoot)
-  await initializeVault({ vaultRoot })
-
-  vaultServicesMocks.writeExperimentOutcome.mockReset()
 
   const result = await runExperimentLifecycleOutcomePrecondition({
-    automationId: 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144',
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
-    vault: vaultRoot,
+    vault: '/tmp/lifecycle-precondition/vault',
   })
 
   expect(result.kind).toBe('skip')
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+})
+
+it('skips when the run is no longer in an active or completed state', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({ ...eligibleFrontmatter, status: 'abandoned' }),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result.kind).toBe('skip')
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+})
+
+it('skips when the authoritative lookup proves absence (not_found)', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockRejectedValue(
+    new VaultCliError('not_found', 'No experiment found.'),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result.kind).toBe('skip')
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+})
+
+it('propagates non-not_found lookup failures so the one-shot is not consumed on a transient read', async () => {
+  // Regression guard: a bounded prompt-context scanner would silently drop
+  // unreadable files and look like absence; the authoritative lookup must
+  // surface unreadable/parse errors so cron records failed and retries.
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockRejectedValue(new Error('ENOENT vault read'))
+
+  await expect(runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })).rejects.toThrow('ENOENT vault read')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
 })
 
 it('propagates outcome-write failures so the cron records a failure and retries', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'experiment-lifecycle-precondition-failure-',
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
   )
-  cleanupRoots.push(parentRoot)
-  await initializeVault({ vaultRoot })
-
-  const experiment = await createExperiment({
-    slug: 'failure-run',
-    startedOn: '2026-04-01T09:00:00.000Z',
-    title: 'Failure Run',
-    vaultRoot,
-  })
-
   vaultServicesMocks.writeExperimentOutcome
     .mockReset()
     .mockRejectedValue(new Error('outcome write failed'))
 
-  const automationId = `automation_${experiment.experiment.id.replace(/^exp_/u, '')}`
   await expect(runExperimentLifecycleOutcomePrecondition({
-    automationId,
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
-    vault: vaultRoot,
+    vault: '/tmp/lifecycle-precondition/vault',
   })).rejects.toThrow('outcome write failed')
 })
 
 it('returns continue for automations that are not final-results lifecycle cron jobs', async () => {
-  vaultServicesMocks.writeExperimentOutcome.mockReset()
+  resetPreconditionMocks()
 
   const progressResult = await runExperimentLifecycleOutcomePrecondition({
     automationId: 'automation_PROGRESSAUTOMATIONIDHASH00',
@@ -399,5 +448,6 @@ it('returns continue for automations that are not final-results lifecycle cron j
 
   expect(progressResult).toEqual({ kind: 'continue' })
   expect(weeklyResult).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.showExperiment).not.toHaveBeenCalled()
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
 })

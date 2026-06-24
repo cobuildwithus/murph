@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
 
 import {
+  experimentFrontmatterSchema,
   formatTimeZoneDateTimeParts,
   isValidIanaTimeZone,
   type ExperimentFrontmatter,
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
 import { listAssistantExperimentFrontmatter } from './active-experiment-context.js'
@@ -119,17 +121,23 @@ function buildProgressMilestoneSeed(
     schedule: { kind: 'at', at: lifecycleFireTimestamp(milestoneDate, timeZone) },
     continuityPolicy: 'fresh',
     tags: [...PROGRESS_MILESTONE_TAGS],
-    instructions: buildProgressMilestoneInstructions(experiment),
+    instructions: buildProgressMilestoneInstructions(experiment, milestoneDate),
   }
 }
 
-function buildProgressMilestoneInstructions(experiment: ExperimentFrontmatter): string {
+function buildProgressMilestoneInstructions(
+  experiment: ExperimentFrontmatter,
+  milestoneDate: string,
+): string {
   const slug = experiment.slug
   return [
     `Goal: give the user an encouraging first progress moment for the experiment "${experiment.title}" (${slug}) after three completed intervention days.`,
-    `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --format json\` first.`,
+    // Pin --as-of to the milestone local date so the report and card
+    // describe day four even when 09:00 local falls on the previous UTC
+    // calendar day for eastern time zones.
+    `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --as-of ${milestoneDate} --format json\` first.`,
     'Skip when the run is no longer active, intervention day four has not arrived, the current intervention window no longer spans four days, this milestone was already shared, or saved assistant support opts out of scheduled summaries.',
-    `Otherwise build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
+    `Otherwise build \`vault-cli experiment progress-card ${slug} --as-of ${milestoneDate} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Lead with what the user completed. Mention at most two metric changes as early signals, with plain uncertainty.',
     'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
     'Keep it warm, brief, and grounded. Avoid causal claims, score worship, or compliance language.',
@@ -157,17 +165,23 @@ function buildFinalResultsSeed(
     },
     continuityPolicy: 'fresh',
     tags: [...FINAL_RESULTS_TAGS],
-    instructions: buildFinalResultsInstructions(experiment),
+    instructions: buildFinalResultsInstructions(experiment, interventionEnd),
   }
 }
 
-function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): string {
+function buildFinalResultsInstructions(
+  experiment: ExperimentFrontmatter,
+  interventionEndDate: string,
+): string {
   const slug = experiment.slug
   return [
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
     `The deterministic outcome was persisted by the cron precondition before this turn — do not attempt to write it yourself. Reference the saved outcome record when composing the review.`,
-    `Build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
+    // Pin --as-of to the run's intervention end so the card matches the
+    // outcome the precondition just persisted (and stays stable across cron
+    // retries that may cross a UTC midnight boundary).
+    `Build \`vault-cli experiment progress-card ${slug} --as-of ${interventionEndDate} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Open with direct congratulations for completing the experiment. Celebrate the follow-through, not whether a biomarker went up or down.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
     'An inconclusive or sparse result is still a result. Do not suppress the completion moment; explain what was learned and what remains uncertain.',
@@ -183,13 +197,20 @@ export type ExperimentLifecyclePreconditionResult =
 /**
  * Single deterministic fire-time gate for experiment final-results cron jobs.
  *
- * Reads canonical experiment state once. When the run is no longer eligible
- * for a final review (status changed, opted out, etc.), returns `skip` so
- * the cron consumes the at-occurrence as skipped — no outcome write, no LLM
- * invocation, no retry. When the run is eligible, persists the deterministic
- * outcome before the LLM notification turn so a transient storage failure
- * throws (→ retryable cron failure) rather than being swallowed by an LLM
- * skip that would consume the one-shot.
+ * Reads canonical experiment state once through the authoritative single-
+ * entity query (NOT the bounded prompt-context scanner — that scanner caps
+ * at 200 matches and silently drops unreadable files, both of which would
+ * make a real run look absent and consume the one-shot). When the run is
+ * no longer eligible for a final review (status, early stop, opt-out)
+ * returns `skip` so the cron consumes the at-occurrence as skipped — no
+ * outcome write, no LLM invocation, no retry. When the run is eligible,
+ * persists the deterministic outcome before the LLM notification turn so a
+ * transient storage failure throws (→ retryable cron failure) rather than
+ * being swallowed by an LLM skip that would consume the one-shot.
+ *
+ * Persistence is pinned to runPlan.interventionEnd as `asOf` so the
+ * outcome's ID and filename are stable across cron retries that may cross a
+ * UTC midnight boundary.
  *
  * Returns `continue` for non-final-results automations so the caller can run
  * its normal notification flow unchanged.
@@ -214,18 +235,33 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     return { kind: 'continue' }
   }
 
-  let experiments: ExperimentFrontmatter[]
+  const services = createIntegratedVaultServices()
+
+  let experiment: ExperimentFrontmatter
   try {
-    experiments = await listAssistantExperimentFrontmatter(input.vault)
-  } catch {
-    return { kind: 'skip', reason: 'experiment vault unreadable at fire time' }
+    const shown = await services.query.showExperiment({
+      vault: input.vault,
+      lookup: experimentLookup,
+      requestId: null,
+    })
+    const data = shown.entity.data as Record<string, unknown>
+    // The query layer denormalizes a few non-frontmatter fields onto data;
+    // strip them before validating, matching the CLI's read pattern.
+    const { experimentSlug, relatedIds, ...frontmatterAttributes } = data
+    void experimentSlug
+    void relatedIds
+    experiment = experimentFrontmatterSchema.parse(frontmatterAttributes)
+  } catch (error) {
+    // A genuine absence (the run was deleted) is a real skip. Read, parse,
+    // and other I/O failures must propagate so cron records the run as
+    // failed and retries — the one-shot must not be consumed when the
+    // current view of the vault is unreliable.
+    if (error instanceof VaultCliError && error.code === 'not_found') {
+      return { kind: 'skip', reason: 'experiment no longer present in the vault' }
+    }
+    throw error
   }
-  const experiment = experiments.find(
-    (entry) => entry.experimentId === experimentLookup,
-  )
-  if (!experiment) {
-    return { kind: 'skip', reason: 'experiment no longer present in the vault' }
-  }
+
   if (experiment.status !== 'active' && experiment.status !== 'completed') {
     return {
       kind: 'skip',
@@ -233,10 +269,29 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     }
   }
 
-  const services = createIntegratedVaultServices()
+  const interventionEnd = experiment.runPlan?.interventionEnd
+  if (!interventionEnd) {
+    return { kind: 'skip', reason: 'experiment has no intervention end date' }
+  }
+
+  if (experiment.endedOn && experiment.endedOn < interventionEnd) {
+    return {
+      kind: 'skip',
+      reason: 'experiment was stopped before its intervention end',
+    }
+  }
+
+  if (experiment.assistantSupport?.notificationStyle === 'skip_by_default') {
+    return {
+      kind: 'skip',
+      reason: 'assistant support opts out of scheduled summaries',
+    }
+  }
+
   await services.core.writeExperimentOutcome({
     vault: input.vault,
     lookup: experimentLookup,
+    asOf: interventionEnd,
     requestId: null,
   })
 
