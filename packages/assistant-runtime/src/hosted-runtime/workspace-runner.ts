@@ -350,10 +350,20 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
+  // The builder owns every field of checkpoint metadata that
+  // buildHostedWorkspaceSnapshotCheckpointRequest falls back to. Mirroring the
+  // committed workspace here after a successful checkpoint prevents a later
+  // pass that omits one of these fields (e.g. a mailbox checkpoint after an
+  // idle retention checkpoint) from resurrecting a stale process-start value.
   const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse): void => {
-    if (response.checkpointed) {
-      input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    if (!response.checkpointed) {
+      return;
     }
+    input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    input.metadata.inboxMediaRetentionWakeAt =
+      response.workspace.inboxMediaRetentionWakeAt ?? null;
+    input.metadata.nextWakeAt = response.workspace.nextWakeAt ?? null;
+    input.metadata.nextWakeReason = response.workspace.nextWakeReason ?? null;
   };
 
   return {

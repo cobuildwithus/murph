@@ -1674,9 +1674,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         }
         clearStagedDeviceSyncDirtyAcks();
-        checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
-        checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
-        checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
+        // checkpointMetadata is mirrored from the committed workspace inside
+        // createHostedWorkspaceSnapshotCheckpointRequestBuilder.recordCheckpoint;
+        // re-mutating it here would be a duplicate state owner and is the seam
+        // that previously let inboxMediaRetentionWakeAt drift.
         servicedProjectedRuntimeWakeKey = null;
         const checkpointWakeLatencySeed =
           consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
