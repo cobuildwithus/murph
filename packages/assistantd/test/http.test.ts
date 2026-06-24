@@ -131,6 +131,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
   preparedDispatchToken: null,
+  autoReplyCrossSessionContextConsumedAt: null,
   lastError: null,
 }
 
@@ -142,6 +143,7 @@ type LegacyMessageOutboxIntentWire = {
 const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'actorId',
   'attemptCount',
+  'autoReplyCrossSessionContextConsumedAt',
   'bindingDelivery',
   'channel',
   'createdAt',
