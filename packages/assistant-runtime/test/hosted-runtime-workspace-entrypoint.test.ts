@@ -9749,8 +9749,8 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const firstAssistantRetryObserved = createDeferred<void>();
-      let assistantPassFinishedCount = 0;
+      const firstPhaseFinished = createDeferred<void>();
+      let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
         mailboxPort: createMailboxPort({ events, items: mailboxItems }),
@@ -9764,27 +9764,6 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
         }),
       });
-      platform.logPort = {
-        async write(request: HostedRuntimeLogRequest) {
-          for (const entry of request.entries) {
-            events.push(`runtime.log:${entry.eventCode}`);
-            if (entry.eventCode !== "assistant.pass_finished") {
-              continue;
-            }
-            assistantPassFinishedCount += 1;
-            if (assistantPassFinishedCount === 1) {
-              assert.ok(pendingInputId);
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: pendingInputId,
-                vaultRoot,
-              });
-              firstAssistantRetryObserved.resolve();
-            }
-          }
-          return { loggedCount: request.entries.length };
-        },
-      };
-
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -9825,16 +9804,38 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform,
           runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            assert.equal(assistantPhaseCalls, 1);
+            await deviceSyncPort.fetchSnapshot();
+            assert.ok(pendingInputId);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: pendingInputId,
+              vaultRoot,
+            });
+            firstPhaseFinished.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: yieldedRetryWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              progressed: true,
+              redactedStatus: {
+                deviceSyncRetryYielded: true,
+              },
+            };
+          },
           shutdownSignal: shutdownController.signal,
           vaultRoot,
         },
       );
 
       await withRealTimeout(
-        firstAssistantRetryObserved.promise,
+        firstPhaseFinished.promise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
+      assert.equal(assistantPhaseCalls, 1);
       assert.equal(checkpointRequests.length, 0);
       shutdownController.abort();
 
@@ -9947,10 +9948,10 @@ describe("hosted workspace runtime entrypoint", () => {
         laneSeq: "1",
       });
 
-      const systemProcessed = createDeferred<void>();
+      const postCheckpointRecorded = createDeferred<void>();
       const assistantRetryObserved = createDeferred<void>();
       let pendingInputId: string | null = null;
-      let assistantPassFinishedCount = 0;
+      let assistantPhaseCalls = 0;
       const platform = createPlatform({
         mailboxPort: createMailboxPort({ events, items: [systemMailboxItem] }),
         workspacePort: createWorkspacePort({
@@ -9959,33 +9960,6 @@ describe("hosted workspace runtime entrypoint", () => {
           workspace: createWorkspaceState({ version: "0" }),
         }),
       });
-      platform.logPort = {
-        async write(request: HostedRuntimeLogRequest) {
-          for (const entry of request.entries) {
-            events.push(`runtime.log:${entry.eventCode}`);
-            if (entry.eventCode === "mailbox.system_processed") {
-              systemProcessed.resolve();
-            }
-            if (entry.eventCode !== "assistant.pass_finished") {
-              continue;
-            }
-            assistantPassFinishedCount += 1;
-            if (assistantPassFinishedCount === 1) {
-              assert.ok(pendingInputId);
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: pendingInputId,
-                vaultRoot,
-              });
-            }
-            if (assistantPassFinishedCount === 1) {
-              assistantRetryObserved.resolve();
-              runtimeAbortController.abort(abortReason);
-            }
-          }
-          return { loggedCount: request.entries.length };
-        },
-      };
-
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -10021,19 +9995,52 @@ describe("hosted workspace runtime entrypoint", () => {
             });
           },
           platform,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              assert.ok(pendingInputId);
+              return {
+                afterCheckpoint: async () => {
+                  events.push("assistant.afterCheckpoint");
+                  postCheckpointRecorded.resolve();
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: "2026-04-27T00:10:00.000Z",
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: {
+                      hostedSystemMailboxRecorded: 1,
+                    },
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: "2026-04-27T00:00:30.000Z",
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  pendingAssistantInputRetry: true,
+                },
+              };
+            }
+            assistantRetryObserved.resolve();
+            runtimeAbortController.abort(abortReason);
+            return {
+              progressed: false,
+            };
+          },
           signal: runtimeAbortController.signal,
           vaultRoot,
         },
       ).catch((error: unknown) => error);
 
-      await withRealTimeout(systemProcessed.promise, runtimeTransitionTimeoutMs, () =>
+      await withRealTimeout(postCheckpointRecorded.promise, runtimeTransitionTimeoutMs, () =>
         events.join(",")
       );
       await vi.advanceTimersByTimeAsync(30_000);
       await withRealTimeout(assistantRetryObserved.promise, runtimeTransitionTimeoutMs, () =>
         events.join(",")
       );
-      assert.equal(assistantPassFinishedCount, 1, events.join(","));
+      assert.equal(assistantPhaseCalls, 2, events.join(","));
       assert.equal(events.includes("snapshot:idle_shutdown"), false);
       assert.equal(checkpointRequests.length, 0);
       assert.equal(
