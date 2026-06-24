@@ -109,3 +109,21 @@ the product needs it. The point is narrower: new runtime side effects, logs,
 diagnostics, projections, generated files, and convenience artifacts must not
 inflate the restored workspace into a large file tree that every hosted turn has
 to walk, compress, encrypt, upload, download, decrypt, and extract.
+
+## Write Family Lifecycle Decisions
+
+This section records the explicit retention/compaction posture for write
+families introduced after this contract froze. The 00-invariants rule
+requires every new write family to document retention or compaction before
+landing; record the chosen posture here so the decision is reviewable.
+
+- `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
+  (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,
+  with no compaction. Each record is a small tombstone (~200 bytes) describing
+  the deleted raw inbox attachment path, sha256, purge time, reason, and
+  retained parser derivative. A heavy user adding roughly ten attachments per
+  day produces about 3,650 records per year, well under one megabyte
+  (~730 KB/year). This puts the family firmly in the "accepted unbounded-tiny"
+  bucket: the monthly shard count is also bounded by elapsed wall-clock
+  months. Snapshot/restore cost remains negligible at the projected steady
+  state, so no rotation or compaction seam is planned.

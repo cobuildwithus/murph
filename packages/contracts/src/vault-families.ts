@@ -587,6 +587,10 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    // Append-only, monthly-sharded, no compaction. Records are ~200-byte
+    // tombstones; a heavy user produces ~730 KB/year. Lifecycle posture is
+    // recorded in docs/contracts/06-hosted-workspace-file-count.md under
+    // "Write Family Lifecycle Decisions".
     id: VAULT_FAMILY_IDS.inboxAttachmentRetention,
     description: "Inbox attachment retention ledger shards.",
     owner: "inboxd",
