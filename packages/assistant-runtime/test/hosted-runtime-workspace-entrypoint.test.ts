@@ -7964,6 +7964,8 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const exactPayload = Buffer.from("restored exact hosted note\n", "utf8");
       const exactPayloadHash = sha256Hex(exactPayload);
+      const olderPayload = Buffer.from("older restored hosted note\n", "utf8");
+      const olderPayloadHash = sha256Hex(olderPayload);
       const receiptBytes = Buffer.from(`${JSON.stringify({
         actions: [
           {
@@ -7978,21 +7980,49 @@ describe("hosted workspace runtime entrypoint", () => {
             targetRelativePath: "journal/2026-04-28.md",
           },
         ],
-        committedAt: TEST_NOW,
-        createdAt: TEST_NOW,
-        occurredAt: TEST_NOW,
+        committedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: "2026-04-28T00:00:00.000Z",
+        occurredAt: "2026-04-28T00:00:00.000Z",
         operationId: "op_synthetic_canonical_restore",
         operationType: "hosted_canonical_write_test",
         schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
         summary: "Restore hosted canonical write receipt.",
-        updatedAt: TEST_NOW,
+        updatedAt: "2026-04-28T00:00:00.000Z",
       }, null, 2)}\n`, "utf8");
       const receiptHash = sha256Hex(receiptBytes);
+      const olderReceiptBytes = Buffer.from(`${JSON.stringify({
+        actions: [
+          {
+            byteLength: olderPayload.byteLength,
+            contentRef: {
+              byteSize: olderPayload.byteLength,
+              sha256: olderPayloadHash,
+            },
+            effect: "create",
+            kind: "text_upsert",
+            sha256: olderPayloadHash,
+            targetRelativePath: "journal/2026-04-28.md",
+          },
+        ],
+        committedAt: "2026-04-28T00:30:00+01:00",
+        createdAt: "2026-04-28T00:30:00+01:00",
+        occurredAt: "2026-04-28T00:30:00+01:00",
+        operationId: "op_synthetic_canonical_restore_old",
+        operationType: "hosted_canonical_write_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore older hosted canonical write receipt.",
+        updatedAt: "2026-04-28T00:30:00+01:00",
+      }, null, 2)}\n`, "utf8");
+      const olderReceiptHash = sha256Hex(olderReceiptBytes);
       const receiptLogBytes = Buffer.from(`${JSON.stringify({
         entries: [
           {
             byteSize: receiptBytes.byteLength,
             sha256: receiptHash,
+          },
+          {
+            byteSize: olderReceiptBytes.byteLength,
+            sha256: olderReceiptHash,
           },
         ],
         schema: "murph.hosted-canonical-write-receipt-log.v1",
@@ -8041,7 +8071,9 @@ describe("hosted workspace runtime entrypoint", () => {
         [baseHash, baseBundle],
         [hotHash, hotSnapshot.bundle],
         [exactPayloadHash, exactPayload],
+        [olderPayloadHash, olderPayload],
         [receiptHash, receiptBytes],
+        [olderReceiptHash, olderReceiptBytes],
         [receiptLogHash, receiptLogBytes],
       ]);
 
@@ -8071,7 +8103,7 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({
                 redactedStatus: {
                   hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
-                  hostedCanonicalWriteReceiptLogEntryCount: 1,
+                  hostedCanonicalWriteReceiptLogEntryCount: 2,
                   hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
                 },
                 snapshotRef: buildHostedExecutionLayeredSnapshotRef({
@@ -8094,7 +8126,15 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(artifactGetCalls, [baseHash, hotHash, receiptLogHash, receiptHash, exactPayloadHash]);
+      assert.deepEqual(artifactGetCalls, [
+        baseHash,
+        hotHash,
+        receiptLogHash,
+        receiptHash,
+        olderReceiptHash,
+        olderPayloadHash,
+        exactPayloadHash,
+      ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),

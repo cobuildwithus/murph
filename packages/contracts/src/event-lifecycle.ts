@@ -1,3 +1,5 @@
+import { compareIsoTimestampsAscending } from "./time.ts";
+
 export interface EventLifecycle {
   revision: number;
   state?: "deleted";
@@ -93,19 +95,32 @@ export function compareEventRevisionPriority(
 
   const leftRecordedAt = left.recordedAt ?? "";
   const rightRecordedAt = right.recordedAt ?? "";
-  const recordedAtComparison = leftRecordedAt.localeCompare(rightRecordedAt);
+  const recordedAtComparison = compareOptionalEventTimestamp(
+    leftRecordedAt,
+    rightRecordedAt,
+  );
   if (recordedAtComparison !== 0) {
     return recordedAtComparison;
   }
 
   const leftOccurredAt = left.occurredAt ?? "";
   const rightOccurredAt = right.occurredAt ?? "";
-  const occurredAtComparison = leftOccurredAt.localeCompare(rightOccurredAt);
+  const occurredAtComparison = compareOptionalEventTimestamp(
+    leftOccurredAt,
+    rightOccurredAt,
+  );
   if (occurredAtComparison !== 0) {
     return occurredAtComparison;
   }
 
   return (left.relativePath ?? "").localeCompare(right.relativePath ?? "");
+}
+
+function compareOptionalEventTimestamp(left: string, right: string): number {
+  if (left && right) {
+    return compareIsoTimestampsAscending(left, right);
+  }
+  return left.localeCompare(right);
 }
 
 export function collapseEventRevisions<T>(

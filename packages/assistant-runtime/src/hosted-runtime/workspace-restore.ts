@@ -69,6 +69,7 @@ import type {
   HostedRuntimePlatform,
   HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
+import { compareHostedIsoTimestampsAscending } from "./timestamp-order.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
@@ -981,7 +982,7 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   }
 
   receipts.sort((left, right) =>
-    left.committedAt.localeCompare(right.committedAt)
+    compareHostedIsoTimestampsAscending(left.committedAt, right.committedAt)
     || left.operationId.localeCompare(right.operationId)
   );
 

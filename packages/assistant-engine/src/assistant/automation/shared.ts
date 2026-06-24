@@ -1,6 +1,7 @@
 import type {
   AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { compareAssistantTimestampsAscending } from '../shared.js'
 
 type ShutdownTimer = ReturnType<typeof setTimeout> | number
 
@@ -95,7 +96,7 @@ export function compareAssistantCaptureOrder(
 
   return leftTimestamp === rightTimestamp
     ? left.captureId.localeCompare(right.captureId)
-    : leftTimestamp.localeCompare(rightTimestamp)
+    : compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
 }
 
 export function normalizeEnabledChannels(channels: readonly string[]): string[] {
