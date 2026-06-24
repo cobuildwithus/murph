@@ -9,6 +9,9 @@ import {
   normalizeAssistantBackendTarget,
 } from '../src/assistant-backend.ts'
 import {
+  DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+} from '../src/assistant/provider-config.ts'
+import {
   assistantSessionIdSchema,
   assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
@@ -291,7 +294,7 @@ test('assistant backend targets trim config input and strip sensitive headers be
     modelProvider: null,
     oss: true,
     profile: 'default',
-    reasoningEffort: 'medium',
+    reasoningEffort: DEFAULT_MURPH_CODEX_REASONING_EFFORT,
     sandbox: 'workspace-write',
   })
 
