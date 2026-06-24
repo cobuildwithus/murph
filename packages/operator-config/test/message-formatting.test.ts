@@ -53,6 +53,35 @@ test('message formatting renders star italics and underline spans', () => {
   )
 })
 
+test('message formatting accepts punctuation inside explicit decoration spans', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText(
+      'Choose **mobile/home/work**, *yes/no*, ++on/off++, or ~~old/new~~.',
+    ),
+    {
+      decorations: [
+        {
+          range: [7, 23],
+          style: 'bold',
+        },
+        {
+          range: [25, 31],
+          style: 'italic',
+        },
+        {
+          range: [33, 39],
+          style: 'underline',
+        },
+        {
+          range: [44, 51],
+          style: 'strikethrough',
+        },
+      ],
+      text: 'Choose mobile/home/work, yes/no, on/off, or old/new.',
+    },
+  )
+})
+
 test('message formatting leaves star and plus lookalikes untouched', () => {
   const value = 'Keep C++, a++b++, counter++, standalone ++, and * bullet markers intact.'
 
