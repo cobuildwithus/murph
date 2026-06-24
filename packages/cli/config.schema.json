@@ -4357,7 +4357,7 @@
                         },
                         "maxCandidates": {
                           "default": 12,
-                          "description": "Maximum research candidates to request from Exa.",
+                          "description": "Maximum research candidates to request and return.",
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 12
