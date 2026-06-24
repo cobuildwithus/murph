@@ -70,7 +70,7 @@ export const POST = withJsonError(async (request: Request) => {
     const response = jsonOk({
       ...(result.initialVisitEligible ? { initialVisitEligible: true } : {}),
       inviteCode: result.inviteCode,
-      joinUrl: result.joinUrl,
+      joinUrl: `/join/${encodeURIComponent(result.inviteCode)}`,
       launchConsentGranted,
       messagingSetupRequired: result.messagingSetupRequired,
       ok: true,
