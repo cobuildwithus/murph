@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildHostedWranglerDeployConfig,
@@ -45,7 +46,6 @@ function createDeployEnvironment() {
     },
     containerMaxInstances: 1000,
     containerSshKey: null,
-    hostedEmailSendBindingEnabled: true,
     logHeadSamplingRate: 1,
     maxEventAttempts: "3",
     retryDelayMs: "30000",
@@ -738,6 +738,11 @@ describe("hosted runner container image contract", () => {
       new URL("../scripts/runner-python-path-e2e.ts", import.meta.url),
       "utf8",
     );
+    const demoVaultMetadata = JSON.parse(
+      await readFile(new URL("../../../fixtures/demo-web-vault/vault.json", import.meta.url), "utf8"),
+    ) as {
+      formatVersion?: unknown;
+    };
     const hostedRunnerSmokeChild = await readFile(
       new URL("../src/hosted-runner-smoke-child.ts", import.meta.url),
       "utf8",
@@ -766,6 +771,7 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:docker:smoke:prepared-base"]).toBe(
       "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     );
+    expect(demoVaultMetadata.formatVersion).toBe(CURRENT_VAULT_FORMAT_VERSION);
     expect(packageJson.scripts?.["worker:deploy"]).toBe(
       "pnpm deploy:worker",
     );
