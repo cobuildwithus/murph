@@ -176,6 +176,70 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("reattaches Live View when refreshing a browserless managed-login handoff as login", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      id: "hch_handoff123",
+      purpose: "managed_login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        profileName: "murph-test-member",
+        saveChanges: true,
+      }),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      purpose: "managed_login",
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "login",
+      status: "open",
+      suggestedReply: "done",
+    });
+  });
+
   it("mints a replacement handoff for an expired link while the run is still alive", async () => {
     const now = new Date("2026-06-17T12:25:00.000Z");
     const oldHandoff = createHandoffRecord({

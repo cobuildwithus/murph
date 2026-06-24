@@ -477,6 +477,7 @@ export class ComputerUseService {
     if (run.status === "awaiting_user") {
       const refreshed = input.handoffPurpose
         ? await this.refreshAwaitingRunHandoff({
+            handoffPurpose: input.handoffPurpose,
             memberId: input.memberId,
             now,
             pauseDeliveryContext: input.pauseDeliveryContext ?? null,
@@ -1453,6 +1454,7 @@ export class ComputerUseService {
   }
 
   private async refreshAwaitingRunHandoff(input: {
+    handoffPurpose: HostedComputerHandoffPurpose;
     memberId: string;
     now: Date;
     pauseDeliveryContext: HostedComputerDeliveryContext | null;
@@ -1465,6 +1467,7 @@ export class ComputerUseService {
     ) {
       return null;
     }
+    const awaitingReason = input.run.awaitingReason;
 
     if (input.run.expiresAt <= input.now) {
       return null;
@@ -1497,7 +1500,44 @@ export class ComputerUseService {
       return null;
     }
 
-    if (existing.status === "open" && existing.expiresAt <= input.now) {
+    let run = input.run;
+    const replacementPurpose = existing.purpose === "managed_login"
+      ? input.handoffPurpose
+      : existing.purpose;
+    if (
+      !run.kernelSessionId &&
+      existing.purpose === "managed_login" &&
+      replacementPurpose !== "managed_login" &&
+      existing.status === "open" &&
+      existing.expiresAt > input.now
+    ) {
+      const claimed = await input.store.claimHandoffForCompletion({
+        handoffId: existing.id,
+        memberId: input.memberId,
+      });
+      if (!claimed) {
+        return null;
+      }
+      try {
+        run = await this.attachRunBrowserFromProfile(
+          run,
+          input.store,
+          claimed.updatedAt,
+        );
+        existing = await input.store.markHandoffExpired({
+          expectedStatus: "checkpointing",
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+          now: input.now,
+        });
+      } catch (error) {
+        await input.store.releaseHandoffClaim({
+          expectedUpdatedAt: claimed.updatedAt,
+          handoffId: claimed.id,
+        }).catch(() => {});
+        throw error;
+      }
+    } else if (existing.status === "open" && existing.expiresAt <= input.now) {
       existing = await input.store.markHandoffExpired({
         expectedStatus: "open",
         expectedUpdatedAt: existing.updatedAt,
@@ -1513,11 +1553,19 @@ export class ComputerUseService {
       });
     }
 
+    if (
+      !run.kernelSessionId &&
+      existing.purpose === "managed_login" &&
+      replacementPurpose !== "managed_login"
+    ) {
+      return null;
+    }
+
     const handoff = await this.createHandoff({
       memberId: input.memberId,
-      purpose: existing.purpose,
-      runExpiresAt: input.run.expiresAt,
-      runId: input.run.id,
+      purpose: replacementPurpose,
+      runExpiresAt: run.expiresAt,
+      runId: run.id,
       suggestedReply: existing.suggestedReply,
     }, input.store);
     try {
@@ -1526,7 +1574,7 @@ export class ComputerUseService {
         expectedPendingHandoffId: existing.id,
         newPendingHandoffId: handoff.record.id,
         now: input.now,
-        runId: input.run.id,
+        runId: run.id,
       });
       if (existing.status === "open") {
         await input.store.markHandoffExpired({
@@ -1540,9 +1588,9 @@ export class ComputerUseService {
       }
 
       return {
-        awaitingReason: refreshed.awaitingReason ?? input.run.awaitingReason,
+        awaitingReason: refreshed.awaitingReason ?? awaitingReason,
         handoffUrl: handoff.handoffUrl,
-        runId: input.run.id,
+        runId: run.id,
         status: "awaiting_user",
         suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,
       };
