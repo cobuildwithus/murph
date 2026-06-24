@@ -1,12 +1,29 @@
 import { rm } from 'node:fs/promises'
 
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+
+const vaultServicesMocks = vi.hoisted(() => ({
+  writeExperimentOutcome: vi.fn(),
+}))
+
+vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    createIntegratedVaultServices: () => ({
+      core: {
+        writeExperimentOutcome: vaultServicesMocks.writeExperimentOutcome,
+      },
+    }),
+  }
+})
 
 import { createExperiment, initializeVault, updateExperiment } from '@murphai/core'
 
 import {
   buildExperimentFinalResultsSeeds,
   buildExperimentLifecycleSeeds,
+  runExperimentLifecycleOutcomePrecondition,
 } from '../src/assistant/experiment-support-automations.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -95,14 +112,15 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     summary: 'A celebratory final review after the experiment finishes.',
   })
   expect(finalResults?.tags).toEqual(expect.arrayContaining(['final-results', 'progress-card']))
-  expect(finalResults?.instructions).toContain('experiment outcome write sauna-rhr')
   expect(finalResults?.instructions).toContain('experiment progress-card sauna-rhr')
   expect(finalResults?.instructions).toContain('opts out of scheduled summaries')
-  // The analyze-and-send fallback must NOT exist: persistence failure has to
-  // surface the error so the cron backoff retries instead of delivering an
-  // unpersisted review.
+  // The LLM must NOT be asked to run the deterministic write itself —
+  // persistence happens in code as a cron precondition so a storage
+  // failure surfaces as a retryable cron failure instead of being
+  // swallowed by an LLM skip that consumes the one-shot.
   expect(finalResults?.instructions).not.toContain('outcome analyze')
-  expect(finalResults?.instructions).toContain('surface the error and stop without delivering anything')
+  expect(finalResults?.instructions).not.toContain('vault-cli experiment outcome write')
+  expect(finalResults?.instructions).toContain('persisted by the cron precondition')
   expect(finalResults?.instructions).toContain('direct congratulations')
   expect(finalResults?.instructions).toContain('An inconclusive or sparse result is still a result')
   expect(finalResults?.instructions).toContain('voice memo may replace it')
@@ -208,4 +226,49 @@ it('prefers the per-run schedule timezone over the vault timezone', async () => 
 
   expect(progress?.schedule).toEqual({ kind: 'at', at: '2026-04-10T21:00:00.000Z' })
   expect(finalResults?.schedule).toEqual({ kind: 'at', at: '2026-04-28T21:00:00.000Z' })
+})
+
+it('persists the deterministic outcome before the final-results notification turn', async () => {
+  vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
+
+  await runExperimentLifecycleOutcomePrecondition({
+    automationSlug: 'experiment-final-results-sauna-rhr',
+    tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results', 'progress-card'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: 'sauna-rhr',
+    requestId: null,
+  })
+})
+
+it('propagates outcome-write failures so the cron records a failure and retries', async () => {
+  vaultServicesMocks.writeExperimentOutcome
+    .mockReset()
+    .mockRejectedValue(new Error('outcome write failed'))
+
+  await expect(runExperimentLifecycleOutcomePrecondition({
+    automationSlug: 'experiment-final-results-sauna-rhr',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })).rejects.toThrow('outcome write failed')
+})
+
+it('is a no-op for automations that are not final-results lifecycle cron jobs', async () => {
+  vaultServicesMocks.writeExperimentOutcome.mockReset()
+
+  await runExperimentLifecycleOutcomePrecondition({
+    automationSlug: 'experiment-progress-sauna-rhr-day-4',
+    tags: ['experiment', 'progress-card', 'milestone'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+  await runExperimentLifecycleOutcomePrecondition({
+    automationSlug: 'weekly-health-digest',
+    tags: ['assistant', 'scheduled', 'murph-managed'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
 })

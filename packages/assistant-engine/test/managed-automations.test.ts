@@ -1074,13 +1074,14 @@ describe('applyMurphManagedAutomations', () => {
       })
   })
 
-  it('archives an existing one-shot when the new desired moment has already expired', async () => {
+  it('keeps a legacy still-future occurrence when the new desired moment is already stale', async () => {
     // Migration repro: a pre-PR final-results automation persisted with the
     // old 15:00 UTC fire is still in the future, but the new desired fire
     // (09:00 in Pacific/Auckland → 21:00 UTC the previous day) has already
     // passed by more than the one-shot expiry window. The installer must
-    // archive the obsolete record instead of leaving the old schedule + old
-    // instructions to fire at the wrong local time.
+    // keep the legacy schedule alive so the user still gets the moment, but
+    // adopt the new content. Archiving here would silently lose the final
+    // review during rollout.
     const previousFinal: StoredAutomationRecord = {
       automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
       continuityPolicy: 'fresh',
@@ -1115,7 +1116,47 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(previousFinal.automationId))
       .toMatchObject({
         instructions: 'New persist-then-deliver prompt.',
-        schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+        // Legacy stored schedule retained so the moment still fires.
+        schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+        status: 'active',
+      })
+  })
+
+  it('archives an existing one-shot only when both the new and the legacy occurrence have expired', async () => {
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After both the new desired fire and the legacy stored fire by far
+      // more than the one-shot expiry window.
+      now: new Date('2026-04-30T18:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
         status: 'archived',
       })
   })

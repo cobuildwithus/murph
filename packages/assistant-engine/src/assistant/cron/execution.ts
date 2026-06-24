@@ -13,6 +13,7 @@ import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
+import { runExperimentLifecycleOutcomePrecondition } from '../experiment-support-automations.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
@@ -346,6 +347,21 @@ export async function executeClaimedAssistantCronJob(input: {
         const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
           claimedJob.target,
         )
+        // Run lifecycle-owned deterministic preconditions BEFORE the LLM
+        // notification turn. These must throw on failure so the surrounding
+        // try/catch records the run as failed and the existing cron backoff
+        // retries the one-shot — a skip or send_message from the LLM both
+        // mark the run successful and consume the at-occurrence.
+        if (
+          input.job.kind === 'canonical' &&
+          input.job.source.kind === 'automation'
+        ) {
+          await runExperimentLifecycleOutcomePrecondition({
+            automationSlug: input.job.source.slug,
+            tags: input.job.source.tags,
+            vault: input.vault,
+          })
+        }
         const result = await sendAssistantNotificationLocal({
           vault: input.vault,
           ...automationTurn,

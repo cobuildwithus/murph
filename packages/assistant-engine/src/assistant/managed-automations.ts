@@ -9,6 +9,7 @@ import {
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
+  type AutomationStatus,
 } from '@murphai/contracts'
 import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -378,13 +379,22 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    // Seed has changed. Reconcile in place. If the new desired one-shot
-    // occurrence has already expired, archive the record so its old future
-    // schedule and instructions cannot still fire — a stale-seed skip here
-    // would silently keep the previous spec alive.
-    const reconciledStatus = isStaleMurphManagedOneShotSeed(seed, now)
-      ? 'archived'
-      : existing.status
+    // Seed has changed. Reconcile in place. A one-shot whose desired
+    // occurrence already passed cannot fire at the new time, but if the
+    // legacy stored occurrence is still in the future, keep firing at the
+    // legacy time so the user still gets the moment with the new content.
+    // Archive only when neither the new desired nor the legacy stored
+    // occurrence can still fire.
+    const newDesiredStale = isStaleOneShotSchedule(seed.schedule, now)
+    const existingStillFires =
+      !isStaleOneShotSchedule(existing.schedule, now)
+    let reconciledSchedule: MurphManagedAutomationSchedule = seed.schedule
+    let reconciledStatus: AutomationStatus = existing.status
+    if (newDesiredStale && existingStillFires) {
+      reconciledSchedule = existing.schedule as MurphManagedAutomationSchedule
+    } else if (newDesiredStale) {
+      reconciledStatus = 'archived'
+    }
 
     const summary = normalizeMurphManagedAutomationSummary(seed)
     await upsertAutomation({
@@ -397,7 +407,7 @@ export async function applyMurphManagedAutomations(
       // Only the create path validates routes, because that is the only
       // point where this module chooses one.
       route: existing.route,
-      schedule: seed.schedule,
+      schedule: reconciledSchedule,
       slug: existing.slug,
       status: reconciledStatus,
       ...(summary === null
@@ -600,11 +610,18 @@ function isStaleMurphManagedOneShotSeed(
   seed: MurphManagedAutomationSeed,
   now: Date,
 ): boolean {
-  if (seed.schedule.kind !== 'at') {
+  return isStaleOneShotSchedule(seed.schedule, now)
+}
+
+function isStaleOneShotSchedule(
+  schedule: AutomationSchedule,
+  now: Date,
+): boolean {
+  if (schedule.kind !== 'at') {
     return false
   }
 
-  const scheduledAtMs = Date.parse(seed.schedule.at)
+  const scheduledAtMs = Date.parse(schedule.at)
   const nowMs = now.getTime()
   if (!Number.isFinite(scheduledAtMs) || !Number.isFinite(nowMs)) {
     return true

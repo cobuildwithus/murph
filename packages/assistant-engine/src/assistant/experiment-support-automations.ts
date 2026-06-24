@@ -6,6 +6,7 @@ import {
   type ExperimentFrontmatter,
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
 import { listAssistantExperimentFrontmatter } from './active-experiment-context.js'
 import type { MurphManagedAutomationSeed } from './managed-automations.js'
@@ -28,6 +29,7 @@ const FIRST_PROGRESS_DAY = 4
 const LIFECYCLE_FIRE_HOUR_LOCAL = 9
 const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as const
 const FINAL_RESULTS_TAGS = ['experiment', 'final-results', 'progress-card'] as const
+const EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX = 'experiment-final-results-'
 
 export async function buildExperimentLifecycleSeeds(
   input: BuildExperimentLifecycleSeedsInput,
@@ -163,7 +165,7 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
   return [
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
-    `Run \`vault-cli experiment outcome write ${slug} --format json\` to persist the deterministic outcome before composing the review. If that command fails, surface the error and stop without delivering anything — the cron retry will run this moment again.`,
+    `The deterministic outcome was persisted by the cron precondition before this turn — do not attempt to write it yourself. Reference the saved outcome record when composing the review.`,
     `Build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Open with direct congratulations for completing the experiment. Celebrate the follow-through, not whether a biomarker went up or down.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
@@ -171,6 +173,54 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
     'Use associated-with or early-signal language rather than causal certainty.',
     'The card plus warm text is the primary experience. If the card cannot be attached, a short celebratory voice memo may replace it when that tool is available; do not try to combine both media types.',
   ].join('\n')
+}
+
+/**
+ * Persist the deterministic outcome for an experiment final-results cron job
+ * before the LLM notification turn runs. Throws on persistence failure so the
+ * surrounding cron executor records the run as failed and the existing
+ * backoff retries the one-shot — the LLM cannot trigger a cron failure on
+ * its own (skip and send_message both mark the run successful and consume
+ * the at-occurrence).
+ */
+export async function runExperimentLifecycleOutcomePrecondition(input: {
+  automationSlug: string | null | undefined
+  tags: readonly string[]
+  vault: string
+}): Promise<void> {
+  if (!isExperimentFinalResultsAutomation(input.tags, input.automationSlug)) {
+    return
+  }
+  const experimentSlug = extractExperimentFinalResultsSlug(input.automationSlug ?? '')
+  if (!experimentSlug) {
+    return
+  }
+  const services = createIntegratedVaultServices()
+  await services.core.writeExperimentOutcome({
+    vault: input.vault,
+    lookup: experimentSlug,
+    requestId: null,
+  })
+}
+
+function isExperimentFinalResultsAutomation(
+  tags: readonly string[],
+  automationSlug: string | null | undefined,
+): boolean {
+  return (
+    tags.includes('experiment') &&
+    tags.includes('final-results') &&
+    typeof automationSlug === 'string' &&
+    automationSlug.startsWith(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX)
+  )
+}
+
+function extractExperimentFinalResultsSlug(automationSlug: string): string | null {
+  if (!automationSlug.startsWith(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX)) {
+    return null
+  }
+  const slug = automationSlug.slice(EXPERIMENT_FINAL_RESULTS_AUTOMATION_SLUG_PREFIX.length)
+  return slug.length > 0 ? slug : null
 }
 
 function experimentProgressAutomationId(experimentId: string): string {
