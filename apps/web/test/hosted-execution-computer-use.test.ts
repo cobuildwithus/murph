@@ -164,6 +164,41 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("rejects managed-login handoffs for non-login pause reasons before creating a handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({
+      lastUrl: "https://checkout.example/pay",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({ run });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "managed_login",
+      memberId: "member_123",
+      reason: "payment_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_LOGIN_NEEDED",
+      retryable: true,
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+  });
+
   it("stores final confirmation as a manual handoff pause", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });

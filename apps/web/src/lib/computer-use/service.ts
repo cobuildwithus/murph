@@ -473,6 +473,9 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     }, store);
+    if (input.handoffPurpose === "managed_login" && input.reason !== "login_needed") {
+      throw managedLoginRequiresLoginNeededError();
+    }
 
     if (run.status === "awaiting_user") {
       const refreshed = input.handoffPurpose
@@ -2784,6 +2787,14 @@ function managedLoginUnavailableError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
     message: "Managed sign-in is temporarily unavailable.",
+    retryable: true,
+  });
+}
+
+function managedLoginRequiresLoginNeededError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_LOGIN_NEEDED",
+    message: "Managed sign-in is only available for login checkpoints.",
     retryable: true,
   });
 }
