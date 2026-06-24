@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 
-import type { ExperimentFrontmatter } from '@murphai/contracts'
+import {
+  formatTimeZoneDateTimeParts,
+  isValidIanaTimeZone,
+  type ExperimentFrontmatter,
+} from '@murphai/contracts'
+import { loadVault } from '@murphai/core'
 
 import { listAssistantExperimentFrontmatter } from './active-experiment-context.js'
 import type { MurphManagedAutomationSeed } from './managed-automations.js'
@@ -20,7 +25,7 @@ export interface BuildExperimentLifecycleSeedsInput {
 }
 
 const FIRST_PROGRESS_DAY = 4
-const LIFECYCLE_FIRE_HOUR_UTC = 15
+const LIFECYCLE_FIRE_HOUR_LOCAL = 9
 const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as const
 const FINAL_RESULTS_TAGS = ['experiment', 'final-results', 'progress-card'] as const
 
@@ -36,7 +41,23 @@ export async function buildExperimentLifecycleSeeds(
     return []
   }
 
-  return experiments.flatMap(buildExperimentSeeds)
+  const vaultTimeZone = await resolveVaultTimeZone(input.vaultRoot)
+
+  return experiments.flatMap((experiment) =>
+    buildExperimentSeeds(experiment, vaultTimeZone),
+  )
+}
+
+async function resolveVaultTimeZone(vaultRoot: string): Promise<string> {
+  try {
+    const { metadata } = await loadVault({ vaultRoot })
+    if (isValidIanaTimeZone(metadata.timezone)) {
+      return metadata.timezone
+    }
+  } catch {
+    // Best-effort: fall through to the UTC default below.
+  }
+  return 'UTC'
 }
 
 /** Kept for the existing managed-automations call site. */
@@ -48,19 +69,33 @@ export function buildExperimentFinalResultsSeeds(
 
 function buildExperimentSeeds(
   experiment: ExperimentFrontmatter,
+  vaultTimeZone: string,
 ): MurphManagedAutomationSeed[] {
   if (experiment.status !== 'active') {
     return []
   }
 
+  const timeZone = resolveExperimentTimeZone(experiment, vaultTimeZone)
   return [
-    buildProgressMilestoneSeed(experiment),
-    buildFinalResultsSeed(experiment),
+    buildProgressMilestoneSeed(experiment, timeZone),
+    buildFinalResultsSeed(experiment, timeZone),
   ].filter((seed): seed is MurphManagedAutomationSeed => seed !== null)
+}
+
+function resolveExperimentTimeZone(
+  experiment: ExperimentFrontmatter,
+  vaultTimeZone: string,
+): string {
+  const runTimeZone = experiment.runPlan?.schedule?.timeZone
+  if (runTimeZone && isValidIanaTimeZone(runTimeZone)) {
+    return runTimeZone
+  }
+  return vaultTimeZone
 }
 
 function buildProgressMilestoneSeed(
   experiment: ExperimentFrontmatter,
+  timeZone: string,
 ): MurphManagedAutomationSeed | null {
   const interventionStart = experiment.runPlan?.interventionStart
   const interventionEnd = experiment.runPlan?.interventionEnd
@@ -78,7 +113,7 @@ function buildProgressMilestoneSeed(
     slug: `experiment-progress-${experiment.slug}-day-${FIRST_PROGRESS_DAY}`,
     title: `First progress · ${experiment.title}`,
     summary: 'A visual progress check after three completed intervention days.',
-    schedule: { kind: 'at', at: lifecycleFireTimestamp(milestoneDate) },
+    schedule: { kind: 'at', at: lifecycleFireTimestamp(milestoneDate, timeZone) },
     continuityPolicy: 'fresh',
     tags: [...PROGRESS_MILESTONE_TAGS],
     instructions: buildProgressMilestoneInstructions(experiment),
@@ -90,7 +125,7 @@ function buildProgressMilestoneInstructions(experiment: ExperimentFrontmatter): 
   return [
     `Goal: give the user an encouraging first progress moment for the experiment "${experiment.title}" (${slug}) after three completed intervention days.`,
     `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --format json\` first.`,
-    'Skip when the run is no longer active, intervention day four has not arrived, this milestone was already shared, or saved assistant support opts out of scheduled summaries.',
+    'Skip when the run is no longer active, intervention day four has not arrived, the current intervention window no longer spans four days, this milestone was already shared, or saved assistant support opts out of scheduled summaries.',
     `Otherwise build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Lead with what the user completed. Mention at most two metric changes as early signals, with plain uncertainty.',
     'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
@@ -100,6 +135,7 @@ function buildProgressMilestoneInstructions(experiment: ExperimentFrontmatter): 
 
 function buildFinalResultsSeed(
   experiment: ExperimentFrontmatter,
+  timeZone: string,
 ): MurphManagedAutomationSeed | null {
   const interventionEnd = experiment.runPlan?.interventionEnd
   if (!interventionEnd) {
@@ -114,7 +150,7 @@ function buildFinalResultsSeed(
     summary: 'A celebratory final review after the experiment finishes.',
     schedule: {
       kind: 'at',
-      at: lifecycleFireTimestamp(addDaysToIsoDate(interventionEnd, 1)),
+      at: lifecycleFireTimestamp(addDaysToIsoDate(interventionEnd, 1), timeZone),
     },
     continuityPolicy: 'fresh',
     tags: [...FINAL_RESULTS_TAGS],
@@ -127,7 +163,7 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
   return [
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
-    `Run \`vault-cli experiment outcome write ${slug} --format json\` to persist the deterministic outcome. If persistence cannot complete, use \`vault-cli experiment outcome analyze ${slug} --format json\` and still give an honest review.`,
+    `Run \`vault-cli experiment outcome write ${slug} --format json\` to persist the deterministic outcome before composing the review. If that command fails, surface the error and stop without delivering anything — the cron retry will run this moment again.`,
     `Build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Open with direct congratulations for completing the experiment. Celebrate the follow-through, not whether a biomarker went up or down.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
@@ -151,10 +187,48 @@ function experimentFinalResultsAutomationId(experimentId: string): string {
   return `automation_${experimentId.replace(/^exp_/u, '')}`
 }
 
-function lifecycleFireTimestamp(date: string): string {
-  const fireAt = new Date(`${date}T00:00:00.000Z`)
-  fireAt.setUTCHours(LIFECYCLE_FIRE_HOUR_UTC, 0, 0, 0)
-  return fireAt.toISOString()
+function lifecycleFireTimestamp(localDate: string, timeZone: string): string {
+  return resolveLocalMorningInstant(
+    localDate,
+    LIFECYCLE_FIRE_HOUR_LOCAL,
+    timeZone,
+  )
+}
+
+/**
+ * Resolve the UTC instant that displays as `${date} ${hour}:00:00` in the
+ * supplied IANA time zone. Iterates against the existing time-zone formatter
+ * so DST transitions and non-hour-aligned offsets converge without bespoke
+ * offset math.
+ */
+function resolveLocalMorningInstant(
+  date: string,
+  hour: number,
+  timeZone: string,
+): string {
+  const desiredYear = Number(date.slice(0, 4))
+  const desiredMonth = Number(date.slice(5, 7))
+  const desiredDay = Number(date.slice(8, 10))
+  const desiredEpoch = Date.UTC(desiredYear, desiredMonth - 1, desiredDay, hour, 0, 0, 0)
+  let candidate = new Date(desiredEpoch)
+  // Two passes resolve any stable offset; four absorb a DST transition window.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = formatTimeZoneDateTimeParts(candidate, timeZone)
+    if (parts.dayKey === date && parts.hour === hour && parts.minute === 0) {
+      return candidate.toISOString()
+    }
+    const observedEpoch = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      0,
+      0,
+    )
+    candidate = new Date(candidate.getTime() + (desiredEpoch - observedEpoch))
+  }
+  return candidate.toISOString()
 }
 
 function addDaysToIsoDate(date: string, days: number): string {
