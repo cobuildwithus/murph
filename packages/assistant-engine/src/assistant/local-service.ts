@@ -593,10 +593,14 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           sharedPlan,
         })
+        // Captured once so the narrowing survives into the sendVaultFile
+        // closure below. Without this local, TS widens the property access
+        // back to `… | null | undefined` inside the async closure body.
+        const actionApprovalPort = hostedExecutionContext?.actionApprovalPort ?? null
         const vaultFileSendAvailable =
           input.deliverResponse === true
           && requiredUserMessageDeliveryAvailable
-          && hostedExecutionContext?.actionApprovalPort != null
+          && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
@@ -609,7 +613,7 @@ export async function sendAssistantMessageLocal(
               messageInput: input,
               requiredUserMessageDeliveryAvailable,
               sendRequiredUserMessage,
-              ...(vaultFileSendAvailable && hostedExecutionContext.actionApprovalPort
+              ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
                     sendVaultFile: async (ref: string) => {
                       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -631,7 +635,7 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                       })
                       const result = await requestAssistantVaultFileSend({
-                        actionApprovalPort: hostedExecutionContext.actionApprovalPort,
+                        actionApprovalPort,
                         actorId: deliveryFields.actorId,
                         bindingDelivery: deliveryFields.bindingDelivery,
                         channel: deliveryFields.channel,
