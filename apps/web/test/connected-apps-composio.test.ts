@@ -5,6 +5,7 @@ import {
   createComposioConnectedAppsClient,
 } from "@/src/lib/connected-apps/composio";
 import {
+  formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
   type HostedConnectedAppsConfig,
 } from "@/src/lib/connected-apps/config";
@@ -247,6 +248,20 @@ describe("Composio connected-app client", () => {
       COMPOSIO_API_KEY: "secret-test-key",
       COMPOSIO_MAX_ACCOUNTS_PER_TOOLKIT: "20",
     }).maxAccountsPerToolkit).toBe(10);
+  });
+
+  it("enables Gmail, Google Calendar, Outlook, and Zoho Mail by default with human labels", () => {
+    const defaults = readHostedConnectedAppsConfig({
+      COMPOSIO_API_KEY: "secret-test-key",
+    });
+    expect([...defaults.toolkits].sort()).toEqual([
+      "gmail",
+      "googlecalendar",
+      "outlook",
+      "zoho_mail",
+    ]);
+    expect(formatHostedConnectedAppToolkitLabel("outlook")).toBe("Microsoft Outlook");
+    expect(formatHostedConnectedAppToolkitLabel("zoho_mail")).toBe("Zoho Mail");
   });
 });
 
