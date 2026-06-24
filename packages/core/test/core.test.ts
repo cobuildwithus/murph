@@ -1859,6 +1859,48 @@ test("listAssessmentResponses sorts by recordedAt and id", async () => {
   assert.deepEqual(actualOrder, [earlier.assessment.id, later.assessment.id]);
 });
 
+test("listAssessmentResponses sorts stored timestamp offsets by instant", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const shardPath = path.join(vaultRoot, "ledger/assessments/2026/2026-04.jsonl");
+  await fs.mkdir(path.dirname(shardPath), { recursive: true });
+  await fs.writeFile(
+    shardPath,
+    [
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:00:00.000Z",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/source.json",
+        responses: {},
+      },
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:30:00+01:00",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9/source.json",
+        responses: {},
+      },
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const records = await listAssessmentResponses({ vaultRoot });
+
+  assert.deepEqual(
+    records.map((record) => record.id),
+    [
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    ],
+  );
+});
+
 test("listAssessmentResponses rejects malformed stored assessment rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });

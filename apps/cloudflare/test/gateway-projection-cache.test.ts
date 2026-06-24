@@ -337,6 +337,18 @@ describe("HostedGatewayProjectionCache", () => {
     ]);
   });
 
+  it("rejects offset-less snapshot timestamps at the cache boundary", async () => {
+    const store = createCache();
+
+    await expect(store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-08T00:00:00.000",
+      conversations: [],
+      messages: [],
+      permissions: [],
+    })).rejects.toThrow(/explicit offset/u);
+  });
+
   it("keeps operator permission decisions applied across later runtime snapshots", async () => {
     const store = createCache();
 
@@ -673,6 +685,17 @@ describe("gateway permission overrides", () => {
         parsed[1]!,
       ]),
     ).toBe(false);
+  });
+
+  it("rejects offset-less permission override timestamps", () => {
+    expect(() => readGatewayPermissionOverrides([
+      {
+        note: null,
+        requestId: "request-a",
+        resolvedAt: "2026-04-06T00:10:00.000",
+        status: "approved",
+      },
+    ])).toThrow("gateway projection cache state is invalid.");
   });
 
   it("fails closed on malformed cache-state input with the renamed error text", () => {
