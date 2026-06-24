@@ -198,6 +198,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
   preparedDispatchToken: null,
+  autoReplyCrossSessionContextConsumedAt: null,
   lastError: null,
 }
 

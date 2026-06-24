@@ -956,7 +956,6 @@ function countAssistantRuntimeResiduePrunedFiles(
   }
   return (
     result.acceptedTurnInputJournalsPruned +
-    result.autoReplyCrossSessionContextCursorsPruned +
     result.autoReplyEvidenceFilesPruned +
     result.autoReplyIntentProvenancePruned +
     result.inputEventsPruned +
@@ -973,8 +972,6 @@ function createAssistantRuntimeResiduePruneLogDetails(
   return {
     prunedAssistantRuntimeAcceptedTurnInputJournalCount:
       result.acceptedTurnInputJournalsPruned,
-    prunedAssistantRuntimeAutoReplyCrossSessionContextCursorCount:
-      result.autoReplyCrossSessionContextCursorsPruned,
     prunedAssistantRuntimeAutoReplyEvidenceFileCount:
       result.autoReplyEvidenceFilesPruned,
     prunedAssistantRuntimeAutoReplyEvidenceGroupCount:

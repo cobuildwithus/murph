@@ -14,10 +14,6 @@ import {
   AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
 } from '../src/assistant/automation/auto-reply-retry.ts'
 import {
-  readAssistantAutoReplyCrossSessionContextCursor,
-  writeAssistantAutoReplyCrossSessionContextCursor,
-} from '../src/assistant/automation/cross-session-context-cursor.ts'
-import {
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.ts'
 import {
@@ -369,66 +365,6 @@ describe('assistant runtime residue pruning', () => {
     await expectPathMissing(resolveIntentProvenancePath(paths, intentId))
   })
 
-  it('prunes cross-session context cursors only after the outbox intent is gone', async () => {
-    const { vaultRoot } = await createAssistantVault(
-      'assistant-runtime-residue-cross-session-context-',
-    )
-    const retainedIntent = await createAssistantOutboxIntent({
-      channel: 'email',
-      createdAt: OLD_RECORD_AT,
-      identityId: 'identity-retained-context',
-      message: 'retained cross-session context',
-      replyToMessageId: 'message-retained-context',
-      sessionId: createSessionId('8'),
-      threadId: 'thread-retained-context',
-      threadIsDirect: true,
-      turnId: createTurnId('8'),
-      turnTrigger: 'automation-auto-reply',
-      vault: vaultRoot,
-    })
-    const retainedRoute = createEmailCrossSessionCursorRoute({
-      identityId: 'identity-retained-context',
-      threadId: 'thread-retained-context',
-    })
-    const orphanedRoute = createEmailCrossSessionCursorRoute({
-      identityId: 'identity-orphaned-context',
-      threadId: 'thread-orphaned-context',
-    })
-    await writeAssistantAutoReplyCrossSessionContextCursor({
-      intentId: retainedIntent.intentId,
-      recordedAt: OLD_RECORD_AT,
-      route: retainedRoute,
-      sentAtMs: Date.parse(OLD_RECORD_AT),
-      vault: vaultRoot,
-    })
-    await writeAssistantAutoReplyCrossSessionContextCursor({
-      intentId: 'intent_orphaned_cross_session_context',
-      recordedAt: OLD_RECORD_AT,
-      route: orphanedRoute,
-      sentAtMs: Date.parse(OLD_RECORD_AT),
-      vault: vaultRoot,
-    })
-
-    const result = await pruneAssistantRuntimeResidue({
-      now: PRUNE_NOW,
-      pendingInputIds: [],
-      vault: vaultRoot,
-    })
-
-    expect(result.autoReplyCrossSessionContextCursorsPruned).toBe(1)
-    await expect(readAssistantAutoReplyCrossSessionContextCursor({
-      route: retainedRoute,
-      vault: vaultRoot,
-    })).resolves.toEqual({
-      intentId: retainedIntent.intentId,
-      sentAtMs: Date.parse(OLD_RECORD_AT),
-    })
-    await expect(readAssistantAutoReplyCrossSessionContextCursor({
-      route: orphanedRoute,
-      vault: vaultRoot,
-    })).resolves.toBeNull()
-  })
-
   it('rejects nested symlink residue directories without deleting target vault files', async () => {
     const source = await createAssistantVault(
       'assistant-runtime-residue-symlink-source-',
@@ -474,16 +410,6 @@ describe('assistant runtime residue pruning', () => {
 const OLD_RECORD_AT = '2026-01-01T00:00:00.000Z'
 const RECENT_RECORD_AT = '2026-01-20T00:00:00.000Z'
 const PRUNE_NOW = new Date('2026-02-01T00:00:00.000Z')
-
-function createEmailCrossSessionCursorRoute(input: {
-  identityId: string
-  threadId: string
-}) {
-  return {
-    channel: 'email',
-    key: `email\0${input.identityId}\0thread:${input.threadId}`,
-  }
-}
 
 async function createAssistantVault(prefix: string) {
   const context = await createTempVaultContext(prefix)

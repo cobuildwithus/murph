@@ -109,6 +109,7 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+    expect(intent.autoReplyCrossSessionContextConsumedAt).toBeNull()
   })
 
   it('normalizes assistant cron ids and nullable session ids', () => {

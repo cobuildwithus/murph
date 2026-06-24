@@ -11,6 +11,8 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
+  readAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import {
@@ -53,13 +55,6 @@ import {
 import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
-import {
-  compareAssistantAutoReplyCrossSessionContextCursorOrder,
-  readAssistantAutoReplyCrossSessionContextCursor,
-  writeAssistantAutoReplyCrossSessionContextCursor,
-  type AssistantAutoReplyCrossSessionContextCursor,
-  type AssistantAutoReplyCrossSessionContextCursorRoute,
-} from './cross-session-context-cursor.js'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
@@ -156,9 +151,8 @@ interface AssistantAutoReplyReplyDecision {
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
-interface AssistantAutoReplySelectedCrossSessionContext
-  extends AssistantAutoReplyCrossSessionContextCursor {
-  route: AssistantAutoReplyCrossSessionContextCursorRoute
+interface AssistantAutoReplySelectedCrossSessionContext {
+  intentId: string
 }
 
 interface AssistantAutoReplyPrimaryInput {
@@ -1146,8 +1140,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ? null
       : {
           intentId: latestCrossSessionDelivery.intentId,
-          route: latestCrossSessionDelivery.cursorRoute,
-          sentAtMs: latestCrossSessionDelivery.sentAtMs,
         },
     kind: 'reply',
     operatorAuthority: 'direct-operator',
@@ -1467,7 +1459,7 @@ async function executeAssistantAutoReply(input: {
       replyInputId: input.replyInputId,
       result,
     })
-    await writeAssistantAutoReplyCrossSessionContextCursorIfNeeded({
+    await markAssistantAutoReplyCrossSessionContextConsumedIfNeeded({
       crossSessionContext: input.crossSessionContext,
       vault: input.vault,
     })
@@ -1481,7 +1473,7 @@ async function executeAssistantAutoReply(input: {
   }
 }
 
-async function writeAssistantAutoReplyCrossSessionContextCursorIfNeeded(input: {
+async function markAssistantAutoReplyCrossSessionContextConsumedIfNeeded(input: {
   crossSessionContext: AssistantAutoReplySelectedCrossSessionContext | null
   vault: string
 }): Promise<void> {
@@ -1491,12 +1483,27 @@ async function writeAssistantAutoReplyCrossSessionContextCursorIfNeeded(input: {
 
   // Do not retry a provider turn that already completed just because this
   // supporting local marker could not be written.
-  await writeAssistantAutoReplyCrossSessionContextCursor({
+  await markAssistantOutboxIntentAutoReplyCrossSessionContextConsumed({
     intentId: input.crossSessionContext.intentId,
-    route: input.crossSessionContext.route,
-    sentAtMs: input.crossSessionContext.sentAtMs,
     vault: input.vault,
   }).catch(() => undefined)
+}
+
+async function markAssistantOutboxIntentAutoReplyCrossSessionContextConsumed(input: {
+  intentId: string
+  vault: string
+}): Promise<void> {
+  const intent = await readAssistantOutboxIntent(input.vault, input.intentId)
+  if (!intent || intent.autoReplyCrossSessionContextConsumedAt !== null) {
+    return
+  }
+
+  const consumedAt = new Date().toISOString()
+  await saveAssistantOutboxIntent(input.vault, {
+    ...intent,
+    autoReplyCrossSessionContextConsumedAt: consumedAt,
+    updatedAt: consumedAt,
+  })
 }
 
 export type AssistantAutoReplyProviderRequestStartHook = (event: {
@@ -3162,7 +3169,13 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
 
   const inputText = normalizeNullableString(input.input.text)
   const inputTime = Date.parse(input.input.occurredAt)
-  if (inputText === null || !Number.isFinite(inputTime)) {
+  const causalUpperBoundMs =
+    resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input.input)
+  if (
+    inputText === null ||
+    !Number.isFinite(inputTime) ||
+    causalUpperBoundMs === null
+  ) {
     return false
   }
 
@@ -3182,7 +3195,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
       }
 
       const entryTime = Date.parse(entry.createdAt)
-      if (!Number.isFinite(entryTime)) {
+      if (!Number.isFinite(entryTime) || entryTime > causalUpperBoundMs) {
         continue
       }
 
@@ -3196,7 +3209,11 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   textCandidates.push(
     ...matchingDeliveries
       .filter((delivery) =>
-        inputProviderMessageId === null || delivery.providerMessageIds.length === 0,
+        delivery.sentAtMs <= causalUpperBoundMs &&
+        (
+          inputProviderMessageId === null ||
+          delivery.providerMessageIds.length === 0
+        ),
       )
       .map((delivery) => ({
         message: delivery.message,
@@ -3248,24 +3265,15 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   input: AssistantAutoReplyPrimaryInput
   session: AssistantSession | null
   vault: string
-}): Promise<AssistantAutoReplyResolvedCrossSessionDelivery | null> {
+}): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
-  const inputTime = Date.parse(input.input.occurredAt)
-  if (!channel || !deliveryTarget || !Number.isFinite(inputTime)) {
+  const causalUpperBoundMs =
+    resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input.input)
+  if (!channel || !deliveryTarget || causalUpperBoundMs === null) {
     return null
   }
 
-  const cursorRoute = resolveAssistantAutoReplyCrossSessionContextCursorRoute({
-    channel,
-    conversation: input.input.conversation,
-    deliveryTarget,
-  })
-  const latestInjectedDelivery =
-    await readAssistantAutoReplyCrossSessionContextCursor({
-      route: cursorRoute,
-      vault: input.vault,
-    })
   const matchingDeliveries = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
@@ -3273,9 +3281,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       vault: input.vault,
     })
   )
-    .filter((delivery) =>
-      delivery.sentAtMs <= inputTime + ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS,
-    )
+    .filter((delivery) => delivery.sentAtMs <= causalUpperBoundMs)
     .sort((left, right) =>
       left.sentAtMs === right.sentAtMs
         ? left.intentId.localeCompare(right.intentId)
@@ -3287,48 +3293,32 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
 
   const selected = matchingDeliveries
     .filter((delivery) =>
-      (input.session === null || delivery.sessionId !== input.session.sessionId) &&
-      (
-        latestInjectedDelivery === null ||
-        compareAssistantAutoReplyCrossSessionContextCursorOrder(
-          delivery,
-          latestInjectedDelivery,
-        ) > 0
-      ),
+      input.session === null || delivery.sessionId !== input.session.sessionId,
     )
     .at(-1) ?? null
-  return selected === null ? null : { ...selected, cursorRoute }
+  return selected?.autoReplyCrossSessionContextConsumedAt === null
+    ? selected
+    : null
 }
 
-function resolveAssistantAutoReplyCrossSessionContextCursorRoute(input: {
-  channel: string
-  conversation: AssistantInputConversationRef
-  deliveryTarget: string
-}): AssistantAutoReplyCrossSessionContextCursorRoute {
-  const conversation = conversationRefFromAssistantInputConversation(
-    input.conversation,
-  )
-  const threadId = normalizeNullableString(conversation.threadId)
-  if (input.channel === 'email' && threadId) {
-    const identityId = normalizeNullableString(conversation.identityId) ?? ''
-    return {
-      channel: input.channel,
-      key: `${input.channel}\0${identityId}\0thread:${threadId}`,
-    }
+function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
+  input: AssistantAutoReplyPrimaryInput,
+): number | null {
+  const occurredAtMs = Date.parse(input.occurredAt)
+  if (!Number.isFinite(occurredAtMs)) {
+    return null
   }
 
-  return {
-    channel: input.channel,
-    key: `${input.channel}\0${input.deliveryTarget}`,
-  }
-}
-
-interface AssistantAutoReplyResolvedCrossSessionDelivery
-  extends AssistantAutoReplyMatchingOutboxDelivery {
-  cursorRoute: AssistantAutoReplyCrossSessionContextCursorRoute
+  const skewBoundMs =
+    occurredAtMs + ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS
+  const receivedAtMs = Date.parse(input.receivedAt ?? '')
+  return Number.isFinite(receivedAtMs)
+    ? Math.min(skewBoundMs, receivedAtMs)
+    : skewBoundMs
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  autoReplyCrossSessionContextConsumedAt: string | null
   intentId: string
   message: string
   providerMessageIds: string[]
@@ -3382,6 +3372,8 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     }
 
     return [{
+      autoReplyCrossSessionContextConsumedAt:
+        intent.autoReplyCrossSessionContextConsumedAt,
       intentId: intent.intentId,
       message,
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
