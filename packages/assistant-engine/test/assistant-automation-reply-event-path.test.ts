@@ -1105,6 +1105,60 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
+  it('still resolves an anchored delivery whose local sentAt is stamped after the inbound reply was received (send-ack/webhook race)', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    // The provider exposed M to the user, the user replied natively, and
+    // that webhook landed before Murph's outbound send() returned and
+    // stamped sentAt. The local clock therefore records sentAt strictly
+    // after the inbound input's receivedAt. The anchored exact-id lookup
+    // must trust the provider message id over the local-clock cutoff.
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-anchored-race',
+        message: 'reminder that user replied to',
+        providerMessageId: 'linq-msg-anchor',
+        sentAt: '2026-04-08T12:00:01.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T12:00:00.000Z',
+      receivedAt: '2026-04-08T12:00:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-anchor',
+        service: null,
+      },
+      text: 'yes do that',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('reminder that user replied to')
+  })
+
   it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

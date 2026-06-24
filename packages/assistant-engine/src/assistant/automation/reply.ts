@@ -1111,12 +1111,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       deliveryTarget: conversationDeliveryTarget,
       input: primaryReplyInput,
-      // Anchor is the newest grouped input that carries a native reply.
-      // The exact-match branch then uses the anchor's own timestamps for its
-      // causal cutoff, so a delivery sent after the oldest grouped input but
-      // before the anchored input remains eligible. Without this the oldest
-      // input's cutoff would slice the anchored delivery out of the search.
-      replyAnchor: readPromptInputsCrossSessionReplyAnchor(promptInputs),
+      // Newest grouped input with a native reply. The selector treats it as
+      // an authoritative provider-side identification, so it bypasses the
+      // local-clock causal cutoff that exists only to guard the unanchored
+      // "latest" fallback.
+      replyToMessageId: readPromptInputsCrossSessionReplyToMessageId(
+        promptInputs,
+      ),
       session: existingSession,
       vault: input.vault,
     })
@@ -1229,24 +1230,13 @@ function createAssistantAutoReplyPrimaryInput(
   }
 }
 
-interface AssistantAutoReplyCrossSessionReplyAnchor {
-  occurredAt: string
-  receivedAt: string | null
-  replyToMessageId: string
-}
-
-function readPromptInputsCrossSessionReplyAnchor(
+function readPromptInputsCrossSessionReplyToMessageId(
   inputs: readonly AssistantAutoReplyPromptInput[],
-): AssistantAutoReplyCrossSessionReplyAnchor | null {
+): string | null {
   for (let index = inputs.length - 1; index >= 0; index -= 1) {
-    const input = inputs[index]
-    const metadata = input?.sourceMetadata
+    const metadata = inputs[index]?.sourceMetadata
     if (metadata?.kind === 'linq' && metadata.replyToMessageId) {
-      return {
-        occurredAt: input.occurredAt,
-        receivedAt: input.receivedAt,
-        replyToMessageId: metadata.replyToMessageId,
-      }
+      return metadata.replyToMessageId
     }
   }
   return null
@@ -3272,29 +3262,23 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   consumedIntentIds: ReadonlySet<string>
   deliveryTarget: string | null
   input: AssistantAutoReplyPrimaryInput
-  replyAnchor: AssistantAutoReplyCrossSessionReplyAnchor | null
+  replyToMessageId: string | null
   session: AssistantSession | null
   vault: string
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
-  // The causal cutoff is anchored to whichever input is being interpreted:
-  // the anchored reply when present, otherwise the bookkeeping primary.
-  const causalUpperBoundMs = resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
-    input.replyAnchor ?? input.input,
-  )
-  if (!channel || !deliveryTarget || causalUpperBoundMs === null) {
+  if (!channel || !deliveryTarget) {
     return null
   }
 
-  const eligible = (
+  const sessionEligible = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       input: input.input,
       vault: input.vault,
     })
   )
-    .filter((delivery) => delivery.sentAtMs <= causalUpperBoundMs)
     .filter((delivery) =>
       input.session === null || delivery.sessionId !== input.session.sessionId,
     )
@@ -3303,31 +3287,45 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
         ? left.intentId.localeCompare(right.intentId)
         : left.sentAtMs - right.sentAtMs,
     )
-  if (eligible.length === 0) {
+
+  // Explicit native reply: the user-supplied provider message id is
+  // authoritative, so this branch ignores both the local-clock causal cutoff
+  // and the consumption watermark. The cutoff exists only to guard the
+  // unanchored "latest" fallback against future-stamped or unconsumed-but-
+  // stale deliveries; an exact provider-id match across the same route can't
+  // be either. The send-ack/inbound-webhook race that records sentAt after
+  // the inbound input's receivedAt is the realistic case this protects.
+  if (input.replyToMessageId) {
+    return (
+      sessionEligible.find((delivery) =>
+        delivery.providerMessageIds.includes(input.replyToMessageId!),
+      ) ?? null
+    )
+  }
+
+  const causalUpperBoundMs = resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
+    input.input,
+  )
+  if (causalUpperBoundMs === null) {
     return null
   }
 
-  // Explicit native reply: the user is anchoring to a specific prior message
-  // identified by provider message id. An earlier consumed delivery that
-  // moved the watermark past it must not hide that explicit anchor.
-  if (input.replyAnchor) {
-    const replyToMessageId = input.replyAnchor.replyToMessageId
-    return (
-      eligible.find((delivery) =>
-        delivery.providerMessageIds.includes(replyToMessageId),
-      ) ?? null
-    )
+  const fresh = sessionEligible.filter(
+    (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
+  )
+  if (fresh.length === 0) {
+    return null
   }
 
   // Unanchored fallback: once a delivery has been used as turn context, no
   // earlier delivery from the same route should resurface as "latest".
   let firstFreshIndex = 0
-  for (let index = 0; index < eligible.length; index++) {
-    if (input.consumedIntentIds.has(eligible[index]!.intentId)) {
+  for (let index = 0; index < fresh.length; index++) {
+    if (input.consumedIntentIds.has(fresh[index]!.intentId)) {
       firstFreshIndex = index + 1
     }
   }
-  return eligible.slice(firstFreshIndex).at(-1) ?? null
+  return fresh.slice(firstFreshIndex).at(-1) ?? null
 }
 
 function readAssistantAutoReplyConsumedCrossSessionIntentIds(
