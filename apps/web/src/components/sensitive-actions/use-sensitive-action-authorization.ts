@@ -29,7 +29,7 @@ export function useSensitiveActionAuthorization() {
     );
 
     if (!isSensitiveActionSignature(signature)) {
-      throw new Error("Privy returned an invalid wallet signature.");
+      throw new Error("Your secure approval could not be completed. Try again.");
     }
 
     return {

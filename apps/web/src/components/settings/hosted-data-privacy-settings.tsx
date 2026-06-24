@@ -288,7 +288,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
               Export your vault
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads the current decrypted browser-vault replica that powers your dashboard as JSON.
+              Downloads your current dashboard data as a JSON file.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (

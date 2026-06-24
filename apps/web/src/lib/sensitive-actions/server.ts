@@ -277,7 +277,7 @@ function sensitiveActionInvalidSignature() {
   return hostedOnboardingError({
     code: "SENSITIVE_ACTION_INVALID_SIGNATURE",
     httpStatus: 403,
-    message: "The secure approval signature could not be verified.",
+    message: "Your secure approval could not be verified. Try again.",
   });
 }
 

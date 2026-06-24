@@ -53,7 +53,7 @@ export function usePasskeyWalletMfa() {
 
       let currentWallet = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
       if (currentWallet.status === "ambiguous") {
-        throw new Error("More than one embedded Murph wallet was found. Contact support before continuing.");
+        throw new Error("More than one Murph wallet was found. Contact support before continuing.");
       }
       if (currentWallet.status === "missing") {
         setActiveStep("create-wallet");
@@ -71,7 +71,7 @@ export function usePasskeyWalletMfa() {
 
       const mfaMethods = readHostedPrivyMfaMethodTypes(userRef.current);
       if (mfaMethods.length > 0 && !hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
-        throw new Error("Passkey must be the only wallet MFA method for secure Murph approvals.");
+        throw new Error("Your passkey must be the only method protecting your Murph wallet.");
       }
       if (!hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
         setActiveStep("enroll-mfa");
@@ -116,9 +116,9 @@ function stepLabel(step: SetupStep): string {
     case "create-passkey":
       return "Creating passkey";
     case "create-wallet":
-      return "Setting up secure container";
+      return "Setting up your Murph wallet";
     case "enroll-mfa":
-      return "Enrolling passkey as MFA factor";
+      return "Linking passkey to your Murph wallet";
   }
 }
 
