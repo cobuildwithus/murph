@@ -191,20 +191,20 @@ describe('research scout', () => {
   })
 
   it('posts one deep-reasoning research-paper search with a compact tag profile', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: JSON.stringify({
-            candidates: [createStructuredCandidate()],
-          }),
-        },
-        results: [{
-          author: 'Example Journal',
-          publishedDate: '2026-06-01',
-          title: 'Example sleep recovery review',
-          url: 'https://example.test/research/sleep-recovery',
-        }],
-      }))
+    const providerPayload = {
+      output: {
+        content: JSON.stringify({
+          candidates: [createStructuredCandidate()],
+        }),
+      },
+      results: [{
+        author: 'Example Journal',
+        publishedDate: '2026-06-01',
+        title: 'Example sleep recovery review',
+        url: 'https://example.test/research/sleep-recovery',
+      }],
+    }
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(providerPayload))
 
     const result = await fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
       env: {
@@ -266,15 +266,7 @@ describe('research scout', () => {
       sentProfileKind: 'tag_profile',
       tokenSource: 'env',
     })
-    expect(result.candidates).toEqual([
-      expect.objectContaining({
-        clinicianDiscussionOnly: true,
-        matchedProfileTags: ['sleep', 'better recovery'],
-        sourceName: 'Example Journal',
-        sourceUrl: 'https://example.test/research/sleep-recovery',
-        title: 'Example sleep recovery review',
-      }),
-    ])
+    expect(result.response).toEqual(providerPayload)
   })
 
   it.each([
@@ -323,18 +315,18 @@ describe('research scout', () => {
   })
 
   it('allows compact non-identifying free-form category tags', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: {
-            candidates: [createStructuredCandidate()],
-          },
+    const providerPayload = {
+      output: {
+        content: {
+          candidates: [createStructuredCandidate()],
         },
-        results: [{
-          title: 'Kept source',
-          url: 'https://example.test/kept',
-        }],
-      }))
+      },
+      results: [{
+        title: 'Kept source',
+        url: 'https://example.test/kept',
+      }],
+    }
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(providerPayload))
 
     const result = await fetchExaResearchScoutCandidates({
       ...RESEARCH_SCOUT_INPUT,
@@ -352,33 +344,33 @@ describe('research scout', () => {
     })
 
     expect(fetchImpl).toHaveBeenCalledTimes(1)
-    expect(result.candidates).toHaveLength(1)
+    expect(result.response).toEqual(providerPayload)
   })
 
-  it('filters weak, generic, and high-hype candidates while preserving warnings', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: {
-            candidates: [
-              createStructuredCandidate({ evidenceStrength: 'weak', resultIndex: 0 }),
-              createStructuredCandidate({ hypeRisk: 'high', resultIndex: 1 }),
-              createStructuredCandidate({ resultIndex: 2, studyType: 'preclinical' }),
-              createStructuredCandidate({ resultIndex: 3, studyType: 'news_or_commentary' }),
-              createStructuredCandidate({ matchedProfileTags: [], resultIndex: 4 }),
-              createStructuredCandidate({ resultIndex: 5 }),
-            ],
-          },
+  it('returns Exa payloads without local candidate filtering', async () => {
+    const providerPayload = {
+      output: {
+        content: {
+          candidates: [
+            createStructuredCandidate({ evidenceStrength: 'weak', resultIndex: 0 }),
+            createStructuredCandidate({ hypeRisk: 'high', resultIndex: 1 }),
+            createStructuredCandidate({ resultIndex: 2, studyType: 'preclinical' }),
+            createStructuredCandidate({ resultIndex: 3, studyType: 'news_or_commentary' }),
+            createStructuredCandidate({ matchedProfileTags: [], resultIndex: 4 }),
+            createStructuredCandidate({ resultIndex: 5 }),
+          ],
         },
-        results: [
-          { title: 'Weak source', url: 'https://example.test/weak' },
-          { title: 'Hyped source', url: 'https://example.test/hyped' },
-          { title: 'Preclinical source', url: 'https://example.test/preclinical' },
-          { title: 'News source', url: 'https://example.test/news' },
-          { title: 'Generic source', url: 'https://example.test/generic' },
-          { title: 'Kept source', url: 'https://example.test/kept' },
-        ],
-      }))
+      },
+      results: [
+        { title: 'Weak source', url: 'https://example.test/weak' },
+        { title: 'Hyped source', url: 'https://example.test/hyped' },
+        { title: 'Preclinical source', url: 'https://example.test/preclinical' },
+        { title: 'News source', url: 'https://example.test/news' },
+        { title: 'Generic source', url: 'https://example.test/generic' },
+        { title: 'Kept source', url: 'https://example.test/kept' },
+      ],
+    }
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(providerPayload))
 
     const result = await fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
       env: {
@@ -387,106 +379,30 @@ describe('research scout', () => {
       fetchImpl,
     })
 
-    expect(result.candidates.map((candidate) => candidate.title)).toEqual(['Kept source'])
-    expect(result.warnings).toEqual([
-      'Dropped 5 weak, generic, or unlinked research candidates.',
-    ])
+    expect(result.response).toEqual(providerPayload)
   })
 
-  it('rejects malformed structured output or unlinked search results as provider response errors', async () => {
-    const invalidStructuredOutputFetch = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: '{"candidates":[{"resultIndex":0}]}',
-        },
-        results: [],
-      }))
+  it('passes through malformed structured content and unlinked search results', async () => {
+    const providerPayload = {
+      output: {
+        content: '{"candidates":[{"resultIndex":0}]}',
+      },
+      results: [
+        { title: 'Invalid URL source', url: 'not a valid URL' },
+        { title: 'Non-web URL source', url: 'file:///tmp/research.pdf' },
+        { title: 'Missing URL source' },
+      ],
+    }
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(providerPayload))
 
-    await expect(
-      fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
-        env: {
-          EXA_API_KEY: 'exa-test-token',
-        },
-        fetchImpl: invalidStructuredOutputFetch,
-      }),
-    ).rejects.toMatchObject({
-      code: 'research_exa_invalid_response',
-      name: 'VaultCliError',
-    } satisfies Partial<VaultCliError>)
+    const result = await fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: {
+        EXA_API_KEY: 'exa-test-token',
+      },
+      fetchImpl,
+    })
 
-    const invalidUrlFetch = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: {
-            candidates: [createStructuredCandidate()],
-          },
-        },
-        results: [{
-          title: 'Invalid URL source',
-          url: 'not a valid URL',
-        }],
-      }))
-
-    await expect(
-      fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
-        env: {
-          EXA_API_KEY: 'exa-test-token',
-        },
-        fetchImpl: invalidUrlFetch,
-      }),
-    ).rejects.toMatchObject({
-      code: 'research_exa_invalid_response',
-      name: 'VaultCliError',
-    } satisfies Partial<VaultCliError>)
-
-    const nonWebUrlFetch = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: {
-            candidates: [createStructuredCandidate()],
-          },
-        },
-        results: [{
-          title: 'Non-web URL source',
-          url: 'file:///tmp/research.pdf',
-        }],
-      }))
-
-    await expect(
-      fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
-        env: {
-          EXA_API_KEY: 'exa-test-token',
-        },
-        fetchImpl: nonWebUrlFetch,
-      }),
-    ).rejects.toMatchObject({
-      code: 'research_exa_invalid_response',
-      name: 'VaultCliError',
-    } satisfies Partial<VaultCliError>)
-
-    const missingUrlFetch = vi.fn<typeof fetch>(async () =>
-      jsonResponse({
-        output: {
-          content: {
-            candidates: [createStructuredCandidate()],
-          },
-        },
-        results: [{
-          title: 'Missing URL source',
-        }],
-      }))
-
-    await expect(
-      fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
-        env: {
-          EXA_API_KEY: 'exa-test-token',
-        },
-        fetchImpl: missingUrlFetch,
-      }),
-    ).rejects.toMatchObject({
-      code: 'research_exa_invalid_response',
-      name: 'VaultCliError',
-    } satisfies Partial<VaultCliError>)
+    expect(result.response).toEqual(providerPayload)
   })
 
   it('keeps the Exa structured-output schema within the shallow citation-free contract', () => {

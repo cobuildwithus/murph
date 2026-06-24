@@ -77,7 +77,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
         .min(1)
         .max(12)
         .default(12)
-        .describe('Maximum research candidates to request and return.'),
+        .describe('Maximum research candidates to request from Exa.'),
     }),
     examples: [
       {
@@ -91,7 +91,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Requires EXA_API_KEY. Pass a compact tag profile only; use research payload-schema --format json for the exact file-body contract. The stdin body is the profile object, for example {"topics":["sleep","recovery"],"behaviors":["exercise"]}. Do not use a generic tags field or include raw labs, names, dates of birth, full notes, or medical records. The tool returns candidates; local vault relevance and final medical framing remain the assistant job.',
+      'Requires EXA_API_KEY. Pass a compact tag profile only; use research payload-schema --format json for the exact file-body contract. The stdin body is the profile object, for example {"topics":["sleep","recovery"],"behaviors":["exercise"]}. Do not use a generic tags field or include raw labs, names, dates of birth, full notes, or medical records. The tool returns the provider response; local vault relevance and final medical framing remain the assistant job.',
     output: researchScoutResultSchema,
     async run({ options }) {
       const rawProfile = await loadJsonInputObject(

@@ -932,7 +932,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Search Exa for bounded recent health research candidates from a compact non-identifying profile without writing vault records.',
         hint:
-          'Requires EXA_API_KEY. Pass a compact tag profile only; run research payload-schema --format json for the exact profile body. Do not include raw labs, names, dates of birth, full notes, or medical records.',
+          'Requires EXA_API_KEY. Pass a compact tag profile only; run research payload-schema --format json for the exact profile body. Returns the provider response without local candidate post-processing.',
         output: researchScoutResultSchema,
       },
     ],
