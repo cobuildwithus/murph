@@ -331,6 +331,7 @@ function createAutomationInputSummary(input: {
     text: 'hello',
     attachmentCount: 0,
     actorIsSelf: false,
+    replyToMessageId: null,
   }
 }
 

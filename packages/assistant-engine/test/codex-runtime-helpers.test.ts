@@ -1853,10 +1853,15 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      provider: 'codex-cli',
-      prompt: 'Answer the current message.',
-      turnContextPrompt: 'Conversation context:\nEarlier assistant reminder.',
-      workingDirectory: '/tmp/provider-tests',
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        dynamicTools: resolveMurphDynamicTools({
+          progressUpdatesAvailable: false,
+        }),
+        prompt: 'Answer the current message.',
+        turnContextPrompt: 'Conversation context:\nEarlier assistant reminder.',
+        workingDirectory: '/tmp/provider-tests',
+      },
     })
 
     expect(attempt.ok).toBe(true)
