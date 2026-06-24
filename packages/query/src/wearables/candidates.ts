@@ -1,6 +1,8 @@
-import { normalizeWearableMetricValue } from "@murphai/importers/device-providers/metric-catalog";
-import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
 import { deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
+import {
+  canonicalizeWearableProviderSlug,
+  normalizeWearableMetricValue,
+} from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
@@ -55,7 +57,7 @@ export function collectWearableDataset(
         filters.providers
           .map((provider) => provider.trim().toLowerCase())
           .filter(Boolean)
-          .map((provider) => canonicalizeDeviceProviderSlug(provider)),
+          .map((provider) => canonicalizeWearableProviderSlug(provider)),
       )
     : null;
 

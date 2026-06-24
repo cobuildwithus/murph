@@ -203,6 +203,21 @@ export async function withCanonicalWriteLockScope<TResult>(
   );
 }
 
+export async function withCanonicalWriteLock<TResult>(
+  vaultRoot: string | undefined,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const normalizedVaultRoot = vaultRoot ?? process.cwd();
+  return withCanonicalWriteLockScope(normalizedVaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(normalizedVaultRoot);
+    try {
+      return await run();
+    } finally {
+      await lock.release();
+    }
+  });
+}
+
 export function assertCanonicalWriteLockScope(vaultRoot: string): void {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const context = canonicalWriteLockContextStorage.getStore();

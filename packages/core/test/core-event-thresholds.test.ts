@@ -322,6 +322,54 @@ test("document deletes retain canonical attachment paths and repeated deletes re
   );
 });
 
+test("event upserts hold the canonical lock across read, plan, and append", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-event-concurrency");
+  await initializeVault({ vaultRoot });
+
+  const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1C1";
+  const occurredAt = new Date("2026-03-12T08:15:00.000Z");
+  const initial = await upsertEvent({
+    vaultRoot,
+    draft: buildNoteEventDraft({
+      id: eventId,
+      note: "Initial note",
+      occurredAt,
+      title: "Initial note",
+    }),
+  });
+
+  await Promise.all([
+    upsertEvent({
+      vaultRoot,
+      draft: buildNoteEventDraft({
+        id: eventId,
+        note: "Concurrent note A",
+        occurredAt,
+        title: "Concurrent note A",
+      }),
+    }),
+    upsertEvent({
+      vaultRoot,
+      draft: buildNoteEventDraft({
+        id: eventId,
+        note: "Concurrent note B",
+        occurredAt,
+        title: "Concurrent note B",
+      }),
+    }),
+  ]);
+
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: initial.ledgerFile,
+  });
+  const revisions = records
+    .filter((record) => record.id === eventId)
+    .map((record) => (record.lifecycle as { revision?: unknown } | undefined)?.revision);
+
+  assert.deepEqual(revisions, [1, 2, 3]);
+});
+
 test("specialized event rewrites reject cross-kind updates and meal deletes retain canonical attachment paths", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds");
   const sourceRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds-source");

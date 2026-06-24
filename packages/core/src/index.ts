@@ -183,6 +183,7 @@ export {
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  withCanonicalWriteLock,
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
   applyHostedCanonicalWriteReceipt,

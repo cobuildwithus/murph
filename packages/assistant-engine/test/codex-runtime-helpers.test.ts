@@ -46,7 +46,7 @@ import {
   buildAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage,
   resolveCodexAssistantProviderTokenPricingBasis,
-  resolveAssistantProviderPrompt,
+  resolveAssistantProviderPrompt as resolveAssistantProviderPromptUnchecked,
 } from '../src/assistant/providers/helpers.ts'
 import {
   recordCodexAttemptStarted,
@@ -54,7 +54,7 @@ import {
 } from '../src/assistant/codex-turn/attempt-observability.ts'
 import {
   executeCodexAssistantTurnFromInput,
-  executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
@@ -67,6 +67,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
+  AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
 import type { AssistantProviderTraceEvent } from '../src/assistant/provider-traces.ts'
@@ -80,6 +81,39 @@ function testCodexResume(codexThreadId: string) {
     codexThreadId,
     prepareFreshThreadFallback: async () => TEST_FRESH_THREAD_FALLBACK,
   }
+}
+
+function resolveAssistantProviderPrompt(
+  input: Omit<AssistantProviderTurnExecutionInput, 'dynamicTools'> & {
+    dynamicTools?: AssistantProviderTurnExecutionInput['dynamicTools']
+  },
+) {
+  return resolveAssistantProviderPromptUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      progressUpdatesAvailable: false,
+    }),
+  })
+}
+
+function executeCodexAssistantTurnAttempt(
+  input: Omit<AssistantProviderTurnExecutionInput, 'dynamicTools'> & {
+    dynamicTools?: AssistantProviderTurnExecutionInput['dynamicTools']
+  },
+) {
+  return executeCodexAssistantTurnAttemptUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
 }
 
 afterEach(() => {
@@ -1809,10 +1843,15 @@ describe('Codex assistant registry helpers', () => {
 
     await expect(
       executeCodexAssistantTurnFromInput({
-        provider: 'codex-cli',
-        prompt: 'send a voice memo',
-        voiceMemoDeliveryChannel: 'telegram',
-        workingDirectory: '/tmp/provider-tests',
+        providerConfig: { provider: 'codex-cli' },
+        turn: {
+          dynamicTools: resolveMurphDynamicTools({
+            progressUpdatesAvailable: false,
+          }),
+          prompt: 'send a voice memo',
+          voiceMemoDeliveryChannel: 'telegram',
+          workingDirectory: '/tmp/provider-tests',
+        },
       }),
     ).resolves.toMatchObject({
       response: 'ok',
@@ -1827,10 +1866,15 @@ describe('Codex assistant registry helpers', () => {
     expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      provider: 'codex-cli',
-      prompt: 'send a voice memo',
-      voiceMemoDeliveryChannel: 'linq',
-      workingDirectory: '/tmp/provider-tests',
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        dynamicTools: resolveMurphDynamicTools({
+          progressUpdatesAvailable: false,
+        }),
+        prompt: 'send a voice memo',
+        voiceMemoDeliveryChannel: 'linq',
+        workingDirectory: '/tmp/provider-tests',
+      },
     })
 
     expect(attempt.ok).toBe(true)
@@ -1859,10 +1903,16 @@ describe('Codex assistant registry helpers', () => {
 
     await expect(
       executeCodexAssistantTurnFromInput({
-        allowMessageReactions: true,
-        provider: 'codex-cli',
-        prompt: 'react to this',
-        workingDirectory: '/tmp/provider-tests',
+        providerConfig: { provider: 'codex-cli' },
+        turn: {
+          allowMessageReactions: true,
+          dynamicTools: resolveMurphDynamicTools({
+            allowMessageReactions: true,
+            progressUpdatesAvailable: false,
+          }),
+          prompt: 'react to this',
+          workingDirectory: '/tmp/provider-tests',
+        },
       }),
     ).resolves.toMatchObject({
       response: 'ok',
@@ -1871,16 +1921,25 @@ describe('Codex assistant registry helpers', () => {
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
     ).toMatchObject({
       allowMessageReactions: true,
+      dynamicTools: expect.arrayContaining([
+        expect.objectContaining({ name: 'react_to_message' }),
+      ]),
     })
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      allowMessageReactions: true,
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        allowMessageReactions: true,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: true,
+          progressUpdatesAvailable: false,
+        }),
+        onTraceEvent: (event) => {
+          traceEvents.push(event)
+        },
+        prompt: 'react to this',
+        workingDirectory: '/tmp/provider-tests',
       },
-      provider: 'codex-cli',
-      prompt: 'react to this',
-      workingDirectory: '/tmp/provider-tests',
     })
 
     expect(attempt.ok).toBe(true)

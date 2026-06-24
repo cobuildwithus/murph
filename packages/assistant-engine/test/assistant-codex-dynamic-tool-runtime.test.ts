@@ -50,14 +50,36 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
 })
 
 import {
-  executeCodexAppServerTurn,
+  executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
+  resolveMurphDynamicTools,
   stopWarmCodexAppServer,
+  type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 
 const tempRoots: string[] = []
+
+function executeCodexAppServerTurn(
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+  },
+) {
+  return executeCodexAppServerTurnUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
+}
 
 afterEach(async () => {
   await stopWarmCodexAppServer('dynamic-tool-runtime-test-cleanup')
