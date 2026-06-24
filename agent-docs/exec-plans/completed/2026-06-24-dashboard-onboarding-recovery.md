@@ -38,3 +38,6 @@ Working set (files/ids/commands):
 - apps/web/test/dashboard-onboarding-recovery.test.tsx
 - apps/web/test/hosted-onboarding-dashboard-recovery-route.test.ts
 - pnpm test:diff <touched paths>
+Status: completed
+Updated: 2026-06-24
+Completed: 2026-06-24

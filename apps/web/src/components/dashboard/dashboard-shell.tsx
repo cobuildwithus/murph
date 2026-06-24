@@ -24,9 +24,11 @@ export function DashboardShell({
   padded?: boolean;
   sidebarAuth?: HostedSidebarAuthSnapshot;
 }) {
+  const requiresDashboardRecovery = sidebarAuth?.requiresDashboardRecovery === true;
+
   return (
     <SidebarProvider>
-      <DashboardOnboardingRecoveryRedirect enabled={sidebarAuth?.authenticated === true} />
+      <DashboardOnboardingRecoveryRedirect enabled={requiresDashboardRecovery} />
       <Sidebar
         initialAuth={sidebarAuth}
         chatAction={(
@@ -56,7 +58,7 @@ export function DashboardShell({
             padded && "px-4 py-8 md:px-14 md:py-10",
           )}
         >
-          {children}
+          {requiresDashboardRecovery ? null : children}
         </main>
       </SidebarInset>
     </SidebarProvider>
