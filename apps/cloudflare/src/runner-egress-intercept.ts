@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildExaResearchScoutRequest,
-  createExaResearchScoutPublishedWindow,
+  clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
   parseExaResearchScoutRequestBody,
@@ -689,7 +689,6 @@ async function maybeHandleHostedDataApiRequest(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
     ...input,
-    allowActiveUserFenceWithoutToken: true,
     providerKind: "murph_data_api",
   });
   if (!authorization.authorized) {
@@ -873,7 +872,6 @@ async function maybeHandleHostedTranscribeRequest(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
     ...input,
-    allowActiveUserFenceWithoutToken: true,
     providerKind: "workers_ai_transcribe",
   });
   if (!authorization.authorized) {
@@ -2525,18 +2523,29 @@ function readHostedExaResearchScoutRequestBody(
     return null;
   }
 
-  return parseExaResearchScoutRequestBody(parsed);
+  const request = parseExaResearchScoutRequestBody(parsed);
+  if (!request) {
+    return null;
+  }
+  const clamped = clampExaResearchScoutPublishedWindow({
+    now: new Date(),
+    since: request.since,
+    until: request.until,
+  });
+  if (!clamped) {
+    return null;
+  }
+  return { ...request, ...clamped };
 }
 
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
-  const publishedWindow = createExaResearchScoutPublishedWindow(new Date());
   return buildExaResearchScoutRequest({
     maxCandidates: input.numResults,
     profile: input.profile,
-    since: publishedWindow.since,
-    until: publishedWindow.until,
+    since: input.since,
+    until: input.until,
   });
 }
 
@@ -2952,7 +2961,6 @@ function isAllowedTelegramOperation(operation: string): boolean {
 }
 
 async function authorizeHostedProviderEgress(input: {
-  allowActiveUserFenceWithoutToken?: boolean;
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   openAiPathnameSuffix?: string;
@@ -3013,34 +3021,6 @@ async function authorizeHostedProviderEgress(input: {
       runtimeAuthorityHeadersPresent,
       startedAt,
     });
-  }
-
-  if (input.providerKind !== "openai" && input.allowActiveUserFenceWithoutToken !== true) {
-    if (!input.userId) {
-      return {
-        activeContainerIdentitySource: null,
-        authorized: false,
-        durationMs: Date.now() - startedAt,
-        mode: "missing_identity",
-        providerEgressTokenPresent: providerEgressToken !== null,
-        rejectReason: "bound_user_missing",
-        runtimeAuthorityHeadersPresent,
-        userId: null,
-        writeFence: null,
-      };
-    }
-
-    return {
-      activeContainerIdentitySource: null,
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: false,
-      rejectReason: "provider_egress_token_missing",
-      runtimeAuthorityHeadersPresent,
-      userId: input.userId,
-      writeFence: null,
-    };
   }
 
   const activeUserFence = await authorizeHostedProviderEgressActiveUserFence({

@@ -1719,14 +1719,20 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("does not use active-user-fence proof for tokenless Linq provider egress", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("uses active-user-fence proof for tokenless Linq provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("Linq should require provider-token proof when authority headers are absent.");
-    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
     const env = createInterceptEnv({
       LINQ_API_TOKEN: "linq-worker-secret",
+      readActiveRuntimeUserFence: async () => ({
+        active: true,
+        attemptId: "attempt-1",
+        leaseGeneration: "1",
+        userId: "member_123",
+      }),
       validateActiveRuntimeWriteFence,
     });
     env.CF_VERSION_METADATA = { id: "version_1" };
@@ -1743,16 +1749,16 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "member_123--v-version_1" },
     );
 
-    expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "linq",
-          providerRequestAuthorized: false,
-          writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_missing",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -3527,7 +3533,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("x-api-key")).toBe("exa-worker-secret");
   });
 
-  it("derives Exa research-scout publication dates instead of forwarding caller dates", async () => {
+  it("forwards the caller's Exa research-scout publication window when it fits the 60-day cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-17T12:34:56.789Z"));
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
@@ -3537,8 +3543,8 @@ describe("hostedRunnerIntercept", () => {
     const response = await hostedRunnerIntercept(
       new Request("https://api.exa.ai/search", {
         body: JSON.stringify(createHostedExaResearchScoutRequestBody({
-          endPublishedDate: "1984-02-03T00:00:00.000Z",
-          startPublishedDate: "2099-01-01T00:00:00.000Z",
+          startPublishedDate: "2026-04-25T00:00:00.000Z",
+          endPublishedDate: "2026-06-17T00:00:00.000Z",
         })),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
@@ -3560,8 +3566,91 @@ describe("hostedRunnerIntercept", () => {
       endPublishedDate?: unknown;
       startPublishedDate?: unknown;
     };
-    expect(forwardedBody.startPublishedDate).toBe("2026-04-18T12:34:56.789Z");
-    expect(forwardedBody.endPublishedDate).toBe("2026-06-17T12:34:56.789Z");
+    expect(forwardedBody.startPublishedDate).toBe("2026-04-25T00:00:00.000Z");
+    expect(forwardedBody.endPublishedDate).toBe("2026-06-17T00:00:00.000Z");
+  });
+
+  it("authorizes Exa egress from a child process via container-identity active-user fence with no caller headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Exa from a child process must not require write-fence headers.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify(createHostedExaResearchScoutRequestBody()),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        readActiveRuntimeUserFence: async () => ({
+          active: true,
+          attemptId: "attempt-1",
+          leaseGeneration: "1",
+          userId: "member_123",
+        }),
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.headers.get("x-api-key")).toBe("exa-worker-secret");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "exa",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects Exa research-scout requests whose publication window ends in the future beyond clock skew", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T12:34:56.789Z"));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify(createHostedExaResearchScoutRequestBody({
+          startPublishedDate: "2026-06-01T00:00:00.000Z",
+          endPublishedDate: "2026-06-17T13:34:56.789Z",
+        })),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("injects Exa credentials from a provider egress token without authority headers", async () => {
@@ -3689,7 +3778,7 @@ describe("hostedRunnerIntercept", () => {
       label: "too many section tags",
       body: createHostedExaResearchScoutRequestBody({
         query: [
-          "Find high-quality new human health research from the last 60 days.",
+          "Find high-quality new human health research.",
           "Research should relate to this non-identifying health interest profile.",
           "",
           `Topics: ${Array.from({ length: 25 }, (_, index) => `topic ${index + 1}`).join(", ")}`,
@@ -3711,7 +3800,7 @@ describe("hostedRunnerIntercept", () => {
       label: "raw numeric profile value",
       body: createHostedExaResearchScoutRequestBody({
         query: [
-          "Find high-quality new human health research from the last 60 days.",
+          "Find high-quality new human health research.",
           "Research should relate to this non-identifying health interest profile.",
           "",
           "Topics: sleep",
@@ -3797,45 +3886,6 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(403);
     }
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("does not use tokenless active-user-fence proof for Exa provider egress", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("Exa should require provider-token proof when authority headers are absent.");
-    });
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.exa.ai/search", {
-        body: JSON.stringify({ query: "bounded research scout" }),
-        headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        EXA_API_KEY: "exa-worker-secret",
-        validateActiveRuntimeWriteFence,
-      }),
-      { containerId: "member_123--v-version_1" },
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          providerKind: "exa",
-          providerRequestAuthorized: false,
-          writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_missing",
-        }),
-        message: "Hosted runner provider egress completed.",
-      }),
-    );
   });
 
   it("rejects Exa credential injection without the sentinel x-api-key header", async () => {
