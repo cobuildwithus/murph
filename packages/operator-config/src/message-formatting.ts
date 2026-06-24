@@ -175,7 +175,7 @@ function isValidDecorationContent(
     return false
   }
 
-  if (content.length > 160 || /[/?&=\\`<>]/u.test(content)) {
+  if (content.length > 160) {
     return false
   }
 
