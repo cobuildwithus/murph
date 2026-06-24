@@ -70,9 +70,6 @@
       "@murphai/hosted-execution/computer-use": [
         "packages/hosted-execution/src/computer-use.ts"
       ],
-      "@murphai/hosted-execution/connected-apps": [
-        "packages/hosted-execution/src/connected-apps.ts"
-      ],
       "@murphai/hosted-execution/dashboard-replica": [
         "packages/hosted-execution/src/dashboard-replica.ts"
       ],
