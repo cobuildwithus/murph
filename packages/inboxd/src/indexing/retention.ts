@@ -17,6 +17,7 @@ import {
   readJsonlRecords,
   resolveVaultPathOnDisk,
   runCanonicalWrite,
+  statAndHashVaultFileInterruptible,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
   withCanonicalWriteLockScope,
@@ -280,12 +281,23 @@ export async function runInboxMediaRetention(
           }
 
           if (!isMissingAfterMaterialization) {
-            const fileState = await statExistingVaultRegularFile(
-              input.vaultRoot,
-              candidate.storedPath,
-              input.signal,
-            );
-            if (fileState.kind !== "ok") {
+            // Verify the bytes currently at the storedPath still match the
+            // canonical attachment hash/size before tombstoning. Otherwise a
+            // corrupted/replaced raw file would be silently converted into a
+            // retention_expired tombstone carrying the canonical hash, hiding
+            // the corruption from vault validation. Skipping on mismatch keeps
+            // the file in place so validation can surface the divergence.
+            const integrity = await safeVerifyRetentionCandidateIntegrity({
+              attachment: candidate.attachment,
+              signal: input.signal,
+              storedPath: candidate.storedPath,
+              vaultRoot: input.vaultRoot,
+            });
+            if (integrity.kind === "interrupted") {
+              throwIfRetentionAborted(input.signal);
+              continue;
+            }
+            if (integrity.kind !== "match") {
               continue;
             }
             if (selectedCandidateCount >= maxAttachments) {
@@ -632,6 +644,58 @@ function resolveFreshAttachmentParseJobProtectionExpiresAt(input: {
   }
 
   return new Date(protectedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString();
+}
+
+type RetentionCandidateIntegrityResult =
+  | { kind: "interrupted" }
+  | { kind: "missing" }
+  | { kind: "mismatch" }
+  | { kind: "invalid" }
+  | { kind: "match" };
+
+async function safeVerifyRetentionCandidateIntegrity(input: {
+  attachment: InboxCaptureAttachmentRecord;
+  signal?: AbortSignal | null;
+  storedPath: string;
+  vaultRoot: string;
+}): Promise<RetentionCandidateIntegrityResult> {
+  let integrity: Awaited<ReturnType<typeof statAndHashVaultFileInterruptible>>;
+  try {
+    integrity = await statAndHashVaultFileInterruptible(
+      input.vaultRoot,
+      input.storedPath,
+      { shouldContinue: () => !(input.signal?.aborted ?? false) },
+    );
+  } catch (error) {
+    // The previous stat-only check returned `invalid` for symlinks and
+    // non-regular files instead of throwing; preserve that skip behavior so
+    // a malformed entry can never crash the whole retention pass.
+    if (isVaultError(error)) {
+      return { kind: "invalid" };
+    }
+    throw error;
+  }
+
+  if (integrity.kind === "interrupted") {
+    return { kind: "interrupted" };
+  }
+  if (integrity.kind === "missing") {
+    return { kind: "missing" };
+  }
+
+  if (integrity.integrity.sha256 !== input.attachment.sha256) {
+    return { kind: "mismatch" };
+  }
+  const expectedByteSize = input.attachment.byteSize;
+  if (
+    expectedByteSize !== null
+    && expectedByteSize !== undefined
+    && integrity.integrity.byteSize !== expectedByteSize
+  ) {
+    return { kind: "mismatch" };
+  }
+
+  return { kind: "match" };
 }
 
 async function statExistingVaultRegularFile(

@@ -205,22 +205,28 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
     protectedAttachmentIds: [protectedAttachmentId],
   });
 
-  assert.equal(result.expiredAttachments, 3);
+  // A storedPath whose bytes no longer match the canonical attachment hash
+  // must not be converted into a `retention_expired` tombstone: that would
+  // hide corruption (a bad restore/materialization, a path collision, or
+  // outright tampering) behind a record carrying the original hash, and the
+  // vault validator would suppress the missing-raw warning. Retention must
+  // leave the file in place so the divergence stays detectable.
+  assert.equal(result.expiredAttachments, 2);
   assert.equal(await fileExists(vaultRoot, imagePath), false);
   assert.equal(await fileExists(vaultRoot, audioPath), false);
   assert.equal(await fileExists(vaultRoot, documentPath), true);
   assert.equal(await fileExists(vaultRoot, protectedPath), true);
-  assert.equal(await fileExists(vaultRoot, tamperedPath), false);
+  assert.equal(await fileExists(vaultRoot, tamperedPath), true);
   assert.deepEqual(
     result.records.map((record) => record.storedPath).sort(),
-    [audioPath, imagePath, tamperedPath].sort(),
+    [audioPath, imagePath].sort(),
   );
 
   const retentionRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: buildInboxAttachmentRetentionLedgerPath("2026-07-05T00:00:00.000Z"),
   });
-  assert.equal(retentionRecords.length, 3);
+  assert.equal(retentionRecords.length, 2);
   assert.equal(
     (
       await runInboxMediaRetention({
@@ -239,6 +245,13 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   });
   assert.equal(cleanupResult.expiredAttachments, 0);
   assert.equal(await fileExists(vaultRoot, audioPath), false);
+  // The tampered raw file remains in place with no retention record, so a
+  // future byte-integrity check (vault validation, runtime hash compare on
+  // load, or operator inspection) can still distinguish corruption from an
+  // intentional retention sweep. The earlier behavior wrote a tombstone
+  // carrying the canonical hash and unlinked the divergent bytes, erasing
+  // that signal entirely.
+  assert.equal(await fileExists(vaultRoot, tamperedPath), true);
   assert.equal((await validateVault({ vaultRoot })).valid, true);
 
   const runtime = await openInboxRuntime({ vaultRoot });
