@@ -34,6 +34,9 @@ import {
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
+import {
+  sendTelegramImageMessage,
+} from "@murphai/assistant-engine/assistant-channel-runtime";
 import type {
   AssistantDeliveryError,
   AssistantOutboxIntent,
@@ -804,6 +807,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       signal: input.signal ?? null,
       telegramEnv,
     }),
+    sendTelegramImage: createHostedAssistantTelegramImageSendDependency({
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+      telegramEnv,
+    }),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
       linqDeliveryContext,
@@ -841,6 +849,29 @@ function createHostedAssistantTelegramSendDependency(input: {
     }, "Hosted assistant Telegram progress delivery");
     return await sendTelegramMessage({
       idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+    }, dependencies);
+  };
+}
+
+function createHostedAssistantTelegramImageSendDependency(input: {
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+  telegramEnv: NodeJS.ProcessEnv;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendTelegramImage"]> {
+  return async (request) => {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.telegramEnv,
+      fetchImplementation: input.providerFetch,
+      ...(request.signal ?? input.signal
+        ? { signal: request.signal ?? input.signal ?? undefined }
+        : {}),
+    }, "Hosted assistant Telegram image delivery");
+    return await sendTelegramImageMessage({
+      idempotencyKey: request.idempotencyKey ?? null,
+      media: request.media,
       message: request.message,
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
@@ -1156,6 +1187,26 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }, "Hosted assistant Telegram delivery");
           providerDispatchEntered = true;
           const result = await sendTelegramMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendTelegramImage: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const dependencies = requireHostedProviderFetchDependencies({
+            env: input.telegramEnv,
+            fetchImplementation: input.providerFetch,
+            ...(request.signal ?? input.signal
+              ? { signal: request.signal ?? input.signal ?? undefined }
+              : {}),
+          }, "Hosted assistant Telegram image delivery");
+          providerDispatchEntered = true;
+          const result = await sendTelegramImageMessage({
+            idempotencyKey: request.idempotencyKey ?? null,
+            media: request.media,
+            message: request.message,
+            replyToMessageId: request.replyToMessageId ?? null,
+            target: request.target,
+          }, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },

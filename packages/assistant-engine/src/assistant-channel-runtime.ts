@@ -1,6 +1,7 @@
 export {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
+  sendTelegramImageMessage,
   sendTelegramMessage,
   sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
