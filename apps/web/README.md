@@ -142,7 +142,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
   surfaces that cannot be operated through Playwright; manual browser handoff
   remains available for login, CAPTCHA, missing details, or direct user
-  takeover, but is not the default final-action boundary.
+  takeover, but is not the default final-action boundary. Each authenticated
+  handoff matches the active browser viewport to the opening screen before
+  showing the live view.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events

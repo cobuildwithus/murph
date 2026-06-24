@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
+import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -64,7 +66,7 @@ export default async function SettingsPage() {
     : account;
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-12">
       <PageHeader
         eyebrow="Settings"
         title="Your account"
@@ -126,11 +128,21 @@ export default async function SettingsPage() {
         </div>
         <Link
           href="/connect"
-          className="relative inline-flex items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+          className="relative inline-flex items-center gap-2.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
         >
+          <Watch className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           Manage wearables
         </Link>
       </section>
+
+      {process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() ? (
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Security
+          </div>
+          <HostedPasskeySettings authenticated={authenticated} />
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

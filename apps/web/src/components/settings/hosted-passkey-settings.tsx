@@ -1,25 +1,22 @@
 "use client";
 
-import { useLinkWithPasskey } from "@privy-io/react-auth";
-import { KeyRound } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import {
+  type User,
+  useCreateWallet,
+  useLinkWithPasskey,
+  useMfaEnrollment,
+  usePrivy,
+} from "@privy-io/react-auth";
+import { Fingerprint } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { Button } from "@/src/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/src/components/ui/dialog";
+import { cn } from "@/src/lib/utils";
 
-import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
+import { SettingsStatusLine } from "./connected-account-card";
 
 export function HostedPasskeySettings({ authenticated }: { authenticated: boolean }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-
   if (!authenticated) {
     return null;
   }
@@ -27,126 +24,172 @@ export function HostedPasskeySettings({ authenticated }: { authenticated: boolea
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
+  if (!appId) {
+    return null;
+  }
+
   return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Passkey</h2>
-      </div>
-      <ConnectedAccountCard
-        value="Sign in faster with biometrics"
-        variant="empty"
-        action={
-          <Button type="button" size="sm" onClick={() => setDialogOpen(true)}>
-            Create passkey
-          </Button>
-        }
-      />
-      <SettingsStatusLine message={null} tone="neutral" />
-      {dialogOpen && appId ? (
-        <HostedPrivyProvider appId={appId} clientId={clientId}>
-          <CreatePasskeyDialog onOpenChange={setDialogOpen} />
-        </HostedPrivyProvider>
-      ) : null}
-    </div>
+    <HostedPrivyProvider appId={appId} clientId={clientId}>
+      <PasskeySetup />
+    </HostedPrivyProvider>
   );
 }
 
-function CreatePasskeyDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
-  const router = useRouter();
-  const { linkWithPasskey, state } = useLinkWithPasskey();
-  const [status, setStatus] = useState<"idle" | "done" | "error">("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+type SetupStep = "create-passkey" | "create-wallet" | "enroll-mfa";
 
-  const isLinking =
-    state.status === "generating-challenge" ||
-    state.status === "awaiting-passkey" ||
-    state.status === "submitting-response";
+function PasskeySetup() {
+  const { user, ready } = usePrivy();
+  const { linkWithPasskey } = useLinkWithPasskey();
+  const { createWallet } = useCreateWallet();
+  const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
 
-  async function handleCreate() {
-    setErrorMessage(null);
+  // The setup handler chains Privy calls and reads `user` after each one to advance.
+  // The `user` captured by the handler closure is stale after an `await`, so a ref
+  // tracks committed Privy user updates while the polling helper waits.
+  const userRef = useRef<User | null>(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasPasskeyMfa = user?.mfaMethods.includes("passkey") ?? false;
+  const isRunning = activeStep !== null;
+  const showAction = ready && !hasPasskeyMfa;
+  const valueText = hasPasskeyMfa
+    ? "Enabled"
+    : !ready
+      ? "Checking…"
+      : "Not configured";
+
+  async function handleSetup() {
+    setError(null);
     try {
-      await linkWithPasskey();
-      setStatus("done");
-    } catch (error) {
-      setStatus("error");
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not create passkey. Try again or use a different device.",
-      );
+      if (!findPasskey(userRef.current)) {
+        setActiveStep("create-passkey");
+        await linkWithPasskey();
+        await waitForUserState(
+          userRef,
+          (u) => findPasskey(u) !== undefined,
+          stepLabel("create-passkey"),
+        );
+      }
+      if (!hasEmbeddedWallet(userRef.current)) {
+        setActiveStep("create-wallet");
+        await createWallet();
+        await waitForUserState(
+          userRef,
+          hasEmbeddedWallet,
+          stepLabel("create-wallet"),
+        );
+      }
+      if (!userRef.current?.mfaMethods.includes("passkey")) {
+        setActiveStep("enroll-mfa");
+        const passkey = findPasskey(userRef.current);
+        if (!passkey) {
+          throw new Error("Passkey not found after creation.");
+        }
+        await initEnrollmentWithPasskey();
+        await submitEnrollmentWithPasskey(
+          { credentialIds: [passkey.credentialId] },
+          // Keeps the passkey usable as a login method too. Switch to true only after we
+          // also gate enrollment on "user has at least one non-passkey login method".
+          { removeForLogin: false },
+        );
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Setup failed. Try again.");
+    } finally {
+      setActiveStep(null);
     }
   }
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="flex flex-col items-center gap-4 pr-0 text-center">
-          <div className="flex size-16 items-center justify-center rounded-full bg-[#7a8c6e]/15">
-            <KeyRound className="size-7 text-[#7a8c6e]" strokeWidth={1.75} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              Create a passkey
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              Use your face, fingerprint, or screen lock to sign in.
-            </DialogDescription>
-          </div>
-        </DialogHeader>
-
-        {status === "done" ? (
-          <div className="rounded-lg border border-[#7a8c6e]/25 bg-[#7a8c6e]/5 p-4 text-center text-sm text-[#2d3436]">
-            Passkey created. You can use it to sign in next time.
-          </div>
-        ) : null}
-
-        {errorMessage ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
-          >
-            {errorMessage}
-          </p>
-        ) : null}
-
-        <div className="flex flex-col gap-2">
-          {status === "done" ? (
-            <Button
-              type="button"
-              size="xl"
-              onClick={() => {
-                onOpenChange(false);
-                router.refresh();
-              }}
-              className="w-full"
-            >
-              Done
-            </Button>
-          ) : (
-            <>
-              <Button
-                type="button"
-                size="xl"
-                onClick={() => void handleCreate()}
-                disabled={isLinking}
-                className="w-full"
-              >
-                {isLinking ? "Creating passkey..." : "Create passkey"}
-              </Button>
-              <Button
-                type="button"
-                size="xl"
-                variant="ghost"
-                onClick={() => onOpenChange(false)}
-                disabled={isLinking}
-                className="w-full"
-              >
-                Cancel
-              </Button>
-            </>
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
+        <Fingerprint
+          className={cn(
+            "size-[18px] shrink-0",
+            hasPasskeyMfa ? "text-[#7a8c6e]" : "text-muted-foreground",
           )}
+          strokeWidth={1.6}
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+            Passkey
+          </span>
+          <p
+            className={cn(
+              "break-words font-serif text-base tracking-tight",
+              hasPasskeyMfa ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {valueText}
+          </p>
         </div>
-      </DialogContent>
-    </Dialog>
+        {showAction
+          ? (
+              <div className="shrink-0">
+                <Button
+                  type="button"
+                  size="default"
+                  variant="default"
+                  disabled={isRunning}
+                  onClick={() => void handleSetup()}
+                >
+                  {isRunning ? "Setting up…" : "Set up"}
+                </Button>
+              </div>
+            )
+          : null}
+      </div>
+      {error
+        ? <SettingsStatusLine message={error} tone="destructive" />
+        : activeStep
+          ? <SettingsStatusLine message={`${stepLabel(activeStep)}…`} tone="neutral" />
+          : null}
+    </div>
   );
+}
+
+function stepLabel(step: SetupStep): string {
+  switch (step) {
+    case "create-passkey":
+      return "Creating passkey";
+    case "create-wallet":
+      return "Setting up secure container";
+    case "enroll-mfa":
+      return "Enrolling passkey as MFA factor";
+  }
+}
+
+function findPasskey(user: User | null) {
+  return user?.linkedAccounts.find(
+    (account): account is typeof account & { type: "passkey"; credentialId: string } =>
+      account.type === "passkey",
+  );
+}
+
+function hasEmbeddedWallet(user: User | null): boolean {
+  return user?.linkedAccounts.some((account) => account.type === "wallet") ?? false;
+}
+
+async function waitForUserState(
+  userRef: { current: User | null },
+  predicate: (user: User) => boolean,
+  label: string,
+  timeoutMs = 5_000,
+  intervalMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = userRef.current;
+    if (current && predicate(current)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`${label} took too long. Please try again.`);
 }

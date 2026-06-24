@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock3 } from "lucide-react";
+import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
@@ -6,11 +7,13 @@ import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
+import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
+const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
 
 export default async function ComputerHandoffPage({
   params,
@@ -92,6 +95,27 @@ export default async function ComputerHandoffPage({
         </section>
       </main>
     );
+  }
+
+  const preset = resolveComputerBrowserViewportPreset(
+    (await headers()).get("user-agent"),
+  );
+  try {
+    await Promise.race([
+      service.ensureHandoffViewport({
+        memberId: session.member.id,
+        preset,
+        token,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("viewport resize timed out")),
+          HANDOFF_VIEWPORT_SSR_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    console.warn("[computer-handoff] viewport resize failed", error);
   }
 
   const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;

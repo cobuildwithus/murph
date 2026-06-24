@@ -2804,7 +2804,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake imports late conversation input without foreground checkpointing", async () => {
+  test("runtime wake preserves late conversation input through post-assistant cleanup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -2826,6 +2826,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
     try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_active_turn",
@@ -2950,7 +2959,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             await waitForCondition(() => admissionCount === 1);
             await waitForCondition(() => liveSteerInputs.length === 1);
             return {
+              afterCheckpoint: async () => ({
+                checkpointReason: "provider_cleanup",
+                nextWakeAt: "2026-04-26T00:05:00.000Z",
+                nextWakeReason: "assistant",
+              }),
               checkpointReason: "canonical_runtime_commit",
+              nextWakeAt: "2026-04-25T23:59:59.000Z",
+              nextWakeReason: "assistant",
               progressed: true,
             };
           } finally {
@@ -2987,6 +3003,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [

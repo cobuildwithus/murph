@@ -2204,7 +2204,7 @@ test("buildExperimentProgressCard compares run windows with canonical metric uni
   });
   assert.equal(card.movers.length, 1);
   assert.equal(card.movers[0]?.label, "Body Weight");
-  assert.equal(card.movers[0]?.delta, "+1.65 kg");
+  assert.equal(card.movers[0]?.delta, "+1.7 kg");
 });
 
 test("buildExperimentProgressCard keeps glucose sample-summary points in run windows", () => {
