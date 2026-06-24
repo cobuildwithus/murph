@@ -27,16 +27,10 @@ afterEach(async () => {
   }
 });
 
-test("ComputerHandoffActiveView renders the live view iframe immediately", async () => {
+test("ComputerHandoffActiveView renders the live view behind a takeover overlay", async () => {
   vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
-  const { cleanup, container } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: DONE_ENDPOINT,
-      iframeAllow: "clipboard-read; clipboard-write",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
+  const { cleanup, container } = await renderHandoff();
   cleanupRender = cleanup;
 
   const iframe = container.querySelector("iframe");
@@ -47,7 +41,36 @@ test("ComputerHandoffActiveView renders the live view iframe immediately", async
   expect(iframe.getAttribute("sandbox")).toBe(
     "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals",
   );
+  expect(iframe.getAttribute("aria-hidden")).toBe("true");
+  expect(iframe.getAttribute("tabindex")).toBe("-1");
+
+  const dialog = container.querySelector('[role="dialog"]');
+  assert.ok(dialog);
+  expect(dialog.textContent).toContain("Your turn");
+  expect(dialog.textContent).toContain("Use the keyboard icon");
+  expect(findTakeoverButton(container)).toBeTruthy();
+  expect(findDoneButton(container)).toBeNull();
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
+test("ComputerHandoffActiveView starts takeover with one click", async () => {
+  const { cleanup, container, window } = await renderHandoff();
+  cleanupRender = cleanup;
+
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe);
+  const iframeFocus = vi.fn();
+  (iframe as unknown as { focus: (options?: FocusOptions) => void }).focus = iframeFocus;
+
+  await click(window, findTakeoverButton(container));
+
+  expect(iframeFocus).toHaveBeenCalledOnce();
+  expect(iframeFocus).toHaveBeenCalledWith({ preventScroll: true });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(iframe.getAttribute("aria-hidden")).toBe("false");
+  expect(iframe.getAttribute("tabindex")).toBe("0");
+  expect(findDoneButton(container)).toBeTruthy();
+  expect(track).toHaveBeenCalledWith("live_view_focus_enabled");
 });
 
 test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
@@ -57,22 +80,16 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   });
   vi.mocked(fetch).mockReturnValue(donePromise);
 
-  const { button, cleanup, container, window } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: DONE_ENDPOINT,
-      iframeAllow: "clipboard-read",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
+  const { cleanup, container, window } = await renderHandoff({
+    iframeAllow: "clipboard-read",
+  });
   cleanupRender = cleanup;
 
   const iframe = container.querySelector("iframe");
   assert.ok(iframe);
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-  await flushReact();
+  await click(window, findTakeoverButton(container));
+  await click(window, findDoneButton(container));
 
   expect(fetch).toHaveBeenCalledWith(DONE_ENDPOINT, {
     method: "POST",
@@ -107,57 +124,10 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(track).toHaveBeenCalledWith("handoff_completed");
 });
 
-test("ComputerHandoffActiveView focuses the iframe each time the keyboard button is pressed", async () => {
-  const { cleanup, container, window } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
-      iframeAllow: "clipboard-read; clipboard-write",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
-  cleanupRender = cleanup;
-
-  const iframe = container.querySelector("iframe");
-  assert.ok(iframe);
-  const iframeFocus = vi.fn();
-  (iframe as unknown as { focus: (options?: FocusOptions) => void }).focus = iframeFocus;
-
-  const focusButton = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Focus the private page so the keyboard and paste work"]',
-  );
-  assert.ok(focusButton);
-  expect(focusButton.textContent).toContain("Keyboard");
-  expect(focusButton.getAttribute("aria-pressed")).toBeNull();
-
-  await act(async () => {
-    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-  await flushReact();
-
-  expect(iframeFocus).toHaveBeenCalledWith({ preventScroll: true });
-  expect(iframeFocus).toHaveBeenCalledOnce();
-
-  await act(async () => {
-    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-  await flushReact();
-
-  expect(iframeFocus).toHaveBeenCalledTimes(2);
-  expect(
-    vi.mocked(track).mock.calls.filter(([name]) => name === "live_view_focus_enabled"),
-  ).toHaveLength(1);
-});
-
 test("ComputerHandoffActiveView fires handoff_abandoned on pagehide while idle", async () => {
   vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
-  const { cleanup, window } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
-      iframeAllow: "clipboard-read",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
+  const { cleanup, window } = await renderHandoff({ iframeAllow: "clipboard-read" });
   cleanupRender = cleanup;
 
   await act(async () => {
@@ -182,19 +152,13 @@ test("ComputerHandoffActiveView does not fire handoff_abandoned after completion
   });
   vi.mocked(fetch).mockReturnValue(fetchPromise);
 
-  const { button, cleanup, window } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
-      iframeAllow: "clipboard-read",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
+  const { cleanup, container, window } = await renderHandoff({
+    iframeAllow: "clipboard-read",
+  });
   cleanupRender = cleanup;
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-  await flushReact();
+  await click(window, findTakeoverButton(container));
+  await click(window, findDoneButton(container));
 
   await act(async () => {
     resolveFetch(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
@@ -221,31 +185,59 @@ test.each([
 ])("ComputerHandoffActiveView clears the saving overlay after %s", async (_label, response) => {
   vi.mocked(fetch).mockResolvedValue(response);
 
-  const { button, cleanup, container, window } = await renderClientComponent(
-    createElement(ComputerHandoffActiveView, {
-      doneEndpoint: DONE_ENDPOINT,
-      iframeAllow: "clipboard-read",
-      liveViewUrl: "https://browser.example.test/live",
-    }),
-  );
+  const { cleanup, container, window } = await renderHandoff({
+    iframeAllow: "clipboard-read",
+  });
   cleanupRender = cleanup;
 
   const iframeBeforeClick = container.querySelector("iframe");
   assert.ok(iframeBeforeClick);
-  expect(iframeBeforeClick.getAttribute("src")).toBe("https://browser.example.test/live");
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-  await flushReact();
+  await click(window, findTakeoverButton(container));
+  await click(window, findDoneButton(container));
 
   expect(container.querySelector("iframe")).toBe(iframeBeforeClick);
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Could not complete. Try again.",
   );
-  expect(button.disabled).toBe(false);
+  expect(findDoneButton(container)?.disabled).toBe(false);
 });
+
+async function renderHandoff(overrides: {
+  iframeAllow?: string;
+} = {}) {
+  return await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: DONE_ENDPOINT,
+      iframeAllow: overrides.iframeAllow ?? "clipboard-read; clipboard-write",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+}
+
+function findTakeoverButton(container: HTMLElement): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Take over the private browser"]',
+  );
+}
+
+function findDoneButton(container: HTMLElement): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Finish this step and return to Murph"]',
+  );
+}
+
+async function click(
+  window: Window,
+  button: HTMLButtonElement | null,
+): Promise<void> {
+  assert.ok(button);
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushReact();
+}
 
 async function flushMicrotasks() {
   await Promise.resolve();
