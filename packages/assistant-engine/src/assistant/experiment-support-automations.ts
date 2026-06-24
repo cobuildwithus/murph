@@ -90,7 +90,7 @@ function buildProgressMilestoneInstructions(experiment: ExperimentFrontmatter): 
   return [
     `Goal: give the user an encouraging first progress moment for the experiment "${experiment.title}" (${slug}) after three completed intervention days.`,
     `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --format json\` first.`,
-    'Skip only when the run is no longer active, intervention day four has not arrived, or this milestone was already shared.',
+    'Skip when the run is no longer active, intervention day four has not arrived, this milestone was already shared, or saved assistant support opts out of scheduled summaries.',
     `Otherwise build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Lead with what the user completed. Mention at most two metric changes as early signals, with plain uncertainty.',
     'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
@@ -126,7 +126,7 @@ function buildFinalResultsInstructions(experiment: ExperimentFrontmatter): strin
   const slug = experiment.slug
   return [
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
-    `Read \`vault-cli experiment show ${slug} --format json\` first. Skip only if the run ended early, is no longer eligible for review, or its final review was already shared.`,
+    `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
     `Run \`vault-cli experiment outcome write ${slug} --format json\` to persist the deterministic outcome. If persistence cannot complete, use \`vault-cli experiment outcome analyze ${slug} --format json\` and still give an honest review.`,
     `Build \`vault-cli experiment progress-card ${slug} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
     'Open with direct congratulations for completing the experiment. Celebrate the follow-through, not whether a biomarker went up or down.',
