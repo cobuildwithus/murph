@@ -64,6 +64,7 @@ export const VAULT_PATHS = Object.freeze({
   geneticsRoot: VAULT_LAYOUT.geneticsDirectory,
   goalsRoot: VAULT_LAYOUT.goalsDirectory,
   inboxCaptureLedgerRoot: VAULT_LAYOUT.inboxCaptureLedgerDirectory,
+  inboxAttachmentRetentionLedgerRoot: VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory,
   journalRoot: VAULT_LAYOUT.journalDirectory,
   memoryDocument: VAULT_LAYOUT.memoryDocument,
   protocolsRoot: VAULT_LAYOUT.protocolsDirectory,

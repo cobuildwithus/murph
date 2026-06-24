@@ -85,6 +85,10 @@ import {
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
+import {
+  resolveAssistantVoiceMemoDeliveryChannel,
+  type AssistantVoiceMemoDeliveryChannel,
+} from '../voice-memo-delivery.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -104,6 +108,7 @@ export interface AssistantRouteTurnPlan {
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
   turnContextPrompt: string | null
+  voiceMemoDeliveryChannel?: AssistantVoiceMemoDeliveryChannel | null
   workingDirectory: string
 }
 
@@ -418,6 +423,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
+  const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
+    messageInput: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
@@ -541,6 +551,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+    voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
@@ -573,6 +584,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
+  const turnContextPrompt = normalizeNullableString(
+    [
+      normalizeNullableString(
+        threadStartPromptResult.layers.dynamicTurnContextPrompt,
+      ),
+      normalizeNullableString(input.input.turnContext),
+    ].filter((section): section is string => section !== null).join('\n\n'),
+  )
   const buildFreshThreadFallbackPlan = async () => {
     const fallbackConversationHistoryMessages =
       await resolveCommittedTranscriptHistoryMessages()
@@ -586,9 +605,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       sessionContext: {
         binding: input.session.binding,
       },
-      turnContextPrompt: normalizeNullableString(
-        threadStartPromptResult.layers.dynamicTurnContextPrompt,
-      ),
+      turnContextPrompt,
     }
   }
   const resume = resumeCodexThreadId !== null
@@ -603,9 +620,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resumeCodexThreadId === null
       ? threadStartDeveloperInstructions
       : null
-  const turnContextPrompt = normalizeNullableString(
-    systemPromptResult.layers.dynamicTurnContextPrompt,
-  )
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,
@@ -661,6 +675,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
+    voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,
     turnContextPrompt,

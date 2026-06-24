@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-06-07
+Last verified: 2026-06-24
 
 ## Current State
 
@@ -66,6 +66,10 @@ Before Murph writes a private run, it should already know the exact Health Commo
 - Other scheduled experiment checks should call deterministic product logic, such as `vault-cli experiment followup due <id> --kind missed-log --format json`, before deciding whether an outbound message is due.
 - Missed-log follow-up should be neutral, at most once per planned session, and easy to decline.
 - Weekly summaries are preferred over daily coaching by default.
+- Eligible runs lasting at least four intervention days should receive one visual progress moment on intervention day four. It celebrates completed work first and treats sparse or unchanged metric data as a caveat rather than a reason to suppress the card.
+- The morning after the intervention ends, Murph should persist the deterministic outcome, attach the progress card, congratulate the user for completing the run, summarize the result with confidence and confounders, and ask whether to repeat it, adapt it, or leave it alone.
+- Saved assistant support may opt out of scheduled summaries, and runs that end early should not receive either lifecycle message.
+- One reply carries one media type. The card plus warm text is primary; a short voice memo may replace the card only when the card cannot be attached.
 
 ## Onboarding Is Structured Planning, Not A Transcript
 
@@ -107,3 +111,4 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 6. Generic vault-read behavior stays in assistant instructions, not repeated on every public protocol page.
 7. Protocol-linked run handoff includes the matching experiment page link so the user can return to the protocol and results surface.
 8. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.
+9. Eligible runs receive one useful early progress card and one clear final-results celebration without adding another scheduler, transport, or source of truth.

@@ -1859,6 +1859,48 @@ test("listAssessmentResponses sorts by recordedAt and id", async () => {
   assert.deepEqual(actualOrder, [earlier.assessment.id, later.assessment.id]);
 });
 
+test("listAssessmentResponses sorts stored timestamp offsets by instant", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const shardPath = path.join(vaultRoot, "ledger/assessments/2026/2026-04.jsonl");
+  await fs.mkdir(path.dirname(shardPath), { recursive: true });
+  await fs.writeFile(
+    shardPath,
+    [
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:00:00.000Z",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/source.json",
+        responses: {},
+      },
+      {
+        schemaVersion: CONTRACT_SCHEMA_VERSION.assessmentResponse,
+        id: "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+        assessmentType: "intake",
+        recordedAt: "2026-04-08T00:30:00+01:00",
+        source: "import",
+        rawPath: "raw/assessments/asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9/source.json",
+        responses: {},
+      },
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const records = await listAssessmentResponses({ vaultRoot });
+
+  assert.deepEqual(
+    records.map((record) => record.id),
+    [
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+      "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    ],
+  );
+});
+
 test("listAssessmentResponses rejects malformed stored assessment rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -3271,6 +3313,174 @@ test("validateVault allows envelope-based inbox raw evidence without manifest si
       title: "Inbox capture",
       note: "Envelope-backed raw inbox evidence.",
       rawRefs: [envelopeRelativePath, attachmentRelativePath],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateVault rejects event rawRefs that point at retention-expired inbox media", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: "evt_01JQ8PWXP5A68SQM1W0GYM40V5",
+      kind: "note",
+      occurredAt: "2026-07-05T00:00:00.000Z",
+      recordedAt: "2026-07-05T00:00:00.000Z",
+      dayKey: "2026-07-05",
+      source: "manual",
+      title: "Expired inbox media",
+      note: "The raw inbox media bytes were retention-expired.",
+      rawRefs: [storedPath],
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-attachment-retention/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-attachment-retention.v1",
+      captureId: "cap_retention_expired",
+      attachmentId: "att_cap_retention_expired_01",
+      ordinal: 1,
+      kind: "image",
+      mime: "image/jpeg",
+      fileName: "photo.jpg",
+      byteSize: 10,
+      storedPath,
+      sha256: "a".repeat(64),
+      captureOccurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      purgedAt: "2026-07-05T00:00:00.000Z",
+      reason: "inbox_media_retention",
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_REFERENCE_MISSING" &&
+        issue.path === storedPath,
+    ),
+  );
+});
+
+test("validateVault checks event evidence rawRefs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired_evidence/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: "evt_01JQ8PWXP5A68SQM1W0GYM40V6",
+      kind: "note",
+      occurredAt: "2026-07-05T00:00:00.000Z",
+      recordedAt: "2026-07-05T00:00:00.000Z",
+      dayKey: "2026-07-05",
+      source: "manual",
+      title: "Expired inbox evidence",
+      note: "The raw inbox media bytes were referenced only from evidence.",
+      evidence: [
+        {
+          rawRef: storedPath,
+          sourceLabel: "Inbox evidence",
+        },
+      ],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_REFERENCE_MISSING" &&
+        issue.path === storedPath,
+    ),
+  );
+});
+
+test("validateVault accepts expired raw inbox media for the matching inbox capture attachment", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const storedPath = "raw/inbox/cap_retention_expired/attachments/photo.jpg";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-06.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-capture.v1",
+      captureId: "cap_retention_expired",
+      identityKey: "telegram:self:msg-expired",
+      eventId: "evt_01JQ8PWXP5A68SQM1W0GYM40V6",
+      source: "telegram",
+      accountId: "self",
+      externalId: "msg-expired",
+      thread: {
+        id: "thread-retention-expired",
+        title: null,
+        isDirect: true,
+      },
+      actor: {
+        id: "actor-retention-expired",
+        displayName: "Sender",
+        isSelf: false,
+      },
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      receivedAt: "2026-06-01T00:00:05.000Z",
+      text: "expired media",
+      raw: {},
+      sourceDirectory: "raw/inbox/cap_retention_expired",
+      envelopePath: "raw/inbox/cap_retention_expired/envelope.json",
+      rawRefs: [],
+      attachments: [
+        {
+          attachmentId: "att_cap_retention_expired_01",
+          ordinal: 1,
+          kind: "image",
+          mime: "image/jpeg",
+          fileName: "photo.jpg",
+          byteSize: 10,
+          storedPath,
+          sha256: "a".repeat(64),
+        },
+      ],
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-attachment-retention/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-attachment-retention.v1",
+      captureId: "cap_retention_expired",
+      attachmentId: "att_cap_retention_expired_01",
+      ordinal: 1,
+      kind: "image",
+      mime: "image/jpeg",
+      fileName: "photo.jpg",
+      byteSize: 10,
+      storedPath,
+      sha256: "a".repeat(64),
+      captureOccurredAt: "2026-06-01T00:00:00.000Z",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      purgedAt: "2026-07-05T00:00:00.000Z",
+      reason: "inbox_media_retention",
     },
   });
 

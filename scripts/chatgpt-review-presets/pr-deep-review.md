@@ -13,6 +13,7 @@ Use the connected GitHub repository to read:
 - the full PR diff
 - touched files
 - enough surrounding callers, invariants, state owners, and tests to judge the change in context
+- the baseline invariants doc at `docs/contracts/00-invariants.md` (and any topic-specific contract files it links, e.g. `docs/contracts/06-hosted-workspace-file-count.md`) — read this before reporting so invariant checks are grounded in the current rules, not memory
 
 Do not review the diff in isolation.
 
@@ -21,6 +22,7 @@ Report only:
 - Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path or anything else you deem a major issue.
 - High-impact edge cases: unusual but realistic states that would cause serious breakage, not incomplete polish or theoretical coverage gaps
 - Complexity collapse opportunities: places where the same required behavior can be achieved with materially less code, fewer concepts, fewer branches, clearer ownership, or reuse of an existing primitive
+- Invariant violations: places where the PR diff breaks, weakens, or quietly drifts from a rule in `docs/contracts/00-invariants.md` or a contract file it links. Cite the specific invariant (section heading + the exact rule) and the diff site that violates it. Surface an invariant violation even when no Critical/High bug is yet reachable — the rule itself is the contract. If the violation is also a reachable production bug, report it once under Critical/high bugs and note which invariant it breaks rather than duplicating it here.
 
 Do not report:
 
@@ -33,7 +35,7 @@ Do not report:
 For each finding:
 
 - cite the concrete files and symbols involved
-- state the severity: Critical, High, or Complexity Collapse
+- state the severity: Critical, High, Complexity Collapse, or Invariant Violation
 - explain the exact reachable failure mode or removable complexity
 - explain why it matters before merge
 - give the production-faithful scenario or end-to-end path the local agent should use to reproduce or validate it
@@ -41,7 +43,7 @@ For each finding:
 
 Stop rules:
 
-- If you find no Critical, High, or Complexity Collapse findings, say that clearly and stop.
+- If you find no Critical, High, Complexity Collapse, or Invariant Violation findings, say that clearly and stop.
 - Do not invent medium findings to prove the review was thorough.
 - Prefer a short zero-finding review over a long list of marginal concerns.
 

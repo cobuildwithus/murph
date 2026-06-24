@@ -185,7 +185,13 @@ export function resolveAssistantProviderPrompt(
 ): string {
   const explicitPrompt = normalizeNullableString(input.prompt)
   if (explicitPrompt) {
-    return explicitPrompt
+    const turnContextPrompt = normalizeNullableString(input.turnContextPrompt)
+    return [
+      turnContextPrompt,
+      explicitPrompt,
+    ]
+      .filter((section): section is string => section !== null)
+      .join('\n\n')
   }
 
   return [

@@ -257,7 +257,7 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-28T16:00:00.000Z')
   })
 
-  it('keeps the managed weekly health research scout on the Wednesday 1 PM local recurrence', () => {
+  it('keeps the managed weekly health research scout on the Wednesday 7:30 PM local recurrence', () => {
     const researchScoutSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
     )
@@ -265,8 +265,8 @@ describe('applyMurphManagedAutomations', () => {
       throw new Error('Expected the weekly health research scout to use a cron schedule.')
     }
 
-    expect(researchScoutSeed.schedule.expression).toBe('0 13 * * 3')
-    expect(researchScoutSeed.instructions).toContain('Each Wednesday at 1:00 PM local time')
+    expect(researchScoutSeed.schedule.expression).toBe('30 19 * * 3')
+    expect(researchScoutSeed.instructions).toContain('Each Wednesday at 7:30 PM local time')
     expect(researchScoutSeed.instructions).not.toContain('Friday morning')
 
     const nextRunAt = findNextAssistantCronOccurrence(
@@ -274,7 +274,7 @@ describe('applyMurphManagedAutomations', () => {
       new Date('2026-06-18T16:00:00.000Z'),
       'America/New_York',
     )
-    expect(nextRunAt).toBe('2026-06-24T17:00:00.000Z')
+    expect(nextRunAt).toBe('2026-06-24T23:30:00.000Z')
     if (!nextRunAt) {
       throw new Error('Expected the weekly health research scout cron to have a next run.')
     }
@@ -282,7 +282,7 @@ describe('applyMurphManagedAutomations', () => {
       researchScoutSeed.schedule.expression,
       new Date(nextRunAt),
       'America/New_York',
-    )).toBe('2026-07-01T17:00:00.000Z')
+    )).toBe('2026-07-01T23:30:00.000Z')
   })
 
   it('keeps weekly product updates on Thursday at 11:30 AM local time', () => {
@@ -417,7 +417,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 13 * * 3',
+        expression: '30 19 * * 3',
       },
       slug: 'weekly-health-research-scout',
       status: 'active',
@@ -425,7 +425,7 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain('Wednesday at 1:00 PM local time')
+    expect(researchScoutRecord?.instructions).toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('0-3 new studies')
@@ -434,7 +434,13 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('tag-level only')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
+    expect(researchScoutRecord?.instructions).toContain('vault-cli research payload-schema --format json')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
+    expect(researchScoutRecord?.instructions).toContain('`topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`')
+    expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
+    expect(researchScoutRecord?.instructions).toContain('Example body: `{"topics":["sleep","recovery"],"behaviors":["exercise"]}`')
+    expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
+    expect(researchScoutRecord?.instructions).toContain('cap `--maxCandidates` at 3')
     expect(researchScoutRecord?.instructions).toContain('Do not perform an open-ended web browsing loop')
     expect(researchScoutRecord?.instructions).toContain('Deduplicate against prior `weekly-health-research-scout` sections')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
@@ -527,13 +533,13 @@ describe('applyMurphManagedAutomations', () => {
       .toMatchObject({
         schedule: {
           kind: 'cron',
-          expression: '0 13 * * 3',
+          expression: '30 19 * * 3',
         },
       })
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
         ?.instructions,
-    ).toContain('Wednesday at 1:00 PM local time')
+    ).toContain('Wednesday at 7:30 PM local time')
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {
@@ -1030,6 +1036,177 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('reconciles an existing one-shot whose desired moment moved earlier within the live window', async () => {
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      // New schedule for a Pacific/Auckland vault: 09:00 NZST on 2026-04-29
+      // is 2026-04-28T21:00Z — 18h earlier than the previous 15:00 UTC fire.
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    // `now` is before BOTH the new desired fire and the old stored fire, so
+    // the new seed is not yet stale and the reconcile must update in place.
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-04-28T18:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+        status: 'active',
+      })
+  })
+
+  it('keeps a legacy still-future occurrence when the new desired moment is already stale', async () => {
+    // Migration repro: a pre-PR final-results automation persisted with the
+    // old 15:00 UTC fire is still in the future, but the new desired fire
+    // (09:00 in Pacific/Auckland → 21:00 UTC the previous day) has already
+    // passed by more than the one-shot expiry window. The installer must
+    // keep the legacy schedule alive so the user still gets the moment, but
+    // adopt the new content. Archiving here would silently lose the final
+    // review during rollout.
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After the new desired fire by far more than the stale-seed window
+      // (1h), but before the obsolete stored fire at 15:00 UTC the next day.
+      now: new Date('2026-04-29T08:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        // Legacy stored schedule retained so the moment still fires.
+        schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+        status: 'active',
+      })
+  })
+
+  it('does not preserve a recurring legacy schedule when the new one-shot is stale (would otherwise fire the final review repeatedly)', async () => {
+    // Regression guard: only an `at` legacy schedule earns the migration
+    // preserve. A `cron`/`every`/`dailyLocal` legacy schedule would fire
+    // one-shot instructions on every recurrence, so reconcile must archive.
+    const recurringLegacy: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'cron', expression: '0 15 * * *' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(recurringLegacy.automationId, recurringLegacy)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: recurringLegacy.automationId,
+      slug: recurringLegacy.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After the new desired one-shot's expiry window — a recurring legacy
+      // schedule would otherwise be retained and fire repeatedly.
+      now: new Date('2026-04-29T08:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(recurringLegacy.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        status: 'archived',
+      })
+  })
+
+  it('archives an existing one-shot only when both the new and the legacy occurrence have expired', async () => {
+    const previousFinal: StoredAutomationRecord = {
+      automationId: 'automation_01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      continuityPolicy: 'fresh',
+      instructions: 'Old final-results prompt.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },
+      slug: 'experiment-final-results-nz-run',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'experiment', 'final-results'],
+      title: 'Old final results',
+    }
+    managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
+
+    const newSeed: MurphManagedAutomationSeed = {
+      automationId: previousFinal.automationId,
+      slug: previousFinal.slug,
+      title: 'Final results · NZ Run',
+      schedule: { kind: 'at', at: '2026-04-28T21:00:00.000Z' },
+      instructions: 'New persist-then-deliver prompt.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // After both the new desired fire and the legacy stored fire by far
+      // more than the one-shot expiry window.
+      now: new Date('2026-04-30T18:00:00.000Z'),
+      seeds: [newSeed],
+      vaultRoot,
+    })).resolves.toMatchObject({ updated: 1 })
+
+    expect(managedAutomationMocks.records.get(previousFinal.automationId))
+      .toMatchObject({
+        instructions: 'New persist-then-deliver prompt.',
+        status: 'archived',
+      })
   })
 
   it('creates a timely one-shot seed but skips it once stale', async () => {

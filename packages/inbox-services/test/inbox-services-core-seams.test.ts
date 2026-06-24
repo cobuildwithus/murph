@@ -12,6 +12,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { expect, test, vi } from 'vitest'
 
 import type {
+  InboxRuntimeModule,
   InboxRuntimeConfig,
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
@@ -1023,6 +1024,7 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
 
     let closed = 0
     let rebuildCalls = 0
+    let rebuildEnqueueParserJobs: boolean | null = null
     const normalizedConfig = await readConfig(paths)
     assert.equal(normalizedConfig.connectors[0]?.accountId, 'bot')
     const runtime = createRuntimeStore([createCapture(), createCapture({ captureId: 'capture-2' })])
@@ -1034,8 +1036,9 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
       async openInboxRuntime() {
         return runtime
       },
-      async rebuildRuntimeFromVault() {
+      async rebuildRuntimeFromVault(input: Parameters<InboxRuntimeModule['rebuildRuntimeFromVault']>[0]) {
         rebuildCalls += 1
+        rebuildEnqueueParserJobs = input.enqueueParserJobs
       },
     } as never
 
@@ -1050,6 +1053,7 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
     assert.equal(result, 'ok')
     assert.equal(await rebuildRuntime(paths, inboxd), 2)
     assert.equal(rebuildCalls, 1)
+    assert.equal(rebuildEnqueueParserJobs, true)
     assert.ok(closed >= 2)
 
     assert.deepEqual(

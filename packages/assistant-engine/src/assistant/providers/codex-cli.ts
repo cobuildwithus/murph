@@ -530,6 +530,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         messageReactionsAvailable:
           input.input.allowMessageReactions === true,
         reactionDynamicToolAvailable,
+        voiceMemoGenerationAvailable: input.input.voiceMemoDeliveryChannel != null,
         conversationHistoryCount,
         conversationHistoryPresent: conversationHistoryCount > 0,
         conversationContextBytes: byteLength(conversationContextPrompt),

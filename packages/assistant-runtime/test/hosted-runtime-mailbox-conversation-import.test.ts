@@ -177,6 +177,7 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "linq",
       partCount: 2,
       reactionEligible: false,
+      replyToMessageId: null,
       service: null,
     });
     assert.ok(replyTarget);
@@ -1052,6 +1053,7 @@ describe("hosted mailbox conversation import adapter", () => {
       kind: "linq",
       partCount: 1,
       reactionEligible: true,
+      replyToMessageId: null,
       service: "iMessage",
     });
   });
@@ -1245,6 +1247,75 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     ]);
     assert.equal(JSON.stringify(listed.events[0]).includes("https://signed.example.invalid"), false);
+  });
+
+  test("blocks the mailbox item for retry when local parser work requests a retry wake", async () => {
+    const decodedWake = createConversationWake({
+      eventId: "evt_parser_retry_projection",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_parser_retry",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: "msg_parser_retry",
+          parts: [
+            {
+              attachmentId: "voice_part_1",
+              fileName: "voice-note.m4a",
+              mimeType: "audio/mp4",
+              size: 256,
+              type: "voice_memo",
+              url: "https://signed.example.invalid/voice",
+            },
+          ],
+        },
+        phoneLookupKey: "+15550100000",
+      },
+    });
+    const projectionUpdates: unknown[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_parser_retry_projection",
+          metrics: {
+            nextWakeAt: "2026-04-26T00:01:00.000Z",
+            parserProcessed: 0,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return {
+          captureId: input.captureId,
+          attachments: [],
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_parser_retry_projection",
+      }),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager({
+        projectionUpdates,
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation-import.parser-retry",
+      retryable: true,
+      status: "blocked",
+    });
+    assert.deepEqual(projectionUpdates, [
+      {
+        captureId: "cap_parser_retry_projection",
+        reasonCode: null,
+        status: "succeeded",
+      },
+    ]);
   });
 
   test("records inbox runtime unavailable as a specific projection and evidence reason", async () => {

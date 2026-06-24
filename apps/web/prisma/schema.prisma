@@ -358,6 +358,7 @@ model HostedMember {
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   productFeedback                HostedProductFeedback[]
+  sensitiveActionChallenges      HostedSensitiveActionChallenge[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -407,6 +408,20 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedSensitiveActionChallenge {
+  tokenHash   String       @id @map("token_hash")
+  memberId    String       @map("member_id")
+  kind        String
+  bindingHash String       @map("binding_hash")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  expiresAt   DateTime     @map("expires_at")
+  member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_sensitive_action_challenge")
 }
 
 model HostedConnectedAppsSession {
@@ -717,6 +732,8 @@ model HostedWorkspace {
   browserVaultReplicaRef Json?        @map("browser_vault_replica_ref")
   nextWakeAt             DateTime?    @map("next_wake_at")
   nextWakeReason         String?      @map("next_wake_reason")
+  inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
+  inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
   createdAt              DateTime     @default(now()) @map("created_at")

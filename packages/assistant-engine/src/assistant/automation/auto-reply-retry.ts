@@ -3,11 +3,16 @@ import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
-import { errorMessage } from '../shared.js'
+import {
+  compareAssistantTimestampsAscending,
+  errorMessage,
+} from '../shared.js'
 import { computeAssistantAutomationRetryAt } from './shared.js'
 
 export const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
 export const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
+export const AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY =
+  'autoReplyCrossSessionContextIntentId'
 
 const ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS = 5 * 60 * 1000
@@ -57,7 +62,10 @@ export function compareAssistantAutoReplyReceiptRecency(
   left: AssistantTurnReceipt,
   right: AssistantTurnReceipt,
 ): number {
-  const updatedAtComparison = left.updatedAt.localeCompare(right.updatedAt)
+  const updatedAtComparison = compareAssistantTimestampsAscending(
+    left.updatedAt,
+    right.updatedAt,
+  )
   if (updatedAtComparison !== 0) {
     return updatedAtComparison
   }

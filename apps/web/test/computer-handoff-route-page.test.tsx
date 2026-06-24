@@ -293,6 +293,28 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("finished_browser_step"), false);
   });
 
+  it("renders inspection handoffs as a static screenshot", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      handoffId: "hch_open",
+      interaction: "view_only",
+      kind: "open",
+      purpose: "screen_inspection",
+      screenshotDataUrl: "data:image/jpeg;base64,aW1hZ2U=",
+      suggestedReply: "yes",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /<img[^>]+alt="Murph private page preview"/);
+    assert.match(markup, /<img[^>]+src="data:image\/jpeg;base64,aW1hZ2U="/);
+    assert.doesNotMatch(markup, /<iframe/u);
+    assert.doesNotMatch(markup, /<button/u);
+    expect(mocks.headers).not.toHaveBeenCalled();
+    expect(mocks.service.ensureHandoffViewport).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       "mobile",
@@ -308,6 +330,7 @@ describe("computer handoff route and page", () => {
       mocks.service.readHandoffPageState.mockResolvedValueOnce({
         handoffId: "hch_open",
         iframeAllow: "clipboard-read",
+        interaction: "takeover",
         kind: "open",
         liveViewUrl: "https://browser.example.test/live",
         purpose: "login",
@@ -332,6 +355,7 @@ describe("computer handoff route and page", () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       handoffId: "hch_open",
       iframeAllow: "clipboard-read",
+      interaction: "takeover",
       kind: "open",
       liveViewUrl: "https://browser.example.test/live",
       purpose: "login",

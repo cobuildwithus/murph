@@ -3,6 +3,7 @@ import {
   normalizeIanaTimeZone,
   toLocalDayKey as toLocalDayKeyShared,
 } from "@murphai/contracts";
+export { compareIsoTimestampsAscending } from "@murphai/contracts";
 
 import { DEFAULT_TIMEZONE } from "./constants.ts";
 import { VaultError } from "./errors.ts";

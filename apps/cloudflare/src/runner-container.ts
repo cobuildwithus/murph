@@ -288,12 +288,16 @@ interface RunnerActivityTimeoutRenewable {
 interface RunnerActiveOperationRecord {
   attemptId: string;
   leaseGeneration: string;
+  processingMode: RunnerRuntimeProcessingMode;
   userId: string;
 }
+
+type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
 
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
   leaseGeneration: string;
+  processingMode?: RunnerRuntimeProcessingMode | null;
   userId: string;
 }
 
@@ -535,6 +539,10 @@ export class RunnerContainer extends Container {
         active.userId !== input.userId
         || active.attemptId !== input.attemptId
         || active.leaseGeneration !== input.leaseGeneration
+        || (
+          input.processingMode !== undefined
+          && active.processingMode !== normalizeRunnerRuntimeProcessingMode(input.processingMode)
+        )
       )
     ) {
       return { kind: "unknown", reason: "active-child-rejected" };
@@ -992,6 +1000,7 @@ export class RunnerContainer extends Container {
     const activeOperation: RunnerActiveOperationRecord = {
       attemptId: input.job.request.attemptId,
       leaseGeneration: input.job.request.leaseGeneration,
+      processingMode: normalizeRunnerRuntimeProcessingMode(input.job.request.processingMode),
       userId: routeUserId,
     };
     let completedSuccessfully = false;
@@ -2667,6 +2676,12 @@ function assertRunnerContainerEnsureProcessingUserIds(
   if (jobUserId !== input.userId) {
     throw new TypeError("Hosted runner container ensureProcessing job userId must match input userId.");
   }
+}
+
+function normalizeRunnerRuntimeProcessingMode(
+  value: unknown,
+): RunnerRuntimeProcessingMode {
+  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
 }
 
 function parseRunnerContainerEnsureReadyForProcessingInput(

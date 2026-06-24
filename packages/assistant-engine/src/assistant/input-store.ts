@@ -14,7 +14,11 @@ import {
   isSameAssistantConversationCapture,
   type AssistantInputConversationRef,
 } from './conversation-ref.js'
-import { isMissingFileError, resolveTimestamp } from './shared.js'
+import {
+  compareAssistantTimestampsAscending,
+  isMissingFileError,
+  resolveTimestamp,
+} from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
@@ -350,6 +354,9 @@ const assistantInputLinqSourceMetadataSchema = z
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
     reactionEligible: z.boolean().optional().default(false),
+    replyToMessageId: safeNullableAssistantInputTokenSchema(
+      'sourceMetadata.replyToMessageId',
+    ),
     service: safeNullableAssistantInputTokenSchema('sourceMetadata.service'),
   })
   .strict()
@@ -1699,12 +1706,15 @@ export function compareAssistantInputCursors(
     }
   }
 
-  const useCreatedAt = Boolean(left.createdAt && right.createdAt)
-  const leftTimestamp = useCreatedAt ? left.createdAt! : left.occurredAt
-  const rightTimestamp = useCreatedAt ? right.createdAt! : right.occurredAt
+  const leftTimestamp = left.createdAt ?? left.occurredAt
+  const rightTimestamp = right.createdAt ?? right.occurredAt
 
-  if (leftTimestamp !== rightTimestamp) {
-    return leftTimestamp.localeCompare(rightTimestamp)
+  const timestampOrder = compareAssistantTimestampsAscending(
+    leftTimestamp,
+    rightTimestamp,
+  )
+  if (timestampOrder !== 0) {
+    return timestampOrder
   }
 
   if (

@@ -359,6 +359,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
+    inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     reason: "idle_shutdown";

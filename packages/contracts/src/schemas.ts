@@ -16,6 +16,7 @@ import {
   foodFrontmatterSchema as foodFrontmatterContract,
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
+  inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
@@ -75,6 +76,7 @@ export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const metricSampleRecordSchema = toJsonSchema(metricSampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
 export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract);
+export const inboxAttachmentRetentionRecordSchema = toJsonSchema(inboxAttachmentRetentionRecordContract);
 export const automationFrontmatterSchema = toJsonSchema(automationFrontmatterContract);
 export const coreFrontmatterSchema = toJsonSchema(coreFrontmatterContract);
 export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterContract);
@@ -110,6 +112,7 @@ export const schemaCatalog = Object.freeze({
   "event-record": eventRecordSchema,
   "integration-ingest-record": integrationIngestRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
+  "inbox-attachment-retention-record": inboxAttachmentRetentionRecordSchema,
   "metric-sample-record": metricSampleRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,
   "frontmatter-automation": automationFrontmatterSchema,

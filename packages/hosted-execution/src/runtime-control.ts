@@ -72,6 +72,13 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS)[number];
 
+export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = [
+  "music_v2",
+] as const;
+
+export type HostedAiUsageAllowanceElevenLabsMusicPricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS)[number];
+
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
@@ -149,6 +156,23 @@ export function normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
 ): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
   const normalized = value?.trim().toLowerCase();
   return normalized && isHostedAiUsageAllowanceElevenLabsTtsPricedModelId(normalized)
+    ? normalized
+    : null;
+}
+
+export function isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceElevenLabsMusicPricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceElevenLabsMusicPricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceElevenLabsMusicPricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(normalized)
     ? normalized
     : null;
 }
@@ -1218,6 +1242,7 @@ export interface HostedWorkspaceState {
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   checkpointedAt?: string | null;
   createdAt: string;
+  inboxMediaRetentionWakeAt?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -1261,6 +1286,7 @@ export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;
+  inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
@@ -1272,6 +1298,7 @@ export interface HostedWorkspaceCheckpointRequest {
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
   checkpointConflictReason?: HostedWorkspaceCheckpointConflictReason | null;
+  replacedSnapshotRef?: HostedExecutionSnapshotRefState;
   workspace: HostedWorkspaceState;
 }
 
@@ -1470,11 +1497,20 @@ export interface HostedWorkspaceInvocationBudget {
   maxRuntimeMs?: number | null;
 }
 
+export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
+  "default",
+  "inbox_media_retention",
+] as const;
+
+export type HostedWorkspaceInvocationProcessingMode =
+  (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
+
 export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
   idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;
   userId: string;
   workspace?: HostedWorkspaceState | null;

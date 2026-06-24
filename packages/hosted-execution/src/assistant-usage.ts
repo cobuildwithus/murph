@@ -254,6 +254,43 @@ export function buildHostedElevenLabsTtsUsageRecord(input: {
   });
 }
 
+export function buildHostedElevenLabsMusicUsageRecord(input: {
+  durationMs: number;
+  memberId: string;
+  model: string;
+  providerRequestId?: string | null;
+}): AssistantUsageRecord {
+  const turnId = `turn_elevenlabs_music_${randomUUID().replaceAll("-", "")}`;
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "ELEVENLABS_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.elevenlabs.io",
+    credentialSource: "platform",
+    featureKey: "music-generation",
+    memberId: input.memberId,
+    occurredAt: new Date().toISOString(),
+    provider: "elevenlabs",
+    providerName: "ElevenLabs",
+    providerRequestId: input.providerRequestId ?? null,
+    rawUsageJson: {
+      durationMs: input.durationMs,
+    },
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    triggerKind: "generate-song",
+    turnId,
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId,
+    }),
+    usageExtractionSourcePath: "elevenlabs.music.compose",
+    usageExtractionVersion: "elevenlabs-music-v1",
+  });
+}
+
 export function createAssistantUsageReportingUserId(input: {
   memberId: string;
   reportingSecret?: string | null;

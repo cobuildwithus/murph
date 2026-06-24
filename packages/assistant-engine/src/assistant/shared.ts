@@ -18,6 +18,10 @@ import {
   normalizeNullableString,
 } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+export {
+  compareIsoTimestampsAscending as compareAssistantTimestampsAscending,
+  compareNullableIsoTimestampsAscending as compareAssistantNullableTimestampsAscending,
+} from '@murphai/contracts'
 
 export {
   errorMessage,

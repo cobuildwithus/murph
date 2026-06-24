@@ -126,6 +126,7 @@ export class HostedUserRunner {
     };
     this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
       bucket,
+      runnerStoreCache: this.runnerStoreCache,
       state,
       stateStore: this.stateStore,
       assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
@@ -147,6 +148,8 @@ export class HostedUserRunner {
   }
 
   async alarm(): Promise<void> {
+    const record = await this.stateStore.readState();
+    await this.workspaceSnapshotSessions.cleanupOrphanCandidates(record.userId);
     await this.runtimeProcessing.alarm();
   }
 

@@ -5,6 +5,13 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   type HostedWorkspaceSnapshotV2Aad,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import type {
+  HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/bundles";
+import {
+  isHostedWorkspaceSnapshotV2Ref,
+  parseHostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
@@ -43,19 +50,34 @@ export interface HostedWorkspaceSnapshotUploadSession {
   expiresAt: string;
   leaseGeneration: string;
   objectKey: string;
+  replacedSnapshotRef?: NonNullable<HostedExecutionSnapshotRef>;
   schema: typeof HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA;
   snapshotId: string;
   userId: string;
   workspaceVersion: string;
 }
 
-export interface HostedWorkspaceSnapshotOrphanCandidate {
+export interface HostedWorkspaceSnapshotV2OrphanCandidate {
   createdAt: string;
+  kind?: "workspace_snapshot_v2";
   objectKey: string;
   schema: typeof HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA;
   snapshotId: string;
   userId: string;
 }
+
+export interface HostedWorkspaceSnapshotLegacyOrphanCandidate {
+  createdAt: string;
+  kind: "legacy_workspace_snapshot";
+  schema: typeof HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA;
+  snapshotId: string;
+  snapshotRef: HostedExecutionSnapshotRef;
+  userId: string;
+}
+
+export type HostedWorkspaceSnapshotOrphanCandidate =
+  | HostedWorkspaceSnapshotLegacyOrphanCandidate
+  | HostedWorkspaceSnapshotV2OrphanCandidate;
 
 export function parseHostedWorkspaceSnapshotUploadSession(
   value: unknown,
@@ -72,6 +94,18 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     throw new TypeError(`${label}.encryption.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME}.`);
   }
 
+  let replacedSnapshotRef: NonNullable<HostedExecutionSnapshotRef> | null = null;
+  if (record.replacedSnapshotRef !== undefined && record.replacedSnapshotRef !== null) {
+    const parsedReplacedSnapshotRef = parseHostedExecutionSnapshotRef(
+      record.replacedSnapshotRef,
+      `${label}.replacedSnapshotRef`,
+    );
+    if (parsedReplacedSnapshotRef === null) {
+      throw new TypeError(`${label}.replacedSnapshotRef must be a hosted execution snapshot ref.`);
+    }
+    replacedSnapshotRef = parsedReplacedSnapshotRef;
+  }
+
   return {
     attemptId: requireString(record.attemptId, `${label}.attemptId`),
     createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
@@ -86,6 +120,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     expiresAt: requireIsoString(record.expiresAt, `${label}.expiresAt`),
     leaseGeneration: requireString(record.leaseGeneration, `${label}.leaseGeneration`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
+    ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
     schema,
     snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
     userId: requireString(record.userId, `${label}.userId`),
@@ -103,13 +138,37 @@ export function parseHostedWorkspaceSnapshotOrphanCandidate(
     throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA}.`);
   }
 
-  return {
-    createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
-    objectKey: requireString(record.objectKey, `${label}.objectKey`),
-    schema,
-    snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
-    userId: requireString(record.userId, `${label}.userId`),
-  };
+  const kind = record.kind === undefined
+    ? "workspace_snapshot_v2"
+    : requireString(record.kind, `${label}.kind`);
+  if (kind === "workspace_snapshot_v2") {
+    return {
+      createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
+      ...(record.kind === undefined ? {} : { kind }),
+      objectKey: requireString(record.objectKey, `${label}.objectKey`),
+      schema,
+      snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
+      userId: requireString(record.userId, `${label}.userId`),
+    };
+  }
+  if (kind === "legacy_workspace_snapshot") {
+    const snapshotRef = parseHostedExecutionSnapshotRef(
+      record.snapshotRef,
+      `${label}.snapshotRef`,
+    );
+    if (!snapshotRef || isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+      throw new TypeError(`${label}.snapshotRef must be a legacy hosted execution snapshot ref.`);
+    }
+    return {
+      createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
+      kind,
+      schema,
+      snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
+      snapshotRef,
+      userId: requireString(record.userId, `${label}.userId`),
+    };
+  }
+  throw new TypeError(`${label}.kind must be workspace_snapshot_v2 or legacy_workspace_snapshot.`);
 }
 
 export function buildHostedWorkspaceSnapshotRefFromUploadSession(input: {

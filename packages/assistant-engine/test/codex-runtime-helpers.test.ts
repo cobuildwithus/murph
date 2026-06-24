@@ -1695,6 +1695,17 @@ describe('Codex assistant registry helpers', () => {
 
     expect(
       resolveAssistantProviderPrompt({
+        prompt: '  explicit prompt  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        turnContextPrompt: 'Current runtime context.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toBe('Current runtime context.\n\nexplicit prompt')
+
+    expect(
+      resolveAssistantProviderPrompt({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -1827,6 +1838,38 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).toContain('actor: hid_linq_actor')
     expect(prompt).toContain('delivery: participant route available')
     expect(prompt).not.toContain('+15550100001')
+  })
+
+  it('prepends turn context to explicit prompts before Codex execution', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-turn-context',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-turn-context',
+      turnId: 'turn-context',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        dynamicTools: resolveMurphDynamicTools({
+          progressUpdatesAvailable: false,
+        }),
+        prompt: 'Answer the current message.',
+        turnContextPrompt: 'Conversation context:\nEarlier assistant reminder.',
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.prompt,
+    ).toBe(
+      'Conversation context:\nEarlier assistant reminder.\n\nAnswer the current message.',
+    )
   })
 
   it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {

@@ -3,15 +3,22 @@ import { existsSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getHostedSidebarAuthSnapshot: vi.fn(),
+}));
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
-  getHostedSidebarAuthSnapshot: async () => ({
-    authenticated: false,
-    label: null,
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: vi.fn(),
   }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedSidebarAuthSnapshot: mocks.getHostedSidebarAuthSnapshot,
 }));
 
 vi.mock("@/src/components/dashboard/sidebar", () => ({
@@ -23,6 +30,14 @@ vi.mock("@/src/components/dashboard/sidebar", () => ({
 }));
 
 import DashboardLayout from "../app/(dashboard)/layout";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getHostedSidebarAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    label: null,
+  });
+});
 
 test("the dashboard layout is the single shell owner for biomarker pages", async () => {
   assert.equal(
@@ -47,4 +62,25 @@ test("the dashboard layout is the single shell owner for biomarker pages", async
   assert.match(markup, /data-slot="sidebar-wrapper"/);
   assert.match(markup, /data-slot="sidebar-inset"/);
   assert.match(markup, /<main class="flex-1 px-4 py-8 md:px-14 md:py-10">/);
+  expect(mocks.getHostedSidebarAuthSnapshot).toHaveBeenCalledWith();
+});
+
+test("dashboard layout leaves access decisions to dashboard pages", async () => {
+  mocks.getHostedSidebarAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    label: null,
+  });
+
+  const markup = renderToStaticMarkup(
+    await DashboardLayout({
+      children: createElement(
+        "div",
+        { "data-dashboard-child": "true" },
+        "dashboard child",
+      ),
+    }),
+  );
+
+  assert.match(markup, /data-dashboard-sidebar="true"/);
+  assert.match(markup, /data-dashboard-child="true"/);
 });

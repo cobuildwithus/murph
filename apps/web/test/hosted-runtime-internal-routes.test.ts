@@ -1278,6 +1278,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
     mocks.checkpointHostedWorkspace
       .mockResolvedValueOnce({
+        replacedSnapshotRef: createBundleRef("snapshot_1"),
         status: "updated",
         workspace: buildWorkspaceRecord({
           checkpointedAt: "2026-04-26T00:01:00.000Z",
@@ -1289,6 +1290,7 @@ describe("hosted runtime internal web routes", () => {
         }),
       })
       .mockResolvedValueOnce({
+        replacedSnapshotRef: null,
         status: "conflict",
         workspace: buildWorkspaceRecord({
           snapshotRef: createBundleRef("snapshot_current"),
@@ -1311,6 +1313,7 @@ describe("hosted runtime internal web routes", () => {
       {
         attemptId: "attempt_1",
         expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
         leaseGeneration: "2",
         nextWakeAt: "2026-04-26T00:05:00.000Z",
         nextWakeReason: "mailbox",
@@ -1329,12 +1332,14 @@ describe("hosted runtime internal web routes", () => {
 
     expect(checkpointPayload).toMatchObject({
       checkpointed: true,
+      replacedSnapshotRef: createBundleRef("snapshot_1"),
       workspace: {
         version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
       nextWakeReason: "mailbox",
       reason: "import",
@@ -1563,17 +1568,37 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("rejects workspace reads for inactive members", async () => {
+  it("serves workspace reads for inactive members so the mode-aware runtime owner can run due inbox media retention", async () => {
+    // Admission policy is owned by `runtime-reconciliation-facts` and the
+    // Temporal runtime workflow: inactive members are confined to
+    // `inbox_media_retention` dispatch. Repeating the active-entitlement
+    // check on this route would also block the retention run, leaving raw
+    // inbox media past the 14-day retention window.
     mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
       billingStatus: "canceled",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+      version: "7",
     }));
 
     const response = await workspaceRoute.GET(new Request(
       "https://example.test/api/internal/hosted-workspace",
     ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
 
-    expect(response.status).toBe(403);
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(payload.workspace).toMatchObject({
+      inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
+      userId: "member_routes_1",
+      version: "7",
+    });
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    // The route no longer consults member entitlement; that owner lives in
+    // reconciliation/runtime invocation.
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("reads workspace state for sponsored Family members", async () => {
@@ -2466,6 +2491,7 @@ function buildWorkspaceRecord(
     browserVaultReplicaRef: Record<string, unknown> | null;
     checkpointedAt: string | null;
     createdAt: string;
+    inboxMediaRetentionWakeAt: string | null;
     nextWakeAt: string | null;
     nextWakeReason: string | null;
     redactedStatusJson: Record<string, unknown> | null;
@@ -2479,6 +2505,7 @@ function buildWorkspaceRecord(
     browserVaultReplicaRef: null,
     checkpointedAt: null,
     createdAt: FIXED_NOW,
+    inboxMediaRetentionWakeAt: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: null,

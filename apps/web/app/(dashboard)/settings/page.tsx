@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -25,7 +26,7 @@ import {
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -35,7 +36,8 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function SettingsPage() {
-  const { authenticated, authenticatedMember, session } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember, session } =
+    await getHostedDashboardPageAuthSnapshot();
 
   if (!authenticated) {
     redirect("/");
@@ -85,6 +87,8 @@ export default async function SettingsPage() {
         serverApprovedPrivyLinkedAccounts,
       })
     : account;
+  const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null;
+  const privyClientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
   return (
     <div className="flex flex-col gap-12">
@@ -168,21 +172,30 @@ export default async function SettingsPage() {
         </Link>
       </section>
 
-      {process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() ? (
+      {privyAppId ? (
+        <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
+          <section className="flex flex-col gap-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Security
+            </div>
+            <HostedPasskeySettings authenticated={authenticated} />
+          </section>
+
+          <section className="flex flex-col gap-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Data & privacy
+            </div>
+            <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled />
+          </section>
+        </HostedPrivyProvider>
+      ) : (
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Security
+            Data & privacy
           </div>
-          <HostedPasskeySettings authenticated={authenticated} />
+          <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled={false} />
         </section>
-      ) : null}
-
-      <section className="flex flex-col gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Data & privacy
-        </div>
-        <HostedDataPrivacySettings authenticated={authenticated} />
-      </section>
+      )}
     </div>
   );
 }

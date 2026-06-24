@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { redirect } from "next/navigation";
 
 import type { HostedAppSession } from "./app-session";
 import { type HostedMemberCoreState } from "./hosted-member-store";
@@ -8,6 +9,7 @@ import {
   anonymousHostedSidebarAuthSnapshot,
   type HostedSidebarAuthSnapshot,
 } from "./sidebar-auth";
+import { deriveHostedPostVerificationStage } from "./lifecycle";
 
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
@@ -39,6 +41,27 @@ const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnap
 
 export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
   return resolveHostedPageAuthSnapshot();
+}
+
+export async function getHostedDashboardPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
+  const auth = await getHostedPageAuthSnapshot();
+  redirectHostedDashboardCheckoutIfNeeded(auth);
+  return auth;
+}
+
+export function redirectHostedDashboardCheckoutIfNeeded(
+  auth: HostedPageAuthSnapshot,
+): void {
+  const member = auth.authenticatedMember;
+  if (
+    member
+    && deriveHostedPostVerificationStage({
+      billingStatus: member.billingStatus,
+      suspendedAt: member.suspendedAt,
+    }) === "checkout"
+  ) {
+    redirect("/join");
+  }
 }
 
 const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {

@@ -75,6 +75,8 @@ const CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON =
   "conversation-import.attachment-evidence-update-failed";
 const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
   "conversation-import.inbox-runtime-unavailable";
+const CONVERSATION_PARSER_RETRY_REASON =
+  "conversation-import.parser-retry";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
@@ -356,12 +358,19 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  if (projectionEffect.parserRetry) {
+    return {
+      reasonCode: CONVERSATION_PARSER_RETRY_REASON,
+      retryable: true,
+      status: "blocked",
+    };
+  }
   return {
     assistantInputId: stagedInput.inputId,
     captureId: null,
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
     metrics: createEmptyHostedConversationWakeMetrics(),
-    ...(projectionEffect.reasonCode ? { reasonCode: projectionEffect.reasonCode } : {}),
+    ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
     status: "imported",
   };
 }
@@ -474,7 +483,10 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
-}): Promise<HostedMailboxPostCheckpointEffectResult> {
+}): Promise<{
+  effect: HostedMailboxPostCheckpointEffectResult;
+  parserRetry: boolean;
+}> {
   let imported: HostedConversationMailboxLocalImportResult;
   try {
     await input.prepareWakeContext({
@@ -505,21 +517,27 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       stagedInput: input.stagedInput,
     });
     return {
-      attachmentEvidenceUpdated,
-      kind: "inbox_projection",
-      projectionUpdated,
-      reasonCode,
-      status: "failed",
+      effect: {
+        attachmentEvidenceUpdated,
+        kind: "inbox_projection",
+        projectionUpdated,
+        reasonCode,
+        status: "failed",
+      },
+      parserRetry: false,
     };
   }
 
   if (!imported.captureId) {
     return {
-      attachmentEvidenceUpdated: null,
-      kind: "inbox_projection",
-      projectionUpdated: null,
-      reasonCode: null,
-      status: "succeeded",
+      effect: {
+        attachmentEvidenceUpdated: null,
+        kind: "inbox_projection",
+        projectionUpdated: null,
+        reasonCode: null,
+        status: "succeeded",
+      },
+      parserRetry: hasHostedConversationParserRetry(imported.metrics),
     };
   }
 
@@ -535,10 +553,17 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     stagedInput: input.stagedInput,
     vaultRoot: input.vaultRoot,
   });
-  return buildHostedConversationProjectionEffectResult({
-    attachmentEvidenceResult,
-    projectionUpdated,
-  });
+  return {
+    effect: buildHostedConversationProjectionEffectResult({
+      attachmentEvidenceResult,
+      projectionUpdated,
+    }),
+    parserRetry: hasHostedConversationParserRetry(imported.metrics),
+  };
+}
+
+function hasHostedConversationParserRetry(metrics: HostedConversationWakeMetrics): boolean {
+  return typeof metrics.nextWakeAt === "string" && metrics.nextWakeAt.trim().length > 0;
 }
 
 function buildHostedConversationProjectionEffectResult(input: {
@@ -1231,6 +1256,9 @@ function createHostedConversationAssistantInputSourceMetadata(
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
+      replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
+        wake.message.linqMessage.replyToMessageId ?? null,
+      ),
       service: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.service ?? null,
       ),

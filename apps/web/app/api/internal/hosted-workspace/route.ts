@@ -5,26 +5,20 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "@/src/lib/hosted-onboarding/family-plan";
-import {
-  hostedOnboardingError,
-} from "@/src/lib/hosted-onboarding/errors";
-import {
-  readHostedMemberCoreState,
-} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES = 0;
 
+// Admission policy for workspace reads lives in the mode-aware runtime owner
+// (`runtime-reconciliation-facts.ts` blocks inactive members from default
+// processing and confines them to `inbox_media_retention` dispatch). Repeating
+// the active-entitlement check here would block the retention run that the
+// owner just authorized, leaving raw inbox media past the 14-day retention.
 export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeWorkspaceReadActiveAccess(userId);
   const workspace = await readHostedWorkspace({ userId });
 
   return jsonOk(parseHostedWorkspaceReadResponse({
@@ -34,6 +28,7 @@ export const GET = withJsonError(async (request: Request) => {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,
           checkpointedAt: workspace.checkpointedAt,
           createdAt: workspace.createdAt,
+          inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
           nextWakeAt: workspace.nextWakeAt,
           nextWakeReason: workspace.nextWakeReason,
           redactedStatus: workspace.redactedStatusJson,
@@ -45,24 +40,3 @@ export const GET = withJsonError(async (request: Request) => {
       : null,
   }));
 });
-
-async function requireHostedRuntimeWorkspaceReadActiveAccess(userId: string): Promise<void> {
-  const prisma = getPrisma();
-  const member = await readHostedMemberCoreState({
-    memberId: userId,
-    prisma,
-  });
-
-  if (member && await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
-    prisma,
-  })) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_RUNTIME_WORKSPACE_USER_INACTIVE",
-    httpStatus: 403,
-    message: "Hosted runtime workspace access is not active.",
-  });
-}

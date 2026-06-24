@@ -10,6 +10,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
 } from "@murphai/query/browser";
+import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
@@ -20,15 +21,17 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault: mocks.useBrowserVault,
 }));
 
-import ExperimentsPage, { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
-import HistoryPage from "../app/(dashboard)/history/page";
+import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
+import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiments-page-client";
+import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
-import OverviewPage from "../app/(dashboard)/overview/page";
+import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
 let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
+const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
@@ -98,7 +101,7 @@ test("dashboard no longer ships a signals app route", async () => {
 });
 
 test("OverviewPage renders the dashboard overview", () => {
-  const markup = renderToStaticMarkup(createElement(OverviewPage));
+  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
   assert.match(markup, /A quick read on your recent notes, experiments, and tracked trends\./);
   assert.match(markup, /Morning walk/);
@@ -148,7 +151,7 @@ test("OverviewPage counts all tracked experiments while listing the most recent 
     status: "ready",
   });
 
-  const markup = renderToStaticMarkup(createElement(OverviewPage));
+  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
   assert.match(markup, /Active now[\s\S]*>27<\/div>/);
   assert.match(markup, /Recently finished[\s\S]*>1<\/div>/);
@@ -161,7 +164,7 @@ test("OverviewPage counts all tracked experiments while listing the most recent 
 });
 
 test("HistoryPage renders recent timeline entries", () => {
-  const markup = renderToStaticMarkup(createElement(HistoryPage));
+  const markup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(markup, /Travel recovery note/);
   assert.match(markup, /Recent notes, events, assessments, and daily summaries/);
@@ -170,7 +173,7 @@ test("HistoryPage renders recent timeline entries", () => {
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
-  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Browse the public protocol library\./);
   assert.match(markup, /Hyperbaric Oxygen Therapy/);
@@ -192,7 +195,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
     status: "ready",
   });
 
-  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Hyperbaric Oxygen Therapy/);
@@ -217,7 +220,7 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
     status: "ready",
   });
 
-  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Started Apr 18, 2026 · 14 days · 150 studies/);
@@ -236,7 +239,7 @@ test("ExperimentsPage shows private-only tracked experiments as non-link cards",
     status: "ready",
   });
 
-  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Private/);
   assert.match(markup, /<article[^>]*>[\s\S]*Private only run[\s\S]*Started Apr 19, 2026 · Private run only[\s\S]*Private run only[\s\S]*<\/article>/);
@@ -253,7 +256,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
     status: "error",
   });
 
-  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Private overlays could not be refreshed/);
   assert.match(markup, /The latest refresh failed\./);
@@ -272,7 +275,7 @@ test("OverviewPage preserves stale data when a refresh fails", () => {
     status: "error",
   });
 
-  const markup = renderToStaticMarkup(createElement(OverviewPage));
+  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
   assert.match(markup, /Could not load your overview/);
   assert.match(markup, /The latest refresh failed\./);
@@ -291,8 +294,8 @@ test("dashboard empty pages show preparing copy while a replica refresh is pendi
     status: "empty",
   });
 
-  const overviewMarkup = renderToStaticMarkup(createElement(OverviewPage));
-  const historyMarkup = renderToStaticMarkup(createElement(HistoryPage));
+  const overviewMarkup = renderToStaticMarkup(createElement(OverviewPageClient));
+  const historyMarkup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(overviewMarkup, /Preparing overview\./);
   assert.match(overviewMarkup, /Preparing your dashboard/);
@@ -319,12 +322,18 @@ test("OverviewPage renders an error state instead of an empty state when the hos
     status: "error",
   });
 
-  const markup = renderToStaticMarkup(createElement(OverviewPage));
+  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
   assert.match(markup, /Could not load your overview/);
   assert.match(markup, /Your dashboard data is not available right now\./);
   assert.doesNotMatch(markup, /Your dashboard is ready for data/);
 });
+
+function createExperimentsPageClientElement() {
+  return createElement(ExperimentsPageClient, {
+    protocols: experimentProtocols,
+  });
+}
 
 function createEntity(
   family: BrowserVaultEntity["family"],

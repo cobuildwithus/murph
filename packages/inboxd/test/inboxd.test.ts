@@ -580,6 +580,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
 
   const rebuiltRuntime = await openInboxRuntime({ vaultRoot });
   await rebuildRuntimeFromVault({
+    enqueueParserJobs: false,
     vaultRoot,
     runtime: rebuiltRuntime,
   });

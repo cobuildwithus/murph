@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 import {
@@ -33,9 +32,7 @@ import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboard
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
-import { issueHostedInvite } from "@/src/lib/hosted-onboarding/invite-service";
-import { requiresHostedBillingCheckout } from "@/src/lib/hosted-onboarding/lifecycle";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -59,20 +56,8 @@ export default async function HomePage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const showInitialVisitDialog =
     readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
-  const auth = await getHostedPageAuthSnapshot();
+  const auth = await getHostedDashboardPageAuthSnapshot();
   const member = auth.authenticatedMember;
-
-  if (
-    member
-    && member.suspendedAt === null
-    && requiresHostedBillingCheckout(member.billingStatus)
-  ) {
-    const invite = await issueHostedInvite({
-      channel: "web",
-      memberId: member.id,
-    });
-    redirect(`/join/${encodeURIComponent(invite.inviteCode)}`);
-  }
 
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();

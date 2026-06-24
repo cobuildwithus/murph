@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+const offsetIsoTimestampSchema = z.string().datetime({ offset: true })
+
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null
@@ -9,9 +11,21 @@ export function normalizeNullableString(value: string | null | undefined): strin
   return normalized.length > 0 ? normalized : null
 }
 
+export function isGatewayIsoTimestamp(value: string): boolean {
+  return offsetIsoTimestampSchema.safeParse(value).success
+}
+
+export function parseGatewayTimestampMs(value: string): number {
+  if (!isGatewayIsoTimestamp(value)) {
+    return Number.NaN
+  }
+
+  return Date.parse(value)
+}
+
 export const isoTimestampSchema = z
   .string()
   .min(1)
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: 'Expected an ISO timestamp.',
+  .refine(isGatewayIsoTimestamp, {
+    message: 'Expected an ISO timestamp with an explicit offset.',
   })

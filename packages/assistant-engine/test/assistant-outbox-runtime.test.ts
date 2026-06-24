@@ -732,13 +732,13 @@ describe('assistant outbox runtime', () => {
 
     const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-list-')
     const later = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T00:02:00.000Z',
+      createdAt: '2026-04-08T00:00:00.000Z',
       message: 'later intent',
       sessionId: 'session-list-later',
       turnId: 'turn-list-later',
     })
     const earlier = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T00:01:00.000Z',
+      createdAt: '2026-04-08T00:30:00+01:00',
       message: 'earlier intent',
       sessionId: 'session-list-earlier',
       turnId: 'turn-list-earlier',
@@ -874,6 +874,68 @@ describe('assistant outbox runtime', () => {
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
     expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+  })
+
+  it('prunes terminal outbox intents by instant when timestamp offsets differ', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-retention-offsets-',
+    )
+
+    for (let index = 0; index < 99; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 3, 19, 1, index, 0)).toISOString()
+      const seeded = await createIntent(vaultRoot, {
+        createdAt,
+        message: `newer terminal ${index}`,
+        sessionId: `session-newer-terminal-${index}`,
+        turnId: `turn-newer-terminal-${index}`,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        status: 'failed',
+        updatedAt: createdAt,
+      })
+    }
+
+    const olderByInstant = await createIntent(vaultRoot, {
+      createdAt: '2026-04-19T00:30:00+01:00',
+      message: 'older by instant',
+      sessionId: 'session-older-by-instant',
+      turnId: 'turn-older-by-instant',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...olderByInstant,
+      status: 'failed',
+      updatedAt: '2026-04-19T00:30:00+01:00',
+    })
+
+    const newerByInstant = await createIntent(vaultRoot, {
+      createdAt: '2026-04-19T00:00:00.000Z',
+      message: 'newer by instant',
+      sessionId: 'session-newer-by-instant',
+      turnId: 'turn-newer-by-instant',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...newerByInstant,
+      status: 'failed',
+      updatedAt: '2026-04-19T00:00:00.000Z',
+    })
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(1)
+
+    const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained).toHaveLength(100)
+    expect(retained.some((intent) => intent.message === 'older by instant')).toBe(
+      false,
+    )
+    expect(retained.some((intent) => intent.message === 'newer by instant')).toBe(
+      true,
+    )
   })
 
   it('reconciles stale persisted deliveries without resending them', async () => {
@@ -3610,18 +3672,11 @@ function expectMessageDelivery(
 function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[number] {
   return {
     kind: 'voice_memo',
-    url: null,
-    mimeType: 'audio/mpeg',
     filename: 'memo.mp3',
-    sizeBytes: 128,
-    transcript: 'Short memo',
-    source: 'elevenlabs',
-    voiceId: 'voice_murph',
-    modelId: 'eleven_multilingual_v2',
-    transportRefs: {
-      linq: {
-        attachmentId: 'attachment_voice_1',
-      },
+    transcript: null,
+    transport: {
+      attachmentId: 'attachment_voice_1',
+      kind: 'linq_attachment',
     },
   }
 }

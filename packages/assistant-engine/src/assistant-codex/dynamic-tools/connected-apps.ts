@@ -15,9 +15,9 @@ import type {
 } from '../../assistant/connected-apps-port.js'
 
 import {
-  buildSafeToolCallValidationDigest,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
+import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const CONNECTED_APPS_RESULT_MAX_BYTES = 120_000
 
@@ -85,83 +85,45 @@ export function readConnectedAppsDynamicToolRequest(input: {
 }): ConnectedAppsDynamicToolRequest | null {
   switch (input.tool) {
     case MURPH_CONNECTED_APPS_MANAGE_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsManageInputSchema,
-        schemaName: 'murph.connected_apps_manage.input',
         schemaRootKeys: ['action', 'toolkit', 'alias', 'account'],
         toolName: 'murph.connected_apps_manage',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-manage' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-manage' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     case MURPH_CONNECTED_APPS_SEARCH_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsSearchInputSchema,
-        schemaName: 'murph.connected_apps_search.input',
-        schemaRootKeys: Object.keys(hostedConnectedAppsSearchInputSchema.shape),
         toolName: 'murph.connected_apps_search',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-search' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-search' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     case MURPH_CONNECTED_APPS_EXECUTE_TOOL.name: {
-      const parsed = parseConnectedAppsArguments({
-        argumentsValue: input.arguments,
+      const parsed = parseDynamicToolArguments({
         schema: hostedConnectedAppsExecuteInputSchema,
-        schemaName: 'murph.connected_apps_execute.input',
-        schemaRootKeys: Object.keys(hostedConnectedAppsExecuteInputSchema.shape),
         toolName: 'murph.connected_apps_execute',
+        value: input.arguments,
       })
       return parsed.ok
-        ? { args: parsed.data, kind: 'connected-apps-execute' }
-        : parsed.request
+        ? { args: parsed.args, kind: 'connected-apps-execute' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
     }
     default:
       return null
   }
 }
 
-function parseConnectedAppsArguments<T>(input: {
-  argumentsValue: unknown
-  schema: z.ZodType<T>
-  schemaName: string
-  schemaRootKeys: readonly string[]
-  toolName: string
-}):
-  | { data: T; ok: true }
-  | {
-      ok: false
-      request: Extract<
-        ConnectedAppsDynamicToolRequest,
-        { kind: 'invalid-connected-apps-arguments' }
-      >
-    } {
-  const parsed = input.schema.safeParse(input.argumentsValue)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      request: {
-        kind: 'invalid-connected-apps-arguments',
-        validationDigest: buildSafeToolCallValidationDigest({
-          error: parsed.error,
-          rawInput: input.argumentsValue,
-          requestedToolName: input.toolName,
-          schemaName: input.schemaName,
-          schemaRootKeys: input.schemaRootKeys,
-          toolName: input.toolName,
-        }),
-      },
-    }
-  }
-
-  return {
-    data: parsed.data,
-    ok: true,
-  }
+function invalidConnectedAppsArgumentsRequest(
+  validationDigest: SafeToolCallValidationDigest,
+): ConnectedAppsDynamicToolRequest {
+  return { kind: 'invalid-connected-apps-arguments', validationDigest }
 }
 
 export async function executeConnectedAppsDynamicTool(input: {
@@ -255,18 +217,31 @@ function stripHtmlForConnectedAppsResult(value: string): string {
     .replace(/<head\b[^>]*>[\s\S]*?<\/head>/giu, ' ')
     // Preserve the most semantically important attributes: a hyperlink's
     // href (tracking links, order URLs, calendar invites, unsubscribe) and
-    // an image's alt text. Both get folded into the surrounding text so the
-    // model sees the destination/label even though the tag is gone.
+    // an image's alt text. The opening-tag pattern uses a quote-aware
+    // tokenizer (`[^>"']` OR a complete `"..."` / `'...'` string) so that
+    // attribute values containing literal `>` (`<a title="Reply >>"...>`,
+    // common in marketing email and table-of-contents emails) do not abort
+    // the match and silently drop the href. href and alt are then extracted
+    // from the captured opening tag with a separate regex so both single-
+    // and double-quoted forms work without nested capture-group plumbing.
     .replace(
-      /<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/giu,
-      (_match, href: string, label: string) => {
-        const trimmed = label.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
-        return trimmed && trimmed !== href ? `${trimmed} (${href})` : href
+      /<a\b(?:[^>"']|"[^"]*"|'[^']*')*?>([\s\S]*?)<\/a>/giu,
+      (match, inner: string) => {
+        const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const href = hrefMatch ? (hrefMatch[1] ?? hrefMatch[2] ?? null) : null
+        const label = inner.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
+        if (!href) return label
+        if (!label) return href
+        return label === href ? href : `${label} (${href})`
       },
     )
     .replace(
-      /<img\b[^>]*\balt\s*=\s*['"]([^'"]+)['"][^>]*>/giu,
-      (_match, alt: string) => `[image: ${alt}]`,
+      /<img\b(?:[^>"']|"[^"]*"|'[^']*')*?>/giu,
+      (match) => {
+        const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/iu.exec(match)
+        const alt = altMatch ? (altMatch[1] ?? altMatch[2] ?? null) : null
+        return alt ? `[image: ${alt}]` : ' '
+      },
     )
     // Block-level breaks become real newlines so flowing prose survives.
     .replace(/<br\s*\/?>/giu, '\n')

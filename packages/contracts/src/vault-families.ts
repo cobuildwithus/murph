@@ -29,6 +29,7 @@ import {
   auditRecordSchema,
   coreFrontmatterSchema,
   eventRecordSchema,
+  inboxAttachmentRetentionRecordSchema,
   experimentFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
@@ -59,6 +60,7 @@ export const METRIC_SAMPLE_LEDGER_DIRECTORY = "ledger/metric-samples" as const;
 export const SAMPLE_LEDGER_DIRECTORY = "ledger/samples" as const;
 export const AUDIT_DIRECTORY = "audit" as const;
 export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures" as const;
+export const INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY = "ledger/inbox-attachment-retention" as const;
 export const RAW_INBOX_DIRECTORY = "raw/inbox" as const;
 export const RAW_INTEGRATIONS_DIRECTORY = "raw/integrations" as const;
 export const RAW_ASSESSMENTS_DIRECTORY = "raw/assessments" as const;
@@ -102,6 +104,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   samples: "samples",
   audits: "audits",
   inboxCaptures: "inboxCaptures",
+  inboxAttachmentRetention: "inboxAttachmentRetention",
   rawAssessments: "rawAssessments",
   rawCaptures: "rawCaptures",
   rawDocuments: "rawDocuments",
@@ -601,6 +604,25 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    // Append-only, monthly-sharded, no compaction. Records are ~200-byte
+    // tombstones; a heavy user produces ~730 KB/year. Lifecycle posture is
+    // recorded in docs/contracts/06-hosted-workspace-file-count.md under
+    // "Write Family Lifecycle Decisions".
+    id: VAULT_FAMILY_IDS.inboxAttachmentRetention,
+    description: "Inbox attachment retention ledger shards.",
+    owner: "inboxd",
+    storageKind: "jsonl-directory",
+    directory: INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY,
+    fileExtension: ".jsonl",
+    shardPattern: "ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl",
+    querySource: "none",
+    validation: {
+      kind: "jsonl",
+      issueCode: "CONTRACT_INVALID",
+      schema: inboxAttachmentRetentionRecordSchema,
+    },
+  },
+  {
     id: VAULT_FAMILY_IDS.rawAssessments,
     description: "Immutable raw assessment imports.",
     owner: "core",
@@ -928,6 +950,7 @@ export const VAULT_LAYOUT = Object.freeze({
   metricSampleLedgerDirectory: METRIC_SAMPLE_LEDGER_DIRECTORY,
   sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
   inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
+  inboxAttachmentRetentionLedgerDirectory: INBOX_ATTACHMENT_RETENTION_LEDGER_DIRECTORY,
   rawDirectory: RAW_DIRECTORY,
   rawAssessmentsDirectory: RAW_ASSESSMENTS_DIRECTORY,
   rawCapturesDirectory: RAW_CAPTURES_DIRECTORY,
@@ -955,4 +978,5 @@ export const VAULT_SHARDS = Object.freeze({
   samples: getVaultShardPattern(VAULT_FAMILY_IDS.samples),
   audit: getVaultShardPattern(VAULT_FAMILY_IDS.audits),
   inboxCaptures: getVaultShardPattern(VAULT_FAMILY_IDS.inboxCaptures),
+  inboxAttachmentRetention: getVaultShardPattern(VAULT_FAMILY_IDS.inboxAttachmentRetention),
 });

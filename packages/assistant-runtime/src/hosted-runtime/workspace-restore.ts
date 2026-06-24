@@ -10,6 +10,7 @@ import {
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
 import {
+  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import type {
@@ -981,7 +982,7 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   }
 
   receipts.sort((left, right) =>
-    left.committedAt.localeCompare(right.committedAt)
+    compareHostedIsoTimestampsAscending(left.committedAt, right.committedAt)
     || left.operationId.localeCompare(right.operationId)
   );
 

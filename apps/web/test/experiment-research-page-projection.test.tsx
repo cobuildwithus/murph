@@ -11,6 +11,7 @@ import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons
 import type { ResearchTabExperiment } from "@/src/components/experiments/experiment-detail/research-tab";
 
 const mocks = vi.hoisted(() => ({
+  getHostedDashboardPageAuthSnapshot: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedDashboardPageAuthSnapshot,
 }));
 
 vi.mock("@/src/components/experiments/experiment-detail/research-tab", () => ({
@@ -46,6 +51,12 @@ import ExperimentResearchPage, {
 
 describe("ExperimentResearchPage", () => {
   beforeEach(() => {
+    mocks.getHostedDashboardPageAuthSnapshot.mockReset();
+    mocks.getHostedDashboardPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: null,
+      session: null,
+    });
     mocks.notFound.mockClear();
     mocks.researchTab.mockClear();
   });

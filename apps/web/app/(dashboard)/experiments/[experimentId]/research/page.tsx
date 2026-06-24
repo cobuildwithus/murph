@@ -9,6 +9,7 @@ import {
   resolveHealthCommonsExperimentResearchTab,
   type ExperimentResearchTabProjection,
 } from "@/src/lib/health-commons/experiment-projections";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -37,6 +38,7 @@ export default async function ExperimentResearchPage({
 }: {
   params: Promise<{ experimentId: string }>;
 }) {
+  await getHostedDashboardPageAuthSnapshot();
   const { experimentId } = await params;
   const research = resolveHealthCommonsExperimentResearchTab(experimentId);
 

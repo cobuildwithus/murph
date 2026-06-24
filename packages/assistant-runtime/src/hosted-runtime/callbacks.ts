@@ -3,6 +3,7 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
+  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
@@ -630,8 +631,10 @@ function compareHostedAssistantDeliveryCandidateCreatedAt(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
-  return readHostedAssistantDeliveryCandidateCreatedAt(left)
-    .localeCompare(readHostedAssistantDeliveryCandidateCreatedAt(right));
+  return compareHostedIsoTimestampsAscending(
+    readHostedAssistantDeliveryCandidateCreatedAt(left),
+    readHostedAssistantDeliveryCandidateCreatedAt(right),
+  );
 }
 
 function readHostedAssistantDeliveryCandidatePriority(
@@ -2151,47 +2154,11 @@ function normalizeHostedAssistantDeliveryMedia(
       return item;
     }
 
-    const linq = item.transportRefs.linq ?? null;
-    const telegram = item.transportRefs.telegram ?? null;
-    if (!linq?.attachmentId && !telegram) {
-      throw new VaultCliError(
-        "ASSISTANT_HOSTED_VOICE_MEMO_TRANSPORT_REQUIRED",
-        "Hosted voice memo delivery requires a supported transport reference.",
-      );
-    }
-    if (item.url !== null) {
-      throw new VaultCliError(
-        "ASSISTANT_HOSTED_VOICE_MEMO_URL_UNSUPPORTED",
-        "Hosted voice memo delivery does not support URL-only voice memo media.",
-      );
-    }
-
     return {
       filename: item.filename,
       kind: "voice_memo",
-      mimeType: item.mimeType,
-      modelId: item.modelId,
-      sizeBytes: item.sizeBytes,
-      source: item.source,
-      transcript: item.transcript,
-      transportRefs: {
-        ...(linq?.attachmentId
-          ? {
-              linq: {
-                attachmentId: linq.attachmentId,
-              },
-            }
-          : {}),
-        ...(telegram
-          ? {
-              telegram: {
-                sendMode: telegram.sendMode,
-              },
-            }
-          : {}),
-      },
-      url: null,
-      voiceId: item.voiceId,
+      transcript: item.transcript ?? null,
+      transport: item.transport,
     };
   });
 }

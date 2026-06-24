@@ -6,6 +6,7 @@ import {
   type HostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import { requireHostedRuntimeLatencyOpsAccess } from "@/src/lib/hosted-runtime-latency/ops-access";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   Table,
   TableBody,
@@ -38,6 +39,7 @@ export default async function RuntimeLatencyOpsPage({
 }: {
   searchParams?: Promise<RuntimeLatencySearchParams>;
 } = {}) {
+  await getHostedDashboardPageAuthSnapshot();
   await requireHostedRuntimeLatencyOpsAccess();
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const dashboard = await readHostedIngressLatencyDashboard({

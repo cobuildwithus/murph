@@ -36,6 +36,7 @@ export interface AttachmentRow {
   file_name: string | null;
   size_bytes: number | null;
   sha256: string | null;
+  content_status: StoredAttachment["contentStatus"];
   extracted_text: string | null;
   transcript_text: string | null;
   derived_path: string | null;
@@ -100,6 +101,7 @@ export function decodeAttachmentRow(row: Record<string, unknown>): AttachmentRow
     file_name: expectNullableString(row.file_name, "capture_attachment.file_name"),
     size_bytes: expectNullableNumber(row.size_bytes, "capture_attachment.size_bytes"),
     sha256: expectNullableString(row.sha256, "capture_attachment.sha256"),
+    content_status: normalizeAttachmentContentStatus(row.content_status),
     extracted_text: expectNullableString(row.extracted_text, "capture_attachment.extracted_text"),
     transcript_text: expectNullableString(row.transcript_text, "capture_attachment.transcript_text"),
     derived_path: expectNullableString(row.derived_path, "capture_attachment.derived_path"),
@@ -201,6 +203,7 @@ export function hydrateCaptureAttachments(rows: AttachmentRow[]): Map<string, In
       fileName: row.file_name,
       byteSize: row.size_bytes,
       sha256: row.sha256,
+      contentStatus: row.content_status,
       extractedText: row.extracted_text,
       transcriptText: row.transcript_text,
       derivedPath: row.derived_path,
@@ -249,6 +252,10 @@ function expectString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function normalizeAttachmentContentStatus(value: unknown): StoredAttachment["contentStatus"] {
+  return value === "retention_expired" ? "retention_expired" : "available";
 }
 
 function expectNullableString(value: unknown, label: string): string | null {

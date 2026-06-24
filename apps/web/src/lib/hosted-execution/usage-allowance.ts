@@ -11,8 +11,10 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
+  normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
+  type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
   type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
@@ -213,6 +215,13 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
   eleven_v3: 100_000n,
 } as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
 
+// ElevenLabs Music is priced by generated duration.
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_VERSION =
+  "elevenlabs-music-pricing-2026-06-24";
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_SOURCE =
+  "https://elevenlabs.io/pricing/api";
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE = 150_000n;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": {
     cachedInputUsdMicrosPerMillionTokens: 500_000n,
@@ -262,11 +271,24 @@ export function priceHostedAiUsageForAllowance(
     });
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
     return priceHostedAiUsageElevenLabsTtsForAllowance({
       counted,
       credentialSource,
+      match: ttsMatch,
+      record,
+    });
+  }
+
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
+    return priceHostedAiUsageElevenLabsMusicForAllowance({
+      counted,
+      credentialSource,
+      match: musicMatch,
       record,
     });
   }
@@ -371,8 +393,13 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
     return tokenPricingBasis;
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
-    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+  if (matchHostedAiUsageElevenLabsTtsRecord(record) !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
+    return tokenPricingBasis;
+  }
+
+  if (matchHostedAiUsageElevenLabsMusicRecord(record) !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
     return tokenPricingBasis;
   }
 
@@ -1354,12 +1381,13 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   }
 }
 
-function assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(
+function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
+  feature: "TTS" | "Music",
 ): void {
   if (basis !== "standard") {
     throw new TypeError(
-      "ElevenLabs TTS hosted AI usage must use standard token pricing basis.",
+      `ElevenLabs ${feature} hosted AI usage must use standard token pricing basis.`,
     );
   }
 }
@@ -1394,7 +1422,7 @@ function priceHostedAiUsageAudioForAllowance(input: {
   credentialSource: AssistantUsageCredentialSource;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const durationMs = readHostedAiUsageAudioDurationMs(input.record);
+  const durationMs = readHostedAiUsageDurationMs(input.record);
   const costUsdMicros = input.counted && durationMs !== null
     ? priceAudioDurationUsdMicros(durationMs)
     : 0n;
@@ -1423,7 +1451,7 @@ function priceHostedAiUsageAudioForAllowance(input: {
   };
 }
 
-function readHostedAiUsageAudioDurationMs(record: AssistantUsageRecord): bigint | null {
+function readHostedAiUsageDurationMs(record: AssistantUsageRecord): bigint | null {
   const durationMs = record.rawUsageJson?.durationMs;
 
   return typeof durationMs === "number"
@@ -1443,36 +1471,59 @@ function readHostedAiUsageAudioBytes(record: AssistantUsageRecord): bigint | nul
     : null;
 }
 
-function priceAudioDurationUsdMicros(durationMs: bigint): bigint {
+function priceAudioDurationUsdMicros(
+  durationMs: bigint,
+  usdMicrosPerMinute = HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE,
+): bigint {
   if (durationMs <= 0n) {
     return 0n;
   }
 
-  return ((durationMs * HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE)
+  return ((durationMs * usdMicrosPerMinute)
     + MS_PER_PRICING_MINUTE - 1n)
     / MS_PER_PRICING_MINUTE;
 }
 
-function isHostedAiUsageAllowanceElevenLabsTtsRecord(record: AssistantUsageRecord): boolean {
-  return record.provider === "elevenlabs"
-    && record.usageExtractionSourcePath === "elevenlabs.text_to_speech"
-    && record.cacheWriteTokens === null
-    && record.cachedInputTokens === null
-    && record.inputTokens === null
-    && record.outputTokens === null
-    && record.reasoningTokens === null
-    && record.totalTokens === null
-    && readHostedAiUsageElevenLabsTtsCharacterCount(record) !== null;
+interface HostedAiUsageAllowanceElevenLabsTtsMatch {
+  characterCount: bigint;
+  modelResolution: {
+    model: HostedAiUsageAllowanceElevenLabsTtsPricedModel | null;
+    source: HostedAiUsageAllowancePricingModelSource | null;
+  };
+}
+
+function matchHostedAiUsageElevenLabsTtsRecord(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowanceElevenLabsTtsMatch | null {
+  if (
+    record.provider !== "elevenlabs"
+    || record.usageExtractionSourcePath !== "elevenlabs.text_to_speech"
+    || record.cacheWriteTokens !== null
+    || record.cachedInputTokens !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.totalTokens !== null
+  ) {
+    return null;
+  }
+  const characterCount = readHostedAiUsageElevenLabsTtsCharacterCount(record);
+  if (characterCount === null) {
+    return null;
+  }
+  return {
+    characterCount,
+    modelResolution: resolveHostedAiUsageAllowanceElevenLabsTtsModel(record),
+  };
 }
 
 function priceHostedAiUsageElevenLabsTtsForAllowance(input: {
   counted: boolean;
   credentialSource: AssistantUsageCredentialSource;
+  match: HostedAiUsageAllowanceElevenLabsTtsMatch;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const characterCount =
-    readHostedAiUsageElevenLabsTtsCharacterCount(input.record) ?? 0n;
-  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsTtsModel(input.record);
+  const { characterCount, modelResolution } = input.match;
   const usdMicrosPerThousandCharacters = modelResolution.model
     ? HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES[modelResolution.model]
     : null;
@@ -1568,6 +1619,96 @@ function normalizeHostedAiUsageAllowanceElevenLabsTtsModel(
   value: string | null,
 ): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
   return normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(value);
+}
+
+interface HostedAiUsageAllowanceElevenLabsMusicMatch {
+  durationMs: bigint;
+  modelResolution: {
+    model: HostedAiUsageAllowanceElevenLabsMusicPricedModel | null;
+    source: HostedAiUsageAllowancePricingModelSource | null;
+  };
+}
+
+function matchHostedAiUsageElevenLabsMusicRecord(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowanceElevenLabsMusicMatch | null {
+  if (
+    record.provider !== "elevenlabs"
+    || record.featureKey !== "music-generation"
+    || record.usageExtractionSourcePath !== "elevenlabs.music.compose"
+    || record.cacheWriteTokens !== null
+    || record.cachedInputTokens !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.totalTokens !== null
+  ) {
+    return null;
+  }
+  const durationMs = readHostedAiUsageDurationMs(record);
+  if (durationMs === null) {
+    return null;
+  }
+  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsMusicModel(record);
+  if (modelResolution.model === null) {
+    return null;
+  }
+  return { durationMs, modelResolution };
+}
+
+function priceHostedAiUsageElevenLabsMusicForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  match: HostedAiUsageAllowanceElevenLabsMusicMatch;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const { durationMs, modelResolution } = input.match;
+  const costUsdMicros = input.counted
+    ? priceAudioDurationUsdMicros(
+        durationMs,
+        HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE,
+      )
+    : 0n;
+
+  return {
+    costUsdMicros,
+    counted: input.counted,
+    pricingSnapshot: {
+      credentialSource: input.credentialSource,
+      model: modelResolution.model,
+      modelSource: modelResolution.source,
+      audio: {
+        durationMs: durationMs.toString(),
+        usdMicrosPerGeneratedMinute:
+          HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE.toString(),
+      },
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_SOURCE,
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+    },
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_VERSION,
+  };
+}
+
+function resolveHostedAiUsageAllowanceElevenLabsMusicModel(
+  record: AssistantUsageRecord,
+): {
+  model: HostedAiUsageAllowanceElevenLabsMusicPricedModel | null;
+  source: HostedAiUsageAllowancePricingModelSource | null;
+} {
+  const served = normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(record.servedModel);
+  if (served) {
+    return { model: served, source: "served" };
+  }
+
+  const requested = normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
+    record.requestedModel,
+  );
+  return requested
+    ? { model: requested, source: "requested" }
+    : { model: null, source: null };
 }
 
 function buildHostedAiUsageAllowanceTokenSnapshot(
