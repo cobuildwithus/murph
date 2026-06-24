@@ -1169,7 +1169,7 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
     retryAfter,
     userNotice: {
       code: "trial_conversion_pending",
-      message: "Your trial has ended and billing is being updated. Try again shortly.",
+      message: `Your trial has ended. Start Pulse to keep Murph replying: ${HOSTED_AI_USAGE_HOME_URL}`,
     },
   };
 }
