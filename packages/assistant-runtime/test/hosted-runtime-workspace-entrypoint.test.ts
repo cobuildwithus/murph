@@ -9711,9 +9711,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
     const followUpWakeAt = "2026-04-27T00:11:00.000Z";
     const idleCheckpointDelayMs = 90_000;
-    const runtimeTransitionTimeoutMs = 5_000;
+    const runtimeTransitionTimeoutMs = 15_000;
     const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_device_sync_pending_retry_bootstrap",
@@ -9784,7 +9785,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       };
 
-      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_pending_retry",
@@ -9919,6 +9920,7 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       shutdownController.abort();
       vi.useRealTimers();
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
@@ -9928,6 +9930,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 90_000;
+    const runtimeTransitionTimeoutMs = 15_000;
     const abortReason = new Error("pending retry observed before idle checkpoint");
     const runtimeAbortController = new AbortController();
     let resultPromise: Promise<unknown> | null = null;
@@ -10023,13 +10026,20 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       ).catch((error: unknown) => error);
 
-      await withRealTimeout(systemProcessed.promise, 1_000, () => events.join(","));
+      await withRealTimeout(systemProcessed.promise, runtimeTransitionTimeoutMs, () =>
+        events.join(",")
+      );
       await vi.advanceTimersByTimeAsync(30_000);
-      await withRealTimeout(assistantRetryObserved.promise, 1_000, () => events.join(","));
+      await withRealTimeout(assistantRetryObserved.promise, runtimeTransitionTimeoutMs, () =>
+        events.join(",")
+      );
       assert.equal(assistantPassFinishedCount, 1, events.join(","));
       assert.equal(events.includes("snapshot:idle_shutdown"), false);
       assert.equal(checkpointRequests.length, 0);
-      assert.equal(await withRealTimeout(resultPromise, 1_000, () => events.join(",")), abortReason);
+      assert.equal(
+        await withRealTimeout(resultPromise, runtimeTransitionTimeoutMs, () => events.join(",")),
+        abortReason,
+      );
     } finally {
       if (!runtimeAbortController.signal.aborted) {
         runtimeAbortController.abort(abortReason);

@@ -8,7 +8,7 @@ import {
   usePrivy,
 } from "@privy-io/react-auth";
 import { Fingerprint } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { Button } from "@/src/components/ui/button";
@@ -48,7 +48,9 @@ function PasskeySetup() {
   // hasn't re-rendered yet. A ref kept in sync each render gives the handler a fresh
   // window into Privy's user state without waiting for React to commit.
   const userRef = useRef<User | null>(user);
-  userRef.current = user;
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
   const [error, setError] = useState<string | null>(null);
