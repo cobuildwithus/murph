@@ -20,6 +20,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -70,6 +71,7 @@ export interface HostedWorkspaceInvocationOptions {
   } | null;
   nodeStartupMs?: number | null;
   onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
+  orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   runnerJobAcceptedAt?: string | null;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
@@ -191,20 +193,27 @@ export async function runHostedWorkspaceInvocation(
       timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
     });
 
-    const hasNodeStartup = options.nodeStartupMs !== null && options.nodeStartupMs !== undefined;
+    const nodeStartupMs = options.nodeStartupMs;
+    const hasNodeStartup = nodeStartupMs !== null && nodeStartupMs !== undefined;
     const hasDispatch = options.dispatch !== null
       && options.dispatch !== undefined
       && Object.keys(options.dispatch).length > 0;
+    const hasOrchestration = options.orchestration !== null
+      && options.orchestration !== undefined
+      && Object.keys(options.orchestration).length > 0;
     const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
       ...(options.runnerJobAcceptedAt
         ? { runnerJobAcceptedAt: options.runnerJobAcceptedAt }
         : {}),
-      ...(hasNodeStartup || hasDispatch
+      ...(hasNodeStartup || hasDispatch || hasOrchestration
         ? {
             phaseBreakdown: {
               schemaVersion: 1,
+              ...(hasOrchestration ? { orchestration: { ...options.orchestration } } : {}),
               ...(hasDispatch ? { dispatch: { ...options.dispatch } } : {}),
-              ...(hasNodeStartup ? { boot: { nodeStartupMs: options.nodeStartupMs as number } } : {}),
+              ...(nodeStartupMs === null || nodeStartupMs === undefined
+                ? {}
+                : { boot: { nodeStartupMs } }),
             },
           }
         : {}),

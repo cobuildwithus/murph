@@ -71,6 +71,10 @@ import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
   readDeployLiveModelTurnSmokeCodexOutputText,
 } from "./deploy-smoke-live-model.ts";
+import {
+  readHostedRuntimeOrchestrationLatencyHeaders,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
+} from "./orchestration-latency-diagnostics.ts";
 
 // Module-evaluation timestamp approximates process start; subtracting the
 // elapsed process uptime recovers the true process-start wall clock so the
@@ -762,6 +766,8 @@ export async function startHostedContainerEntrypoint(input: {
       const runnerJobAcceptedAt = new Date().toISOString();
       const coldNodeStartupMs = pendingColdNodeStartupMs;
       pendingColdNodeStartupMs = null;
+      const orchestrationMilestones =
+        readHostedRuntimeOrchestrationLatencyHeaders(request.headers);
       const dispatchMilestones = readHostedContainerDispatchMilestones(request);
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -841,6 +847,7 @@ export async function startHostedContainerEntrypoint(input: {
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
+        ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
         runnerJobAcceptedAt,
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
@@ -2919,6 +2926,7 @@ async function runHostedWorkspaceInvocation(
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
+    orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
@@ -2928,6 +2936,7 @@ async function runHostedWorkspaceInvocation(
     dispatch: options?.dispatch ?? null,
     nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
+    orchestration: options?.orchestration ?? null,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
     shutdownSignal: options?.shutdownSignal ?? null,
     signal: options?.signal,
@@ -2943,6 +2952,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
+    orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;

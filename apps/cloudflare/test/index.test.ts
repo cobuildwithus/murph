@@ -65,6 +65,8 @@ import {
 import {
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -1950,6 +1952,10 @@ describe("cloudflare worker routes", () => {
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER]:
+                "1776999999000",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER]:
+                "1776999999050",
               [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]: "10000",
             },
             method: "POST",
@@ -1969,6 +1975,11 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
         commandTimeoutMs: 10_000,
+        orchestration: {
+          temporalActivityStartedAtEpochMs: 1_776_999_999_000,
+          temporalActivityRequestStartedAtEpochMs: 1_776_999_999_050,
+          cloudflareRouteReceivedAtEpochMs: expect.any(Number),
+        },
         userId: "test-user",
       });
     });
@@ -2031,6 +2042,9 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: {
+          cloudflareRouteReceivedAtEpochMs: expect.any(Number),
+        },
         userId: "test-user",
       });
     });

@@ -286,6 +286,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
   ReadonlySet<string>
 > = {
+  orchestration: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.orchestration),
   dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
@@ -1040,6 +1041,32 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       `${label}.schemaVersion`,
     ),
   };
+
+  if (record.orchestration !== undefined) {
+    const orchestrationLabel = `${label}.orchestration`;
+    const orchestration = requireObject(record.orchestration, orchestrationLabel);
+    assertAllowedObjectKeys(
+      orchestration,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.orchestration,
+      orchestrationLabel,
+    );
+    breakdown.orchestration = {
+      ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityRequestStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "activeWakeFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalBoolean(orchestration, "activeWakeAccepted", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "replacementFenceClearedAtEpochMs", orchestrationLabel),
+      ...requireOptionalBoolean(orchestration, "replacedStaleFence", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartRequestedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartFenceBoundAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationPreparedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationAcceptedAtEpochMs", orchestrationLabel),
+    };
+  }
 
   if (record.dispatch !== undefined) {
     const dispatchLabel = `${label}.dispatch`;

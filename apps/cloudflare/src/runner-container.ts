@@ -31,6 +31,11 @@ import {
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
+import {
+  buildHostedRuntimeOrchestrationLatencyHeaders,
+  sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
+} from "./orchestration-latency-diagnostics.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
 } from "./worker-contracts.ts";
@@ -142,6 +147,7 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
   userId: string;
 }
@@ -160,6 +166,7 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
 
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   signal?: AbortSignal;
@@ -1048,6 +1055,7 @@ export class RunnerContainer extends Container {
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
+            ...buildHostedRuntimeOrchestrationLatencyHeaders(input.orchestration),
             "x-dispatch-invoke-received-at-ms": String(dispatchInvokeReceivedAtEpochMs),
             "x-dispatch-container-ensure-ready-started-at-ms": String(
               dispatchContainerEnsureReadyStartedAtEpochMs,
@@ -2057,6 +2065,7 @@ export async function invokeHostedExecutionContainerRunner(
   const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
   const invokeRequest: HostedExecutionContainerInvokeRequest = {
     job: input.job,
+    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     ...(input.timeoutMs === undefined || input.timeoutMs === null
       ? {}
       : { timeoutMs: input.timeoutMs }),
@@ -2673,6 +2682,7 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
 function parseHostedExecutionContainerInvokeInput(
   payload: {
     job?: unknown;
+    orchestration?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
@@ -2687,6 +2697,7 @@ function parseHostedExecutionContainerInvokeInput(
 
   return {
     job,
+    orchestration: sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(payload.orchestration),
     timeoutMs: readOptionalTimeoutMs(payload.timeoutMs),
     userId,
   };

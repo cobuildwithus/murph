@@ -793,6 +793,25 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
+  // Control-plane orchestration stamps before the runner-container DO starts
+  // dispatch. These are epoch-ms values from different hosts, so they are for
+  // coarse span splitting only, not strict clock-order assertions.
+  orchestration?: {
+    temporalActivityStartedAtEpochMs?: number;
+    temporalActivityRequestStartedAtEpochMs?: number;
+    cloudflareRouteReceivedAtEpochMs?: number;
+    userRunnerEnsureStartedAtEpochMs?: number;
+    activeWakeStartedAtEpochMs?: number;
+    activeWakeFinishedAtEpochMs?: number;
+    activeWakeAccepted?: boolean;
+    replacementFenceClearedAtEpochMs?: number;
+    replacedStaleFence?: boolean;
+    freshStartRequestedAtEpochMs?: number;
+    freshStartFenceBoundAtEpochMs?: number;
+    freshStartContainerReadyAtEpochMs?: number;
+    freshStartInvocationPreparedAtEpochMs?: number;
+    freshStartInvocationAcceptedAtEpochMs?: number;
+  };
   // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
   // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
   // containerEnsureReadyStartedAtEpochMs immediately before ensureContainerReady,
@@ -837,6 +856,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
 }
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
+  "orchestration",
   "dispatch",
   "restore",
   "boot",
@@ -856,6 +876,22 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
   readonly string[]
 > = {
+  orchestration: [
+    "temporalActivityStartedAtEpochMs",
+    "temporalActivityRequestStartedAtEpochMs",
+    "cloudflareRouteReceivedAtEpochMs",
+    "userRunnerEnsureStartedAtEpochMs",
+    "activeWakeStartedAtEpochMs",
+    "activeWakeFinishedAtEpochMs",
+    "activeWakeAccepted",
+    "replacementFenceClearedAtEpochMs",
+    "replacedStaleFence",
+    "freshStartRequestedAtEpochMs",
+    "freshStartFenceBoundAtEpochMs",
+    "freshStartContainerReadyAtEpochMs",
+    "freshStartInvocationPreparedAtEpochMs",
+    "freshStartInvocationAcceptedAtEpochMs",
+  ],
   dispatch: [
     "invokeReceivedAtEpochMs",
     "containerEnsureReadyStartedAtEpochMs",
@@ -890,7 +926,11 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 } as const;
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
-  ["boot.restoreWasCold"] as const;
+  [
+    "orchestration.activeWakeAccepted",
+    "orchestration.replacedStaleFence",
+    "boot.restoreWasCold",
+  ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
 
@@ -913,6 +953,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
   ReadonlySet<string>
 > = {
+  orchestration: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.orchestration),
   dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),

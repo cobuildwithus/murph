@@ -263,6 +263,22 @@ describe("hosted runtime latency dashboard store", () => {
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
+        orchestration: {
+          temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+          temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+          userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+          activeWakeStartedAtEpochMs: 1_777_000_000_040,
+          activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+          activeWakeAccepted: false,
+          replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+          replacedStaleFence: true,
+          freshStartRequestedAtEpochMs: 1_777_000_000_070,
+          freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+          freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+          freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+          freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+        },
         dispatch: {
           invokeReceivedAtEpochMs: 1_777_000_000_000,
           containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -283,6 +299,22 @@ describe("hosted runtime latency dashboard store", () => {
     let trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+        temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        activeWakeStartedAtEpochMs: 1_777_000_000_040,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeAccepted: false,
+        replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacedStaleFence: true,
+        freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+        freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+      },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -296,7 +328,7 @@ describe("hosted runtime latency dashboard store", () => {
       },
     });
 
-    // Idempotent re-send must not clobber the already-populated dispatch/restore/boot/wake.
+    // Idempotent re-send must not clobber already-populated staged diagnostics.
     await recordHostedIngressAssistantInputStaged({
       assistantInputId: "input_phase_1",
       at: instant("2026-06-09T10:00:01.000Z"),
@@ -304,6 +336,11 @@ describe("hosted runtime latency dashboard store", () => {
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
+        orchestration: {
+          temporalActivityStartedAtEpochMs: 999,
+          activeWakeAccepted: true,
+          freshStartInvocationAcceptedAtEpochMs: 999,
+        },
         dispatch: { invokeReceivedAtEpochMs: 999 },
         restore: { sizeGuardMs: 999 },
         boot: { nodeStartupMs: 999 },
@@ -316,6 +353,22 @@ describe("hosted runtime latency dashboard store", () => {
     trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+        temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        activeWakeStartedAtEpochMs: 1_777_000_000_040,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeAccepted: false,
+        replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacedStaleFence: true,
+        freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+        freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+      },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -329,7 +382,7 @@ describe("hosted runtime latency dashboard store", () => {
       },
     });
 
-    // Provider sub-object merges in alongside the preserved restore/boot/wake.
+    // Provider sub-object merges in alongside the preserved staged diagnostics.
     await recordHostedIngressProviderStarted({
       assistantInputIds: ["input_phase_1"],
       at: instant("2026-06-09T10:00:03.000Z"),
@@ -346,6 +399,22 @@ describe("hosted runtime latency dashboard store", () => {
     trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+        temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        activeWakeStartedAtEpochMs: 1_777_000_000_040,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeAccepted: false,
+        replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacedStaleFence: true,
+        freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+        freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+      },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,

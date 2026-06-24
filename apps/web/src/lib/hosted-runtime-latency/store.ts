@@ -750,6 +750,7 @@ async function updateHostedIngressAssistantInputStagedLocked(
           input.restoreMilestones.workspaceRestoreDoneAt,
         ),
         ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
+          "orchestration",
           "dispatch",
           "restore",
           "boot",

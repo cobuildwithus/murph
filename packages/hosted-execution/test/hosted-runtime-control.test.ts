@@ -830,6 +830,22 @@ describe("hosted runtime control contracts", () => {
   it("round-trips phaseBreakdown on both latency events and rejects unsafe leaves", () => {
     const stagedBreakdown = {
       schemaVersion: 1,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_777_000_000_000,
+        temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        activeWakeStartedAtEpochMs: 1_777_000_000_040,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeAccepted: false,
+        replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacedStaleFence: true,
+        freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
+        freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
+        freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+      },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
@@ -930,6 +946,29 @@ describe("hosted runtime control contracts", () => {
         },
       });
       expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    // Orchestration diagnostics are the same metadata-only boundary: epoch-ms
+    // numbers plus explicit booleans only.
+    for (const unsafeOrchestration of [
+      { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
+      { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
+      { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
+      { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
+      { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, orchestration: unsafeOrchestration },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
       expect("phaseBreakdown" in parsed.event).toBe(false);
     }
 

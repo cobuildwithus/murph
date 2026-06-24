@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -57,6 +59,10 @@ describe("ensureRuntimeProcessing", () => {
     expect(headers.has("authorization")).toBe(false);
     expect(headers.has(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBe(true);
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
+    expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER))
+      .toMatch(/^\d+$/u);
+    expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER))
+      .toMatch(/^\d+$/u);
     expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe("10000");
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",

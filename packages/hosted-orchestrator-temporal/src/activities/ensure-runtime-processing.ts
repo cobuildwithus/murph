@@ -6,6 +6,8 @@ import {
   parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 
@@ -27,6 +29,7 @@ const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
 export async function ensureRuntimeProcessing(
   request: EnsureRuntimeProcessingInput,
 ): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const activityStartedAtEpochMs = Date.now();
   const parsedRequest = parseEnsureRuntimeProcessingInput(request);
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
@@ -37,13 +40,18 @@ export async function ensureRuntimeProcessing(
     activity: "ensureRuntimeProcessing",
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     userId: parsedRequest.userId,
-  }, async () =>
-    await requestHostedOrchestratorJson(
+  }, async () => {
+    const requestStartedAtEpochMs = Date.now();
+    return await requestHostedOrchestratorJson(
       cloudflareEnvironment.cloudflareHostedControlBaseUrl,
       {
         body: JSON.stringify(cloudflareRequest),
         boundUserId: parsedRequest.userId,
         unsignedHeaders: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER]:
+            String(activityStartedAtEpochMs),
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER]:
+            String(requestStartedAtEpochMs),
           [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
             String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
         },
@@ -54,8 +62,8 @@ export async function ensureRuntimeProcessing(
         signing: cloudflareEnvironment.cloudflareHostedControlSigning,
         timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
       },
-    )
-  );
+    );
+  });
 }
 
 function parseEnsureRuntimeProcessingInput(
