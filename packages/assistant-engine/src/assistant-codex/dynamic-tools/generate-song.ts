@@ -59,7 +59,6 @@ export function parseGenerateSongArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateSongArgumentsSchema,
-    schemaRootKeys: Object.keys(generateSongArgumentsSchema.shape),
     toolName: 'murph.generate_song',
     value,
   })

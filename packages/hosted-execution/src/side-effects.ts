@@ -843,7 +843,6 @@ function requireExactObjectKeys(
   spec: { required: readonly string[]; optional?: readonly string[] },
   label: string,
 ): void {
-  const required = new Set(spec.required);
   const allowed = new Set<string>([...spec.required, ...(spec.optional ?? [])]);
   const presentKeys = Object.keys(record);
   const present = new Set(presentKeys);

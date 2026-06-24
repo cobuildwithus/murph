@@ -74,54 +74,46 @@ export function readConnectedAppsDynamicToolRequest(input: {
   tool: string | null
 }): ConnectedAppsDynamicToolRequest | null {
   switch (input.tool) {
-    case MURPH_CONNECTED_APPS_MANAGE_TOOL.name:
-      return wrapConnectedAppsParse(
-        parseDynamicToolArguments({
-          schema: hostedConnectedAppsManageInputSchema,
-          schemaRootKeys: ['action', 'toolkit', 'alias', 'account'],
-          toolName: 'murph.connected_apps_manage',
-          value: input.arguments,
-        }),
-        'connected-apps-manage',
-      )
-    case MURPH_CONNECTED_APPS_SEARCH_TOOL.name:
-      return wrapConnectedAppsParse(
-        parseDynamicToolArguments({
-          schema: hostedConnectedAppsSearchInputSchema,
-          schemaRootKeys: Object.keys(hostedConnectedAppsSearchInputSchema.shape),
-          toolName: 'murph.connected_apps_search',
-          value: input.arguments,
-        }),
-        'connected-apps-search',
-      )
-    case MURPH_CONNECTED_APPS_EXECUTE_TOOL.name:
-      return wrapConnectedAppsParse(
-        parseDynamicToolArguments({
-          schema: hostedConnectedAppsExecuteInputSchema,
-          schemaRootKeys: Object.keys(hostedConnectedAppsExecuteInputSchema.shape),
-          toolName: 'murph.connected_apps_execute',
-          value: input.arguments,
-        }),
-        'connected-apps-execute',
-      )
+    case MURPH_CONNECTED_APPS_MANAGE_TOOL.name: {
+      const parsed = parseDynamicToolArguments({
+        schema: hostedConnectedAppsManageInputSchema,
+        schemaRootKeys: ['action', 'toolkit', 'alias', 'account'],
+        toolName: 'murph.connected_apps_manage',
+        value: input.arguments,
+      })
+      return parsed.ok
+        ? { args: parsed.args, kind: 'connected-apps-manage' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
+    }
+    case MURPH_CONNECTED_APPS_SEARCH_TOOL.name: {
+      const parsed = parseDynamicToolArguments({
+        schema: hostedConnectedAppsSearchInputSchema,
+        toolName: 'murph.connected_apps_search',
+        value: input.arguments,
+      })
+      return parsed.ok
+        ? { args: parsed.args, kind: 'connected-apps-search' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
+    }
+    case MURPH_CONNECTED_APPS_EXECUTE_TOOL.name: {
+      const parsed = parseDynamicToolArguments({
+        schema: hostedConnectedAppsExecuteInputSchema,
+        toolName: 'murph.connected_apps_execute',
+        value: input.arguments,
+      })
+      return parsed.ok
+        ? { args: parsed.args, kind: 'connected-apps-execute' }
+        : invalidConnectedAppsArgumentsRequest(parsed.validationDigest)
+    }
     default:
       return null
   }
 }
 
-function wrapConnectedAppsParse<TArgs>(
-  parsed:
-    | { ok: true; args: TArgs }
-    | { ok: false; validationDigest: SafeToolCallValidationDigest },
-  kind: 'connected-apps-manage' | 'connected-apps-search' | 'connected-apps-execute',
+function invalidConnectedAppsArgumentsRequest(
+  validationDigest: SafeToolCallValidationDigest,
 ): ConnectedAppsDynamicToolRequest {
-  if (parsed.ok) {
-    return { args: parsed.args, kind } as ConnectedAppsDynamicToolRequest
-  }
-  return {
-    kind: 'invalid-connected-apps-arguments',
-    validationDigest: parsed.validationDigest,
-  }
+  return { kind: 'invalid-connected-apps-arguments', validationDigest }
 }
 
 export async function executeConnectedAppsDynamicTool(input: {

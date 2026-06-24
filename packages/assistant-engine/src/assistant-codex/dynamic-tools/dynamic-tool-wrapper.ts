@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import { z } from 'zod'
 
 import type {
   AssistantResponseMedia,
@@ -46,11 +46,17 @@ export function wrapVoiceMemoToolResult(
   }
 }
 
-export function parseDynamicToolArguments<T extends z.ZodType<unknown>>(
+export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
   input: {
     schema: T
     schemaName?: string
-    schemaRootKeys: readonly string[]
+    /**
+     * Root-key list used in the validation digest. Required for schemas where
+     * `Object.keys(schema.shape)` is not the natural key set (e.g.
+     * discriminated unions). For plain ZodObject schemas this is derived from
+     * `schema.shape` automatically.
+     */
+    schemaRootKeys?: readonly string[]
     toolName: string
     value: unknown
   },
@@ -66,10 +72,22 @@ export function parseDynamicToolArguments<T extends z.ZodType<unknown>>(
         rawInput: input.value,
         requestedToolName: input.toolName,
         schemaName: input.schemaName ?? `${input.toolName}.input`,
-        schemaRootKeys: input.schemaRootKeys,
+        schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema, input.toolName),
         toolName: input.toolName,
       }),
     }
   }
-  return { args: parsed.data as z.infer<T>, ok: true }
+  return { args: parsed.data, ok: true }
+}
+
+function resolveSchemaRootKeys(
+  schema: z.ZodTypeAny,
+  toolName: string,
+): readonly string[] {
+  if (schema instanceof z.ZodObject) {
+    return Object.keys(schema.shape)
+  }
+  throw new TypeError(
+    `parseDynamicToolArguments requires explicit schemaRootKeys for non-object schemas (${toolName}).`,
+  )
 }

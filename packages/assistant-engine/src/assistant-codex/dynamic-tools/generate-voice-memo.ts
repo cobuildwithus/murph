@@ -57,7 +57,6 @@ export function parseGenerateVoiceMemoArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateVoiceMemoArgumentsSchema,
-    schemaRootKeys: Object.keys(generateVoiceMemoArgumentsSchema.shape),
     toolName: 'murph.generate_voice_memo',
     value,
   })

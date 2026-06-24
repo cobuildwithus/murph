@@ -257,11 +257,13 @@ export function priceHostedAiUsageForAllowance(
     });
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
     return priceHostedAiUsageElevenLabsTtsForAllowance({
       counted,
       credentialSource,
+      match: ttsMatch,
       record,
     });
   }
@@ -377,7 +379,7 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
     return tokenPricingBasis;
   }
 
-  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+  if (matchHostedAiUsageElevenLabsTtsRecord(record) !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
     return tokenPricingBasis;
   }
@@ -1434,26 +1436,46 @@ function priceAudioDurationUsdMicros(
     / MS_PER_PRICING_MINUTE;
 }
 
-function isHostedAiUsageAllowanceElevenLabsTtsRecord(record: AssistantUsageRecord): boolean {
-  return record.provider === "elevenlabs"
-    && record.usageExtractionSourcePath === "elevenlabs.text_to_speech"
-    && record.cacheWriteTokens === null
-    && record.cachedInputTokens === null
-    && record.inputTokens === null
-    && record.outputTokens === null
-    && record.reasoningTokens === null
-    && record.totalTokens === null
-    && readHostedAiUsageElevenLabsTtsCharacterCount(record) !== null;
+interface HostedAiUsageAllowanceElevenLabsTtsMatch {
+  characterCount: bigint;
+  modelResolution: {
+    model: HostedAiUsageAllowanceElevenLabsTtsPricedModel | null;
+    source: HostedAiUsageAllowancePricingModelSource | null;
+  };
+}
+
+function matchHostedAiUsageElevenLabsTtsRecord(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowanceElevenLabsTtsMatch | null {
+  if (
+    record.provider !== "elevenlabs"
+    || record.usageExtractionSourcePath !== "elevenlabs.text_to_speech"
+    || record.cacheWriteTokens !== null
+    || record.cachedInputTokens !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.totalTokens !== null
+  ) {
+    return null;
+  }
+  const characterCount = readHostedAiUsageElevenLabsTtsCharacterCount(record);
+  if (characterCount === null) {
+    return null;
+  }
+  return {
+    characterCount,
+    modelResolution: resolveHostedAiUsageAllowanceElevenLabsTtsModel(record),
+  };
 }
 
 function priceHostedAiUsageElevenLabsTtsForAllowance(input: {
   counted: boolean;
   credentialSource: AssistantUsageCredentialSource;
+  match: HostedAiUsageAllowanceElevenLabsTtsMatch;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const characterCount =
-    readHostedAiUsageElevenLabsTtsCharacterCount(input.record) ?? 0n;
-  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsTtsModel(input.record);
+  const { characterCount, modelResolution } = input.match;
   const usdMicrosPerThousandCharacters = modelResolution.model
     ? HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES[modelResolution.model]
     : null;

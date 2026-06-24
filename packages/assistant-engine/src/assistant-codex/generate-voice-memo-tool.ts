@@ -170,8 +170,7 @@ async function executeGeneratedVoiceMemo(input: {
   runtime: VoiceMemoToolRuntime
   signal: AbortSignal | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  const label = voiceMemoGenerationLabel(input.generation)
-  const transcript = voiceMemoGenerationTranscript(input.generation)
+  const { label, transcript } = describeVoiceMemoGeneration(input.generation)
   const filename = `${input.filenameBase}.mp3`
   if (input.runtime.kind === 'telegram') {
     return {
@@ -260,17 +259,6 @@ function validateElevenLabsApiKeyPrecondition(
     }
   }
   return null
-}
-
-function voiceMemoGenerationTranscript(
-  generation: AssistantVoiceMemoGeneration,
-): string | null {
-  switch (generation.kind) {
-    case 'elevenlabs_speech':
-      return generation.text
-    case 'elevenlabs_music':
-      return null
-  }
 }
 
 function unavailableVoiceMemoResult(
@@ -427,13 +415,19 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+function describeVoiceMemoGeneration(
+  generation: AssistantVoiceMemoGeneration,
+): { label: VoiceMemoGenerationLabel; transcript: string | null } {
+  switch (generation.kind) {
+    case 'elevenlabs_speech':
+      return { label: 'voice memo', transcript: generation.text }
+    case 'elevenlabs_music':
+      return { label: 'song', transcript: null }
+  }
+}
+
 function voiceMemoGenerationLabel(
   generation: AssistantVoiceMemoGeneration,
 ): VoiceMemoGenerationLabel {
-  switch (generation.kind) {
-    case 'elevenlabs_speech':
-      return 'voice memo'
-    case 'elevenlabs_music':
-      return 'song'
-  }
+  return describeVoiceMemoGeneration(generation).label
 }
