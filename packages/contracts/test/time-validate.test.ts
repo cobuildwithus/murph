@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   addDaysToIsoDate,
+  compareIsoTimestampsAscending,
+  compareNullableIsoTimestampsAscending,
   extractIsoDatePrefix,
   formatTimeZoneDateTimeParts,
   isStrictIsoDateTime,
@@ -36,6 +38,25 @@ describe("time helpers", () => {
     expect(normalizeStrictIsoTimestamp("not-a-date")).toBeNull();
     expect(normalizeStrictIsoTimestamp(Number.POSITIVE_INFINITY)).toBeNull();
     expect(normalizeStrictIsoTimestamp(new Date(Number.NaN))).toBeNull();
+  });
+
+  it("compares ISO timestamps by instant before falling back to string order", () => {
+    expect(
+      compareIsoTimestampsAscending(
+        "2026-04-08T00:30:00+01:00",
+        "2026-04-08T00:00:00.000Z",
+      ),
+    ).toBeLessThan(0);
+    expect(
+      compareIsoTimestampsAscending(
+        "2026-04-08T01:00:00+01:00",
+        "2026-04-08T00:00:00.000Z",
+      ),
+    ).toBe(0);
+    expect(compareIsoTimestampsAscending("not-a-date-b", "not-a-date-a")).toBeGreaterThan(0);
+    expect(
+      compareNullableIsoTimestampsAscending(null, "2026-04-08T00:00:00.000Z"),
+    ).toBeGreaterThan(0);
   });
 
   it("parses daily times and formats timezone parts deterministically", () => {

@@ -4,6 +4,7 @@ import {
   applyGatewayProjectionSnapshotToEventLog,
   compareGatewayConversationsDescending,
   compareGatewayMessagesAscending,
+  compareGatewayTimestampsAscending,
   createGatewayAttachmentId,
   createGatewayCaptureMessageId,
   createGatewayConversationSessionKey,
@@ -856,6 +857,123 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
       }),
     ).toBeLessThan(0)
     expect(compareGatewayMessagesAscending(next.messages[0], next.messages[1])).toBeLessThan(0)
+  })
+
+  it('orders gateway timestamps by instant when offset shapes differ', () => {
+    const { next, previous, primary } = buildProjectionSnapshots()
+    const offsetEarlier = '2026-04-08T00:30:00+01:00'
+    const utcLater = '2026-04-08T00:00:00.000Z'
+
+    expect(compareGatewayTimestampsAscending(offsetEarlier, utcLater)).toBeLessThan(0)
+    expect(
+      compareGatewayTimestampsAscending(
+        '2026-04-08T01:00:00+01:00',
+        '2026-04-08T00:00:00.000Z',
+      ),
+    ).toBe(0)
+
+    const conversationOrder = listGatewayConversationsFromSnapshot({
+      ...next,
+      conversations: [
+        {
+          ...next.conversations[0],
+          lastActivityAt: offsetEarlier,
+        },
+        {
+          ...next.conversations[1],
+          lastActivityAt: utcLater,
+        },
+      ],
+      messages: [],
+    })
+    expect(conversationOrder.conversations.map((conversation) => conversation.sessionKey)).toEqual([
+      next.conversations[1].sessionKey,
+      next.conversations[0].sessionKey,
+    ])
+
+    const messageOrder = readGatewayMessagesFromSnapshot({
+      ...next,
+      messages: [
+        {
+          ...next.messages[0],
+          createdAt: utcLater,
+          messageId: 'message-utc-later',
+          sessionKey: primary.sessionKey,
+        },
+        {
+          ...next.messages[1],
+          createdAt: offsetEarlier,
+          messageId: 'message-offset-earlier',
+          sessionKey: primary.sessionKey,
+        },
+      ],
+    }, {
+      limit: 10,
+      oldestFirst: true,
+      sessionKey: primary.sessionKey,
+    })
+    expect(messageOrder.messages.map((message) => message.messageId)).toEqual([
+      'message-offset-earlier',
+      'message-utc-later',
+    ])
+
+    const permissionOrder = listGatewayOpenPermissionsFromSnapshot({
+      ...previous,
+      permissions: [
+        {
+          ...previous.permissions[0],
+          requestId: 'perm-utc-later',
+          requestedAt: utcLater,
+        },
+        {
+          ...previous.permissions[0],
+          requestId: 'perm-offset-earlier',
+          requestedAt: offsetEarlier,
+        },
+      ],
+    })
+    expect(permissionOrder.map((permission) => permission.requestId)).toEqual([
+      'perm-offset-earlier',
+      'perm-utc-later',
+    ])
+
+    const previousForEvents: GatewayProjectionSnapshot = {
+      ...previous,
+      messages: [],
+      permissions: [
+        {
+          ...previous.permissions[0],
+          requestId: 'perm-event',
+          requestedAt: offsetEarlier,
+          resolvedAt: null,
+          status: 'open',
+        },
+      ],
+    }
+    const nextForEvents: GatewayProjectionSnapshot = {
+      ...previousForEvents,
+      generatedAt: utcLater,
+      messages: [
+        {
+          ...next.messages[0],
+          createdAt: offsetEarlier,
+          messageId: 'message-event',
+          sessionKey: primary.sessionKey,
+        },
+      ],
+      permissions: [
+        {
+          ...previousForEvents.permissions[0],
+          note: 'approved',
+          resolvedAt: utcLater,
+          status: 'approved',
+        },
+      ],
+    }
+
+    expect(
+      diffGatewayProjectionSnapshots(previousForEvents, nextForEvents).map((event) => event.kind),
+    ).toEqual(['message.created', 'permission.resolved'])
   })
 
   it('polls and waits for event-log results without inventing extra state', async () => {

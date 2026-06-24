@@ -1,5 +1,6 @@
 import {
   applyGatewayProjectionSnapshotToEventLog,
+  compareGatewayTimestampsAscending,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   fetchGatewayAttachmentsFromSnapshot,
   gatewayListOpenPermissionsInputSchema,
@@ -67,7 +68,7 @@ export class HostedGatewayProjectionCache {
       const current = await this.readCacheState();
       if (
         current.baseSnapshot &&
-        current.baseSnapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
+        compareGatewayTimestampsAscending(current.baseSnapshot.generatedAt, parsed.generatedAt) > 0
       ) {
         return;
       }

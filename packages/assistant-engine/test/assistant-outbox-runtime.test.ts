@@ -732,13 +732,13 @@ describe('assistant outbox runtime', () => {
 
     const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-list-')
     const later = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T00:02:00.000Z',
+      createdAt: '2026-04-08T00:00:00.000Z',
       message: 'later intent',
       sessionId: 'session-list-later',
       turnId: 'turn-list-later',
     })
     const earlier = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T00:01:00.000Z',
+      createdAt: '2026-04-08T00:30:00+01:00',
       message: 'earlier intent',
       sessionId: 'session-list-earlier',
       turnId: 'turn-list-earlier',

@@ -1,6 +1,6 @@
 import { VaultError } from "../errors.ts";
 import { normalizeRelativeVaultPath, sanitizePathSegment } from "../path-safety.ts";
-import { toIsoTimestamp } from "../time.ts";
+import { compareIsoTimestampsAscending, toIsoTimestamp } from "../time.ts";
 
 import type { DateInput } from "../types.ts";
 
@@ -191,12 +191,18 @@ export function compareIsoTimestamps(
   right: { occurredAt: string; recordedAt: string; id: string },
   order: "asc" | "desc",
 ): number {
-  const occurredComparison = left.occurredAt.localeCompare(right.occurredAt);
+  const occurredComparison = compareIsoTimestampsAscending(
+    left.occurredAt,
+    right.occurredAt,
+  );
   if (occurredComparison !== 0) {
     return order === "asc" ? occurredComparison : -occurredComparison;
   }
 
-  const recordedComparison = left.recordedAt.localeCompare(right.recordedAt);
+  const recordedComparison = compareIsoTimestampsAscending(
+    left.recordedAt,
+    right.recordedAt,
+  );
   if (recordedComparison !== 0) {
     return order === "asc" ? recordedComparison : -recordedComparison;
   }

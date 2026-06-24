@@ -198,7 +198,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'A weekly scout for new studies, therapies, treatments, and health research that may relate to your current context.',
     schedule: {
       kind: 'cron',
-      expression: '0 13 * * 3',
+      expression: '30 19 * * 3',
     },
     continuityPolicy: 'fresh',
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
@@ -206,7 +206,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-health-research-scout',
     ],
     instructions: [
-      'Each Wednesday at 1:00 PM local time, produce a concise weekly health research scout for the configured automation route.',
+      'Each Wednesday at 7:30 PM local time, produce a concise weekly health research scout for the configured automation route.',
       '',
       'Goal:',
       "Find 0-3 new studies, therapies, treatments, clinical guidelines, or research insights from the last 60 days that clearly relate to the user's current health context.",

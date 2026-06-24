@@ -14,6 +14,8 @@ import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {
   appendTextFile,
+  compareAssistantNullableTimestampsAscending,
+  compareAssistantTimestampsAscending,
   ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
@@ -122,7 +124,9 @@ export async function readAssistantCronRuns(
       return []
     }
 
-    return parsed.values.sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    return parsed.values.sort((left, right) =>
+      compareAssistantTimestampsAscending(right.startedAt, left.startedAt),
+    )
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
@@ -284,7 +288,7 @@ export function sortAssistantCronJobs(
   jobs: readonly AssistantCronJob[],
 ): AssistantCronJob[] {
   return [...jobs].sort((left, right) => {
-    const nextRunComparison = compareNullableIsoTimestamps(
+    const nextRunComparison = compareAssistantNullableTimestampsAscending(
       left.state.nextRunAt,
       right.state.nextRunAt,
     )
@@ -396,31 +400,6 @@ function resolveAssistantCronRunsPath(
     kind: 'cron job',
     value: jobId,
   })
-}
-
-function compareNullableIsoTimestamps(
-  left: string | null,
-  right: string | null,
-): number {
-  if (left === right) {
-    return 0
-  }
-
-  if (left === null) {
-    return 1
-  }
-
-  if (right === null) {
-    return -1
-  }
-
-  const leftMs = parseAssistantCronTimestampMs(left)
-  const rightMs = parseAssistantCronTimestampMs(right)
-  if (Number.isFinite(leftMs) && Number.isFinite(rightMs)) {
-    return leftMs - rightMs
-  }
-
-  return left.localeCompare(right)
 }
 
 function parseAssistantCronTimestampMs(timestamp: string | null): number {

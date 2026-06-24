@@ -76,6 +76,7 @@ import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import { compareHostedIsoTimestampsAscending } from "./timestamp-order.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -630,8 +631,10 @@ function compareHostedAssistantDeliveryCandidateCreatedAt(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
-  return readHostedAssistantDeliveryCandidateCreatedAt(left)
-    .localeCompare(readHostedAssistantDeliveryCandidateCreatedAt(right));
+  return compareHostedIsoTimestampsAscending(
+    readHostedAssistantDeliveryCandidateCreatedAt(left),
+    readHostedAssistantDeliveryCandidateCreatedAt(right),
+  );
 }
 
 function readHostedAssistantDeliveryCandidatePriority(
