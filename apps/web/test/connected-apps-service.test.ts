@@ -15,6 +15,7 @@ import {
   executeHostedConnectedAppsRequest,
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 interface MemberRow {
   billingStatus: "active" | "canceled";
@@ -594,6 +595,397 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(3);
   });
 
+  it("executes only allowlisted built-in services without an account", async () => {
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/execute") {
+        expect(init?.method).toBe("POST");
+        expect(readJsonBody(init)).toEqual({
+          arguments: { query: "pharmacy" },
+          tool_slug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        });
+        return jsonResponse({ places: [] });
+      }
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        throw new Error("Built-in services should not resolve a connected account.");
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { query: "pharmacy" },
+          toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual({ places: [] });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: {},
+          toolSlug: "GMAIL_FETCH_EMAILS",
+        },
+        operation: "execute",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_ACCOUNT_REQUIRED",
+      httpStatus: 400,
+    });
+    expect(executeFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("executes OpenWeather through Composio with the server-held API key", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      expect(parsed.pathname).toBe(
+        "/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+      );
+      expect(init?.method).toBe("POST");
+      expect(readJsonBody(init)).toEqual({
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        custom_auth_params: {
+          parameters: [{
+            in: "query",
+            name: "appid",
+            value: "openweather-test-key",
+          }],
+        },
+        user_id: "hbm_member",
+        version: "20260414_00",
+      });
+      return jsonResponse({
+        data: { weather: [{ description: "clear sky" }] },
+        successful: true,
+      });
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual({ weather: [{ description: "clear sky" }] });
+
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before OpenWeather execution when the API key is missing", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (): Promise<Response> => {
+      throw new Error("Missing weather credentials must fail before execution.");
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 40.7128, lon: -74.006 },
+          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+        },
+        operation: "execute",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_CONFIGURATION_UNAVAILABLE",
+      httpStatus: 503,
+    });
+
+    expect(executeFetch).not.toHaveBeenCalled();
+  });
+
+  it("requires agent approval and safe arguments for calendar creation", async () => {
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (): Promise<Response> => {
+      throw new Error("Calendar writes should be rejected before contacting Composio.");
+    });
+    const request = {
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "calendar",
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute" as const,
+      },
+    };
+
+    await expect(executeHostedConnectedAppsRequest(request)).rejects.toMatchObject({
+      code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
+      httpStatus: 400,
+    });
+    await expect(executeHostedConnectedAppsRequest({
+      ...request,
+      request: {
+        ...request.request,
+        input: {
+          ...request.request.input,
+          arguments: {
+            ...request.request.input.arguments,
+            attendees: ["provider@example.com"],
+          },
+          agentApproved: true as const,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED",
+      httpStatus: 400,
+    });
+    expect(executeFetch).not.toHaveBeenCalled();
+  });
+
+  it("executes confirmed calendar creation through the direct tool endpoint", async () => {
+    installPrismaHarness();
+    const requests: Array<{ body: unknown; url: URL }> = [];
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      requests.push({
+        body: init?.body ? readJsonBody(init) : null,
+        url: parsed,
+      });
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "calendar",
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: "quiet-calendar",
+            },
+          ],
+        });
+      }
+      if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+        return jsonResponse({
+          data: { eventId: "evt_123" },
+          successful: true,
+        });
+      }
+      if (parsed.pathname.startsWith("/api/v3.1/tool_router/session")) {
+        throw new Error("Calendar creation should not use the read-only Tool Router session.");
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "calendar",
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            location: "123 Main St",
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          agentApproved: true as const,
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual({ eventId: "evt_123" });
+    expect(executeFetch).toHaveBeenCalledTimes(2);
+    expect(requests.map((request) => ({
+      body: request.body,
+      pathname: request.url.pathname,
+      toolkitSlugs: request.url.searchParams.getAll("toolkit_slugs"),
+      userIds: request.url.searchParams.getAll("user_ids"),
+    }))).toEqual([
+      {
+        body: null,
+        pathname: "/api/v3.1/connected_accounts",
+        toolkitSlugs: [
+          "gmail",
+          "googlecalendar",
+        ],
+        userIds: ["hbm_member"],
+      },
+      {
+        body: {
+          arguments: {
+            calendar_id: "primary",
+            create_meeting_room: false,
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            location: "123 Main St",
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          connected_account_id: "ca_calendar",
+          version: "20260429_00",
+        },
+        pathname: "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
+        toolkitSlugs: [],
+        userIds: [],
+      },
+    ]);
+  });
+
+  it("does not mark failed or ambiguous direct calendar creation retryable", async () => {
+    installPrismaHarness();
+    const buildRequest = () => ({
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "calendar",
+          agentApproved: true as const,
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute" as const,
+      },
+    });
+    const expectCalendarCreateFailure = async (
+      directResponse: "http-502" | "throw" | "unsuccessful",
+      expectedDetails: Record<string, unknown>,
+      expectedCauseMessage: string,
+      expectedRootCauseMessage: string | null = null,
+    ) => {
+      const error = await executeHostedConnectedAppsRequest({
+        ...buildRequest(),
+        fetchImpl: buildFetch(directResponse),
+      }).catch((value: unknown) => value);
+      if (!isHostedOnboardingError(error)) {
+        throw new Error("Expected hosted onboarding error.");
+      }
+
+      expect(error).toMatchObject({
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: expectedDetails,
+        httpStatus: 400,
+        retryable: false,
+      });
+      expect(error.cause).toBeInstanceOf(Error);
+      if (!(error.cause instanceof Error)) {
+        throw new Error("Expected hosted error cause.");
+      }
+      expect(error.cause.message).toContain(
+        "ambiguous result",
+      );
+      expect(error.cause.cause).toBeInstanceOf(Error);
+      if (!(error.cause.cause instanceof Error)) {
+        throw new Error("Expected original Composio cause.");
+      }
+      expect(error.cause.cause.message).toContain(expectedCauseMessage);
+      if (expectedRootCauseMessage !== null) {
+        expect(error.cause.cause.cause).toBeInstanceOf(Error);
+        if (!(error.cause.cause.cause instanceof Error)) {
+          throw new Error("Expected root transport cause.");
+        }
+        expect(error.cause.cause.cause.message).toContain(expectedRootCauseMessage);
+      }
+    };
+    const buildFetch = (directResponse: "http-502" | "throw" | "unsuccessful") =>
+      vi.fn(async (
+        url: string | URL | Request,
+      ): Promise<Response> => {
+        const parsed = new URL(String(url));
+        if (parsed.pathname === "/api/v3.1/connected_accounts") {
+          return jsonResponse({
+            items: [
+              {
+                alias: "calendar",
+                id: "ca_calendar",
+                is_disabled: false,
+                status: "ACTIVE",
+                toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+                word_id: "quiet-calendar",
+              },
+            ],
+          });
+        }
+        if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+          if (directResponse === "http-502") {
+            return jsonResponse({ error: "upstream unavailable" }, 502);
+          }
+          if (directResponse === "throw") {
+            throw new Error("socket closed after provider accepted request");
+          }
+          return jsonResponse({
+            data: null,
+            error: "permission denied",
+            successful: false,
+          });
+        }
+        throw new Error(`Unexpected Composio request ${String(url)}`);
+      });
+
+    await expectCalendarCreateFailure(
+      "unsuccessful",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        type: "composio_direct_execute_unsuccessful",
+      },
+      "direct tool execution did not succeed",
+    );
+    await expectCalendarCreateFailure(
+      "throw",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        type: "composio_transport_error",
+      },
+      "temporarily unavailable",
+      "socket closed after provider accepted request",
+    );
+    await expectCalendarCreateFailure(
+      "http-502",
+      {
+        operationName: "GOOGLECALENDAR_CREATE_EVENT",
+        statusCode: 502,
+        type: "composio_http_error",
+      },
+      "failed with status 502",
+    );
+  });
+
   it("keeps removed-toolkit grants manageable without making them executable", async () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
     installPrismaHarness();
@@ -681,7 +1073,14 @@ describe("connected-app service", () => {
         expect(init?.method).toBe("POST");
         const body = readJsonBody(init);
         expect(body).toMatchObject({
-          toolkits: { enable: ["googlecalendar"] },
+          toolkits: {
+            enable: [
+              "googlecalendar",
+              "composio_search",
+              "instacart",
+              "openweather_api",
+            ],
+          },
         });
         return jsonResponse({ session_id: "trs_member" });
       }

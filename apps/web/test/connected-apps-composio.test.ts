@@ -18,7 +18,7 @@ const config: HostedConnectedAppsConfig = {
 };
 
 describe("Composio connected-app client", () => {
-  it("creates one durable read-only multi-account session", async () => {
+  it("creates one durable constrained multi-account session", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -40,7 +40,39 @@ describe("Composio connected-app client", () => {
           disable: ["destructiveHint"],
           enable: ["readOnlyHint"],
         },
-        toolkits: { enable: ["gmail", "googlecalendar"] },
+        tools: {
+          composio_search: {
+            enable: [
+              "COMPOSIO_SEARCH_AMAZON",
+              "COMPOSIO_SEARCH_GOOGLE_MAPS",
+              "COMPOSIO_SEARCH_NPPESNPI_LOOKUP",
+              "COMPOSIO_SEARCH_WALMART",
+            ],
+          },
+          instacart: {
+            enable: [
+              "INSTACART_CREATE_INSTACART_RECIPE_LINK",
+              "INSTACART_CREATE_RECIPE_PAGE",
+              "INSTACART_CREATE_SHOPPING_LIST_PAGE",
+              "INSTACART_GET_NEARBY_RETAILERS",
+            ],
+          },
+          openweather_api: {
+            enable: [
+              "OPENWEATHER_API_GET_CURRENT_WEATHER",
+              "OPENWEATHER_API_GET5_DAY_FORECAST",
+            ],
+          },
+        },
+        toolkits: {
+          enable: [
+            "gmail",
+            "googlecalendar",
+            "composio_search",
+            "instacart",
+            "openweather_api",
+          ],
+        },
         user_id: "hbm_member",
         workbench: { enable: false },
       });
@@ -61,6 +93,19 @@ describe("Composio connected-app client", () => {
         body: JSON.parse(String(init?.body)),
         url: String(url),
       });
+      if (String(url).endsWith("/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT")) {
+        return jsonResponse({ data: { eventId: "evt_123" }, successful: true });
+      }
+      if (
+        String(url).endsWith(
+          "/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+        )
+      ) {
+        return jsonResponse({
+          data: { weather: [{ description: "clear sky" }] },
+          successful: true,
+        });
+      }
       return jsonResponse({ ok: true });
     });
     const client = createComposioConnectedAppsClient({ config, fetchImpl });
@@ -75,6 +120,36 @@ describe("Composio connected-app client", () => {
       arguments: { query: "has:attachment filename:pdf" },
       sessionId: "trs_session",
       toolSlug: "GMAIL_FETCH_EMAILS",
+    });
+    await client.execute({
+      arguments: { query: "pharmacy" },
+      sessionId: "trs_session",
+      toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+    });
+    await client.executeDirect({
+      account: "calendar",
+      arguments: {
+        event_duration_hour: 0,
+        event_duration_minutes: 30,
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual physical",
+        timezone: "America/New_York",
+      },
+      toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      version: "20260429_00",
+    });
+    await client.executeDirect({
+      arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+      customAuthParams: {
+        parameters: [{
+          in: "query",
+          name: "appid",
+          value: "openweather-test-key",
+        }],
+      },
+      toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+      userId: "hbm_member",
+      version: "20260414_00",
     });
 
     expect(requests).toEqual([
@@ -93,7 +168,66 @@ describe("Composio connected-app client", () => {
         },
         url: "https://backend.composio.test/api/v3.1/tool_router/session/trs_session/execute",
       },
+      {
+        body: {
+          arguments: { query: "pharmacy" },
+          tool_slug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        },
+        url: "https://backend.composio.test/api/v3.1/tool_router/session/trs_session/execute",
+      },
+      {
+        body: {
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          connected_account_id: "calendar",
+          version: "20260429_00",
+        },
+        url: "https://backend.composio.test/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
+      },
+      {
+        body: {
+          arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+          custom_auth_params: {
+            parameters: [{
+              in: "query",
+              name: "appid",
+              value: "openweather-test-key",
+            }],
+          },
+          user_id: "hbm_member",
+          version: "20260414_00",
+        },
+        url: "https://backend.composio.test/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+      },
     ]);
+  });
+
+  it("fails direct execution when Composio reports an unsuccessful envelope", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        data: null,
+        error: "permission denied",
+        successful: false,
+      })
+    );
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    const error = await client.executeDirect({
+      account: "calendar",
+      arguments: { summary: "Annual physical" },
+      toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      version: "20260429_00",
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(ComposioConnectedAppsRequestError);
+    expect(error).toMatchObject({ retryable: false });
+    expect(String(error)).not.toContain("permission denied");
+    expect(String(error)).not.toContain("secret-test-key");
   });
 
   it("supports multiple connected accounts and explicit provider revoke/delete", async () => {
@@ -250,16 +384,37 @@ describe("Composio connected-app client", () => {
     }).maxAccountsPerToolkit).toBe(10);
   });
 
-  it("enables Gmail, Google Calendar, Outlook, and Zoho Mail by default with human labels", () => {
+  it("keeps built-in services out of the connectable toolkit list", () => {
+    expect(readHostedConnectedAppsConfig({
+      COMPOSIO_API_KEY: "secret-test-key",
+      COMPOSIO_CONNECTED_APP_TOOLKITS:
+        "gmail,composio_search,instacart,openweather_api",
+    }).toolkits).toEqual(["gmail"]);
+  });
+
+  it("enables the supported connected apps by default with human labels", () => {
     const defaults = readHostedConnectedAppsConfig({
       COMPOSIO_API_KEY: "secret-test-key",
     });
     expect([...defaults.toolkits].sort()).toEqual([
+      "dropbox",
       "gmail",
       "googlecalendar",
+      "googledrive",
+      "googletasks",
+      "notion",
+      "one_drive",
       "outlook",
+      "todoist",
       "zoho_mail",
     ]);
+    expect(defaults.toolkits).not.toContain("strava");
+    expect(formatHostedConnectedAppToolkitLabel("googledrive")).toBe("Google Drive");
+    expect(formatHostedConnectedAppToolkitLabel("one_drive")).toBe("Microsoft OneDrive");
+    expect(formatHostedConnectedAppToolkitLabel("dropbox")).toBe("Dropbox");
+    expect(formatHostedConnectedAppToolkitLabel("googletasks")).toBe("Google Tasks");
+    expect(formatHostedConnectedAppToolkitLabel("todoist")).toBe("Todoist");
+    expect(formatHostedConnectedAppToolkitLabel("notion")).toBe("Notion");
     expect(formatHostedConnectedAppToolkitLabel("outlook")).toBe("Microsoft Outlook");
     expect(formatHostedConnectedAppToolkitLabel("zoho_mail")).toBe("Zoho Mail");
   });

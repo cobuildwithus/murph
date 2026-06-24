@@ -1,6 +1,9 @@
 import "server-only";
 
-import type { HostedConnectedAppsConfig } from "./config";
+import {
+  HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
+  type HostedConnectedAppsConfig,
+} from "./config";
 
 const COMPOSIO_REQUEST_TIMEOUT_MS = 30_000;
 const COMPOSIO_RESPONSE_LIMIT_BYTES = 512 * 1024;
@@ -18,12 +21,27 @@ export interface ComposioConnectedAccount {
 }
 
 export class ComposioConnectedAppsRequestError extends Error {
+  readonly operationName: string | null;
+  readonly retryable: boolean | null;
   readonly status: number | null;
+  readonly type: string | null;
 
-  constructor(message: string, status: number | null = null) {
-    super(message);
+  constructor(
+    message: string,
+    status: number | null = null,
+    options: {
+      cause?: unknown;
+      operationName?: string | null;
+      retryable?: boolean | null;
+      type?: string | null;
+    } = {},
+  ) {
+    super(message, { cause: options.cause });
     this.name = "ComposioConnectedAppsRequestError";
+    this.operationName = options.operationName ?? null;
+    this.retryable = options.retryable ?? null;
     this.status = status;
+    this.type = options.type ?? null;
   }
 }
 
@@ -49,7 +67,13 @@ export function createComposioConnectedAppsClient(input: {
             disable: ["destructiveHint"],
             enable: ["readOnlyHint"],
           },
-          toolkits: { enable: [...input.config.toolkits] },
+          tools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
+          toolkits: {
+            enable: [
+              ...input.config.toolkits,
+              ...Object.keys(HOSTED_CONNECTED_APPS_SERVICE_TOOLS),
+            ],
+          },
           user_id: userId,
           workbench: { enable: false },
         },
@@ -87,14 +111,14 @@ export function createComposioConnectedAppsClient(input: {
     },
 
     async execute(inputExecute: {
-      account: string;
+      account?: string;
       arguments: Record<string, unknown>;
       sessionId: string;
       toolSlug: string;
     }): Promise<unknown> {
       return await requestJson({
         body: {
-          account: inputExecute.account,
+          ...(inputExecute.account ? { account: inputExecute.account } : {}),
           arguments: inputExecute.arguments,
           tool_slug: inputExecute.toolSlug,
         },
@@ -103,6 +127,40 @@ export function createComposioConnectedAppsClient(input: {
         method: "POST",
         path: `/api/v3.1/tool_router/session/${encodeURIComponent(inputExecute.sessionId)}/execute`,
       });
+    },
+
+    async executeDirect(inputExecute: {
+      account?: string;
+      arguments: Record<string, unknown>;
+      customAuthParams?: {
+        parameters: readonly {
+          in: "header" | "query";
+          name: string;
+          value: string;
+        }[];
+      };
+      toolSlug: string;
+      userId?: string;
+      version: string;
+    }): Promise<unknown> {
+      const payload = await requestJson({
+        body: {
+          arguments: inputExecute.arguments,
+          ...(inputExecute.account
+            ? { connected_account_id: inputExecute.account }
+            : {}),
+          ...(inputExecute.customAuthParams
+            ? { custom_auth_params: inputExecute.customAuthParams }
+            : {}),
+          ...(inputExecute.userId ? { user_id: inputExecute.userId } : {}),
+          version: inputExecute.version,
+        },
+        config: input.config,
+        fetchImpl,
+        method: "POST",
+        path: `/api/v3.1/tools/execute/${encodeURIComponent(inputExecute.toolSlug)}`,
+      });
+      return readSuccessfulDirectExecutePayload(payload);
     },
 
     async createLink(inputLink: {
@@ -211,6 +269,21 @@ export function createComposioConnectedAppsClient(input: {
   };
 }
 
+function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
+  const record = asRecord(payload);
+  if (record?.successful !== true) {
+    throw new ComposioConnectedAppsRequestError(
+      "Composio direct tool execution did not succeed.",
+      null,
+      {
+        retryable: false,
+        type: "composio_direct_execute_unsuccessful",
+      },
+    );
+  }
+  return Object.hasOwn(record, "data") ? record.data : {};
+}
+
 function parseConnectedAccount(item: unknown): ComposioConnectedAccount[] {
   const record = asRecord(item);
   const toolkit = asRecord(record?.toolkit);
@@ -257,9 +330,14 @@ async function requestJson(input: {
       method: input.method,
       signal,
     });
-  } catch {
+  } catch (error) {
     throw new ComposioConnectedAppsRequestError(
       "Composio is temporarily unavailable.",
+      null,
+      {
+        cause: error,
+        type: "composio_transport_error",
+      },
     );
   }
 
@@ -267,6 +345,7 @@ async function requestJson(input: {
     throw new ComposioConnectedAppsRequestError(
       `Composio request failed with status ${response.status}.`,
       response.status,
+      { type: "composio_http_error" },
     );
   }
 
@@ -279,6 +358,10 @@ async function requestJson(input: {
     throw new ComposioConnectedAppsRequestError(
       "Composio returned an invalid JSON response.",
       response.status,
+      {
+        cause: error,
+        type: "composio_invalid_json",
+      },
     );
   }
 }
@@ -289,6 +372,7 @@ async function readBoundedJsonResponse(response: Response): Promise<unknown> {
     throw new ComposioConnectedAppsRequestError(
       "Composio response was too large.",
       response.status,
+      { type: "composio_response_too_large" },
     );
   }
 
@@ -304,6 +388,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
       throw new ComposioConnectedAppsRequestError(
         "Composio response was too large.",
         response.status,
+        { type: "composio_response_too_large" },
       );
     }
     return text;
@@ -327,6 +412,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
         throw new ComposioConnectedAppsRequestError(
           "Composio response was too large.",
           response.status,
+          { type: "composio_response_too_large" },
         );
       }
       chunks.push(value);
