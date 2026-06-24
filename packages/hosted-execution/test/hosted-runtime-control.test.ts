@@ -45,6 +45,8 @@ import {
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
+  parseHostedCodexAuthUpdate,
+  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
@@ -106,6 +108,7 @@ describe("hosted runtime control contracts", () => {
       "runtime.manual-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
+      "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
@@ -151,6 +154,7 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
+    expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
   });
 
@@ -661,6 +665,54 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: "",
     })).toThrow(/non-empty string/u);
+  });
+
+  it("parses hosted Codex auth updates with exact bounded callback shapes", () => {
+    expect(parseHostedCodexAuthUpdate({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "device_code",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/device",
+    })).toEqual({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "device_code",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/device",
+    });
+    expect(parseHostedCodexAuthUpdate({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "connected",
+    })).toEqual({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "connected",
+    });
+    expect(parseHostedCodexAuthUpdateResponse({ applied: false })).toEqual({
+      applied: false,
+      status: "superseded",
+    });
+    expect(parseHostedCodexAuthUpdateResponse({
+      applied: true,
+      status: "already_applied",
+    })).toEqual({
+      applied: true,
+      status: "already_applied",
+    });
+    expect(() => parseHostedCodexAuthUpdateResponse({
+      applied: true,
+      status: "superseded",
+    })).toThrow(/conflicts/u);
+
+    expect(() => parseHostedCodexAuthUpdate({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "device_code",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://example.test/device",
+    })).toThrow(/OpenAI auth host/u);
+    expect(() => parseHostedCodexAuthUpdate({
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "connected",
+      verificationUrl: "https://auth.openai.com/device",
+    })).toThrow(/not allowed/u);
   });
 
   it("parses hosted runtime latency trace callbacks with exact safe keys", () => {

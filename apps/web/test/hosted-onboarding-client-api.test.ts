@@ -67,6 +67,34 @@ describe("hosted onboarding client api", () => {
     });
   });
 
+  it("sends DELETE JSON requests through the shared hosted API helper", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      method: "DELETE",
+      payload: {},
+      url: "/api/settings/chatgpt",
+    })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/chatgpt", {
+      body: JSON.stringify({}),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+      },
+      keepalive: false,
+      method: "DELETE",
+    });
+  });
+
   it("allows explicit fetch credential overrides", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
       ok: true,

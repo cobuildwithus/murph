@@ -392,6 +392,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.equal(authMode, 0o600);
 
   const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
   assert.match(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\./u);
   assert.doesNotMatch(config, /base_url/u);
@@ -533,6 +534,89 @@ test("hosted Codex runtime config removes stale subscription auth from a persist
     },
   });
   await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+});
+
+test("hosted Codex runtime config removes managed ChatGPT auth from a persistent home", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
+  const codexAuthPath = path.join(codexHome, "auth.json");
+  const managedAuthJson = buildManagedChatGptCodexAuthJson();
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await writeFile(codexAuthPath, managedAuthJson, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+  assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "hosted-openai",
+  );
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.doesNotMatch(config, /^cli_auth_credentials_store = "file"$/mu);
+  assert.match(config, /^model_provider = "hosted-openai"$/mu);
+  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.doesNotMatch(config, /chatgpt-refresh-token/u);
+  assertHostedCodexAutoCompactTokenLimit(config);
+});
+
+test("hosted Codex runtime config removes invalid persistent ChatGPT auth", async () => {
+  for (const invalidAuthJson of [
+    "{\"auth_mode\":\"chatgpt\"",
+    JSON.stringify({
+      OPENAI_API_KEY: null,
+      auth_mode: "chatgpt",
+      last_refresh: "2026-06-11T00:00:00.000Z",
+      tokens: {
+        access_token: "chatgpt-access-token",
+      },
+    }),
+  ]) {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
+    const codexAuthPath = path.join(codexHome, "auth.json");
+    await mkdir(codexHome, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await writeFile(codexAuthPath, invalidAuthJson, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "secret-openai-key",
+      },
+    });
+
+    await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+    assert.equal(
+      result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      "hosted-openai",
+    );
+
+    const config = await readFile(result.codexConfigPath, "utf8");
+    assert.doesNotMatch(config, /^cli_auth_credentials_store = "file"$/mu);
+    assert.match(config, /^model_provider = "hosted-openai"$/mu);
+    assert.doesNotMatch(config, /chatgpt-access-token/u);
+  }
 });
 
 test("hosted runtime launch env policy forwards the dev-only ChatGPT subscription auth", () => {
@@ -1275,6 +1359,18 @@ function buildChatGptCodexAuthJson(): string {
     auth_mode: "chatgptAuthTokens",
     last_refresh: "2026-06-11T00:00:00.000Z",
     tokens: chatGptCodexAuthTokens(),
+  });
+}
+
+function buildManagedChatGptCodexAuthJson(): string {
+  return JSON.stringify({
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgpt",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: {
+      ...chatGptCodexAuthTokens(),
+      refresh_token: "chatgpt-refresh-token",
+    },
   });
 }
 

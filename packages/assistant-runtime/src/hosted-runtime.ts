@@ -1307,15 +1307,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let durableCheckpointWakeAt: string | null = null;
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
+    let forceIdleCheckpointBeforeWake = false;
     let idleWakeOrdinal = 0;
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
     };
-    const runDurableCheckpointEffectsBestEffort = async (): Promise<void> => {
+    const runDurableCheckpointEffectsBestEffort = async (): Promise<{
+      requiresFollowUpCheckpoint: boolean;
+    }> => {
       const effects = pendingDurableCheckpointEffects.splice(0);
+      let requiresFollowUpCheckpoint = false;
       for (const effect of effects) {
         try {
           const effectResult = await effect();
+          requiresFollowUpCheckpoint ||= effectResult?.requiresFollowUpCheckpoint === true;
           const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
           if (effectWake.nextWakeAt) {
             const selectedWake = selectEarliestHostedRuntimeWake([
@@ -1341,6 +1346,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         }
       }
+      return { requiresFollowUpCheckpoint };
     };
     const trackMailboxPostCheckpointEffects = (passResult: HostedWorkspaceRunnerResult): void => {
       const effectsFinished = passResult.mailboxPostCheckpointEffectsFinished;
@@ -1491,7 +1497,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
       };
       while (runtimeStateDirty) {
-        if (accumulatedProjection.status !== "budget_exhausted") {
+        if (
+          accumulatedProjection.status !== "budget_exhausted"
+          && !forceIdleCheckpointBeforeWake
+        ) {
           if (idleCheckpointStartByMs === null) {
             throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
           }
@@ -1531,6 +1540,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
         }
+        forceIdleCheckpointBeforeWake = false;
 
         emitPhaseLog({
           details: {
@@ -1676,7 +1686,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         const durableCheckpointEffectCount = pendingDurableCheckpointEffects.length;
-        await runDurableCheckpointEffectsBestEffort();
+        const durableCheckpointEffects = await runDurableCheckpointEffectsBestEffort();
         if (
           latestCheckpointSnapshotCleanForWarmReuse
           && durableCheckpointEffectCount === 0
@@ -1691,6 +1701,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
         checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
         servicedProjectedRuntimeWakeKey = null;
+        if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
+          accumulatedProjection = {
+            ...accumulatedProjection,
+            committedWorkspace: checkpoint.workspace,
+            projectedWakeRequiresCheckpoint: true,
+          };
+          runtimeStateDirty = true;
+          idleCheckpointStartByMs = Date.now();
+          forceIdleCheckpointBeforeWake = true;
+          continue;
+        }
         const checkpointWakeLatencySeed =
           consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
         if (checkpointWakeLatencySeed) {
