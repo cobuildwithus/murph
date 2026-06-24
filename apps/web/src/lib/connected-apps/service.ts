@@ -14,9 +14,12 @@ import {
   type ComposioConnectedAccount,
 } from "./composio";
 import {
+  assertHostedConnectedAppsSearchToolkit,
   assertHostedConnectedAppToolkit,
   buildHostedConnectedAppsPolicyRevision,
   formatHostedConnectedAppToolkitLabel,
+  getHostedConnectedAppsConfirmedWritePolicy,
+  isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
 } from "./config";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
@@ -67,7 +70,7 @@ export async function executeHostedConnectedAppsRequest(input: {
         });
       case "search": {
         const toolkits = input.request.input.toolkits?.map((toolkit) =>
-          assertHostedConnectedAppToolkit(config, toolkit)
+          assertHostedConnectedAppsSearchToolkit(config, toolkit)
         );
         const sessionId = await ensureHostedConnectedAppsSession({
           client,
@@ -82,23 +85,92 @@ export async function executeHostedConnectedAppsRequest(input: {
         });
       }
       case "execute": {
+        const {
+          account: selector,
+          arguments: argumentsValue,
+          toolSlug,
+          userConfirmed,
+        } = input.request.input;
+        if (isHostedConnectedAppsServiceTool(toolSlug)) {
+          const sessionId = await ensureHostedConnectedAppsSession({
+            client,
+            config,
+            memberId: input.memberId,
+            prisma,
+          });
+          return await client.execute({
+            arguments: argumentsValue,
+            sessionId,
+            toolSlug,
+          });
+        }
+
+        const writePolicy = getHostedConnectedAppsConfirmedWritePolicy(toolSlug);
+        if (writePolicy) {
+          assertHostedConnectedAppToolkit(config, writePolicy.toolkit);
+          if (!userConfirmed) {
+            throw hostedOnboardingError({
+              code: "CONNECTED_APPS_CONFIRMATION_REQUIRED",
+              httpStatus: 400,
+              message: "Confirm the calendar event before adding it.",
+            });
+          }
+          const unsupportedArguments = Object.keys(argumentsValue).filter(
+            (key) => !writePolicy.allowedArguments.includes(key),
+          );
+          if (unsupportedArguments.length > 0) {
+            throw hostedOnboardingError({
+              code: "CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED",
+              httpStatus: 400,
+              message: "That calendar action includes unsupported options.",
+            });
+          }
+        }
+
+        if (!selector) {
+          throw hostedOnboardingError({
+            code: "CONNECTED_APPS_ACCOUNT_REQUIRED",
+            httpStatus: 400,
+            message: "Choose a connected account before running that tool.",
+          });
+        }
+        const account = await resolveOwnedConnectedAccount({
+          client,
+          memberId: input.memberId,
+          selector,
+          scope: "configured",
+        });
+
+        if (writePolicy) {
+          if (account.toolkit.slug.trim().toLowerCase() !== writePolicy.toolkit) {
+            throw hostedOnboardingError({
+              code: "CONNECTED_APPS_TOOLKIT_MISMATCH",
+              httpStatus: 400,
+              message: "Choose an account that matches the calendar action.",
+            });
+          }
+          return await client.executeDirect({
+            account: account.id,
+            arguments: {
+              ...argumentsValue,
+              ...writePolicy.forcedArguments,
+            },
+            toolSlug,
+            version: writePolicy.version,
+          });
+        }
+
         const sessionId = await ensureHostedConnectedAppsSession({
           client,
           config,
           memberId: input.memberId,
           prisma,
         });
-        const account = await resolveOwnedConnectedAccount({
-          client,
-          memberId: input.memberId,
-          selector: input.request.input.account,
-          scope: "configured",
-        });
         return await client.execute({
           account: account.id,
-          arguments: input.request.input.arguments,
+          arguments: argumentsValue,
           sessionId,
-          toolSlug: input.request.input.toolSlug,
+          toolSlug,
         });
       }
     }

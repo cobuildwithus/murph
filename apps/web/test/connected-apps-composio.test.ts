@@ -18,7 +18,7 @@ const config: HostedConnectedAppsConfig = {
 };
 
 describe("Composio connected-app client", () => {
-  it("creates one durable read-only multi-account session", async () => {
+  it("creates one durable constrained multi-account session", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -40,7 +40,27 @@ describe("Composio connected-app client", () => {
           disable: ["destructiveHint"],
           enable: ["readOnlyHint"],
         },
-        toolkits: { enable: ["gmail", "googlecalendar"] },
+        tools: {
+          composio_search: {
+            enable: [
+              "COMPOSIO_SEARCH_AMAZON",
+              "COMPOSIO_SEARCH_GOOGLE_MAPS",
+              "COMPOSIO_SEARCH_NPPESNPI_LOOKUP",
+              "COMPOSIO_SEARCH_WALMART",
+            ],
+          },
+          instacart: {
+            enable: [
+              "INSTACART_CREATE_INSTACART_RECIPE_LINK",
+              "INSTACART_CREATE_RECIPE_PAGE",
+              "INSTACART_CREATE_SHOPPING_LIST_PAGE",
+              "INSTACART_GET_NEARBY_RETAILERS",
+            ],
+          },
+        },
+        toolkits: {
+          enable: ["gmail", "googlecalendar", "composio_search", "instacart"],
+        },
         user_id: "hbm_member",
         workbench: { enable: false },
       });
@@ -76,6 +96,23 @@ describe("Composio connected-app client", () => {
       sessionId: "trs_session",
       toolSlug: "GMAIL_FETCH_EMAILS",
     });
+    await client.execute({
+      arguments: { query: "pharmacy" },
+      sessionId: "trs_session",
+      toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+    });
+    await client.executeDirect({
+      account: "calendar",
+      arguments: {
+        event_duration_hour: 0,
+        event_duration_minutes: 30,
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual physical",
+        timezone: "America/New_York",
+      },
+      toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      version: "20260429_00",
+    });
 
     expect(requests).toEqual([
       {
@@ -92,6 +129,27 @@ describe("Composio connected-app client", () => {
           tool_slug: "GMAIL_FETCH_EMAILS",
         },
         url: "https://backend.composio.test/api/v3.1/tool_router/session/trs_session/execute",
+      },
+      {
+        body: {
+          arguments: { query: "pharmacy" },
+          tool_slug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        },
+        url: "https://backend.composio.test/api/v3.1/tool_router/session/trs_session/execute",
+      },
+      {
+        body: {
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          connected_account_id: "calendar",
+          version: "20260429_00",
+        },
+        url: "https://backend.composio.test/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
       },
     ]);
   });
@@ -250,16 +308,36 @@ describe("Composio connected-app client", () => {
     }).maxAccountsPerToolkit).toBe(10);
   });
 
-  it("enables Gmail, Google Calendar, Outlook, and Zoho Mail by default with human labels", () => {
+  it("keeps built-in services out of the connectable toolkit list", () => {
+    expect(readHostedConnectedAppsConfig({
+      COMPOSIO_API_KEY: "secret-test-key",
+      COMPOSIO_CONNECTED_APP_TOOLKITS: "gmail,composio_search,instacart",
+    }).toolkits).toEqual(["gmail"]);
+  });
+
+  it("enables the supported connected apps by default with human labels", () => {
     const defaults = readHostedConnectedAppsConfig({
       COMPOSIO_API_KEY: "secret-test-key",
     });
     expect([...defaults.toolkits].sort()).toEqual([
+      "dropbox",
       "gmail",
       "googlecalendar",
+      "googledrive",
+      "googletasks",
+      "notion",
+      "one_drive",
       "outlook",
+      "todoist",
       "zoho_mail",
     ]);
+    expect(defaults.toolkits).not.toContain("strava");
+    expect(formatHostedConnectedAppToolkitLabel("googledrive")).toBe("Google Drive");
+    expect(formatHostedConnectedAppToolkitLabel("one_drive")).toBe("Microsoft OneDrive");
+    expect(formatHostedConnectedAppToolkitLabel("dropbox")).toBe("Dropbox");
+    expect(formatHostedConnectedAppToolkitLabel("googletasks")).toBe("Google Tasks");
+    expect(formatHostedConnectedAppToolkitLabel("todoist")).toBe("Todoist");
+    expect(formatHostedConnectedAppToolkitLabel("notion")).toBe("Notion");
     expect(formatHostedConnectedAppToolkitLabel("outlook")).toBe("Microsoft Outlook");
     expect(formatHostedConnectedAppToolkitLabel("zoho_mail")).toBe("Zoho Mail");
   });

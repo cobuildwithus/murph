@@ -15,13 +15,91 @@ const DEFAULT_CONNECTED_APP_TOOLKITS = [
   "googlecalendar",
   "outlook",
   "zoho_mail",
+  "googledrive",
+  "one_drive",
+  "dropbox",
+  "googletasks",
+  "todoist",
+  "notion",
 ] as const;
+
+export const HOSTED_CONNECTED_APPS_SERVICE_TOOLS = {
+  composio_search: {
+    enable: [
+      "COMPOSIO_SEARCH_AMAZON",
+      "COMPOSIO_SEARCH_GOOGLE_MAPS",
+      "COMPOSIO_SEARCH_NPPESNPI_LOOKUP",
+      "COMPOSIO_SEARCH_WALMART",
+    ],
+  },
+  instacart: {
+    enable: [
+      "INSTACART_CREATE_INSTACART_RECIPE_LINK",
+      "INSTACART_CREATE_RECIPE_PAGE",
+      "INSTACART_CREATE_SHOPPING_LIST_PAGE",
+      "INSTACART_GET_NEARBY_RETAILERS",
+    ],
+  },
+} as const;
+
+export interface HostedConnectedAppsConfirmedWritePolicy {
+  allowedArguments: readonly string[];
+  forcedArguments?: Readonly<Record<string, unknown>>;
+  toolkit: string;
+  version: string;
+}
+
+const HOSTED_CONNECTED_APPS_CONFIRMED_WRITES: Readonly<
+  Record<string, HostedConnectedAppsConfirmedWritePolicy>
+> = {
+  GOOGLECALENDAR_CREATE_EVENT: {
+    allowedArguments: [
+      "description",
+      "event_duration_hour",
+      "event_duration_minutes",
+      "location",
+      "start_datetime",
+      "summary",
+      "timezone",
+    ],
+    forcedArguments: {
+      calendar_id: "primary",
+      create_meeting_room: false,
+    },
+    toolkit: "googlecalendar",
+    version: "20260429_00",
+  },
+  OUTLOOK_CALENDAR_CREATE_EVENT: {
+    allowedArguments: [
+      "body",
+      "end_datetime",
+      "location",
+      "start_datetime",
+      "subject",
+      "time_zone",
+    ],
+    forcedArguments: { is_online_meeting: false },
+    toolkit: "outlook",
+    version: "20260508_00",
+  },
+};
+
+const HOSTED_CONNECTED_APPS_SERVICE_TOOL_SLUGS = new Set<string>(
+  Object.values(HOSTED_CONNECTED_APPS_SERVICE_TOOLS).flatMap(({ enable }) => enable),
+);
+
 const MIN_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 2;
 const MAX_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 10;
 const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
+  dropbox: "Dropbox",
   gmail: "Gmail",
   googlecalendar: "Google Calendar",
+  googledrive: "Google Drive",
+  googletasks: "Google Tasks",
+  notion: "Notion",
+  one_drive: "Microsoft OneDrive",
   outlook: "Microsoft Outlook",
+  todoist: "Todoist",
   zoho_mail: "Zoho Mail",
 };
 
@@ -35,6 +113,8 @@ export function buildHostedConnectedAppsPolicyRevision(
   return stablePositiveIntHash(JSON.stringify({
     maxAccountsPerToolkit: config.maxAccountsPerToolkit,
     policyVersion: HOSTED_CONNECTED_APPS_POLICY_VERSION,
+    confirmedWrites: HOSTED_CONNECTED_APPS_CONFIRMED_WRITES,
+    serviceTools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
     tags: {
       disable: ["destructiveHint"],
       enable: ["readOnlyHint"],
@@ -82,6 +162,34 @@ export function assertHostedConnectedAppToolkit(
   return normalized;
 }
 
+export function assertHostedConnectedAppsSearchToolkit(
+  config: Pick<HostedConnectedAppsConfig, "toolkits">,
+  toolkit: string,
+): string {
+  const normalized = toolkit.trim().toLowerCase();
+  if (
+    !config.toolkits.includes(normalized)
+    && !Object.hasOwn(HOSTED_CONNECTED_APPS_SERVICE_TOOLS, normalized)
+  ) {
+    throw hostedOnboardingError({
+      code: "CONNECTED_APPS_TOOLKIT_NOT_CONFIGURED",
+      httpStatus: 404,
+      message: "That connected app or service is not configured for Murph.",
+    });
+  }
+  return normalized;
+}
+
+export function isHostedConnectedAppsServiceTool(toolSlug: string): boolean {
+  return HOSTED_CONNECTED_APPS_SERVICE_TOOL_SLUGS.has(toolSlug);
+}
+
+export function getHostedConnectedAppsConfirmedWritePolicy(
+  toolSlug: string,
+): HostedConnectedAppsConfirmedWritePolicy | null {
+  return HOSTED_CONNECTED_APPS_CONFIRMED_WRITES[toolSlug] ?? null;
+}
+
 export function formatHostedConnectedAppToolkitLabel(toolkit: string): string {
   return CONNECTED_APP_TOOLKIT_LABELS[toolkit]
     ?? toolkit
@@ -99,7 +207,11 @@ function readConfiguredToolkits(value: string | undefined): string[] {
 
   for (const raw of values) {
     const toolkit = raw.trim().toLowerCase();
-    if (!toolkit || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(toolkit)) {
+    if (
+      !toolkit
+      || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(toolkit)
+      || Object.hasOwn(HOSTED_CONNECTED_APPS_SERVICE_TOOLS, toolkit)
+    ) {
       continue;
     }
     if (!toolkits.includes(toolkit)) {

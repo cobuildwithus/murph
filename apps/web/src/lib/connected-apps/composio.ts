@@ -1,6 +1,9 @@
 import "server-only";
 
-import type { HostedConnectedAppsConfig } from "./config";
+import {
+  HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
+  type HostedConnectedAppsConfig,
+} from "./config";
 
 const COMPOSIO_REQUEST_TIMEOUT_MS = 30_000;
 const COMPOSIO_RESPONSE_LIMIT_BYTES = 512 * 1024;
@@ -49,7 +52,13 @@ export function createComposioConnectedAppsClient(input: {
             disable: ["destructiveHint"],
             enable: ["readOnlyHint"],
           },
-          toolkits: { enable: [...input.config.toolkits] },
+          tools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
+          toolkits: {
+            enable: [
+              ...input.config.toolkits,
+              ...Object.keys(HOSTED_CONNECTED_APPS_SERVICE_TOOLS),
+            ],
+          },
           user_id: userId,
           workbench: { enable: false },
         },
@@ -87,14 +96,14 @@ export function createComposioConnectedAppsClient(input: {
     },
 
     async execute(inputExecute: {
-      account: string;
+      account?: string;
       arguments: Record<string, unknown>;
       sessionId: string;
       toolSlug: string;
     }): Promise<unknown> {
       return await requestJson({
         body: {
-          account: inputExecute.account,
+          ...(inputExecute.account ? { account: inputExecute.account } : {}),
           arguments: inputExecute.arguments,
           tool_slug: inputExecute.toolSlug,
         },
@@ -102,6 +111,25 @@ export function createComposioConnectedAppsClient(input: {
         fetchImpl,
         method: "POST",
         path: `/api/v3.1/tool_router/session/${encodeURIComponent(inputExecute.sessionId)}/execute`,
+      });
+    },
+
+    async executeDirect(inputExecute: {
+      account: string;
+      arguments: Record<string, unknown>;
+      toolSlug: string;
+      version: string;
+    }): Promise<unknown> {
+      return await requestJson({
+        body: {
+          arguments: inputExecute.arguments,
+          connected_account_id: inputExecute.account,
+          version: inputExecute.version,
+        },
+        config: input.config,
+        fetchImpl,
+        method: "POST",
+        path: `/api/v3.1/tools/execute/${encodeURIComponent(inputExecute.toolSlug)}`,
       });
     },
 

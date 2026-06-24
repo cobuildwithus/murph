@@ -34,16 +34,49 @@ describe("murph connected-app dynamic tools", () => {
     ).toHaveLength(3);
   });
 
-  it("requires explicit account selection for execution", () => {
+  it("accepts accountless built-in service execution requests", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        arguments: {},
-        toolSlug: "GMAIL_FETCH_EMAILS",
+        arguments: { query: "pharmacy" },
+        toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
       },
       tool: "connected_apps_execute",
     }));
 
-    expect(request?.kind).toBe("invalid-connected-apps-arguments");
+    expect(request).toMatchObject({
+      args: {
+        arguments: { query: "pharmacy" },
+        toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+      },
+      kind: "connected-apps-execute",
+    });
+  });
+
+  it("preserves explicit confirmation for calendar creation", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        account: "calendar",
+        arguments: {
+          event_duration_hour: 0,
+          event_duration_minutes: 30,
+          start_datetime: "2026-07-01T10:00:00-04:00",
+          summary: "Annual physical",
+          timezone: "America/New_York",
+        },
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        userConfirmed: true,
+      },
+      tool: "connected_apps_execute",
+    }));
+
+    expect(request).toMatchObject({
+      args: {
+        account: "calendar",
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        userConfirmed: true,
+      },
+      kind: "connected-apps-execute",
+    });
   });
 
   it("passes search through the signed hosted control-plane transport", async () => {
