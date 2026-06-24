@@ -1,4 +1,5 @@
 import {
+  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";

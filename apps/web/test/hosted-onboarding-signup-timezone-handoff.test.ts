@@ -124,6 +124,9 @@ describe("hosted signup timezone handoff", () => {
           return { count: 1 };
         }),
       },
+      hostedAccountGroupMembership: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
     } as unknown as PrismaClient;
 
     await expect(
