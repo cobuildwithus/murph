@@ -35,8 +35,8 @@ test("initializeVault creates registry-owned required directories", async () => 
 
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.automationsDirectory);
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.inboxCaptureLedgerDirectory);
+  await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.rawInboxDirectory);
-  await expectDirectoryExists(vaultRoot, VAULT_LAYOUT.rawIntegrationsDirectory);
 });
 
 test("validateVault validates registry-owned frontmatter and jsonl families", async () => {

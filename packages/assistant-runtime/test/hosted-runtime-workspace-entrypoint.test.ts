@@ -9,9 +9,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
   runCanonicalWrite,
+  VAULT_LAYOUT,
 } from "@murphai/core";
 import {
   readAssistantInputEvent,
@@ -49,6 +51,14 @@ import {
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
@@ -412,6 +422,81 @@ describe("hosted workspace runtime entrypoint", () => {
         process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
       }
       consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("marks restored legacy vault migration dirty for the hosted checkpoint path", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-legacy-vault-format-migration");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let restoreCallCount = 0;
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_legacy_vault_format_migration",
+          leaseGeneration: "7",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+          const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+          assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-legacy-vault-format-migration-checkpoint",
+            ),
+          };
+        },
+        async importItem() {
+          throw new Error("Legacy vault format migration test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events: [],
+            workspace: createWorkspaceState({ snapshotRef, version: "0" }),
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("Legacy vault format migration test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              restoreCallCount += 1;
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              const metadataPath = path.join(input.durableRoot, VAULT_LAYOUT.metadata);
+              const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+              await writeFile(
+                metadataPath,
+                `${JSON.stringify({ ...metadata, formatVersion: 1 }, null, 2)}\n`,
+                "utf8",
+              );
+            },
+            async startSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not start snapshots.");
+            },
+          },
+        }),
+        vaultRoot,
+      });
+
+      assert.equal(restoreCallCount, 1);
+      const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+      const migratedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+      assert.equal(migratedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -9124,6 +9209,7 @@ function createPlatform(input: {
   runtimeLivenessRequired?: boolean | null;
   stageSamples?: StageTimingSample[];
   workspacePort: HostedRuntimeWorkspacePort | null;
+  workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
   return {
     artifactStore: {
@@ -9195,6 +9281,7 @@ function createPlatform(input: {
       ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
       : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
+    ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
   };
 }
 
@@ -9691,6 +9778,40 @@ function createBundleRef(input: {
     key: input.key,
     size: input.size,
     updatedAt: TEST_NOW,
+  };
+}
+
+function createWorkspaceSnapshotV2Ref(snapshotId: string): HostedWorkspaceSnapshotV2Ref {
+  const objectKey = `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+  return {
+    archive: {
+      compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+      encryptedByteSize: 1,
+      encryptedObjectSha256: "1".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "2".repeat(64),
+      totalPlainBytes: 1,
+    },
+    createdAt: TEST_NOW,
+    encryption: {
+      aad: {
+        objectKey,
+        purpose: HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+        snapshotId,
+        userId: TEST_USER_ID,
+      },
+      ivBase64: "AAAAAAAAAAAAAAAA",
+      rootKeyId: "synthetic-root-key",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "synthetic-wrapped-data-key",
+    },
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: TEST_USER_ID,
   };
 }
 

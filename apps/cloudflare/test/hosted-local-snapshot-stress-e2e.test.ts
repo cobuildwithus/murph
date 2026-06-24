@@ -5,6 +5,9 @@ import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
+} from "@murphai/contracts";
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import type {
@@ -337,7 +340,7 @@ async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
     path.join(vaultRoot, "vault.json"),
     `${JSON.stringify({
       createdAt: "2026-05-05T00:00:00.000Z",
-      formatVersion: 1,
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
       timezone: "Asia/Kuala_Lumpur",
       title: "Synthetic Snapshot Stress Vault",
       vaultId: "vault_01JZSNAPSHOTSTRESS000000000",

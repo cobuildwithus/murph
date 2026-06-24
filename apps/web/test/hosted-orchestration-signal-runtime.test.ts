@@ -68,6 +68,7 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
+  signalHostedRuntimeMaintenanceRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -277,6 +278,82 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it("persists runtime maintenance as durable control mailbox work before signaling", async () => {
+    await signalHostedRuntimeMaintenanceRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    });
+
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:maintenance:[0-9a-f]{32}$/u),
+        kind: "runtime.maintenance-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.maintenance-requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("dedupes runtime maintenance mailbox work for the same workspace version within a short window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
+    try {
+      await signalHostedRuntimeMaintenanceRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+      await signalHostedRuntimeMaintenanceRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+
+      const envelopes = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+        ([input]) => input.envelope,
+      );
+      expect(envelopes).toHaveLength(2);
+      expect(envelopes[0]?.eventId).toMatch(
+        /^runtime-control:maintenance:[0-9a-f]{32}$/u,
+      );
+      expect(envelopes[1]?.eventId).toBe(envelopes[0]?.eventId);
+      expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
+        "2026-05-28T08:15:00.000Z",
+        "2026-05-28T08:15:00.000Z",
+      ]);
+      expect(mocks.signalWithStart.mock.calls.map((call) => call[1].signalArgs[0])).toEqual([
+        {
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.maintenance-requested",
+        },
+        {
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.maintenance-requested",
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("dedupes browser-vault control mailbox work for the same workspace version within a short window", async () => {

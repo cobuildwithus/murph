@@ -14,6 +14,7 @@ import {
   selectLatestEventSpineEntry,
   type EventSpineEntry,
 } from "./history/event-spine.ts";
+import { listIntegrationIngestsForEvent } from "./integration-ingests.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
@@ -290,14 +291,11 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
 ): Promise<boolean> {
   const sourceWorkoutId = record.workout?.sourceWorkoutId;
   const expectedProviderSlug = slugifyProvider(record.workout?.sourceApp);
-  const rawRefs = record.rawRefs;
   const storedZones = record.workout?.heartRateZones;
 
   if (
     !sourceWorkoutId
     || !expectedProviderSlug
-    || !Array.isArray(rawRefs)
-    || rawRefs.length === 0
     || !storedZones
     || storedZones.length !== 6
   ) {
@@ -313,16 +311,76 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
   // Any rawRef that fails to read or parse means we cannot complete the
   // joint check — fail closed and let the candidate be reported as
   // unverified rather than risk repairing on partial evidence.
+  const evidencePayloads = await readDeviceEvidenceJsonPayloads(vaultRoot, record);
+  if (!evidencePayloads) {
+    return false;
+  }
+
   const sameIdRows: RawSameIdWorkoutRow[] = [];
-  for (const rawRef of rawRefs) {
-    const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
-    if (rawPayload === undefined) {
-      return false;
-    }
-    sameIdRows.push(...collectRawSameIdWorkoutRows(rawPayload, sourceWorkoutId));
+  for (const payload of evidencePayloads) {
+    sameIdRows.push(...collectRawSameIdWorkoutRows(payload, sourceWorkoutId));
   }
 
   return rawEvidenceVerifiesStoredRow(sameIdRows, expectedProviderSlug, storedZones);
+}
+
+async function readDeviceEvidenceJsonPayloads(
+  vaultRoot: string,
+  record: ActivitySessionEventRecord,
+): Promise<unknown[] | undefined> {
+  const payloads: unknown[] = [];
+  const rawRefs = record.rawRefs;
+  if (Array.isArray(rawRefs)) {
+    for (const rawRef of rawRefs) {
+      const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
+      if (rawPayload === undefined) {
+        return undefined;
+      }
+      payloads.push(rawPayload);
+    }
+  }
+
+  const ingestPayloads = await readIntegrationEvidenceJsonPayloadsForEvent(vaultRoot, record.id);
+  if (ingestPayloads === undefined) {
+    return undefined;
+  }
+  payloads.push(...ingestPayloads);
+
+  return payloads.length > 0 ? payloads : undefined;
+}
+
+async function readIntegrationEvidenceJsonPayloadsForEvent(
+  vaultRoot: string,
+  eventId: string,
+): Promise<unknown[] | undefined> {
+  let entries: Awaited<ReturnType<typeof listIntegrationIngestsForEvent>>;
+  try {
+    entries = await listIntegrationIngestsForEvent(vaultRoot, eventId);
+  } catch {
+    return undefined;
+  }
+
+  const payloads: unknown[] = [];
+  for (const entry of entries) {
+    const output = entry.record.outputs.events.find((event) => event.id === eventId);
+    if (!output) {
+      continue;
+    }
+
+    for (const role of output.roles) {
+      const part = entry.record.parts.find((candidate) => candidate.role === role);
+      if (!part) {
+        return undefined;
+      }
+      try {
+        payloads.push(JSON.parse(part.content) as unknown);
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
+  return payloads;
 }
 
 function rawEvidenceVerifiesStoredRow(

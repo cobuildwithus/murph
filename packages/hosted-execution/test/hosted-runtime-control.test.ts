@@ -106,6 +106,7 @@ describe("hosted runtime control contracts", () => {
       "device-sync.wake",
       "vault-share.delivery",
       "runtime.manual-requested",
+      "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
@@ -152,6 +153,7 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
+    expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
   });

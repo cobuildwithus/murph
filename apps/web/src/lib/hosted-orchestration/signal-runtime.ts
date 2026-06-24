@@ -76,6 +76,13 @@ export interface SignalHostedBrowserVaultRefreshInput {
   userId: string;
 }
 
+export interface SignalHostedRuntimeMaintenanceInput {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  prisma?: PrismaClient;
+  userId: string;
+}
+
 export interface SignalHostedManualRunInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -151,6 +158,27 @@ export async function signalHostedBrowserVaultRefreshRuntime(
     environment: input.environment,
     eventId: control.eventId,
     kind: "runtime.browser-vault-refresh-requested",
+    occurredAt: control.occurredAt,
+    prisma,
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedRuntimeMaintenanceRuntime(
+  input: SignalHostedRuntimeMaintenanceInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const workspace = await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  const control = buildHostedRuntimeMaintenanceControlEvent({
+    userId: input.userId,
+    workspaceVersion: workspace.version,
+  });
+
+  return signalHostedRuntimeControlMailboxRequest({
+    client: input.client,
+    environment: input.environment,
+    eventId: control.eventId,
+    kind: "runtime.maintenance-requested",
     occurredAt: control.occurredAt,
     prisma,
     userId: input.userId,
@@ -294,6 +322,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
+const RUNTIME_MAINTENANCE_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
 function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
   userId: string;
@@ -316,6 +345,31 @@ function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
 
   return {
     eventId: `runtime-control:browser-vault-refresh:${fingerprint}`,
+    occurredAt: new Date(bucketMs).toISOString(),
+  };
+}
+
+function buildHostedRuntimeMaintenanceControlEvent(input: {
+  userId: string;
+  workspaceVersion: string;
+}): {
+  eventId: string;
+  occurredAt: string;
+} {
+  const bucketMs = Math.floor(Date.now() / RUNTIME_MAINTENANCE_CONTROL_DEDUPE_WINDOW_MS) *
+    RUNTIME_MAINTENANCE_CONTROL_DEDUPE_WINDOW_MS;
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      bucketMs,
+      userId: input.userId,
+      version: 1,
+      workspaceVersion: input.workspaceVersion,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+
+  return {
+    eventId: `runtime-control:maintenance:${fingerprint}`,
     occurredAt: new Date(bucketMs).toISOString(),
   };
 }

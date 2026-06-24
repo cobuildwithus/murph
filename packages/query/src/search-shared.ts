@@ -204,6 +204,8 @@ const STRUCTURED_VALUE_KEYS = new Set([
 
 const STRUCTURED_EXCLUDED_KEYS = new Set([
   "data",
+  "evidencePart",
+  "evidenceParts",
   "externalRef",
   "payload",
   "raw",

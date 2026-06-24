@@ -303,7 +303,7 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
 
   assert.deepEqual(rawOnlyPayload.events, []);
   assert.deepEqual(rawOnlyPayload.samples ?? [], []);
-  assert.deepEqual(rawOnlyPayload.rawArtifacts ?? [], []);
+  assert.deepEqual(rawOnlyPayload.evidenceParts ?? [], []);
 
   try {
     await writeFile(

@@ -233,12 +233,12 @@ test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () =>
   assert.equal(dataTypeDeletion?.externalRef?.resourceType, "workout");
   assert.equal(dataTypeDeletion?.fields?.sourceEventType, "workout.deleted");
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:sleep:sleep.deleted:")),
+    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:sleep:sleep.deleted:")),
   );
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:session:session.deleted:")),
+    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:session:session.deleted:")),
   );
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
+    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
 });
