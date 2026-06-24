@@ -227,26 +227,13 @@ export async function applyHostedCodexAuthUpdate(input: {
           });
     }
     case "connected": {
-      const result = await prisma.hostedCodexAuthConnection.updateMany({
-        data: {
-          state: "connected",
-          userCode: null,
-          verificationUrl: null,
-        },
-        where: {
+      return createHostedCodexAuthUpdateResponse(
+        await markHostedCodexAuthAttemptErrorStatus({
           attemptId: input.update.attemptId,
           memberId: input.memberId,
-          state: { in: ["connecting", "connect_error"] },
-        },
-      });
-      return result.count === 1
-        ? createHostedCodexAuthUpdateResponse("applied")
-        : await resolveHostedCodexAuthCallbackMiss({
-            alreadyAppliedStates: ["connected"],
-            attemptId: input.update.attemptId,
-            memberId: input.memberId,
-            prisma,
-          });
+          prisma,
+        }),
+      );
     }
     case "failed": {
       return createHostedCodexAuthUpdateResponse(

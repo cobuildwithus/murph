@@ -821,13 +821,14 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       if (!port) {
         throw new Error("Hosted Codex auth checkpoint requires a configured Codex auth port.");
       }
-      const response = await port.update({
-        attemptId: input.record.attemptId,
-        phase: input.record.phase,
-      });
+      const phase = input.record.phase === "connected" ? "failed" : input.record.phase;
       if (input.record.phase === "connected") {
         await removeHostedCodexAuthJson(input.operatorHomeRoot);
       }
+      const response = await port.update({
+        attemptId: input.record.attemptId,
+        phase,
+      });
       return {
         nextWakeAt: null,
         recorded: response.status === "superseded" ? 0 : 1,

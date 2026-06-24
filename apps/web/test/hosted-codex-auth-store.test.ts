@@ -177,7 +177,7 @@ describe("hosted Codex auth store", () => {
     });
   });
 
-  it("applies callback updates only to the active attempt and idempotently records terminals", async () => {
+  it("applies callback updates only to the active attempt and fails closed on legacy connected terminals", async () => {
     const prisma = createCodexAuthPrismaHarness({
       attemptId: "hca_abcdefghijklmnop",
       memberId: "member_123",
@@ -259,7 +259,7 @@ describe("hosted Codex auth store", () => {
       status: "already_applied",
     });
     expect(prisma.getRecord()).toMatchObject({
-      state: "connected",
+      state: "connect_error",
       userCode: null,
       verificationUrl: null,
     });
@@ -368,10 +368,10 @@ describe("hosted Codex auth store", () => {
       },
     })).resolves.toEqual({
       applied: true,
-      status: "applied",
+      status: "already_applied",
     });
     expect(prisma.getRecord()).toMatchObject({
-      state: "connected",
+      state: "connect_error",
       userCode: null,
       verificationUrl: null,
     });

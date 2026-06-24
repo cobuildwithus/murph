@@ -298,8 +298,8 @@ without starting OAuth. Disconnect remains local-revocation-first for cleanup:
 remote app-server logout is best effort, local `auth.json` deletion is required,
 and a local deletion failure keeps the system-mailbox item retryable instead of
 consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` before the post-checkpoint
-effect is considered clean.
+in-flight wake prunes local managed `auth.json` and is reported as a failed
+connection cleanup callback, not as a durable connected state.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

@@ -819,7 +819,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("records Codex auth terminal updates only after the checkpoint boundary", async () => {
+  it("maps legacy connected Codex auth updates to failed after the checkpoint boundary", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: true,
@@ -886,14 +886,14 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
-        phase: "connected",
+        phase: "failed",
       });
     } finally {
       await workspace.cleanup();
     }
   });
 
-  it("removes managed Codex auth when a terminal Codex auth update is superseded", async () => {
+  it("removes managed Codex auth when a legacy connected Codex auth update is superseded", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: false,
@@ -954,13 +954,17 @@ describe("hosted system mailbox notification execution context", () => {
         nextWakeAt: null,
         recorded: 0,
       });
+      expect(updateCodexAuth).toHaveBeenCalledWith({
+        attemptId: "hca_abcdefghijklmnop",
+        phase: "failed",
+      });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await workspace.cleanup();
     }
   });
 
-  it("removes managed Codex auth when a terminal Codex auth update was already applied", async () => {
+  it("removes managed Codex auth when a legacy connected Codex auth update was already applied", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: true,
@@ -1020,6 +1024,10 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+      });
+      expect(updateCodexAuth).toHaveBeenCalledWith({
+        attemptId: "hca_abcdefghijklmnop",
+        phase: "failed",
       });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
