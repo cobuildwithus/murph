@@ -1547,26 +1547,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || (accumulatedProjection.nextWakeAt !== null
             && Date.parse(accumulatedProjection.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
-        const mediaRetentionProtections =
-          await collectHostedPendingAssistantInputMediaRetentionProtections({
-            vaultRoot: restored.vaultRoot,
-          });
-        const idleMaintenance = await runHostedIdleCheckpointMaintenance({
-          pendingWork: idleMaintenancePendingWork,
-          materializeRetentionCandidatePaths: async (storedPaths) => {
-            const materialized = await restored.materializeWorkspaceArtifacts(storedPaths);
-            return {
-              missingStoredPaths: [...materialized.missingArtifactPaths]
-                .map((artifactPath) =>
-                  artifactPath.startsWith("vault:")
-                    ? artifactPath.slice("vault:".length)
-                    : artifactPath
-                ),
-            };
-          },
-          protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
-          protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
-          protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
+        const idleMaintenance = await runHostedPendingInputProtectedIdleMaintenance({
           // The compact call rides the same warm-process credential as turns,
           // so attribute it the same way: members using their own provider key
           // must not have platform allowance debited for it.
@@ -1576,8 +1557,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             provider: "codex-cli",
             userEnvKeys: Object.keys(guardedRuntime.userEnv),
           }),
+          materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
           memberId: input.request.userId,
           model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+          pendingWork: idleMaintenancePendingWork,
           providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
           recordUsage: guardedRuntime.platform.usageRecordPort
             ? async (record) => {
@@ -2046,6 +2029,56 @@ function buildHostedRuntimePhaseTraceMetadata(
   return details;
 }
 
+// Single owner for the protections + materializer + retention wiring used by
+// both the normal idle path and the retention-only checkpoint. Routing every
+// idle retention pass through this helper makes the pending-input protection
+// contract a structural invariant: a new retention call site cannot omit it
+// without changing this signature.
+export async function runHostedPendingInputProtectedIdleMaintenance(input: {
+  credentialSource: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["credentialSource"];
+  materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
+  memberId: string;
+  model: string | null;
+  pendingWork: boolean;
+  providerName: string | null;
+  recordUsage: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["recordUsage"];
+  resolveAssistantSessionId: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["resolveAssistantSessionId"];
+  shutdownSignal: AbortSignal | null;
+  vaultRoot: string;
+  wakeSignal: RuntimeWakeSignal | null;
+}): Promise<HostedIdleMaintenanceOutcome> {
+  const mediaRetentionProtections =
+    await collectHostedPendingAssistantInputMediaRetentionProtections({
+      vaultRoot: input.vaultRoot,
+    });
+  return await runHostedIdleCheckpointMaintenance({
+    credentialSource: input.credentialSource,
+    materializeRetentionCandidatePaths: async (storedPaths) => {
+      const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
+      return {
+        missingStoredPaths: [...materialized.missingArtifactPaths]
+          .map((artifactPath) =>
+            artifactPath.startsWith("vault:")
+              ? artifactPath.slice("vault:".length)
+              : artifactPath
+          ),
+      };
+    },
+    memberId: input.memberId,
+    model: input.model,
+    pendingWork: input.pendingWork,
+    protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
+    protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
+    protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
+    providerName: input.providerName,
+    recordUsage: input.recordUsage,
+    resolveAssistantSessionId: input.resolveAssistantSessionId,
+    shutdownSignal: input.shutdownSignal,
+    vaultRoot: input.vaultRoot,
+    wakeSignal: input.wakeSignal,
+  });
+}
+
 async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
@@ -2067,19 +2100,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     };
   }
 
-  const idleMaintenance = await runHostedIdleCheckpointMaintenance({
+  const idleMaintenance = await runHostedPendingInputProtectedIdleMaintenance({
     credentialSource: "platform",
-    materializeRetentionCandidatePaths: async (storedPaths) => {
-      const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
-      return {
-        missingStoredPaths: [...materialized.missingArtifactPaths]
-          .map((artifactPath) =>
-            artifactPath.startsWith("vault:")
-              ? artifactPath.slice("vault:".length)
-              : artifactPath
-          ),
-      };
-    },
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
     memberId: input.input.request.userId,
     model: null,
     pendingWork: false,

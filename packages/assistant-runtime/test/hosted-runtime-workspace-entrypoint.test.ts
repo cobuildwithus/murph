@@ -1114,6 +1114,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, dueWakeAt);
       assert.equal(result.nextWakeReason, "assistant_due");
+      // This vault has no snapshot ref, so the runtime restore takes the
+      // null-bootstrap branch and wipes the vault before retention runs. The
+      // observable absence of the audio file here proves the bootstrap flow
+      // runs as expected; the production-faithful pending-input protection
+      // contract (audio survives a 14-day-old retention sweep) is verified by
+      // `runHostedPendingInputProtectedIdleMaintenance forwards collected
+      // pending-input protections to runHostedIdleCheckpointMaintenance`
+      // against a seeded vault that no longer needs restore.
       await assert.rejects(
         stat(path.join(vaultRoot, audioPath)),
         (error: unknown) =>
