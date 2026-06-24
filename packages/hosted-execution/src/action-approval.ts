@@ -5,6 +5,15 @@ import {
 
 export const HOSTED_ACTION_APPROVAL_ID_PREFIX = "haa_";
 
+export const HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS = [
+  "text",
+  "telegram",
+  "email",
+] as const;
+
+export type HostedActionApprovalReturnContactKind =
+  (typeof HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS)[number];
+
 const ACTION_ID_MAX_LENGTH = 200;
 const ACTION_KIND_MAX_LENGTH = 120;
 const APPROVAL_ID_PATTERN = /^haa_[A-Za-z0-9_-]{32}$/u;
@@ -21,12 +30,17 @@ export interface HostedActionApprovalPresentation {
  * Trusted domain code owns the action identity and exact-action fingerprint.
  * Presentation is part of the immutable request identity, so the runtime cannot
  * later present one action and execute another under the same action id.
+ *
+ * `returnContactKind` biases the post-decision Return-to-Murph link toward
+ * the conversation channel the action came from. It is part of the immutable
+ * identity so the runtime cannot present one channel and execute another.
  */
 export interface HostedActionApprovalRequest {
   actionId: string;
   actionKind: string;
   actionFingerprint: string;
   presentation: HostedActionApprovalPresentation;
+  returnContactKind: HostedActionApprovalReturnContactKind | null;
 }
 
 export type HostedActionApprovalResult =
@@ -51,7 +65,13 @@ export function parseHostedActionApprovalRequest(
   const request = requireExactObject(
     value,
     "Hosted action approval request",
-    ["actionFingerprint", "actionId", "actionKind", "presentation"],
+    [
+      "actionFingerprint",
+      "actionId",
+      "actionKind",
+      "presentation",
+      "returnContactKind",
+    ],
   );
   const actionFingerprint = requireString(
     request.actionFingerprint,
@@ -77,7 +97,27 @@ export function parseHostedActionApprovalRequest(
       ACTION_KIND_MAX_LENGTH,
     ),
     presentation: parseHostedActionApprovalPresentation(request.presentation),
+    returnContactKind: parseHostedActionApprovalReturnContactKind(
+      request.returnContactKind,
+    ),
   };
+}
+
+function parseHostedActionApprovalReturnContactKind(
+  value: unknown,
+): HostedActionApprovalReturnContactKind | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (
+    typeof value === "string"
+    && (HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS as readonly string[]).includes(value)
+  ) {
+    return value as HostedActionApprovalReturnContactKind;
+  }
+  throw new TypeError(
+    "Hosted action approval request returnContactKind must be null or one of text, telegram, email.",
+  );
 }
 
 export function parseHostedActionApprovalPresentation(
@@ -116,6 +156,7 @@ export function serializeHostedActionApprovalRequest(
     parsed.actionFingerprint,
     parsed.presentation.title,
     parsed.presentation.body,
+    parsed.returnContactKind,
   ]);
 }
 

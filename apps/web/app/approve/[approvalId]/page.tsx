@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock3, ShieldAlert, XCircle, type LucideIcon } from "lucide-react";
+import { redirect } from "next/navigation";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
@@ -11,7 +12,10 @@ import {
   readHostedActionApproval,
   requireHostedActionApprovalId,
 } from "@/src/lib/action-approvals";
-import type { HostedActionApprovalStatus } from "@/src/lib/action-approvals-shared";
+import type {
+  HostedActionApprovalStatus,
+  HostedActionApprovalView,
+} from "@/src/lib/action-approvals-shared";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
@@ -43,7 +47,7 @@ export default async function ActionApprovalPage({
       );
     }
 
-    return <ActionApprovalTerminalState status={approval.status} />;
+    return <ActionApprovalTerminalState approval={approval} />;
   } catch (error) {
     if (
       isHostedOnboardingError(error)
@@ -56,19 +60,29 @@ export default async function ActionApprovalPage({
 }
 
 async function ActionApprovalTerminalState({
-  status,
+  approval,
 }: {
-  status: Exclude<HostedActionApprovalStatus, "pending">;
+  approval: HostedActionApprovalView & {
+    status: Exclude<HostedActionApprovalStatus, "pending">;
+  };
 }) {
-  const content = terminalContent(status);
+  const content = terminalContent(approval.status);
   const contactOptions = await resolveHostedMurphContactOptions({
     message: { body: content.replyBody },
+    preferredKind: approval.returnContactKind,
   });
+
+  // Already-approved revisits bounce the member straight back to the
+  // conversation they came from. Denied/expired stay on-screen so the
+  // member can read what happened before navigating away.
+  if (approval.status === "approved" && contactOptions[0]?.href) {
+    redirect(contactOptions[0].href);
+  }
 
   return (
     <ActionApprovalScreen
       badgeIcon={content.icon}
-      badgeTone={status === "approved" ? "primary" : "muted"}
+      badgeTone={approval.status === "approved" ? "primary" : "muted"}
       body={content.description}
       title={content.title}
     >

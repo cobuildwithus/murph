@@ -9,12 +9,14 @@ import type {
 } from "@prisma/client";
 import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
+  HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
   isHostedActionApprovalId,
   parseHostedActionApprovalPresentation,
   parseHostedActionApprovalRequest,
   serializeHostedActionApprovalRequest,
   type HostedActionApprovalRequest,
   type HostedActionApprovalResult,
+  type HostedActionApprovalReturnContactKind,
 } from "@murphai/hosted-execution/action-approval";
 
 import type {
@@ -45,6 +47,7 @@ export interface PendingHostedActionApprovalIdentity {
   bindingHash: string;
   expiresAt: Date;
   presentation: HostedActionApprovalView["presentation"];
+  returnContactKind: HostedActionApprovalReturnContactKind | null;
   tokenHash: string;
 }
 
@@ -92,6 +95,7 @@ export async function requestHostedActionApproval(input: {
       memberId: input.memberId,
       presentationBody: request.presentation.body,
       presentationTitle: request.presentation.title,
+      returnContactKind: request.returnContactKind,
       tokenHash: buildHostedActionApprovalPlaceholderHash(approvalId),
     },
     update: {},
@@ -249,6 +253,7 @@ export async function decideHostedActionApprovalTx(input: {
     approvalId: input.approval.approvalId,
     expiresAt: input.approval.expiresAt.toISOString(),
     presentation: input.approval.presentation,
+    returnContactKind: input.approval.returnContactKind,
     status: input.decision,
   };
 }
@@ -335,6 +340,7 @@ function buildHostedActionApprovalView(
     approvalId: identity.approvalId,
     expiresAt: identity.expiresAt.toISOString(),
     presentation: identity.presentation,
+    returnContactKind: identity.returnContactKind,
     status: readHostedActionApprovalStatus(approval, now),
   };
 }
@@ -364,8 +370,23 @@ function requireHostedActionApprovalIdentity(
       body: approval.presentationBody,
       title: approval.presentationTitle,
     }),
+    returnContactKind: readStoredReturnContactKind(approval.returnContactKind),
     tokenHash: approval.tokenHash,
   };
+}
+
+function readStoredReturnContactKind(
+  value: string | null,
+): HostedActionApprovalReturnContactKind | null {
+  if (value === null) {
+    return null;
+  }
+  if (
+    (HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS as readonly string[]).includes(value)
+  ) {
+    return value as HostedActionApprovalReturnContactKind;
+  }
+  throw new TypeError("Hosted action approval returnContactKind is invalid.");
 }
 
 function readHostedActionApprovalStatus(

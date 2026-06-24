@@ -87,6 +87,7 @@ export const POST = withJsonError(async (
         ? APPROVED_REPLY_BODY
         : DENIED_REPLY_BODY,
     },
+    preferredKind: approval.returnContactKind,
   });
   const response: HostedActionApprovalDecisionResponse = {
     ...view,

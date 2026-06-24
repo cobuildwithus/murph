@@ -5,6 +5,7 @@ import path from 'node:path'
 import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
+  HostedActionApprovalReturnContactKind,
 } from '@murphai/hosted-execution/action-approval'
 import {
   assistantOutboxIntentSchema,
@@ -238,6 +239,22 @@ export function buildAssistantVaultFileSendApprovalRequest(
       body: `Murph will send “${file.filename}” (${formatByteCount(file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
+    returnContactKind: resolveAssistantVaultFileSendReturnContactKind(intent.channel),
+  }
+}
+
+function resolveAssistantVaultFileSendReturnContactKind(
+  channel: string | null | undefined,
+): HostedActionApprovalReturnContactKind | null {
+  switch (channel?.trim().toLowerCase()) {
+    case 'linq':
+      return 'text'
+    case 'telegram':
+      return 'telegram'
+    case 'email':
+      return 'email'
+    default:
+      return null
   }
 }
 
