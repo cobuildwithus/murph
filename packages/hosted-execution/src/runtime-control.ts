@@ -72,6 +72,13 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS)[number];
 
+export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = [
+  "music_v2",
+] as const;
+
+export type HostedAiUsageAllowanceElevenLabsMusicPricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS)[number];
+
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
@@ -149,6 +156,23 @@ export function normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
 ): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
   const normalized = value?.trim().toLowerCase();
   return normalized && isHostedAiUsageAllowanceElevenLabsTtsPricedModelId(normalized)
+    ? normalized
+    : null;
+}
+
+export function isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceElevenLabsMusicPricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceElevenLabsMusicPricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceElevenLabsMusicPricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(normalized)
     ? normalized
     : null;
 }

@@ -49,24 +49,37 @@ export interface HostedAssistantDeliveryImageMedia {
   url: string;
 }
 
+export type HostedAssistantDeliveryVoiceMemoGeneration =
+  | {
+      kind: "elevenlabs_speech";
+      modelId: string;
+      outputFormat: "mp3_44100_128";
+      text: string;
+      voiceId: string;
+    }
+  | {
+      durationMs: number;
+      forceInstrumental: boolean;
+      kind: "elevenlabs_music";
+      modelId: "music_v2";
+      outputFormat: "mp3_48000_192";
+      prompt: string;
+    };
+
+export type HostedAssistantDeliveryVoiceMemoTransport =
+  | {
+      attachmentId: string;
+      kind: "linq_attachment";
+    }
+  | {
+      generation: HostedAssistantDeliveryVoiceMemoGeneration;
+      kind: "telegram_generation";
+    };
+
 export interface HostedAssistantDeliveryVoiceMemoMedia {
   filename: string;
   kind: "voice_memo";
-  mimeType: "audio/aac" | "audio/mp4" | "audio/mpeg" | "audio/wav" | "audio/x-m4a";
-  modelId: string;
-  sizeBytes: number | null;
-  source: "elevenlabs";
-  transcript: string;
-  transportRefs: {
-    linq?: {
-      attachmentId: string;
-    };
-    telegram?: {
-      sendMode: "generate_at_delivery";
-    };
-  };
-  url: null;
-  voiceId: string;
+  transport: HostedAssistantDeliveryVoiceMemoTransport;
 }
 
 export type HostedAssistantDeliveryMedia =
@@ -702,97 +715,146 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
   record: Record<string, unknown>,
   label: string,
 ): HostedAssistantDeliveryVoiceMemoMedia {
-  const transportRefs = requireObject(record.transportRefs ?? {}, `${label}.transportRefs`);
-  const linq = transportRefs.linq === undefined
-    ? null
-    : parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
-      transportRefs.linq,
-      `${label}.transportRefs.linq`,
-    );
-  const telegram = transportRefs.telegram === undefined
-    ? null
-    : parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
-      transportRefs.telegram,
-      `${label}.transportRefs.telegram`,
-    );
-  if (!linq && !telegram) {
-    throw new TypeError(`${label}.transportRefs must include linq or telegram.`);
-  }
-  if (record.url !== null && record.url !== undefined) {
-    throw new TypeError(`${label}.url must be null.`);
-  }
+  requireExactHostedVoiceMemoObjectKeys(record, ["filename", "kind", "transport"], label);
 
   return {
-    filename: requireString(record.filename, `${label}.filename`),
+    filename: requireHostedVoiceMemoBoundedTrimmedString(record.filename, `${label}.filename`, 255),
     kind: "voice_memo",
-    mimeType: requireHostedAssistantVoiceMemoMimeType(record.mimeType, `${label}.mimeType`),
-    modelId: requireString(record.modelId, `${label}.modelId`),
-    sizeBytes: record.sizeBytes === null || record.sizeBytes === undefined
-      ? null
-      : requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
-    source: requireHostedAssistantVoiceMemoSource(record.source, `${label}.source`),
-    transcript: requireString(record.transcript, `${label}.transcript`),
-    transportRefs: {
-      ...(linq ? { linq } : {}),
-      ...(telegram ? { telegram } : {}),
-    },
-    url: null,
-    voiceId: requireString(record.voiceId, `${label}.voiceId`),
+    transport: parseHostedAssistantDeliveryVoiceMemoTransport(
+      record.transport,
+      `${label}.transport`,
+    ),
   };
 }
 
-function parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+function parseHostedAssistantDeliveryVoiceMemoTransport(
   value: unknown,
   label: string,
-): HostedAssistantDeliveryVoiceMemoMedia["transportRefs"]["linq"] {
+): HostedAssistantDeliveryVoiceMemoTransport {
   const record = requireObject(value, label);
-  return {
-    attachmentId: requireString(record.attachmentId, `${label}.attachmentId`),
-  };
+  const kind = requireString(record.kind, `${label}.kind`);
+  if (kind === "linq_attachment") {
+    requireExactHostedVoiceMemoObjectKeys(record, ["attachmentId", "kind"], label);
+    return {
+      attachmentId: requireHostedVoiceMemoBoundedTrimmedString(
+        record.attachmentId,
+        `${label}.attachmentId`,
+        200,
+      ),
+      kind,
+    };
+  }
+  if (kind === "telegram_generation") {
+    requireExactHostedVoiceMemoObjectKeys(record, ["generation", "kind"], label);
+    return {
+      generation: parseHostedAssistantDeliveryVoiceMemoGeneration(
+        record.generation,
+        `${label}.generation`,
+      ),
+      kind,
+    };
+  }
+
+  throw new TypeError(`${label}.kind must be linq_attachment or telegram_generation.`);
 }
 
-function parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
+function parseHostedAssistantDeliveryVoiceMemoGeneration(
   value: unknown,
   label: string,
-): HostedAssistantDeliveryVoiceMemoMedia["transportRefs"]["telegram"] {
+): HostedAssistantDeliveryVoiceMemoGeneration {
   const record = requireObject(value, label);
-  const sendMode = record.sendMode ?? "generate_at_delivery";
-  if (sendMode !== "generate_at_delivery") {
-    throw new TypeError(`${label}.sendMode must be generate_at_delivery.`);
+  const kind = requireString(record.kind, `${label}.kind`);
+  if (kind === "elevenlabs_speech") {
+    requireExactHostedVoiceMemoObjectKeys(
+      record,
+      ["kind", "modelId", "outputFormat", "text", "voiceId"],
+      label,
+    );
+    if (record.outputFormat !== "mp3_44100_128") {
+      throw new TypeError(`${label}.outputFormat must be mp3_44100_128.`);
+    }
+    return {
+      kind,
+      modelId: requireHostedVoiceMemoBoundedTrimmedString(record.modelId, `${label}.modelId`, 200),
+      outputFormat: "mp3_44100_128",
+      text: requireHostedVoiceMemoBoundedTrimmedString(record.text, `${label}.text`, 4_000),
+      voiceId: requireHostedVoiceMemoBoundedTrimmedString(record.voiceId, `${label}.voiceId`, 200),
+    };
   }
-  return {
-    sendMode,
-  };
+  if (kind === "elevenlabs_music") {
+    requireExactHostedVoiceMemoObjectKeys(
+      record,
+      [
+        "durationMs",
+        "forceInstrumental",
+        "kind",
+        "modelId",
+        "outputFormat",
+        "prompt",
+      ],
+      label,
+    );
+    if (record.modelId !== "music_v2") {
+      throw new TypeError(`${label}.modelId must be music_v2.`);
+    }
+    if (record.outputFormat !== "mp3_48000_192") {
+      throw new TypeError(`${label}.outputFormat must be mp3_48000_192.`);
+    }
+    return {
+      durationMs: requireHostedVoiceMemoIntegerInRange(
+        record.durationMs,
+        `${label}.durationMs`,
+        3_000,
+        300_000,
+      ),
+      forceInstrumental: requireBoolean(
+        record.forceInstrumental,
+        `${label}.forceInstrumental`,
+      ),
+      kind,
+      modelId: "music_v2",
+      outputFormat: "mp3_48000_192",
+      prompt: requireHostedVoiceMemoBoundedTrimmedString(record.prompt, `${label}.prompt`, 4_100),
+    };
+  }
+
+  throw new TypeError(`${label}.kind must be elevenlabs_speech or elevenlabs_music.`);
 }
 
-function requireHostedAssistantVoiceMemoMimeType(
-  value: unknown,
+function requireExactHostedVoiceMemoObjectKeys(
+  record: Record<string, unknown>,
+  allowedKeys: readonly string[],
   label: string,
-): HostedAssistantDeliveryVoiceMemoMedia["mimeType"] {
-  const mimeType = requireString(value, label);
-  if (
-    mimeType === "audio/aac" ||
-    mimeType === "audio/mp4" ||
-    mimeType === "audio/mpeg" ||
-    mimeType === "audio/wav" ||
-    mimeType === "audio/x-m4a"
-  ) {
-    return mimeType;
+): void {
+  const allowed = new Set(allowedKeys);
+  const unknown = Object.keys(record).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new TypeError(`${label} contains unsupported fields: ${unknown.sort().join(", ")}.`);
   }
-
-  throw new TypeError(`${label} must be a supported voice memo MIME type.`);
 }
 
-function requireHostedAssistantVoiceMemoSource(
+function requireHostedVoiceMemoBoundedTrimmedString(
   value: unknown,
   label: string,
-): "elevenlabs" {
-  const source = requireString(value, label);
-  if (source === "elevenlabs") {
-    return source;
+  maxLength: number,
+): string {
+  const normalized = requireString(value, label).trim();
+  if (!normalized || normalized.length > maxLength) {
+    throw new TypeError(`${label} must contain 1 to ${maxLength} characters.`);
   }
+  return normalized;
+}
 
-  throw new TypeError(`${label} must be elevenlabs.`);
+function requireHostedVoiceMemoIntegerInRange(
+  value: unknown,
+  label: string,
+  minimum: number,
+  maximum: number,
+): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new TypeError(`${label} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return value as number;
 }
 
 function parseHostedAssistantDeliveryAttempt(

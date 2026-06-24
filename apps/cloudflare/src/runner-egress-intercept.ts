@@ -21,6 +21,7 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -71,9 +72,9 @@ import {
 } from "./runner-injected-credential.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
-  HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+  HOSTED_ELEVENLABS_MAX_BODY_BYTES,
   isAllowedElevenLabsRequest,
-  parseHostedElevenLabsTtsRequestBody,
+  parseHostedElevenLabsRequestBody,
 } from "./runner-egress-elevenlabs.ts";
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
@@ -1271,17 +1272,17 @@ async function maybeHandleElevenLabsRequest(input: {
 
   const requestBody = await readBoundedRequestBody(
     input.request,
-    HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+    HOSTED_ELEVENLABS_MAX_BODY_BYTES,
   );
   if (requestBody === null) {
     return new Response("Payload Too Large", { status: 413 });
   }
-  const ttsRequest = parseHostedElevenLabsTtsRequestBody({
+  const providerRequest = parseHostedElevenLabsRequestBody({
     body: requestBody,
     contentType: input.request.headers.get("content-type"),
     pathnameSuffix,
   });
-  if (ttsRequest === null) {
+  if (providerRequest === null) {
     return disallowedProviderEgress();
   }
 
@@ -1302,18 +1303,26 @@ async function maybeHandleElevenLabsRequest(input: {
       createProviderUpstreamUrl(input.url, pathMatch),
       headers,
       {
-        body: ttsRequest.upstreamBody,
+        body: providerRequest.upstreamBody,
       },
     ),
     url: input.url,
   });
   if (response.ok) {
-    const usageRecording = recordHostedElevenLabsTtsUsage({
-      characterCount: ttsRequest.characterCount,
-      env: input.env,
-      memberId: authorization.userId,
-      model: ttsRequest.modelId,
-    });
+    const usageRecording = providerRequest.kind === "tts"
+      ? recordHostedElevenLabsTtsUsage({
+          characterCount: providerRequest.characterCount,
+          env: input.env,
+          memberId: authorization.userId,
+          model: providerRequest.modelId,
+        })
+      : recordHostedElevenLabsMusicUsage({
+          durationMs: providerRequest.durationMs,
+          env: input.env,
+          memberId: authorization.userId,
+          model: providerRequest.modelId,
+          providerRequestId: response.headers.get("song-id"),
+        });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(usageRecording);
     } else {
@@ -1360,6 +1369,50 @@ function recordHostedElevenLabsTtsUsage(input: {
       },
       level: "warn",
       message: "Hosted ElevenLabs TTS usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
+}
+
+function recordHostedElevenLabsMusicUsage(input: {
+  durationMs: number;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  model: string;
+  providerRequestId: string | null;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted ElevenLabs Music usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedElevenLabsMusicUsageRecord({
+      durationMs: input.durationMs,
+      memberId: input.memberId,
+      model: input.model,
+      providerRequestId: input.providerRequestId,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "elevenlabs_music",
+      },
+      level: "warn",
+      message: "Hosted ElevenLabs Music usage recording failed; delivery unaffected.",
       phase: "wake.running",
     });
   });

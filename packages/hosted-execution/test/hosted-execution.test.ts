@@ -564,7 +564,7 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
-    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
+    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
