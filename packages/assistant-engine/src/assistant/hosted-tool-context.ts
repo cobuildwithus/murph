@@ -8,6 +8,9 @@ import type {
 import type {
   AssistantProgressDeliveryResult,
 } from './turn-progress.js'
+import type {
+  AssistantConnectedAppsPort,
+} from './connected-apps-port.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -15,6 +18,7 @@ export interface AssistantHostedDeliveryContext {
 }
 
 export interface AssistantHostedToolContext {
+  readonly connectedApps?: AssistantConnectedAppsPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -28,6 +32,7 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
+  connectedApps?: AssistantConnectedAppsPort | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   messageInput: AssistantMessageInput
@@ -41,6 +46,7 @@ export function createAssistantHostedToolContext(input: {
   }
 
   return {
+    connectedApps: input.connectedApps ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()

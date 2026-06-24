@@ -1,5 +1,7 @@
-import type { WearableCanonicalMetricKey } from "@murphai/importers/device-providers/metric-catalog";
-import type { DeviceProviderMetricFamily } from "@murphai/importers/device-providers/provider-descriptors";
+import type {
+  WearableCanonicalMetricKey,
+  WearableProviderMetricFamily,
+} from "@murphai/health-metrics";
 import type { DeviceDataOrigin } from "@murphai/contracts";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
@@ -419,7 +421,7 @@ export interface WearableSleepWindowScorecard {
 
 export type WearableMetricKey = WearableCanonicalMetricKey;
 
-export type WearableMetricPolicyFamily = DeviceProviderMetricFamily | null;
+export type WearableMetricPolicyFamily = WearableProviderMetricFamily | null;
 
 export const SLEEP_METRIC_KEYS = new Set<WearableMetricKey>([
   "averageHeartRate",

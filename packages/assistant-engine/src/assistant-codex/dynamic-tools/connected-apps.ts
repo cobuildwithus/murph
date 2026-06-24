@@ -1,16 +1,18 @@
 import { z } from 'zod'
 
 import {
-  HOSTED_CONNECTED_APPS_PATH,
   hostedConnectedAppsExecuteInputSchema,
   hostedConnectedAppsManageInputSchema,
-  hostedConnectedAppsResponseSchema,
   hostedConnectedAppsSearchInputSchema,
   type HostedConnectedAppsExecuteInput,
   type HostedConnectedAppsManageInput,
   type HostedConnectedAppsRequest,
   type HostedConnectedAppsSearchInput,
 } from '@murphai/hosted-execution/connected-apps'
+
+import type {
+  AssistantConnectedAppsPort,
+} from '../../assistant/connected-apps-port.js'
 
 import {
   buildSafeToolCallValidationDigest,
@@ -154,8 +156,7 @@ function parseConnectedAppsArguments<T>(input: {
 
 export async function executeConnectedAppsDynamicTool(input: {
   abortSignal?: AbortSignal | null
-  available: boolean
-  fetchImpl: typeof fetch
+  connectedApps: AssistantConnectedAppsPort
   request: Exclude<
     ConnectedAppsDynamicToolRequest,
     { kind: 'invalid-connected-apps-arguments' }
@@ -166,41 +167,13 @@ export async function executeConnectedAppsDynamicTool(input: {
     success: boolean
   }
 }> {
-  if (!input.available) {
-    return connectedAppsTextResult(
-      false,
-      'connected apps are unavailable without hosted connected-app transport',
-    )
-  }
-
   const requestBody: HostedConnectedAppsRequest = toHostedConnectedAppsRequest(input.request)
 
   try {
-    const response = await input.fetchImpl(
-      new URL(HOSTED_CONNECTED_APPS_PATH, 'http://web-control.worker').toString(),
-      {
-        body: JSON.stringify(requestBody),
-        headers: {
-          'content-type': 'application/json',
-        },
-        method: 'POST',
-        signal: input.abortSignal ?? undefined,
-      },
-    )
-
-    if (!response.ok) {
-      return connectedAppsTextResult(
-        false,
-        await readConnectedAppsApiError(response),
-      )
-    }
-
-    const parsed = hostedConnectedAppsResponseSchema.safeParse(await response.json())
-    if (!parsed.success) {
-      return connectedAppsTextResult(false, 'connected apps returned an invalid response')
-    }
-
-    const text = serializeConnectedAppsResult(parsed.data.result)
+    const response = await input.connectedApps.request(requestBody, {
+      signal: input.abortSignal ?? null,
+    })
+    const text = serializeConnectedAppsResult(response.result)
     if (!text) {
       return connectedAppsTextResult(
         false,
@@ -236,32 +209,6 @@ function serializeConnectedAppsResult(value: unknown): string | null {
   } catch {
     return null
   }
-}
-
-async function readConnectedAppsApiError(response: Response): Promise<string> {
-  const fallback = `connected apps API failed with status ${response.status}`
-  try {
-    const value = await response.json()
-    const record = asRecord(value)
-    const error = asRecord(record?.error)
-    const code = typeof error?.code === 'string' ? error.code : null
-    const message = typeof error?.message === 'string' ? error.message : null
-    if (code && message) {
-      return `${fallback}: ${code}: ${message}`
-    }
-    if (code) {
-      return `${fallback}: ${code}`
-    }
-  } catch {
-    // Internal route errors are JSON; keep a bounded fallback for transport drift.
-  }
-  return fallback
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function connectedAppsTextResult(success: boolean, text: string) {

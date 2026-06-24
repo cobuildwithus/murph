@@ -1,3 +1,15 @@
+import {
+  GARMIN_WEARABLE_PROVIDER_DESCRIPTOR,
+  JUNCTION_WEARABLE_PROVIDER_DESCRIPTOR,
+  OURA_WEARABLE_PROVIDER_DESCRIPTOR,
+  STRAVA_WEARABLE_PROVIDER_DESCRIPTOR,
+  WHOOP_WEARABLE_PROVIDER_DESCRIPTOR,
+  resolveWearableProviderSourcePriority,
+  type ResolveWearableProviderSourcePriorityInput,
+  type WearableProviderMetricFamily,
+  type WearableProviderSourcePriorityHints,
+} from "@murphai/health-metrics";
+
 export type DeviceProviderTransportMode =
   | "oauth_callback"
   | "external_link"
@@ -7,18 +19,7 @@ export type DeviceProviderTransportMode =
   | "sdk_ingestion"
   | "xml_import";
 
-export type DeviceProviderMetricFamily =
-  | "activity"
-  | "sleep"
-  | "recovery"
-  | "readiness"
-  | "cardio"
-  | "respiration"
-  | "temperature"
-  | "blood_oxygen"
-  | "body"
-  | "women_health"
-  | "session";
+export type DeviceProviderMetricFamily = WearableProviderMetricFamily;
 
 export type DeviceProviderSnapshotParserKind = "schema" | "passthrough";
 export type DeviceProviderWebhookDeliveryMode = "notification" | "resource";
@@ -65,11 +66,8 @@ export interface DeviceProviderNormalizationDescriptor {
   snapshotParser: DeviceProviderSnapshotParserKind;
 }
 
-export interface DeviceProviderSourcePriorityHints {
-  defaultPriority: number;
-  metricFamilies: Partial<Record<DeviceProviderMetricFamily, number>>;
-  metrics?: Partial<Record<string, number>>;
-}
+export type DeviceProviderSourcePriorityHints =
+  WearableProviderSourcePriorityHints;
 
 export interface DeviceProviderDescriptor {
   provider: string;
@@ -90,10 +88,8 @@ export interface DeviceProviderDescriptor {
 
 export const DEFAULT_DEVICE_SYNC_BACKFILL_DAYS = 180;
 
-export interface ResolveDeviceProviderSourcePriorityInput {
-  metric?: string | null;
-  metricFamily?: DeviceProviderMetricFamily | null;
-}
+export type ResolveDeviceProviderSourcePriorityInput =
+  ResolveWearableProviderSourcePriorityInput;
 
 export interface DeviceProviderDescriptorLike {
   provider: string;
@@ -204,185 +200,15 @@ export function resolveDeviceProviderSourcePriority(
   descriptor: DeviceProviderDescriptor,
   input: ResolveDeviceProviderSourcePriorityInput = {},
 ): number {
-  const metric = normalizeDeviceProviderMetricKey(input.metric);
-  const metricPriority = metric ? descriptor.sourcePriorityHints.metrics?.[metric] : undefined;
-
-  if (typeof metricPriority === "number" && Number.isFinite(metricPriority)) {
-    return metricPriority;
-  }
-
-  const familyPriority = input.metricFamily
-    ? descriptor.sourcePriorityHints.metricFamilies[input.metricFamily]
-    : undefined;
-
-  if (typeof familyPriority === "number" && Number.isFinite(familyPriority)) {
-    return familyPriority;
-  }
-
-  return descriptor.sourcePriorityHints.defaultPriority;
+  return resolveWearableProviderSourcePriority(descriptor, input);
 }
-
-function normalizeDeviceProviderMetricKey(metric: string | null | undefined): string | null {
-  if (typeof metric !== "string") {
-    return null;
-  }
-
-  const normalized = metric.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-const GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 100,
-  activityScore: 90,
-  averageHeartRate: 80,
-  awakeMinutes: 80,
-  bmi: 100,
-  bodyBattery: 100,
-  bodyFatPercentage: 100,
-  dayStrain: 90,
-  deepMinutes: 80,
-  distanceKm: 100,
-  hrv: 80,
-  lightMinutes: 80,
-  lowestHeartRate: 90,
-  readinessScore: 80,
-  recoveryScore: 80,
-  remMinutes: 80,
-  respiratoryRate: 80,
-  restingHeartRate: 90,
-  sessionCount: 100,
-  sessionMinutes: 90,
-  sleepConsistency: 80,
-  sleepEfficiency: 80,
-  sleepPerformance: 80,
-  sleepScore: 90,
-  spo2: 80,
-  steps: 100,
-  stressLevel: 100,
-  temperature: 90,
-  temperatureDeviation: 80,
-  timeInBedMinutes: 90,
-  totalCalories: 100,
-  totalSleepMinutes: 80,
-  weightKg: 100,
-} as const satisfies Record<string, number>);
-
-const OURA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 90,
-  activityScore: 100,
-  averageHeartRate: 100,
-  awakeMinutes: 100,
-  bmi: 90,
-  bodyBattery: 90,
-  bodyFatPercentage: 90,
-  dayStrain: 80,
-  deepMinutes: 100,
-  distanceKm: 90,
-  hrv: 100,
-  lightMinutes: 100,
-  lowestHeartRate: 100,
-  readinessScore: 100,
-  recoveryScore: 90,
-  remMinutes: 100,
-  respiratoryRate: 100,
-  restingHeartRate: 80,
-  sessionCount: 80,
-  sessionMinutes: 100,
-  sleepConsistency: 90,
-  sleepEfficiency: 100,
-  sleepPerformance: 90,
-  sleepScore: 100,
-  spo2: 100,
-  steps: 90,
-  stressLevel: 80,
-  temperature: 80,
-  temperatureDeviation: 100,
-  timeInBedMinutes: 100,
-  totalCalories: 90,
-  totalSleepMinutes: 100,
-  weightKg: 90,
-} as const satisfies Record<string, number>);
-
-const WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 80,
-  activityScore: 80,
-  averageHeartRate: 90,
-  awakeMinutes: 90,
-  bmi: 80,
-  bodyBattery: 80,
-  bodyFatPercentage: 80,
-  dayStrain: 100,
-  deepMinutes: 90,
-  distanceKm: 80,
-  hrv: 90,
-  lightMinutes: 90,
-  lowestHeartRate: 80,
-  readinessScore: 90,
-  recoveryScore: 100,
-  remMinutes: 90,
-  respiratoryRate: 90,
-  restingHeartRate: 100,
-  sessionCount: 90,
-  sessionMinutes: 80,
-  sleepConsistency: 100,
-  sleepEfficiency: 90,
-  sleepPerformance: 100,
-  sleepScore: 80,
-  spo2: 90,
-  steps: 80,
-  stressLevel: 90,
-  temperature: 100,
-  temperatureDeviation: 90,
-  timeInBedMinutes: 80,
-  totalCalories: 80,
-  totalSleepMinutes: 90,
-  weightKg: 80,
-} as const satisfies Record<string, number>);
-
-const STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 85,
-  averageHeartRate: 95,
-  averageSpeedMps: 90,
-  distanceKm: 100,
-  maxHeartRate: 95,
-  maxSpeedMps: 90,
-  sessionCount: 80,
-  sessionMinutes: 100,
-  totalCalories: 85,
-  totalElevationGainMeters: 90,
-} as const satisfies Record<string, number>);
-
-const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 55,
-  activityScore: 55,
-  averageHeartRate: 55,
-  awakeMinutes: 55,
-  bmi: 55,
-  bodyFatPercentage: 55,
-  deepMinutes: 55,
-  distanceKm: 55,
-  hrv: 55,
-  lightMinutes: 55,
-  maxHeartRate: 55,
-  remMinutes: 55,
-  respiratoryRate: 55,
-  restingHeartRate: 55,
-  sleepScore: 55,
-  spo2: 55,
-  steps: 55,
-  stressLevel: 55,
-  totalCalories: 55,
-  totalSleepMinutes: 55,
-  weightKg: 55,
-} as const satisfies Record<string, number>);
 
 // Garmin has no direct import adapter (ingestion is Junction-only), but the
 // descriptor stays registered: it is Garmin's public identity for data already
 // in vaults - the query layer resolves the "Garmin" display name and
 // per-metric selection priorities from this registry.
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "garmin",
-  displayName: "Garmin",
+  ...GARMIN_WEARABLE_PROVIDER_DESCRIPTOR,
   transportModes: ["async_export"],
   connection: {
     kind: "none",
@@ -398,23 +224,10 @@ export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
     ],
     snapshotParser: "schema",
   },
-  sourcePriorityHints: {
-    defaultPriority: 70,
-    metricFamilies: {
-      activity: 100,
-      cardio: 80,
-      sleep: 65,
-      respiration: 65,
-      temperature: 60,
-      women_health: 100,
-    },
-    metrics: GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES,
-  },
 } as const satisfies DeviceProviderDescriptor;
 
 export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "oura",
-  displayName: "Oura",
+  ...OURA_WEARABLE_PROVIDER_DESCRIPTOR,
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "oauth2",
@@ -452,24 +265,10 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
     ],
     snapshotParser: "schema",
   },
-  sourcePriorityHints: {
-    defaultPriority: 85,
-    metricFamilies: {
-      sleep: 100,
-      readiness: 100,
-      blood_oxygen: 100,
-      session: 90,
-      cardio: 85,
-      respiration: 80,
-      activity: 75,
-    },
-    metrics: OURA_DEVICE_PROVIDER_METRIC_PRIORITIES,
-  },
 } as const satisfies DeviceProviderDescriptor;
 
 export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "strava",
-  displayName: "Strava",
+  ...STRAVA_WEARABLE_PROVIDER_DESCRIPTOR,
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "oauth2",
@@ -499,21 +298,10 @@ export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
     metricFamilies: ["activity", "cardio", "session"],
     snapshotParser: "schema",
   },
-  sourcePriorityHints: {
-    defaultPriority: 75,
-    metricFamilies: {
-      activity: 100,
-      cardio: 90,
-      session: 95,
-    },
-    metrics: STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES,
-  },
 } as const satisfies DeviceProviderDescriptor;
 
 export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "whoop",
-  aliases: ["whoop_v2", "whoop-v2"],
-  displayName: "WHOOP",
+  ...WHOOP_WEARABLE_PROVIDER_DESCRIPTOR,
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "oauth2",
@@ -559,23 +347,10 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
     metricFamilies: ["activity", "sleep", "recovery", "body", "respiration", "temperature"],
     snapshotParser: "schema",
   },
-  sourcePriorityHints: {
-    defaultPriority: 80,
-    metricFamilies: {
-      recovery: 100,
-      sleep: 95,
-      body: 90,
-      respiration: 85,
-      temperature: 85,
-      activity: 80,
-    },
-    metrics: WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES,
-  },
 } as const satisfies DeviceProviderDescriptor;
 
 export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "junction",
-  displayName: "Junction",
+  ...JUNCTION_WEARABLE_PROVIDER_DESCRIPTOR,
   transportModes: ["external_link", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "external_link",
@@ -599,20 +374,6 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
   normalization: {
     metricFamilies: ["activity", "sleep", "recovery", "cardio", "respiration", "blood_oxygen", "body", "session"],
     snapshotParser: "schema",
-  },
-  sourcePriorityHints: {
-    defaultPriority: 55,
-    metricFamilies: {
-      activity: 55,
-      sleep: 55,
-      recovery: 55,
-      cardio: 55,
-      respiration: 55,
-      blood_oxygen: 55,
-      body: 55,
-      session: 55,
-    },
-    metrics: JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES,
   },
 } as const satisfies DeviceProviderDescriptor;
 

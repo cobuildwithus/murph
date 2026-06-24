@@ -24,6 +24,7 @@ import {
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../../jsonl.ts";
+import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { loadVault } from "../../vault.ts";
 import {
   compactObject,
@@ -422,6 +423,12 @@ function isDraftUpsertInput(input: UpsertEventInput): input is UpsertEventDraftI
 export async function upsertEvent(
   input: UpsertEventInput,
 ): Promise<UpsertEventResult> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertEventLocked(input));
+}
+
+async function upsertEventLocked(
+  input: UpsertEventInput,
+): Promise<UpsertEventResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const suppliedEventId = isDraftUpsertInput(input)
     ? normalizeDraftEventId(input.draft.id)
@@ -494,6 +501,12 @@ export async function upsertEvent(
 }
 
 export async function deleteEvent(
+  input: DeleteEventInput,
+): Promise<DeleteEventResult> {
+  return withCanonicalWriteLock(input.vaultRoot, () => deleteEventLocked(input));
+}
+
+async function deleteEventLocked(
   input: DeleteEventInput,
 ): Promise<DeleteEventResult> {
   const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, input.eventId);

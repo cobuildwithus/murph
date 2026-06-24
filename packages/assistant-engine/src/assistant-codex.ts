@@ -118,6 +118,7 @@ import type {
 } from './assistant/hosted-tool-context.js'
 import type {
   AssistantNoReplyDisposition,
+  AssistantProviderDynamicTool,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
@@ -139,7 +140,10 @@ import type {
 } from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
-export { listMurphDynamicToolNames } from './assistant-codex/dynamic-tools.js'
+export {
+  listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
+} from './assistant-codex/dynamic-tools.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
@@ -417,7 +421,6 @@ export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
-  connectedAppsAvailable?: boolean | null
   approvalPolicy?: string
   configOverrides?: readonly string[]
   codexCommand?: string
@@ -426,6 +429,7 @@ export interface CodexAppServerTurnInput {
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
   developerInstructions?: string | null
+  dynamicTools: readonly AssistantProviderDynamicTool[]
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
@@ -3072,7 +3076,6 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      connectedAppsAvailable: input.connectedAppsAvailable === true,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,

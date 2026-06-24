@@ -427,86 +427,89 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan,
     })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
-      abortSignal: serviceTier
-        ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
-        : executionPlan.input.abortSignal,
-      activeTurnId: executionPlan.turnId,
-      activeTurnSteering: executionPlan.activeTurnSteering,
-      activeTurnSessionId: attemptPlan.session.sessionId,
-      allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
-      allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
-        input: executionPlan.input,
-        session: attemptPlan.session,
-        sharedPlan: executionPlan.sharedPlan,
-      }),
-      connectedAppsAvailable:
-        executionPlan.executionContext?.hosted?.connectedAppsAvailable ?? false,
-      generatedImageUploader:
-        executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
-      onCodexThreadHistoryUnsafe:
-        executionPlan.onCodexThreadHistoryUnsafe ?? null,
-      onFinishWithoutReplyAccepted:
-        executionPlan.onFinishWithoutReplyAccepted ?? null,
-      onProviderRequestStarted: (event) => {
-        notifyProviderRequestStartedBestEffort({
-          event: {
-            providerRequestOrdinal: input.providerRequestOrdinal,
-            startedAt: event.startedAt,
-          },
-          hook: input.onProviderRequestStarted ?? null,
-        })
+      providerConfig: {
+        approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
+        codexCommand:
+          attemptPlan.route.codexCommand ??
+          executionPlan.input.codexCommand ??
+          undefined,
+        codexHome: attemptPlan.route.providerOptions.codexHome,
+        model: attemptPlan.route.providerOptions.model,
+        modelProvider: attemptPlan.route.providerOptions.modelProvider,
+        oss: attemptPlan.route.providerOptions.oss,
+        profile: attemptPlan.route.providerOptions.profile,
+        provider: attemptPlan.route.provider,
+        reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+        sandbox: attemptPlan.route.providerOptions.sandbox,
       },
-      provider: attemptPlan.route.provider,
-      providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
-      productFeedbackRecorder: createAssistantProductFeedbackRecorder({
-        acceptedInputItems: executionPlan.acceptedInputItems ?? [],
-        productFeedbackRecorder:
-          executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
-      }),
-      providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-      publicInternetFetch:
-        executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-      voiceMemoDeliveryChannel,
-      requireGeneratedImageUploader:
-        executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
-      hostedToolContext: executionPlan.hostedToolContext ?? null,
-      workingDirectory: attemptPlan.routePlan.workingDirectory,
-      env: attemptEnv,
-      developerInstructions: attemptPlan.routePlan.developerInstructions,
-      usageAttribution,
-      userPrompt: executionPlan.input.prompt,
-      userMessageContent: resolveCodexRouteUserMessageContent({
-        route: attemptPlan.route,
-        userMessageContent: executionPlan.input.userMessageContent,
-      }),
-      systemPrompt: attemptPlan.routePlan.systemPrompt,
-      progressDelivery: executionPlan.progressDelivery ?? null,
-      turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
-      sessionContext: attemptPlan.routePlan.sessionContext
-        ? {
-            binding: attemptPlan.session.binding,
-          }
-        : undefined,
-      resume: attemptPlan.routePlan.resume,
-      codexCommand:
-        attemptPlan.route.codexCommand ??
-        executionPlan.input.codexCommand ??
-        undefined,
-      codexHome: attemptPlan.route.providerOptions.codexHome,
-      model: attemptPlan.route.providerOptions.model,
-      modelProvider: attemptPlan.route.providerOptions.modelProvider,
-      reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-      sandbox: attemptPlan.route.providerOptions.sandbox,
-      // Per-turn execution policy from the message input, not route identity.
-      serviceTier,
-      approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
-      conversationHistoryMessages:
-        attemptPlan.routePlan.conversationHistoryMessages,
-      onEvent: executionPlan.input.onProviderEvent ?? undefined,
-      profile: attemptPlan.route.providerOptions.profile,
-      oss: attemptPlan.route.providerOptions.oss,
-      onTraceEvent: executionPlan.input.onTraceEvent,
-      showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
+      turn: {
+        abortSignal: serviceTier
+          ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
+          : executionPlan.input.abortSignal,
+        activeTurnId: executionPlan.turnId,
+        activeTurnSteering: executionPlan.activeTurnSteering,
+        activeTurnSessionId: attemptPlan.session.sessionId,
+        allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+        allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
+          input: executionPlan.input,
+          session: attemptPlan.session,
+          sharedPlan: executionPlan.sharedPlan,
+        }),
+        conversationHistoryMessages:
+          attemptPlan.routePlan.conversationHistoryMessages,
+        developerInstructions: attemptPlan.routePlan.developerInstructions,
+        dynamicTools: attemptPlan.routePlan.dynamicTools,
+        env: attemptEnv,
+        generatedImageUploader:
+          executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
+        hostedToolContext: executionPlan.hostedToolContext ?? null,
+        onCodexThreadHistoryUnsafe:
+          executionPlan.onCodexThreadHistoryUnsafe ?? null,
+        onEvent: executionPlan.input.onProviderEvent ?? undefined,
+        onFinishWithoutReplyAccepted:
+          executionPlan.onFinishWithoutReplyAccepted ?? null,
+        onProviderRequestStarted: (event) => {
+          notifyProviderRequestStartedBestEffort({
+            event: {
+              providerRequestOrdinal: input.providerRequestOrdinal,
+              startedAt: event.startedAt,
+            },
+            hook: input.onProviderRequestStarted ?? null,
+          })
+        },
+        onTraceEvent: executionPlan.input.onTraceEvent,
+        productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+          acceptedInputItems: executionPlan.acceptedInputItems ?? [],
+          productFeedbackRecorder:
+            executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
+        }),
+        progressDelivery: executionPlan.progressDelivery ?? null,
+        providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
+        providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+        publicInternetFetch:
+          executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+        requireGeneratedImageUploader:
+          executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+        resume: attemptPlan.routePlan.resume,
+        // Per-turn execution policy from the message input, not route identity.
+        serviceTier,
+        sessionContext: attemptPlan.routePlan.sessionContext
+          ? {
+              binding: attemptPlan.session.binding,
+            }
+          : undefined,
+        showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
+        systemPrompt: attemptPlan.routePlan.systemPrompt,
+        turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
+        usageAttribution,
+        userMessageContent: resolveCodexRouteUserMessageContent({
+          route: attemptPlan.route,
+          userMessageContent: executionPlan.input.userMessageContent,
+        }),
+        userPrompt: executionPlan.input.prompt,
+        voiceMemoDeliveryChannel,
+        workingDirectory: attemptPlan.routePlan.workingDirectory,
+      },
     })
     attemptMetadata = normalizeAssistantProviderAttemptMetadata(attemptResult.metadata)
     recordAssistantRuntimeIssueInputsBestEffort({

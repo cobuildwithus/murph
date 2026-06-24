@@ -58,6 +58,7 @@ import type {
   HostedEmailSendRequest,
 } from "../hosted-email.ts";
 import type {
+  AssistantConnectedAppsPort,
   AssistantHostedGeneratedImageUploader,
 } from "@murphai/assistant-engine";
 import type {
@@ -374,7 +375,7 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
-  connectedAppsAvailable?: boolean | null;
+  connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;

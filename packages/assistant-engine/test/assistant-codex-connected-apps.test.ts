@@ -6,6 +6,8 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
+import type { AssistantConnectedAppsPort } from "../src/assistant/connected-apps-port.ts";
+import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
 import type { AssistantProgressDelivery } from "../src/assistant/turn-progress.ts";
 
 describe("murph connected-app dynamic tools", () => {
@@ -44,47 +46,46 @@ describe("murph connected-app dynamic tools", () => {
   });
 
   it("passes search through the signed hosted control-plane transport", async () => {
-    const fetchImpl = vi.fn(async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      expect(String(url)).toBe("http://web-control.worker/api/internal/connected-apps");
-      expect(JSON.parse(String(init?.body))).toEqual({
-        operation: "search",
-        input: {
-          query: "find recent email attachments",
-          toolkits: ["gmail"],
-        },
-      });
-      return jsonResponse({
-        result: {
-          success: true,
-          tool_schemas: {
-            GMAIL_GET_ATTACHMENT: { input_schema: { type: "object" } },
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async (input) => {
+        expect(input).toEqual({
+          operation: "search",
+          input: {
+            query: "find recent email attachments",
+            toolkits: ["gmail"],
           },
-        },
-      });
-    });
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+        });
+        return {
+          result: {
+            success: true,
+            tool_schemas: {
+              GMAIL_GET_ATTACHMENT: { input_schema: { type: "object" } },
+            },
+          },
+        };
+      }),
+    };
+    const toolRequest = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         query: "find recent email attachments",
         toolkits: ["gmail"],
       },
       tool: "connected_apps_search",
     }));
-    if (!request || request.kind !== "connected-apps-search") {
+    if (!toolRequest || toolRequest.kind !== "connected-apps-search") {
       throw new Error("Expected connected-apps search request.");
     }
 
     const result = await executeMurphDynamicToolRequest({
-      connectedAppsAvailable: true,
       env: {},
-      fetchImpl,
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
-      request,
+      request: toolRequest,
     });
 
+    expect(connectedApps.request).toHaveBeenCalledTimes(1);
     expect(result.rpcResult.success).toBe(true);
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       success: true,
@@ -92,11 +93,11 @@ describe("murph connected-app dynamic tools", () => {
   });
 
   it("does not call the control plane when connected apps are unavailable", async () => {
-    const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
+    const fetchImpl = vi.fn(async (): Promise<Response> => new Response());
     const result = await executeMurphDynamicToolRequest({
-      connectedAppsAvailable: false,
       env: {},
-      fetchImpl,
+      fetchImpl: fetchImpl as typeof fetch,
+      hostedToolContext: createHostedToolContext(null),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -110,13 +111,13 @@ describe("murph connected-app dynamic tools", () => {
   });
 
   it("fails closed instead of truncating an oversized provider result", async () => {
-    const fetchImpl = vi.fn(async (): Promise<Response> =>
-      jsonResponse({ result: { body: "x".repeat(130_000) } })
-    );
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: { body: "x".repeat(130_000) } })),
+    };
     const result = await executeMurphDynamicToolRequest({
-      connectedAppsAvailable: true,
       env: {},
-      fetchImpl,
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
@@ -148,6 +149,22 @@ function dynamicToolCall(input: {
   };
 }
 
+function createHostedToolContext(
+  connectedApps: AssistantConnectedAppsPort | null,
+): AssistantHostedToolContext {
+  return {
+    connectedApps,
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    requiredUserMessageDeliveryAvailable: false,
+    sendRequiredUserMessage: async () => ({
+      kind: "failed",
+      source: "model",
+    }),
+  };
+}
+
 function createProgressDelivery(): AssistantProgressDelivery {
   return {
     send: vi.fn(async (_text: string, options) => ({
@@ -155,11 +172,4 @@ function createProgressDelivery(): AssistantProgressDelivery {
       source: options?.source ?? "model",
     })),
   };
-}
-
-function jsonResponse(payload: unknown, status = 200): Response {
-  return new Response(JSON.stringify(payload), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    status,
-  });
 }

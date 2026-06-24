@@ -113,91 +113,26 @@ export async function executeCodexAssistantTurnAttempt(
 export async function executeCodexAssistantTurnFromInput(
   input: AssistantProviderTurnInput,
 ): Promise<AssistantProviderTurnExecutionResult> {
-  const providerConfig = normalizeAssistantProviderConfig(input)
-
-  return await executeCodexAssistantTurn({
-    activeTurnId: input.activeTurnId,
-    allowFinishWithoutReply: input.allowFinishWithoutReply,
-    allowMessageReactions: input.allowMessageReactions,
-    abortSignal: input.abortSignal,
-    activeTurnSteering: input.activeTurnSteering,
-    activeTurnSessionId: input.activeTurnSessionId,
-    connectedAppsAvailable: input.connectedAppsAvailable,
-    conversationHistoryMessages: input.conversationHistoryMessages,
-    developerInstructions: input.developerInstructions,
-    env: input.env,
-    generatedImageUploader: input.generatedImageUploader,
-    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
-    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted,
-    onEvent: input.onEvent,
-    onProviderRequestStarted: input.onProviderRequestStarted,
-    onTraceEvent: input.onTraceEvent,
-    prompt: input.prompt,
-    productFeedbackRecorder: input.productFeedbackRecorder,
-    providerConfig,
-    providerFetch: input.providerFetch,
-    publicInternetFetch: input.publicInternetFetch,
-    providerRequestOrdinal: input.providerRequestOrdinal,
-    requireGeneratedImageUploader: input.requireGeneratedImageUploader,
-    resume: input.resume,
-    serviceTier: input.serviceTier,
-    sessionContext: input.sessionContext,
-    showThinkingTraces: input.showThinkingTraces,
-    systemPrompt: input.systemPrompt,
-    progressDelivery: input.progressDelivery,
-    hostedToolContext: input.hostedToolContext,
-    turnContextPrompt: input.turnContextPrompt,
-    userPrompt: input.userPrompt,
-    userMessageContent: input.userMessageContent,
-    usageAttribution: input.usageAttribution,
-    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel,
-    workingDirectory: input.workingDirectory,
-  })
+  return await executeCodexAssistantTurn(
+    toAssistantProviderTurnExecutionInput(input),
+  )
 }
 
 export async function executeCodexAssistantTurnAttemptFromInput(
   input: AssistantProviderTurnInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
-  const providerConfig = normalizeAssistantProviderConfig(input)
+  return await executeCodexAssistantTurnAttempt(
+    toAssistantProviderTurnExecutionInput(input),
+  )
+}
 
-  return await executeCodexAssistantTurnAttempt({
-    activeTurnId: input.activeTurnId,
-    allowFinishWithoutReply: input.allowFinishWithoutReply,
-    allowMessageReactions: input.allowMessageReactions,
-    abortSignal: input.abortSignal,
-    activeTurnSteering: input.activeTurnSteering,
-    activeTurnSessionId: input.activeTurnSessionId,
-    connectedAppsAvailable: input.connectedAppsAvailable,
-    conversationHistoryMessages: input.conversationHistoryMessages,
-    developerInstructions: input.developerInstructions,
-    env: input.env,
-    generatedImageUploader: input.generatedImageUploader,
-    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
-    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted,
-    onEvent: input.onEvent,
-    onProviderRequestStarted: input.onProviderRequestStarted,
-    onTraceEvent: input.onTraceEvent,
-    prompt: input.prompt,
-    productFeedbackRecorder: input.productFeedbackRecorder,
-    providerConfig,
-    providerFetch: input.providerFetch,
-    publicInternetFetch: input.publicInternetFetch,
-    providerRequestOrdinal: input.providerRequestOrdinal,
-    requireGeneratedImageUploader: input.requireGeneratedImageUploader,
-    resume: input.resume,
-    serviceTier: input.serviceTier,
-    sessionContext: input.sessionContext,
-    showThinkingTraces: input.showThinkingTraces,
-    systemPrompt: input.systemPrompt,
-    progressDelivery: input.progressDelivery,
-    hostedToolContext: input.hostedToolContext,
-    turnContextPrompt: input.turnContextPrompt,
-    userPrompt: input.userPrompt,
-    userMessageContent: input.userMessageContent,
-    usageAttribution: input.usageAttribution,
-    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel,
-    workingDirectory: input.workingDirectory,
-  })
+function toAssistantProviderTurnExecutionInput(
+  input: AssistantProviderTurnInput,
+): AssistantProviderTurnExecutionInput {
+  return {
+    ...input.turn,
+    providerConfig: normalizeAssistantProviderConfig(input.providerConfig),
+  }
 }
 
 export { createCatalogModel }
