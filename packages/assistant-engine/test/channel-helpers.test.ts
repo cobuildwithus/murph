@@ -915,6 +915,7 @@ describe('channel helper seams', () => {
       {
         kind: 'voice_memo' as const,
         filename: 'memo.mp3',
+        transcript: null,
         transport: {
           attachmentId: 'attachment_voice_1',
           kind: 'linq_attachment' as const,
@@ -1306,6 +1307,7 @@ function createVoiceMemoMediaBase(): VoiceMemoMedia {
   return {
     kind: 'voice_memo' as const,
     filename: 'memo.mp3',
+    transcript: null,
     transport: {
       attachmentId: 'attachment_voice_1',
       kind: 'linq_attachment' as const,
