@@ -487,7 +487,7 @@ export function resolveMurphDynamicTools(input: {
       tool === MURPH_GENERATE_VOICE_MEMO_TOOL ||
       tool === MURPH_GENERATE_SONG_TOOL
     ) {
-      return input.voiceMemoGenerationAvailable !== false
+      return input.voiceMemoGenerationAvailable === true
     }
 
     if (
