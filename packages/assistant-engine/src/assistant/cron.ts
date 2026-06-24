@@ -426,10 +426,7 @@ export async function getAssistantCronStatus(
   const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
   const nextRunAt =
-    enabledJobs
-      .map((job) => job.state.nextRunAt)
-      .filter((value): value is string => value !== null)
-      .sort((left, right) => left.localeCompare(right))[0] ?? null
+    enabledJobs.find((job) => job.state.nextRunAt !== null)?.state.nextRunAt ?? null
 
   return {
     totalJobs: canonicalJobs.length,
