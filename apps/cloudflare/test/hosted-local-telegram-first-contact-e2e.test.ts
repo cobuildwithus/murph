@@ -227,6 +227,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
+      connectedAppsAvailable: true,
       messageReactionsAvailable: true,
     });
 

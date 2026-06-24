@@ -544,6 +544,14 @@ describe("ComputerUseService", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "desktop",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
     expect(kernel.executePlaywrightCalls).toBe(0);
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toBeNull();
@@ -2461,6 +2469,72 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("resizes the browser behind an open member-owned handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "mobile",
+      token: "handoff-token",
+    })).resolves.toBeUndefined();
+    expect(kernel.ensureBrowserViewportInputs).toEqual([
+      {
+        preset: "mobile",
+        sessionId: "kernel-session-1",
+      },
+    ]);
+  });
+
+  it("blocks browser resize when the handoff is no longer pending on the run", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: "hch_other_handoff",
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "mobile",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
+    });
+    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: "hch_other_handoff",
+      status: "awaiting_user",
+    });
+  });
+
   it("blocks handoff completion when member suspension races the claim", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "login" });
@@ -4176,6 +4250,9 @@ describe("ComputerUseService", () => {
     const deleteProfile = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
+    const ensureBrowserViewport = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
     const ensureProfile = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
@@ -4189,6 +4266,7 @@ describe("ComputerUseService", () => {
       createBrowser,
       deleteBrowserByIdOrName,
       deleteProfile,
+      ensureBrowserViewport,
       ensureProfile,
       executePlaywright,
       osControl,
@@ -4211,6 +4289,7 @@ describe("ComputerUseService", () => {
     expect(createBrowser).not.toHaveBeenCalled();
     expect(deleteBrowserByIdOrName).not.toHaveBeenCalled();
     expect(deleteProfile).not.toHaveBeenCalled();
+    expect(ensureBrowserViewport).not.toHaveBeenCalled();
     expect(ensureProfile).not.toHaveBeenCalled();
     expect(executePlaywright).not.toHaveBeenCalled();
   });
@@ -5625,6 +5704,8 @@ function createFakeKernel(input: {
   createdSessionIds: string[];
   deletedProfileNames: string[];
   deletedSessionIds: string[];
+  ensureBrowserViewportInputs:
+    Parameters<ComputerKernelClient["ensureBrowserViewport"]>[0][];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
 } {
@@ -5637,6 +5718,7 @@ function createFakeKernel(input: {
     createdSessionIds: [],
     deletedProfileNames: [],
     deletedSessionIds: [],
+    ensureBrowserViewportInputs: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
     async createBrowser(browserInput) {
@@ -5663,6 +5745,9 @@ function createFakeKernel(input: {
     },
     async deleteProfile(name: string) {
       this.deletedProfileNames.push(name);
+    },
+    async ensureBrowserViewport(viewportInput) {
+      this.ensureBrowserViewportInputs.push(viewportInput);
     },
     async ensureProfile() {},
     async executePlaywright(executeInput) {

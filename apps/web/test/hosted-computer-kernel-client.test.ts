@@ -17,6 +17,8 @@ const kernelSdkMocks = vi.hoisted(() => {
       playwright: {
         execute: vi.fn(),
       },
+      retrieve: vi.fn(),
+      update: vi.fn(),
     },
     profiles: {
       create: vi.fn(),
@@ -30,6 +32,9 @@ const kernelSdkMocks = vi.hoisted(() => {
   });
 
   return {
+    browserCreate: kernelClient.browsers.create,
+    browserRetrieve: kernelClient.browsers.retrieve,
+    browserUpdate: kernelClient.browsers.update,
     ConflictError: class ConflictError extends Error {},
     Kernel,
     NotFoundError: class NotFoundError extends Error {},
@@ -49,6 +54,92 @@ import { KernelComputerClient } from "../src/lib/computer-use/kernel-client";
 describe("KernelComputerClient", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("creates browsers without overriding the kernel viewport default", async () => {
+    kernelSdkMocks.browserCreate.mockResolvedValueOnce({
+      browser_live_view_url: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      session_id: "kernel-session-1",
+    });
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+
+    await expect(client.createBrowser({
+      browserName: "browser-1",
+      profileName: "profile-1",
+      saveChanges: true,
+      timeoutSeconds: 3600,
+    })).resolves.toEqual({
+      liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      sessionId: "kernel-session-1",
+    });
+
+    expect(kernelSdkMocks.browserCreate).toHaveBeenCalledWith({
+      headless: false,
+      name: "browser-1",
+      profile: {
+        name: "profile-1",
+        save_changes: true,
+      },
+      stealth: true,
+      timeout_seconds: 3600,
+    });
+  });
+
+  it("updates only when the requested viewport preset differs", async () => {
+    kernelSdkMocks.browserRetrieve
+      .mockResolvedValueOnce({
+        viewport: { height: 844, width: 390 },
+      })
+      .mockResolvedValueOnce({
+        viewport: { height: 844, width: 390 },
+      });
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+
+    await client.ensureBrowserViewport({
+      preset: "mobile",
+      sessionId: "kernel-session-1",
+    });
+    await client.ensureBrowserViewport({
+      preset: "desktop",
+      sessionId: "kernel-session-1",
+    });
+
+    expect(kernelSdkMocks.browserRetrieve).toHaveBeenNthCalledWith(
+      1,
+      "kernel-session-1",
+    );
+    expect(kernelSdkMocks.browserRetrieve).toHaveBeenNthCalledWith(
+      2,
+      "kernel-session-1",
+    );
+    expect(kernelSdkMocks.browserUpdate).toHaveBeenCalledTimes(1);
+    expect(kernelSdkMocks.browserUpdate).toHaveBeenCalledWith(
+      "kernel-session-1",
+      {
+        viewport: {
+          force: true,
+          height: 800,
+          refresh_rate: 60,
+          width: 1280,
+        },
+      },
+    );
+  });
+
+  it("sanitizes viewport SDK failures", async () => {
+    kernelSdkMocks.browserRetrieve.mockRejectedValueOnce(
+      new Error("upstream error for kernel-session-secret"),
+    );
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+
+    await expect(client.ensureBrowserViewport({
+      preset: "desktop",
+      sessionId: "kernel-session-secret",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_VIEWPORT_UPDATE_FAILED",
+      message: "Computer browser viewport update failed.",
+      retryable: true,
+    });
   });
 
   it("maps OS-control actions to the corresponding Kernel computer methods", async () => {

@@ -3,14 +3,21 @@ import assert from "node:assert/strict";
 import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+vi.mock("@vercel/analytics", () => ({ track: vi.fn() }));
+
+import { track } from "@vercel/analytics";
+
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 
 import { renderClientComponent } from "./render-client-component";
+
+const DONE_ENDPOINT = "/api/computer/handoff/handoff-token/done";
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
+  vi.mocked(track).mockClear();
 });
 
 afterEach(async () => {
@@ -20,16 +27,12 @@ afterEach(async () => {
   }
 });
 
-test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
-  let resolveFetch!: (response: Response) => void;
-  const fetchPromise = new Promise<Response>((resolve) => {
-    resolveFetch = resolve;
-  });
-  vi.mocked(fetch).mockReturnValue(fetchPromise);
+test("ComputerHandoffActiveView renders the live view iframe immediately", async () => {
+  vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
-  const { button, cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read; clipboard-write",
       liveViewUrl: "https://browser.example.test/live",
     }),
@@ -45,13 +48,33 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
     "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals",
   );
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
+test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
+  let resolveDone!: (response: Response) => void;
+  const donePromise = new Promise<Response>((resolve) => {
+    resolveDone = resolve;
+  });
+  vi.mocked(fetch).mockReturnValue(donePromise);
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: DONE_ENDPOINT,
+      iframeAllow: "clipboard-read",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe);
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   await flushReact();
 
-  expect(fetch).toHaveBeenCalledWith("/api/computer/handoff/handoff-token/done", {
+  expect(fetch).toHaveBeenCalledWith(DONE_ENDPOINT, {
     method: "POST",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
@@ -63,11 +86,11 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(container.querySelector("iframe")).toBe(iframe);
 
   await act(async () => {
-    resolveFetch(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
+    resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
       headers: { "content-type": "application/json" },
       status: 200,
     }));
-    await fetchPromise;
+    await donePromise;
     await flushMicrotasks();
   });
 
@@ -81,6 +104,115 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");
   expect(fallbackLink.textContent).toContain("Open Murph");
   expect(container.querySelector("iframe")).toBe(iframe);
+  expect(track).toHaveBeenCalledWith("handoff_completed");
+});
+
+test("ComputerHandoffActiveView focuses the iframe each time the keyboard button is pressed", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      iframeAllow: "clipboard-read; clipboard-write",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe);
+  const iframeFocus = vi.fn();
+  (iframe as unknown as { focus: (options?: FocusOptions) => void }).focus = iframeFocus;
+
+  const focusButton = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Focus the private page so the keyboard and paste work"]',
+  );
+  assert.ok(focusButton);
+  expect(focusButton.textContent).toContain("Keyboard");
+  expect(focusButton.getAttribute("aria-pressed")).toBeNull();
+
+  await act(async () => {
+    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushReact();
+
+  expect(iframeFocus).toHaveBeenCalledWith({ preventScroll: true });
+  expect(iframeFocus).toHaveBeenCalledOnce();
+
+  await act(async () => {
+    focusButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushReact();
+
+  expect(iframeFocus).toHaveBeenCalledTimes(2);
+  expect(
+    vi.mocked(track).mock.calls.filter(([name]) => name === "live_view_focus_enabled"),
+  ).toHaveLength(1);
+});
+
+test("ComputerHandoffActiveView fires handoff_abandoned on pagehide while idle", async () => {
+  vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+  const { cleanup, window } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      iframeAllow: "clipboard-read",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    window.dispatchEvent(new window.Event("pagehide"));
+  });
+
+  expect(track).toHaveBeenCalledWith("handoff_abandoned");
+
+  await act(async () => {
+    window.dispatchEvent(new window.Event("pagehide"));
+  });
+
+  expect(
+    vi.mocked(track).mock.calls.filter(([name]) => name === "handoff_abandoned"),
+  ).toHaveLength(1);
+});
+
+test("ComputerHandoffActiveView does not fire handoff_abandoned after completion", async () => {
+  let resolveFetch!: (response: Response) => void;
+  const fetchPromise = new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  });
+  vi.mocked(fetch).mockReturnValue(fetchPromise);
+
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(ComputerHandoffActiveView, {
+      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      iframeAllow: "clipboard-read",
+      liveViewUrl: "https://browser.example.test/live",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushReact();
+
+  await act(async () => {
+    resolveFetch(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }));
+    await fetchPromise;
+    await flushMicrotasks();
+  });
+
+  await act(async () => {
+    window.dispatchEvent(new window.Event("pagehide"));
+  });
+
+  expect(track).toHaveBeenCalledWith("handoff_completed");
+  expect(
+    vi.mocked(track).mock.calls.filter(([name]) => name === "handoff_abandoned"),
+  ).toHaveLength(0);
 });
 
 test.each([
@@ -91,7 +223,7 @@ test.each([
 
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
-      doneEndpoint: "/api/computer/handoff/handoff-token/done",
+      doneEndpoint: DONE_ENDPOINT,
       iframeAllow: "clipboard-read",
       liveViewUrl: "https://browser.example.test/live",
     }),

@@ -238,6 +238,7 @@ export function printHelp(): void {
       "  MURPH_DEV_MINIO_DATA_DIR=.tmp/hosted-local-minio-r2 Persist local MinIO R2 data for interactive dev",
       "  MURPH_DEV_MINIO_PORT=9000           Pin the local MinIO R2-compatible S3 port",
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
+      "  MURPH_DEV_SKIP_TLS_PROXY=1          Skip the local HTTPS proxy (auto-runs when `caddy` is on PATH and ./Caddyfile exists)",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
       "  MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto  Auto-use a local Linq cloudflared config when Linq credentials are present; set 1 to require it or 0 to disable",

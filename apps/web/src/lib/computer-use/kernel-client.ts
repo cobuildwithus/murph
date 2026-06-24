@@ -4,6 +4,10 @@ import type {
 } from "@murphai/hosted-execution/computer-use";
 
 import { computerUseError } from "./errors";
+import {
+  COMPUTER_BROWSER_VIEWPORTS,
+  type ComputerBrowserViewportPreset,
+} from "./viewport";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
 const KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH = 4_000;
@@ -26,6 +30,10 @@ export interface ComputerKernelClient {
   }): Promise<KernelBrowserHandle>;
   deleteBrowserByIdOrName(idOrName: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
+  ensureBrowserViewport(input: {
+    preset: ComputerBrowserViewportPreset;
+    sessionId: string;
+  }): Promise<void>;
   ensureProfile(name: string): Promise<void>;
   executePlaywright(input: {
     code: string;
@@ -61,6 +69,37 @@ export class KernelComputerClient implements ComputerKernelClient {
         return;
       }
       throw error;
+    }
+  }
+
+  async ensureBrowserViewport(input: {
+    preset: ComputerBrowserViewportPreset;
+    sessionId: string;
+  }): Promise<void> {
+    try {
+      const viewport = COMPUTER_BROWSER_VIEWPORTS[input.preset];
+      const browser = await this.kernel.browsers.retrieve(input.sessionId);
+
+      if (
+        browser.viewport?.width === viewport.width
+        && browser.viewport?.height === viewport.height
+      ) {
+        return;
+      }
+
+      await this.kernel.browsers.update(input.sessionId, {
+        viewport: {
+          ...viewport,
+          force: true,
+        },
+      });
+    } catch {
+      throw computerUseError({
+        code: "HOSTED_COMPUTER_VIEWPORT_UPDATE_FAILED",
+        httpStatus: 502,
+        message: "Computer browser viewport update failed.",
+        retryable: true,
+      });
     }
   }
 
