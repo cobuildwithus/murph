@@ -40,17 +40,24 @@ export const HOSTED_CONNECTED_APPS_SERVICE_TOOLS = {
       "INSTACART_GET_NEARBY_RETAILERS",
     ],
   },
+  // Weather only; Mapbox remains Murph's geocoding/routing layer.
+  openweather_api: {
+    enable: [
+      "OPENWEATHER_API_GET_CURRENT_WEATHER",
+      "OPENWEATHER_API_GET5_DAY_FORECAST",
+    ],
+  },
 } as const;
 
-export interface HostedConnectedAppsConfirmedWritePolicy {
+export interface HostedConnectedAppsCalendarWritePolicy {
   allowedArguments: readonly string[];
   forcedArguments?: Readonly<Record<string, unknown>>;
   toolkit: string;
   version: string;
 }
 
-const HOSTED_CONNECTED_APPS_CONFIRMED_WRITES: Readonly<
-  Record<string, HostedConnectedAppsConfirmedWritePolicy>
+const HOSTED_CONNECTED_APPS_CALENDAR_WRITES: Readonly<
+  Record<string, HostedConnectedAppsCalendarWritePolicy>
 > = {
   GOOGLECALENDAR_CREATE_EVENT: {
     allowedArguments: [
@@ -88,6 +95,12 @@ const HOSTED_CONNECTED_APPS_SERVICE_TOOL_SLUGS = new Set<string>(
   Object.values(HOSTED_CONNECTED_APPS_SERVICE_TOOLS).flatMap(({ enable }) => enable),
 );
 
+const HOSTED_CONNECTED_APPS_OPENWEATHER_TOOLS = new Set<string>(
+  HOSTED_CONNECTED_APPS_SERVICE_TOOLS.openweather_api.enable,
+);
+
+const HOSTED_CONNECTED_APPS_OPENWEATHER_VERSION = "20260414_00";
+
 const MIN_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 2;
 const MAX_CONNECTED_APP_ACCOUNTS_PER_TOOLKIT = 10;
 const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
@@ -113,7 +126,7 @@ export function buildHostedConnectedAppsPolicyRevision(
   return stablePositiveIntHash(JSON.stringify({
     maxAccountsPerToolkit: config.maxAccountsPerToolkit,
     policyVersion: HOSTED_CONNECTED_APPS_POLICY_VERSION,
-    confirmedWrites: HOSTED_CONNECTED_APPS_CONFIRMED_WRITES,
+    calendarWrites: HOSTED_CONNECTED_APPS_CALENDAR_WRITES,
     serviceTools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
     tags: {
       disable: ["destructiveHint"],
@@ -184,10 +197,44 @@ export function isHostedConnectedAppsServiceTool(toolSlug: string): boolean {
   return HOSTED_CONNECTED_APPS_SERVICE_TOOL_SLUGS.has(toolSlug);
 }
 
-export function getHostedConnectedAppsConfirmedWritePolicy(
+export function getHostedConnectedAppsCustomAuthExecution(
   toolSlug: string,
-): HostedConnectedAppsConfirmedWritePolicy | null {
-  return HOSTED_CONNECTED_APPS_CONFIRMED_WRITES[toolSlug] ?? null;
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): {
+  customAuthParams: {
+    parameters: readonly {
+      in: "query";
+      name: "appid";
+      value: string;
+    }[];
+  };
+  version: string;
+} | null {
+  if (!HOSTED_CONNECTED_APPS_OPENWEATHER_TOOLS.has(toolSlug)) {
+    return null;
+  }
+
+  const apiKey = source.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey) {
+    throw connectedAppsConfigurationError("OPENWEATHER_API_KEY is not configured.");
+  }
+
+  return {
+    customAuthParams: {
+      parameters: [{
+        in: "query",
+        name: "appid",
+        value: apiKey,
+      }],
+    },
+    version: HOSTED_CONNECTED_APPS_OPENWEATHER_VERSION,
+  };
+}
+
+export function getHostedConnectedAppsCalendarWritePolicy(
+  toolSlug: string,
+): HostedConnectedAppsCalendarWritePolicy | null {
+  return HOSTED_CONNECTED_APPS_CALENDAR_WRITES[toolSlug] ?? null;
 }
 
 export function formatHostedConnectedAppToolkitLabel(toolkit: string): string {

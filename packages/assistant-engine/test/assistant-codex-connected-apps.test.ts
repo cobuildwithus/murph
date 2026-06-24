@@ -37,25 +37,26 @@ describe("murph connected-app dynamic tools", () => {
   it("accepts accountless built-in service execution requests", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        arguments: { query: "pharmacy" },
-        toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
       },
       tool: "connected_apps_execute",
     }));
 
     expect(request).toMatchObject({
       args: {
-        arguments: { query: "pharmacy" },
-        toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS",
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
       },
       kind: "connected-apps-execute",
     });
   });
 
-  it("preserves explicit confirmation for calendar creation", () => {
+  it("preserves explicit agent approval for calendar creation", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         account: "calendar",
+        agentApproved: true,
         arguments: {
           event_duration_hour: 0,
           event_duration_minutes: 30,
@@ -64,7 +65,6 @@ describe("murph connected-app dynamic tools", () => {
           timezone: "America/New_York",
         },
         toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
-        userConfirmed: true,
       },
       tool: "connected_apps_execute",
     }));
@@ -72,8 +72,8 @@ describe("murph connected-app dynamic tools", () => {
     expect(request).toMatchObject({
       args: {
         account: "calendar",
+        agentApproved: true,
         toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
-        userConfirmed: true,
       },
       kind: "connected-apps-execute",
     });

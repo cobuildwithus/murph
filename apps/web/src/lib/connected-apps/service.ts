@@ -18,7 +18,8 @@ import {
   assertHostedConnectedAppToolkit,
   buildHostedConnectedAppsPolicyRevision,
   formatHostedConnectedAppToolkitLabel,
-  getHostedConnectedAppsConfirmedWritePolicy,
+  getHostedConnectedAppsCalendarWritePolicy,
+  getHostedConnectedAppsCustomAuthExecution,
   isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
 } from "./config";
@@ -87,11 +88,22 @@ export async function executeHostedConnectedAppsRequest(input: {
       case "execute": {
         const {
           account: selector,
+          agentApproved,
           arguments: argumentsValue,
           toolSlug,
-          userConfirmed,
         } = input.request.input;
         if (isHostedConnectedAppsServiceTool(toolSlug)) {
+          const customAuthExecution = getHostedConnectedAppsCustomAuthExecution(toolSlug);
+          if (customAuthExecution) {
+            return await client.executeDirect({
+              arguments: argumentsValue,
+              customAuthParams: customAuthExecution.customAuthParams,
+              toolSlug,
+              userId: input.memberId,
+              version: customAuthExecution.version,
+            });
+          }
+
           const sessionId = await ensureHostedConnectedAppsSession({
             client,
             config,
@@ -105,14 +117,14 @@ export async function executeHostedConnectedAppsRequest(input: {
           });
         }
 
-        const writePolicy = getHostedConnectedAppsConfirmedWritePolicy(toolSlug);
+        const writePolicy = getHostedConnectedAppsCalendarWritePolicy(toolSlug);
         if (writePolicy) {
           assertHostedConnectedAppToolkit(config, writePolicy.toolkit);
-          if (!userConfirmed) {
+          if (!agentApproved) {
             throw hostedOnboardingError({
-              code: "CONNECTED_APPS_CONFIRMATION_REQUIRED",
+              code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
               httpStatus: 400,
-              message: "Confirm the calendar event before adding it.",
+              message: "Approve the calendar event before adding it.",
             });
           }
           const unsupportedArguments = Object.keys(argumentsValue).filter(
@@ -157,6 +169,15 @@ export async function executeHostedConnectedAppsRequest(input: {
             },
             toolSlug,
             version: writePolicy.version,
+          }).catch((error: unknown) => {
+            if (error instanceof ComposioConnectedAppsRequestError) {
+              throw new ComposioConnectedAppsRequestError(
+                "Composio calendar event creation returned an ambiguous result.",
+                error.status,
+                { retryable: false },
+              );
+            }
+            throw error;
           });
         }
 
@@ -707,7 +728,8 @@ function mapConnectedAppsError(error: unknown): unknown {
   if (!(error instanceof ComposioConnectedAppsRequestError)) {
     return error;
   }
-  const retryable = error.status === null || error.status === 429 || error.status >= 500;
+  const retryable = error.retryable
+    ?? (error.status === null || error.status === 429 || error.status >= 500);
   return hostedOnboardingError({
     code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
     httpStatus: retryable ? 503 : 400,

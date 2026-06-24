@@ -57,9 +57,21 @@ describe("Composio connected-app client", () => {
               "INSTACART_GET_NEARBY_RETAILERS",
             ],
           },
+          openweather_api: {
+            enable: [
+              "OPENWEATHER_API_GET_CURRENT_WEATHER",
+              "OPENWEATHER_API_GET5_DAY_FORECAST",
+            ],
+          },
         },
         toolkits: {
-          enable: ["gmail", "googlecalendar", "composio_search", "instacart"],
+          enable: [
+            "gmail",
+            "googlecalendar",
+            "composio_search",
+            "instacart",
+            "openweather_api",
+          ],
         },
         user_id: "hbm_member",
         workbench: { enable: false },
@@ -81,6 +93,19 @@ describe("Composio connected-app client", () => {
         body: JSON.parse(String(init?.body)),
         url: String(url),
       });
+      if (String(url).endsWith("/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT")) {
+        return jsonResponse({ data: { eventId: "evt_123" }, successful: true });
+      }
+      if (
+        String(url).endsWith(
+          "/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+        )
+      ) {
+        return jsonResponse({
+          data: { weather: [{ description: "clear sky" }] },
+          successful: true,
+        });
+      }
       return jsonResponse({ ok: true });
     });
     const client = createComposioConnectedAppsClient({ config, fetchImpl });
@@ -112,6 +137,19 @@ describe("Composio connected-app client", () => {
       },
       toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
       version: "20260429_00",
+    });
+    await client.executeDirect({
+      arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+      customAuthParams: {
+        parameters: [{
+          in: "query",
+          name: "appid",
+          value: "openweather-test-key",
+        }],
+      },
+      toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+      userId: "hbm_member",
+      version: "20260414_00",
     });
 
     expect(requests).toEqual([
@@ -151,7 +189,45 @@ describe("Composio connected-app client", () => {
         },
         url: "https://backend.composio.test/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
       },
+      {
+        body: {
+          arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+          custom_auth_params: {
+            parameters: [{
+              in: "query",
+              name: "appid",
+              value: "openweather-test-key",
+            }],
+          },
+          user_id: "hbm_member",
+          version: "20260414_00",
+        },
+        url: "https://backend.composio.test/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+      },
     ]);
+  });
+
+  it("fails direct execution when Composio reports an unsuccessful envelope", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        data: null,
+        error: "permission denied",
+        successful: false,
+      })
+    );
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    const error = await client.executeDirect({
+      account: "calendar",
+      arguments: { summary: "Annual physical" },
+      toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      version: "20260429_00",
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(ComposioConnectedAppsRequestError);
+    expect(error).toMatchObject({ retryable: false });
+    expect(String(error)).not.toContain("permission denied");
+    expect(String(error)).not.toContain("secret-test-key");
   });
 
   it("supports multiple connected accounts and explicit provider revoke/delete", async () => {
@@ -311,7 +387,8 @@ describe("Composio connected-app client", () => {
   it("keeps built-in services out of the connectable toolkit list", () => {
     expect(readHostedConnectedAppsConfig({
       COMPOSIO_API_KEY: "secret-test-key",
-      COMPOSIO_CONNECTED_APP_TOOLKITS: "gmail,composio_search,instacart",
+      COMPOSIO_CONNECTED_APP_TOOLKITS:
+        "gmail,composio_search,instacart,openweather_api",
     }).toolkits).toEqual(["gmail"]);
   });
 

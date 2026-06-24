@@ -648,7 +648,77 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("requires confirmation and safe arguments for calendar creation", async () => {
+  it("executes OpenWeather through Composio with the server-held API key", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      expect(parsed.pathname).toBe(
+        "/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER",
+      );
+      expect(init?.method).toBe("POST");
+      expect(readJsonBody(init)).toEqual({
+        arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+        custom_auth_params: {
+          parameters: [{
+            in: "query",
+            name: "appid",
+            value: "openweather-test-key",
+          }],
+        },
+        user_id: "hbm_member",
+        version: "20260414_00",
+      });
+      return jsonResponse({
+        data: { weather: [{ description: "clear sky" }] },
+        successful: true,
+      });
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 40.7128, lon: -74.006, units: "imperial" },
+          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual({ weather: [{ description: "clear sky" }] });
+
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before OpenWeather execution when the API key is missing", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (): Promise<Response> => {
+      throw new Error("Missing weather credentials must fail before execution.");
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 40.7128, lon: -74.006 },
+          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+        },
+        operation: "execute",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_CONFIGURATION_UNAVAILABLE",
+      httpStatus: 503,
+    });
+
+    expect(executeFetch).not.toHaveBeenCalled();
+  });
+
+  it("requires agent approval and safe arguments for calendar creation", async () => {
     installPrismaHarness();
     const executeFetch = vi.fn(async (): Promise<Response> => {
       throw new Error("Calendar writes should be rejected before contacting Composio.");
@@ -673,7 +743,7 @@ describe("connected-app service", () => {
     };
 
     await expect(executeHostedConnectedAppsRequest(request)).rejects.toMatchObject({
-      code: "CONNECTED_APPS_CONFIRMATION_REQUIRED",
+      code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
       httpStatus: 400,
     });
     await expect(executeHostedConnectedAppsRequest({
@@ -686,7 +756,7 @@ describe("connected-app service", () => {
             ...request.request.input.arguments,
             attendees: ["provider@example.com"],
           },
-          userConfirmed: true,
+          agentApproved: true as const,
         },
       },
     })).rejects.toMatchObject({
@@ -723,7 +793,10 @@ describe("connected-app service", () => {
         });
       }
       if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
-        return jsonResponse({ eventId: "evt_123" });
+        return jsonResponse({
+          data: { eventId: "evt_123" },
+          successful: true,
+        });
       }
       if (parsed.pathname.startsWith("/api/v3.1/tool_router/session")) {
         throw new Error("Calendar creation should not use the read-only Tool Router session.");
@@ -745,8 +818,8 @@ describe("connected-app service", () => {
             summary: "Annual physical",
             timezone: "America/New_York",
           },
+          agentApproved: true as const,
           toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
-          userConfirmed: true,
         },
         operation: "execute",
       },
@@ -787,6 +860,76 @@ describe("connected-app service", () => {
         userIds: [],
       },
     ]);
+  });
+
+  it("does not mark failed or ambiguous direct calendar creation retryable", async () => {
+    installPrismaHarness();
+    const buildRequest = () => ({
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "calendar",
+          agentApproved: true as const,
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute" as const,
+      },
+    });
+    const buildFetch = (directResponse: "unsuccessful" | "throw") =>
+      vi.fn(async (
+        url: string | URL | Request,
+      ): Promise<Response> => {
+        const parsed = new URL(String(url));
+        if (parsed.pathname === "/api/v3.1/connected_accounts") {
+          return jsonResponse({
+            items: [
+              {
+                alias: "calendar",
+                id: "ca_calendar",
+                is_disabled: false,
+                status: "ACTIVE",
+                toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+                word_id: "quiet-calendar",
+              },
+            ],
+          });
+        }
+        if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+          if (directResponse === "throw") {
+            throw new Error("socket closed after provider accepted request");
+          }
+          return jsonResponse({
+            data: null,
+            error: "permission denied",
+            successful: false,
+          });
+        }
+        throw new Error(`Unexpected Composio request ${String(url)}`);
+      });
+
+    await expect(executeHostedConnectedAppsRequest({
+      ...buildRequest(),
+      fetchImpl: buildFetch("unsuccessful"),
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: 400,
+      retryable: false,
+    });
+    await expect(executeHostedConnectedAppsRequest({
+      ...buildRequest(),
+      fetchImpl: buildFetch("throw"),
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: 400,
+      retryable: false,
+    });
   });
 
   it("keeps removed-toolkit grants manageable without making them executable", async () => {
@@ -877,7 +1020,12 @@ describe("connected-app service", () => {
         const body = readJsonBody(init);
         expect(body).toMatchObject({
           toolkits: {
-            enable: ["googlecalendar", "composio_search", "instacart"],
+            enable: [
+              "googlecalendar",
+              "composio_search",
+              "instacart",
+              "openweather_api",
+            ],
           },
         });
         return jsonResponse({ session_id: "trs_member" });

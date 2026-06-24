@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-23
+Last verified: 2026-06-24
 
 ## Purpose
 
@@ -33,7 +33,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/user-interviews.md` | User-interview kit: cardinal rules, prospective-user and existing-user scripts, question swaps, signal lists, Murph-specific probes, after-call synthesis template. Based on Gustaf Alströmer's YC talk + PG. | User research method | Medium | 2026-06-10 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-06-09 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials, and hosted computer-use Kernel/browser secret handling. | Security policy | High | 2026-06-24 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials, hosted computer-use Kernel/browser secret handling, and Composio connected-app plus OpenWeather authority. | Security policy | High | 2026-06-24 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |

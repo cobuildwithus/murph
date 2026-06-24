@@ -21,11 +21,17 @@ export interface ComposioConnectedAccount {
 }
 
 export class ComposioConnectedAppsRequestError extends Error {
+  readonly retryable: boolean | null;
   readonly status: number | null;
 
-  constructor(message: string, status: number | null = null) {
+  constructor(
+    message: string,
+    status: number | null = null,
+    options: { retryable?: boolean | null } = {},
+  ) {
     super(message);
     this.name = "ComposioConnectedAppsRequestError";
+    this.retryable = options.retryable ?? null;
     this.status = status;
   }
 }
@@ -115,15 +121,29 @@ export function createComposioConnectedAppsClient(input: {
     },
 
     async executeDirect(inputExecute: {
-      account: string;
+      account?: string;
       arguments: Record<string, unknown>;
+      customAuthParams?: {
+        parameters: readonly {
+          in: "header" | "query";
+          name: string;
+          value: string;
+        }[];
+      };
       toolSlug: string;
+      userId?: string;
       version: string;
     }): Promise<unknown> {
-      return await requestJson({
+      const payload = await requestJson({
         body: {
           arguments: inputExecute.arguments,
-          connected_account_id: inputExecute.account,
+          ...(inputExecute.account
+            ? { connected_account_id: inputExecute.account }
+            : {}),
+          ...(inputExecute.customAuthParams
+            ? { custom_auth_params: inputExecute.customAuthParams }
+            : {}),
+          ...(inputExecute.userId ? { user_id: inputExecute.userId } : {}),
           version: inputExecute.version,
         },
         config: input.config,
@@ -131,6 +151,7 @@ export function createComposioConnectedAppsClient(input: {
         method: "POST",
         path: `/api/v3.1/tools/execute/${encodeURIComponent(inputExecute.toolSlug)}`,
       });
+      return readSuccessfulDirectExecutePayload(payload);
     },
 
     async createLink(inputLink: {
@@ -237,6 +258,18 @@ export function createComposioConnectedAppsClient(input: {
       });
     },
   };
+}
+
+function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
+  const record = asRecord(payload);
+  if (record?.successful !== true) {
+    throw new ComposioConnectedAppsRequestError(
+      "Composio direct tool execution did not succeed.",
+      null,
+      { retryable: false },
+    );
+  }
+  return Object.hasOwn(record, "data") ? record.data : {};
 }
 
 function parseConnectedAccount(item: unknown): ComposioConnectedAccount[] {
