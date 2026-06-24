@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as assistantEngine from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
+  recordHostedMailboxAssistantInputItem,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -128,6 +129,45 @@ describe("createHostedAssistantInputSource", () => {
       older.inputId,
     ]);
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("hydrates selected hosted mailbox proof from the sidecar", async () => {
+    const vaultRoot = await createTempVault();
+    const selected = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_selected_raw_mailbox",
+        eventId: "evt_selected_raw_mailbox",
+        itemId: "blinded_item_selected_raw_mailbox",
+        laneSeq: "10",
+        messageId: "msg_selected_raw_mailbox",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "selected continuation message",
+      }),
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: selected.inputId,
+      mailboxItemId: "mailbox_item_runtime_resume_001",
+      vault: vaultRoot,
+    });
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [selected.inputId],
+      vaultRoot,
+    });
+
+    const listed = await source.listInputCandidates({
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs).toHaveLength(1);
+    expect(listed.inputs[0]?.event.inputId).toBe(selected.inputId);
+    const sourceRef = listed.inputs[0]?.event.sourceRef;
+    expect(sourceRef?.kind).toBe("hosted-mailbox");
+    expect(sourceRef?.kind === "hosted-mailbox" ? sourceRef.itemId : null)
+      .toBe("blinded_item_selected_raw_mailbox");
+    expect(listed.inputs[0]?.event.hostedMailboxItemId)
+      .toBe("mailbox_item_runtime_resume_001");
   });
 
   it("refreshes newly enqueued pending ids without admitting old unselected pending ids", async () => {

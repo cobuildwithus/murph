@@ -17,10 +17,11 @@ import {
 } from "../src/assistant/turn-progress.js";
 
 describe("assistant product feedback", () => {
-  it("is stable across related-item ordering and scoped to accepted input", () => {
+  it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
     const feedback = {
       kind: "feature_interest" as const,
       relatedChangelogItemIds: ["beta", "alpha"],
+      summary: "Interested in the beta and alpha updates.",
     };
     const first = buildAssistantProductFeedbackIdempotencyKey({
       acceptedInputIds: ["assistant_input_1"],
@@ -33,6 +34,13 @@ describe("assistant product feedback", () => {
         relatedChangelogItemIds: ["alpha", "beta"],
       },
     });
+    const reworded = buildAssistantProductFeedbackIdempotencyKey({
+      acceptedInputIds: ["assistant_input_1"],
+      feedback: {
+        ...feedback,
+        summary: "Different concise wording for the same explicit feedback.",
+      },
+    });
     const nextInput = buildAssistantProductFeedbackIdempotencyKey({
       acceptedInputIds: ["assistant_input_2"],
       feedback,
@@ -40,6 +48,7 @@ describe("assistant product feedback", () => {
 
     expect(first).toMatch(/^[a-f0-9]{64}$/u);
     expect(reordered).toBe(first);
+    expect(reworded).toBe(first);
     expect(nextInput).not.toBe(first);
   });
 
@@ -74,6 +83,17 @@ describe("assistant product feedback", () => {
     expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
   });
 
+  it("advertises the shipped-interest changelog id requirement in the tool schema", () => {
+    const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
+    expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
+    expect(schema).toContain('"minItems":1');
+    expect(schema).toContain('"feature_interest"');
+    expect(schema).toContain('"summary"');
+    expect(schema).toContain('Speculative:');
+    expect(schema).toContain('Murph-observed:');
+    expect(schema).not.toContain('"topic"');
+  });
+
   it("parses and records explicit feedback through the turn-scoped capability", async () => {
     const recordProductFeedback = vi.fn(async (
       _feedback: HostedRuntimeProductFeedbackRecord,
@@ -91,6 +111,7 @@ describe("assistant product feedback", () => {
         arguments: {
           kind: "feature_interest",
           relatedChangelogItemIds: ["native-message-formatting"],
+          summary: "Interested in native message formatting.",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -101,6 +122,7 @@ describe("assistant product feedback", () => {
       feedback: {
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
       },
       kind: "submit-product-feedback",
     });
@@ -126,14 +148,102 @@ describe("assistant product feedback", () => {
         feedback: {
           kind: "feature_interest",
           relatedChangelogItemIds: ["native-message-formatting"],
+          summary: "Interested in native message formatting.",
         },
       }),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
     });
     expect(result.rpcResult).toEqual({
       success: true,
       contentItems: [{ type: "inputText", text: "product feedback recorded" }],
     });
+  });
+
+  it("parses generalized feature-request feedback without changelog ids", () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+          summary: "Wants Strava integration support.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+
+    expect(request).toEqual({
+      feedback: {
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+      },
+      kind: "submit-product-feedback",
+    });
+  });
+
+  it("rejects malformed generalized feedback tool arguments", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_interest",
+          summary: "Interested in native message formatting.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          feedbackTags: ["message-formatting"],
+          kind: "feature_request",
+          summary: "Wants better message formatting.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+          topic: "integrations",
+          summary: "Wants Strava integration support.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_request",
+          summary: "",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })?.kind).toBe("invalid-product-feedback-arguments");
   });
 });

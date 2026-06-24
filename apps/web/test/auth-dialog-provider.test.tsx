@@ -181,7 +181,7 @@ test("ComputerHandoffAuthRequiredState opens the shared auth dialog on mount", a
     { requireButton: false },
   );
 
-  expect(rendered.container.textContent).toContain("Sign in to open this browser handoff");
+  expect(rendered.container.textContent).toContain("Sign in to open this private page");
   expect(mocks.authDialogProps?.open).toBe(true);
 
   await rendered.cleanup();

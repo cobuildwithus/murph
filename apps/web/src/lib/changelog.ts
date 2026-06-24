@@ -3,6 +3,7 @@ import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
+export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
 export const CHANGELOG_FEATURE_LIMIT_MAX = 20;
 export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 5;
 

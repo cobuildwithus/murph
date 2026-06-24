@@ -142,6 +142,16 @@ describe("hosted execution observability", () => {
       + "via <REDACTED_PATH> and <REDACTED_PATH>",
     );
     expect(
+      sanitizeHostedExecutionStructuredLogText(
+        "browser failed at https://example.test/path?token=secret#frag "
+        + "with href=\"https://example.test/private\" src='https://cdn.example.test/pixel?secret=x' "
+        + "action=https://example.test/submit?token=secret",
+      ),
+    ).toBe(
+      "browser failed at <REDACTED_URL> with href=<REDACTED_URL> "
+      + "src=<REDACTED_URL> action=<REDACTED_URL>",
+    );
+    expect(
       normalizeHostedExecutionOperatorMessage(
         "failed hosted-user-runtime:member_123 for member_abc123 and user_def123",
       ),

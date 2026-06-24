@@ -219,6 +219,7 @@ function normalizeAssistantProductFeedback(
   return {
     kind: feedback.kind,
     relatedChangelogItemIds: [...new Set(feedback.relatedChangelogItemIds)],
+    summary: feedback.summary,
   }
 }
 

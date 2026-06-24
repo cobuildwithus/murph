@@ -26,12 +26,14 @@ type StoredAutomationRecord = {
 const managedAutomationMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
+  patchAutomation: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
   showAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
 }))
 
 vi.mock('@murphai/core', () => ({
+  patchAutomation: managedAutomationMocks.patchAutomation,
   showAutomation: managedAutomationMocks.showAutomation,
   upsertAutomation: managedAutomationMocks.upsertAutomation,
 }))
@@ -88,6 +90,7 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 
 import {
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -107,6 +110,16 @@ const defaultRoute = {
   participantId: null,
   threadId: null,
 }
+
+const legacyOnboardingFollowupInstructions = [
+  'This scheduled check helps continue Murph setup.',
+  '',
+  'First inspect onboarding status with `vault-cli assistant onboarding status`.',
+  '',
+  'If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.',
+  '',
+  'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
+].join('\n')
 
 beforeEach(() => {
   managedAutomationMocks.records.clear()
@@ -167,6 +180,48 @@ beforeEach(() => {
       return {
         auditPath: 'audit/mock.jsonl',
         created: !existing,
+        record,
+      }
+    })
+  managedAutomationMocks.patchAutomation
+    .mockReset()
+    .mockImplementation(async (input: {
+      continuityPolicy?: 'fresh' | 'preserve'
+      instructions?: string
+      lookup: string
+      route?: StoredAutomationRecord['route']
+      schedule?: StoredAutomationRecord['schedule']
+      slug?: string
+      status?: StoredAutomationRecord['status']
+      summary?: string | null
+      tags?: string[]
+      title?: string
+    }) => {
+      const existing = [...managedAutomationMocks.records.values()]
+        .find((record) =>
+          record.automationId === input.lookup || record.slug === input.lookup
+        )
+      if (!existing) {
+        throw new Error('Automation was not found.')
+      }
+
+      const record: StoredAutomationRecord = {
+        ...existing,
+        continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
+        instructions: input.instructions ?? existing.instructions,
+        route: input.route ?? existing.route,
+        schedule: input.schedule ?? existing.schedule,
+        slug: input.slug ?? existing.slug,
+        status: input.status ?? existing.status,
+        summary: input.summary === undefined ? existing.summary : input.summary,
+        tags: input.tags ?? existing.tags,
+        title: input.title ?? existing.title,
+      }
+
+      managedAutomationMocks.records.set(record.automationId, record)
+      return {
+        auditPath: 'audit/mock.jsonl',
+        created: false,
         record,
       }
     })
@@ -242,6 +297,14 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('/api/changelog?days=7')
     expect(seed.instructions).toContain('murph.attach_response_media')
     expect(seed.instructions).toContain('murph.submit_product_feedback')
+    expect(seed.instructions).toContain('another feature in mind')
+    expect(seed.instructions).toContain('clear inferred workflow friction')
+    expect(seed.instructions).toContain('Speculative:')
+    expect(seed.instructions).toContain('Murph-observed:')
+    expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
+    expect(seed.instructions).toContain('concise product-only summary')
+    expect(seed.instructions).toContain('tags, topics, raw user wording')
+    expect(seed.instructions).not.toContain('kind/topic')
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date('2026-06-22T12:00:00.000Z'),
@@ -553,6 +616,210 @@ describe('applyMurphManagedAutomations', () => {
       .toMatchObject({
         status: 'paused',
       })
+  })
+
+  it('reconciles an existing active onboarding follow-up definition by owned slug', async () => {
+    const existingRoute = {
+      channel: 'linq',
+      deliveryTarget: 'existing-thread',
+      identityId: 'identity-1',
+      participantId: null,
+      threadId: null,
+    }
+    managedAutomationMocks.records.set('automation_onboarding_followup', {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: existingRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        lookup: 'automation_onboarding_followup',
+        summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+        tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+        title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      }),
+    )
+    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
+      .not.toHaveProperty('route')
+    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
+      .not.toHaveProperty('schedule')
+    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
+      .not.toHaveProperty('status')
+    expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
+      .toMatchObject({
+        route: existingRoute,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '08:00',
+        },
+        status: 'active',
+      })
+  })
+
+  it('updates a paused onboarding follow-up without reactivating it', async () => {
+    managedAutomationMocks.records.set('automation_onboarding_followup', {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'paused',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'automation_onboarding_followup',
+      }),
+    )
+    expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
+      .toMatchObject({
+        route: defaultRoute,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '08:00',
+        },
+        status: 'paused',
+      })
+  })
+
+  it('migrates the original unmarked onboarding follow-up seed by exact fingerprint', async () => {
+    managedAutomationMocks.records.set('automation_legacy_onboarding_followup', {
+      automationId: 'automation_legacy_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: legacyOnboardingFollowupInstructions,
+      route: defaultRoute,
+      schedule: {
+        everyMs: 90_000,
+        kind: 'every',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'User-edited setup follow-up summary.',
+      tags: ['assistant', 'onboarding'],
+      title: 'User-edited setup follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.records.get('automation_legacy_onboarding_followup'))
+      .toMatchObject({
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        route: defaultRoute,
+        schedule: {
+          everyMs: 90_000,
+          kind: 'every',
+        },
+        status: 'active',
+        summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+        tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+        title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      })
+  })
+
+  it('does not reconcile archived or user-owned onboarding follow-up slugs', async () => {
+    managedAutomationMocks.records.set('automation_archived_onboarding_followup', {
+      automationId: 'automation_archived_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'archived',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 0,
+    })
+
+    managedAutomationMocks.records.clear()
+    managedAutomationMocks.patchAutomation.mockClear()
+    managedAutomationMocks.upsertAutomation.mockClear()
+    managedAutomationMocks.records.set('automation_user_onboarding_followup', {
+      automationId: 'automation_user_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'user-owned follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'User summary',
+      tags: ['assistant', 'scheduled'],
+      title: 'User follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
   })
 
   it('updates active seed-owned fields while preserving the existing route', async () => {

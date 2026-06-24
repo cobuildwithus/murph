@@ -18,20 +18,24 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   window: Window & typeof globalThis;
 };
 
+type RenderClientComponentOptions = {
+  location?: Record<string, string>;
+};
+
 export async function renderClientComponent(
   element: ReactElement,
 ): Promise<RenderClientComponentResult<HTMLButtonElement>>;
 export async function renderClientComponent(
   element: ReactElement,
-  options: { location?: Record<string, string>; requireButton?: true },
+  options: RenderClientComponentOptions & { requireButton?: true },
 ): Promise<RenderClientComponentResult<HTMLButtonElement>>;
 export async function renderClientComponent(
   element: ReactElement,
-  options: { location?: Record<string, string>; requireButton: false },
+  options: RenderClientComponentOptions & { requireButton: false },
 ): Promise<RenderClientComponentResult<HTMLButtonElement | null>>;
 export async function renderClientComponent(
   element: ReactElement,
-  options: { location?: Record<string, string>; requireButton?: boolean } = {},
+  options: RenderClientComponentOptions & { requireButton?: boolean } = {},
 ): Promise<RenderClientComponentResult<HTMLButtonElement | null>> {
   const { document, window } = loadLinkedom().parseHTML(
     "<html><body><div id='root'></div></body></html>",

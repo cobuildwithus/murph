@@ -1,5 +1,6 @@
 "use client";
 
+import { Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState, type ReactNode } from "react";
 
@@ -43,6 +44,7 @@ export function HostedAccountSettingsCards({
     <>
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
         <SettingsRow
+          icon={<Phone className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Phone"
           value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
           empty={!phoneNumber}
@@ -58,6 +60,7 @@ export function HostedAccountSettingsCards({
           }
         />
         <SettingsRow
+          icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Telegram"
           value={telegramValue}
           empty={!telegramUserId}
@@ -77,6 +80,7 @@ export function HostedAccountSettingsCards({
           }
         />
         <SettingsRow
+          icon={<Mail className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Email"
           value={emailAddress ?? "Not connected"}
           empty={!emailAddress}
@@ -113,13 +117,15 @@ export function HostedAccountSettingsCards({
 function SettingsRow(props: {
   action?: ReactNode;
   empty?: boolean;
+  icon?: ReactNode;
   label: string;
   meta?: ReactNode;
   value: string;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
-      <div className="min-w-0 flex-1">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
+      {props.icon ?? <span className="block size-[18px]" aria-hidden="true" />}
+      <div className="min-w-0">
         <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
           {props.label}
         </span>

@@ -3,6 +3,7 @@ import {
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
+  readHostedMailboxAssistantInputItems,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -264,11 +265,19 @@ async function readHostedAssistantInputCandidatesById(input: {
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+    inputIds: events.map((event) => event.inputId),
+    vault: input.vaultRoot,
+  });
   return events
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
-    .map(assistantInputCandidateFromStoredEvent);
+    .map((event) =>
+      assistantInputCandidateFromStoredEvent(event, {
+        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+      })
+    );
 }
 
 async function readHostedAssistantInputEventsById(input: {

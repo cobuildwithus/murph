@@ -1370,10 +1370,9 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_act',
                 arguments: {
-                  action: 'goto',
+                  code: "await page.goto('https://shop.example.test/checkout');",
                   runId: 'run_123',
                   timeoutMs: 25000,
-                  url: 'https://shop.example.test/checkout',
                 },
               },
             }),
@@ -1611,7 +1610,7 @@ describe('assistant codex runtime', () => {
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
-  it('rejects finish_without_reply after pausing a computer run for the user', async () => {
+  it('allows finish_without_reply after pausing a computer run for the user', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1704,28 +1703,16 @@ describe('assistant codex runtime', () => {
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'finish_without_reply unavailable after computer_pause_for_user; send a normal final response with the handoff URL or next step for the user',
+                  text: 'finished without reply',
                 },
               ],
             },
           })
 
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-computer-pause-no-reply',
-                  type: 'assistant_message',
-                  message: 'Paused for confirmation: https://web.example.test/computer/handoff/raw-token',
-                },
-              },
-            }),
-          )
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -1752,9 +1739,9 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [],
-      finalAction: null,
-      finalMessage: 'Paused for confirmation: https://web.example.test/computer/handoff/raw-token',
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      finalAction: { kind: 'none' },
+      finalMessage: '',
     })
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })

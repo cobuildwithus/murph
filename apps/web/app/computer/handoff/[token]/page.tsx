@@ -1,17 +1,19 @@
-import { CheckCircle2, Clock3, Monitor } from "lucide-react";
+import { CheckCircle2, Clock3 } from "lucide-react";
+import { headers } from "next/headers";
 
+import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
-import { ComputerHandoffDoneButton } from "@/src/components/computer-use/computer-handoff-done-button";
-import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
+import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { cn } from "@/src/lib/utils";
 
-const HANDOFF_DONE_REPLY_BODY = "done";
+const HANDOFF_DONE_REPLY_BODY = "Done";
+const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
 
 export default async function ComputerHandoffPage({
   params,
@@ -38,18 +40,18 @@ export default async function ComputerHandoffPage({
     const isCompleted = state.kind === "completed";
     const Icon = isCompleted ? CheckCircle2 : Clock3;
     const title = isCompleted
-      ? "Browser step saved"
+      ? "All set"
       : state.kind === "checkpointing"
-        ? "Saving browser step"
-        : "Browser handoff expired";
+        ? "Saving your progress"
+        : "This link expired";
     const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
     const nextStep = isCompleted
-      ? "Reply to Murph to continue the browser run."
+      ? "Reply to Murph to continue."
       : state.kind === "checkpointing"
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
-        : "Return to Murph and ask to restart this browser step.";
+        : "Return to Murph and ask for a new link.";
     const contactOptions = isCompleted
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
@@ -95,32 +97,36 @@ export default async function ComputerHandoffPage({
     );
   }
 
+  const preset = resolveComputerBrowserViewportPreset(
+    (await headers()).get("user-agent"),
+  );
+  try {
+    await Promise.race([
+      service.ensureHandoffViewport({
+        memberId: session.member.id,
+        preset,
+        token,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("viewport resize timed out")),
+          HANDOFF_VIEWPORT_SSR_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    console.warn("[computer-handoff] viewport resize failed", error);
+  }
+
   const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
-      <iframe
-        allow={state.iframeAllow}
-        className="block h-dvh w-full border-0 bg-foreground"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
-        src={state.liveViewUrl}
-        title="Murph browser handoff"
+      <ComputerHandoffActiveView
+        doneEndpoint={doneEndpoint}
+        iframeAllow={state.iframeAllow}
+        liveViewUrl={state.liveViewUrl}
       />
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
-      >
-        <ComputerHandoffFloatingIsland
-          handle={
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            </span>
-          }
-        >
-          <ComputerHandoffDoneButton endpoint={doneEndpoint} />
-        </ComputerHandoffFloatingIsland>
-      </div>
     </main>
   );
 }

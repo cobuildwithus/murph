@@ -11,6 +11,7 @@ describe("hosted product feedback contracts", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
     };
     expect(parseHostedRuntimeProductFeedbackRecordRequest({ feedback })).toEqual({
       feedback,
@@ -30,6 +31,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "not-a-digest",
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -37,14 +39,126 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: [],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "bug_report",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Wants a bug-report workflow.",
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
         idempotencyKey: "a".repeat(64),
         kind: "feature_request",
-        relatedChangelogItemIds: ["native-message-formatting"],
+        relatedChangelogItemIds: [],
       },
     })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "x".repeat(501),
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        feedbackTags: ["message-formatting"],
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants better message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+        topic: "integrations",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "native-message-formatting",
+          "native-message-formatting",
+        ],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["NativeMessageFormatting"],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "one",
+          "two",
+          "three",
+          "four",
+          "five",
+          "six",
+          "seven",
+          "eight",
+        ],
+        summary: "Interested in many changelog items.",
+      },
+    })).toThrow();
+  });
+
+  it("supports structured feature requests and frustrations", () => {
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "b".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "  Wants Strava   integration support.  ",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "b".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        summary: "The dashboard feels slow.",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        relatedChangelogItemIds: [],
+        summary: "The dashboard feels slow.",
+      },
+    });
   });
 });

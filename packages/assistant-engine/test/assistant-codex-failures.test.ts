@@ -312,6 +312,75 @@ describe('assistant Codex failure helpers', () => {
 
   it('classifies connection loss from structured codexErrorInfo when present', () => {
     expect(
+      buildCodexTurnFailedError({
+        errorInfo: null,
+        fallback:
+          'stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
+        providerActionCount: 0,
+        codexThreadId: 'thread-turn-connection-text',
+        status: 'failed',
+      }),
+    ).toMatchObject({
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      context: {
+        codexErrorInfoPresent: false,
+        codexFailureStage: 'connection_lost',
+        codexTurnStatus: 'failed',
+        connectionLost: true,
+        providerActionCount: 0,
+        recoverableConnectionLoss: true,
+        retryable: true,
+      },
+      message:
+        'Codex app-server lost its connection while waiting for the model. stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses) Codex thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
+    })
+
+    expect(
+      buildCodexTurnFailedError({
+        errorInfo: {
+          httpStatusCode: null,
+          kind: 'responseStreamDisconnected',
+        },
+        fallback: 'an entirely novel provider transport message',
+        providerActionCount: 0,
+        codexThreadId: 'thread-turn-structured-connection',
+        status: 'failed',
+      }),
+    ).toMatchObject({
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      context: {
+        codexErrorInfo: 'responseStreamDisconnected',
+        codexErrorInfoPresent: true,
+        connectionLost: true,
+        recoverableConnectionLoss: true,
+        retryable: true,
+      },
+    })
+
+    // Structured non-connection errors remain terminal even if the text looks
+    // like a transport failure.
+    expect(
+      buildCodexTurnFailedError({
+        errorInfo: {
+          httpStatusCode: null,
+          kind: 'internalServerError',
+        },
+        fallback: 'stream disconnected before completion: connection reset',
+        providerActionCount: 0,
+        codexThreadId: 'thread-turn-structured-non-connection',
+        status: 'failed',
+      }),
+    ).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexErrorInfo: 'internalServerError',
+        codexFailureStage: 'turn_failed',
+        connectionLost: false,
+        retryable: false,
+      },
+    })
+
+    expect(
       buildCodexFailure({
         code: null,
         errorInfo: {

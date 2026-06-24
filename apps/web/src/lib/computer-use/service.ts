@@ -1,14 +1,10 @@
-import { lookup as lookupDns } from "node:dns/promises";
-
 import {
-  isHostedComputerIpLiteral,
-  isHostedComputerNavigationUrl,
-  isHostedComputerPublicIpAddress,
   type HostedComputerActRequest,
   type HostedComputerAwaitingReason,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
+  type HostedComputerOsControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -31,6 +27,7 @@ import {
   type ComputerRunRecord,
   type ComputerUseStore,
 } from "./store";
+import type { ComputerBrowserViewportPreset } from "./viewport";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
@@ -42,18 +39,11 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
+const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
-type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
-type ComputerActLocator = NonNullable<
-  HostedComputerActRequest extends infer TAction
-    ? TAction extends { locator?: infer TLocator }
-      ? TLocator
-      : never
-    : never
->;
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -73,6 +63,13 @@ export interface ComputerObserveResult {
   visibleText: string;
 }
 
+export interface ComputerOsControlResult {
+  action: HostedComputerOsControlRequest["action"];
+  ok: true;
+  runId: string;
+  status: "running";
+}
+
 export interface ComputerPauseForUserResult {
   awaitingReason: HostedComputerAwaitingReason;
   handoffUrl: string | null;
@@ -87,9 +84,6 @@ export interface ComputerExpiredRunCleanupResult {
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
-type HostedComputerActLocator = NonNullable<Extract<HostedComputerActRequest, {
-  locator?: unknown;
-}>["locator"]>;
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -122,7 +116,6 @@ export class ComputerUseService {
   private readonly crypto: ComputerUseCrypto;
   private readonly env: EnvSource;
   private kernel: ComputerKernelClient | null;
-  private readonly navigationDnsLookup: NavigationDnsLookup;
   private readonly now: () => Date;
   private readonly store: ComputerUseStore;
 
@@ -130,14 +123,12 @@ export class ComputerUseService {
     crypto?: ComputerUseCrypto;
     env?: EnvSource;
     kernel?: ComputerKernelClient;
-    navigationDnsLookup?: NavigationDnsLookup;
     now?: () => Date;
     store?: ComputerUseStore;
   } = {}) {
     this.crypto = input.crypto ?? hostedComputerUseCrypto;
     this.env = input.env ?? process.env;
     this.kernel = input.kernel ?? null;
-    this.navigationDnsLookup = input.navigationDnsLookup ?? defaultNavigationDnsLookup;
     this.now = input.now ?? (() => new Date());
     this.store = input.store ?? new PrismaComputerUseStore();
   }
@@ -146,7 +137,6 @@ export class ComputerUseService {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
-    resumeRunId: string | null;
     startUrl: string | null;
   }): Promise<ComputerRunHandle> {
     await this.store.requireMemberComputerUseAvailable({
@@ -159,22 +149,10 @@ export class ComputerUseService {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
-    resumeRunId: string | null;
     startUrl: string | null;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
-    const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-
-    if (input.resumeRunId) {
-      return await this.resumeAwaitingRunById({
-        memberId: input.memberId,
-        now,
-        resumeAfterMailboxItemId: input.resumeAfterMailboxItemId ?? null,
-        resumeDeliveryContext: input.resumeDeliveryContext ?? null,
-        runId: input.resumeRunId,
-        store,
-      });
-    }
+    const startUrl = requireComputerNavigationUrl(input.startUrl);
 
     let activeRun = await store.findActiveRunForMember({
       memberId: input.memberId,
@@ -198,6 +176,16 @@ export class ComputerUseService {
         if (!activeRun) {
           return await this.startRunWithStore(input, store);
         }
+      }
+      if (activeRun.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
+        return await this.resumeAwaitingRunById({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          runId: activeRun.id,
+          store,
+        });
       }
       return runHandle(activeRun, true);
     }
@@ -253,10 +241,9 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
-      await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const initialState = startUrl
-        ? await this.navigateKernelBrowserToPublicUrl({
+        ? await this.navigateKernelBrowserToUrl({
             sessionId: browser.sessionId,
             timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
             url: startUrl,
@@ -372,37 +359,22 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ title: string | null; url: string | null }> {
+  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
     const run = await this.requireRunnableRun(input);
-    if (input.action === "goto") {
-      await this.requirePublicNavigationUrl(input.url);
-    }
     const kernel = this.requireKernel();
-    const actionDeadline = createComputerActDeadline(input, this.now);
     const sessionId = requireKernelSessionId(run);
-    await requireNonSensitiveComputerInputTarget({
-      action: input,
-      deadline: actionDeadline,
-      kernel,
-      sessionId,
-    });
-    const actionKernelTimeoutMs = readComputerActRemainingTimeoutMs(actionDeadline);
-    const actionForExecution = limitComputerActRequestTimeout(
-      input,
-      readComputerActExecutionTimeoutMs(input, actionKernelTimeoutMs),
-    );
     let result: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
     try {
       result = await kernel.executePlaywright({
-        code: buildComputerActCode(actionForExecution),
+        code: buildComputerActCode(input),
         sessionId,
-        timeoutMs: actionKernelTimeoutMs,
+        timeoutMs: input.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
       });
     } catch (error) {
-      throw addComputerActFailureContext(error, actionForExecution);
+      throw addComputerActFailureContext(error, input);
     }
     const state = readRequiredBrowserActionStateResult(result.result);
     await this.store.updateRunBrowserState({
@@ -415,8 +387,38 @@ export class ComputerUseService {
     });
 
     return {
+      result: state.result,
       title: state.title,
       url: state.url,
+    };
+  }
+
+  async osControl(input: HostedComputerOsControlRequest & {
+    memberId: string;
+    runId: string;
+  }): Promise<ComputerOsControlResult> {
+    const { memberId, runId, ...action } = input;
+    await this.store.requireMemberComputerUseAvailable({
+      memberId,
+    });
+    const run = await this.requireRunnableRun({ memberId, runId });
+    const kernel = this.requireKernel();
+    const sessionId = requireKernelSessionId(run);
+    await requireNonSensitiveComputerOsTextTarget({
+      action,
+      kernel,
+      sessionId,
+    });
+    await kernel.osControl({
+      action,
+      sessionId,
+    });
+
+    return {
+      action: action.action,
+      ok: true,
+      runId: run.id,
+      status: "running",
     };
   }
 
@@ -690,6 +692,38 @@ export class ComputerUseService {
       purpose: handoff.purpose,
       suggestedReply: handoff.suggestedReply,
     };
+  }
+
+  async ensureHandoffViewport(input: {
+    memberId: string;
+    preset: ComputerBrowserViewportPreset;
+    token: string;
+  }): Promise<void> {
+    await this.store.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    const handoff = await this.store.requireHandoffByTokenHash({
+      tokenHash: sha256Hex(input.token),
+    });
+
+    assertHandoffOwnedByMember(handoff, input.memberId);
+    assertOpenFreshHandoff(handoff, this.now());
+
+    const run = await this.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: handoff.runId,
+    });
+    if (run.status !== "awaiting_user" || run.pendingHandoffId !== handoff.id) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
+        message: "Computer handoff is no longer open.",
+      });
+    }
+
+    await this.requireKernel().ensureBrowserViewport({
+      preset: input.preset,
+      sessionId: requireKernelSessionId(run),
+    });
   }
 
   async completeHandoff(input: {
@@ -1090,7 +1124,7 @@ export class ComputerUseService {
     return readBrowserStateResult(response.result);
   }
 
-  private async navigateKernelBrowserToPublicUrl(input: {
+  private async navigateKernelBrowserToUrl(input: {
     sessionId: string;
     timeoutMs: number;
     url: string;
@@ -1109,55 +1143,6 @@ export class ComputerUseService {
     });
 
     return readBrowserStateResult(response.result);
-  }
-
-  private async installPublicNavigationGuard(sessionId: string): Promise<void> {
-    await this.requireKernel().executePlaywright({
-      code: [
-        buildPlaywrightPublicNavigationGuardCode(),
-        "return true;",
-      ].join("\n"),
-      sessionId,
-      timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
-    });
-  }
-
-  private async requirePublicNavigationUrl(
-    value: string | null | undefined,
-  ): Promise<string | null> {
-    const url = requireComputerNavigationUrl(value);
-    if (!url) {
-      return null;
-    }
-
-    const hostname = new URL(url).hostname;
-    if (isHostedComputerIpLiteral(hostname)) {
-      return url;
-    }
-
-    let records: readonly { address: string }[];
-    try {
-      records = await this.navigationDnsLookup(hostname);
-    } catch {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-        httpStatus: 400,
-        message: "Computer navigation hostname could not be verified as public.",
-      });
-    }
-
-    if (
-      records.length === 0 ||
-      records.some((record) => !isHostedComputerPublicIpAddress(record.address))
-    ) {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-        httpStatus: 400,
-        message: "Computer navigation hostname must resolve only to public addresses.",
-      });
-    }
-
-    return url;
   }
 
   private async checkpointProfileAfterLoginHandoff(
@@ -1216,7 +1201,6 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds,
       });
-      await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const replaceInput: ReplaceRunBrowserInput = {
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
@@ -2004,14 +1988,22 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
   return [
-    ...buildComputerActActionCode(input),
-    buildComputerActionStateReturnCode(),
+    "const __murphUserResult = await (async () => {",
+    input.code,
+    "\n})();",
+    "const __murphUrl = page.url();",
+    "const __murphTitle = await page.title().catch(() => null);",
+    "return {",
+    "  result: typeof __murphUserResult === 'undefined' ? null : __murphUserResult,",
+    "  title: __murphTitle,",
+    "  url: __murphUrl,",
+    "};",
   ].join("\n");
 }
 
 function addComputerActFailureContext(
   error: unknown,
-  action: HostedComputerActRequest,
+  input: HostedComputerActRequest,
 ): unknown {
   const domainError = readComputerUseDomainError(error);
   if (
@@ -2025,9 +2017,8 @@ function addComputerActFailureContext(
     code: domainError.code,
     details: {
       ...domainError.details,
-      browserAction: action.action,
-      ...readComputerActTimeoutDetail(action),
-      ...readComputerActLocatorDetail(action),
+      codeHash: shortHash(input.code),
+      timeoutMs: input.timeoutMs,
     },
     httpStatus: domainError.httpStatus,
     message: domainError.message,
@@ -2070,70 +2061,19 @@ function readComputerUseErrorDetails(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function readComputerActTimeoutDetail(
-  action: HostedComputerActRequest,
-): Record<string, number> {
-  if (action.action === "wait") {
-    return { waitMs: action.ms };
-  }
-
-  return { timeoutMs: action.timeoutMs };
-}
-
-function readComputerActLocatorDetail(
-  action: HostedComputerActRequest,
-): Record<string, string> {
-  if (!("locator" in action) || !action.locator) {
-    return {};
-  }
-
-  return {
-    locator: describeComputerActLocator(action.locator),
-  };
-}
-
-function describeComputerActLocator(locator: ComputerActLocator): string {
-  switch (locator.by) {
-    case "role":
-      return [
-        `role=${locator.role}`,
-        ...(locator.name ? [`name=${locator.name}`] : []),
-        `exact=${locator.exact}`,
-      ].join(", ");
-    case "label":
-    case "placeholder":
-    case "text":
-    case "altText":
-    case "title":
-      return `${locator.by}=${locator.text}, exact=${locator.exact}`;
-    case "testId":
-      return `testId=${locator.testId}`;
-  }
-}
-
-async function requireNonSensitiveComputerInputTarget(input: {
-  action: HostedComputerActRequest;
-  deadline: ComputerActDeadline;
+async function requireNonSensitiveComputerOsTextTarget(input: {
+  action: HostedComputerOsControlRequest;
   kernel: ComputerKernelClient;
   sessionId: string;
 }): Promise<void> {
-  if (
-    input.action.action !== "fill" &&
-    input.action.action !== "type" &&
-    input.action.action !== "select"
-  ) {
+  if (input.action.action !== "typeText") {
     return;
   }
 
-  const requestTimeoutMs = readComputerActRemainingTimeoutMs(input.deadline);
-  const locatorTimeoutMs = Math.min(
-    input.action.timeoutMs,
-    readComputerActActionTimeoutMs(requestTimeoutMs),
-  );
   const result = await input.kernel.executePlaywright({
-    code: buildComputerSensitiveInputProbeCode(input.action.locator, locatorTimeoutMs),
+    code: buildComputerActiveElementSensitiveInputProbeCode(),
     sessionId: input.sessionId,
-    timeoutMs: requestTimeoutMs,
+    timeoutMs: COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS,
   });
   const preflight = readComputerSensitiveInputPreflightResult(result.result);
   if (!preflight.sensitive) {
@@ -2147,104 +2087,81 @@ async function requireNonSensitiveComputerInputTarget(input: {
   });
 }
 
-type ComputerActDeadline = {
-  deadlineMs: number;
-  nowMs: () => number;
-};
-
-function createComputerActDeadline(
-  input: HostedComputerActRequest,
-  now: () => Date,
-): ComputerActDeadline {
-  return {
-    deadlineMs: now().getTime() + computerActExecutionTimeoutMs(input),
-    nowMs: () => now().getTime(),
-  };
+function buildComputerActiveElementSensitiveInputProbeCode(): string {
+  return `
+const target = page.locator(':focus');
+await target.waitFor({ state: 'attached', timeout: 1000 }).catch(() => {});
+const targetIsInspectable = await target.count().then((count) => count === 1).catch(() => false);
+if (!targetIsInspectable) return { sensitive: true, reason: "focused_target_uninspectable" };
+const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();
+const type = await attr("type");
+const inputMode = await attr("inputmode");
+const maxLengthRaw = await attr("maxlength");
+const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;
+const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);
+const tagName = String(await target.evaluate((element) => element.tagName).catch(() => "") || "").toLowerCase();
+const isContentEditable = await target.evaluate((element) => element instanceof HTMLElement && element.isContentEditable).catch(() => false);
+const editableInputTypes = new Set(["", "text", "search", "email", "tel", "url", "number", "date", "datetime-local", "month", "password", "time", "week"]);
+const isEditableTextTarget =
+  tagName === "textarea" ||
+  isContentEditable === true ||
+  (tagName === "input" && editableInputTypes.has(type));
+if (!isEditableTextTarget) return { sensitive: true, reason: "focused_target_not_editable" };
+if (type === "password") return { sensitive: true, reason: "password_type" };
+if (autocompleteTokens.some((token) =>
+  token === "current-password" ||
+  token === "new-password" ||
+  token === "one-time-code" ||
+  token.startsWith("cc-")
+)) {
+  return { sensitive: true, reason: "sensitive_autocomplete" };
 }
-
-function readComputerActRemainingTimeoutMs(deadline: ComputerActDeadline): number {
-  const remainingMs = Math.floor(deadline.deadlineMs - deadline.nowMs());
-  if (remainingMs <= 0) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
-      httpStatus: 504,
-      message: "Computer action timed out before it could complete.",
-      retryable: true,
-    });
-  }
-
-  return remainingMs;
-}
-
-function readComputerActActionTimeoutMs(kernelTimeoutMs: number): number {
-  const actionTimeoutMs = kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS;
-  if (actionTimeoutMs <= 0) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_ACTION_TIMEOUT",
-      httpStatus: 504,
-      message: "Computer action timed out before it could complete.",
-      retryable: true,
-    });
-  }
-
-  return actionTimeoutMs;
-}
-
-function readComputerActExecutionTimeoutMs(
-  input: HostedComputerActRequest,
-  kernelTimeoutMs: number,
-): number {
-  if (input.action === "wait") {
-    return Math.max(0, kernelTimeoutMs - COMPUTER_ACT_RESULT_MARGIN_MS);
-  }
-
-  return readComputerActActionTimeoutMs(kernelTimeoutMs);
-}
-
-function limitComputerActRequestTimeout(
-  input: HostedComputerActRequest,
-  timeoutMs: number,
-): HostedComputerActRequest {
-  switch (input.action) {
-    case "wait":
-      return {
-        ...input,
-        ms: Math.min(input.ms, timeoutMs),
-      };
-    case "goto":
-    case "click":
-    case "fill":
-    case "type":
-    case "select":
-    case "check":
-    case "uncheck":
-    case "press":
-    case "scroll":
-    case "waitFor":
-      return {
-        ...input,
-        timeoutMs: Math.min(input.timeoutMs, timeoutMs),
-      };
-  }
-}
-
-function computerActExecutionTimeoutMs(input: HostedComputerActRequest): number {
-  const actionTimeoutMs = input.action === "wait" ? input.ms : input.timeoutMs;
-  return actionTimeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS;
+const hints = [
+  type,
+  inputMode,
+  await attr("name"),
+  await attr("id"),
+  await attr("aria-label"),
+  await attr("aria-description"),
+  await attr("aria-describedby"),
+  await attr("aria-labelledby"),
+  await attr("placeholder"),
+  await attr("title"),
+  await attr("data-testid"),
+  await attr("data-test"),
+  await attr("data-qa"),
+].join(" ");
+const sensitivePatterns = [
+  /\\b(?:password|passcode|passphrase)\\b/u,
+  /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
+  /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b|\\b(?:verification|authentication|security)(?:code|passcode|token)\\b/u,
+  /\\b(?:cvc|cvv|cvn|cid)\\b/u,
+  /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
+  /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
+  /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
+  /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
+];
+if (sensitivePatterns.some((pattern) => pattern.test(hints))) return { sensitive: true, reason: "sensitive_hint" };
+const shortCodeField =
+  /\\bcode\\b/u.test(hints) &&
+  (
+    inputMode === "numeric" ||
+    inputMode === "decimal" ||
+    inputMode === "tel" ||
+    type === "number" ||
+    type === "tel" ||
+    (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
+  );
+return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
+`.trim();
 }
 
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
     return null;
   }
-  if (!isHostedComputerNavigationUrl(value)) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-      httpStatus: 400,
-      message: "Computer navigation URLs must use public http or https hosts.",
-    });
-  }
-  return value;
+  return trimmed;
 }
 
 function buildComputerNavigationCode(input: {
@@ -2252,295 +2169,14 @@ function buildComputerNavigationCode(input: {
   url: string;
 }): string {
   return [
-    buildPlaywrightPublicNavigationGuardCode(),
     `await page.goto(${JSON.stringify(input.url)}, { waitUntil: 'domcontentloaded', timeout: ${input.timeoutMs} });`,
     "const finalUrl = page.url();",
-    "if (!(await isMurphPublicNavigationUrl(finalUrl))) {",
-    "  await page.goto('about:blank').catch(() => {});",
-    "  throw new Error('Unsafe computer navigation target.');",
-    "}",
     "const title = await page.title().catch(() => null);",
     "let visibleText = '';",
     "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
     `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
     "return { url: finalUrl, title, visibleText };",
   ].join("\n");
-}
-
-function buildComputerActActionCode(action: HostedComputerActRequest): string[] {
-  switch (action.action) {
-    case "goto":
-      return buildComputerGotoActionCode(action.url, action.timeoutMs);
-    case "click":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.click({ timeout: ${action.timeoutMs} });`,
-      ];
-    case "fill":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.fill(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
-      ];
-    case "type":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.pressSequentially(${JSON.stringify(action.text)}, { delay: ${action.delayMs}, timeout: ${action.timeoutMs} });`,
-      ];
-    case "select":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.selectOption(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
-      ];
-    case "check":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.check({ timeout: ${action.timeoutMs} });`,
-      ];
-    case "uncheck":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.uncheck({ timeout: ${action.timeoutMs} });`,
-      ];
-    case "press": {
-      if (action.locator) {
-        return [
-          `await ${buildComputerLocatorExpression(action.locator)}.press(${JSON.stringify(action.key)}, { timeout: ${action.timeoutMs} });`,
-        ];
-      }
-      return [
-        `await page.keyboard.press(${JSON.stringify(action.key)});`,
-      ];
-    }
-    case "scroll": {
-      const lines: string[] = [];
-      if (action.locator) {
-        lines.push(
-          `await ${buildComputerLocatorExpression(action.locator)}.scrollIntoViewIfNeeded({ timeout: ${action.timeoutMs} });`,
-        );
-      }
-      lines.push(`await page.mouse.wheel(${action.deltaX}, ${action.deltaY});`);
-      return lines;
-    }
-    case "wait":
-      return [`await page.waitForTimeout(${action.ms});`];
-    case "waitFor":
-      return [
-        `await ${buildComputerLocatorExpression(action.locator)}.waitFor({ state: ${JSON.stringify(action.state)}, timeout: ${action.timeoutMs} });`,
-      ];
-  }
-}
-
-function buildComputerGotoActionCode(url: string, timeoutMs: number): string[] {
-  return [
-    `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
-  ];
-}
-
-function buildComputerSensitiveInputProbeCode(
-  locator: HostedComputerActLocator,
-  timeoutMs: number,
-): string {
-  const locatorHints = readComputerLocatorSensitiveHints(locator);
-  return [
-    `const target = ${buildComputerLocatorExpression(locator)};`,
-    `await target.waitFor({ state: 'attached', timeout: ${timeoutMs} });`,
-    `const locatorHints = ${JSON.stringify(locatorHints)}.map((value) => String(value || "").toLowerCase());`,
-    `const attr = async (name) => String(await target.getAttribute(name, { timeout: 1000 }).catch(() => "") || "").toLowerCase();`,
-    `const type = await attr("type");`,
-    `const inputMode = await attr("inputmode");`,
-    `const maxLengthRaw = await attr("maxlength");`,
-    `const maxLength = maxLengthRaw ? Number(maxLengthRaw) : -1;`,
-    `const autocompleteTokens = (await attr("autocomplete")).split(/\\s+/u).filter(Boolean);`,
-    `if (type === "password") return { sensitive: true, reason: "password_type" };
-  const lower = (value) => String(value || "").toLowerCase();
-  if (autocompleteTokens.some((token) =>
-    token === "current-password" ||
-    token === "new-password" ||
-    token === "one-time-code" ||
-    token.startsWith("cc-")
-  )) {
-    return { sensitive: true, reason: "sensitive_autocomplete" };
-  }
-  const hints = [
-    type,
-    inputMode,
-    await attr("name"),
-    await attr("id"),
-    await attr("aria-label"),
-    await attr("aria-description"),
-    await attr("aria-describedby"),
-    await attr("aria-labelledby"),
-    await attr("placeholder"),
-    await attr("title"),
-    await attr("data-testid"),
-    await attr("data-test"),
-    await attr("data-qa"),
-    ...locatorHints.map(lower),
-  ].join(" ");
-  const sensitivePatterns = [
-    /\\b(?:password|passcode|passphrase)\\b/u,
-    /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
-    /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b|\\b(?:verification|authentication|security)(?:code|passcode|token)\\b/u,
-    /\\b(?:cvc|cvv|cvn|cid)\\b/u,
-    /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
-    /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
-    /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
-    /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
-  ];
-  if (sensitivePatterns.some((pattern) => pattern.test(hints))) {
-    return { sensitive: true, reason: "sensitive_hint" };
-  }
-  const shortCodeField =
-    /\\bcode\\b/u.test(hints) &&
-    (
-      inputMode === "numeric" ||
-      inputMode === "decimal" ||
-      inputMode === "tel" ||
-      type === "number" ||
-      type === "tel" ||
-      (Number.isFinite(maxLength) && maxLength > 0 && maxLength <= 8)
-    );
-  return { sensitive: shortCodeField, reason: shortCodeField ? "short_code" : undefined };
-`,
-  ].join("\n");
-}
-
-function readComputerLocatorSensitiveHints(locator: HostedComputerActLocator): string[] {
-  switch (locator.by) {
-    case "role":
-      return uniqueStrings([locator.role, locator.name]);
-    case "testId":
-      return uniqueStrings([locator.testId]);
-    case "altText":
-    case "label":
-    case "placeholder":
-    case "text":
-    case "title":
-      return uniqueStrings([locator.text]);
-  }
-}
-
-function buildComputerLocatorExpression(locator: HostedComputerActLocator): string {
-  switch (locator.by) {
-    case "role":
-      return `page.getByRole(${JSON.stringify(locator.role)}, ${JSON.stringify({
-        ...(locator.name ? { name: locator.name } : {}),
-        exact: locator.exact,
-      })})`;
-    case "label":
-      return buildComputerTextLocatorExpression("getByLabel", locator.text, locator.exact);
-    case "placeholder":
-      return buildComputerTextLocatorExpression("getByPlaceholder", locator.text, locator.exact);
-    case "text":
-      return buildComputerTextLocatorExpression("getByText", locator.text, locator.exact);
-    case "altText":
-      return buildComputerTextLocatorExpression("getByAltText", locator.text, locator.exact);
-    case "title":
-      return buildComputerTextLocatorExpression("getByTitle", locator.text, locator.exact);
-    case "testId":
-      return `page.getByTestId(${JSON.stringify(locator.testId)})`;
-  }
-}
-
-function buildComputerTextLocatorExpression(
-  method: "getByAltText" | "getByLabel" | "getByPlaceholder" | "getByText" | "getByTitle",
-  text: string,
-  exact: boolean,
-): string {
-  return `page.${method}(${JSON.stringify(text)}, ${JSON.stringify({ exact })})`;
-}
-
-function buildComputerActionStateReturnCode(): string {
-  return [
-    "const title = await page.title().catch(() => null);",
-    "const url = page.url();",
-    "return { url, title };",
-  ].join("\n");
-}
-
-function buildPlaywrightPublicNavigationGuardCode(): string {
-  return `
-const normalizeMurphNavigationHostname = (value) => String(value || "")
-  .trim()
-  .toLowerCase()
-  .replace(/^\\[/u, "")
-  .replace(/\\]$/u, "")
-  .replace(/\\.$/u, "");
-const readMurphNavigationIpv4 = (value) => {
-  const parts = String(value).split(".");
-  if (parts.length !== 4) return null;
-  const octets = parts.map((part) => /^\\d{1,3}$/u.test(part) ? Number(part) : NaN);
-  return octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-    ? octets
-    : null;
-};
-const isMurphPublicIpv4 = ([a, b]) =>
-  !(a === 0 || a === 10 || a === 127 || a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 0 || b === 168)) ||
-    (a === 198 && (b === 18 || b === 19 || b === 51)) ||
-    (a === 203 && b === 0));
-const isMurphPublicIpv6 = (value) => {
-  const normalized = String(value).toLowerCase();
-  return !(normalized.startsWith("::") ||
-    normalized.startsWith("64:ff9b:") ||
-    normalized.startsWith("100:") ||
-    normalized.startsWith("2001:0:") ||
-    normalized.startsWith("2001:2:") ||
-    normalized.startsWith("2002:") ||
-    normalized.startsWith("fc") || normalized.startsWith("fd") ||
-    /^fe[89ab][0-9a-f]?:/u.test(normalized) ||
-    normalized.startsWith("ff") ||
-    normalized.startsWith("2001:db8:")) &&
-    /^[0-9a-f:.]+$/u.test(normalized);
-};
-const readMurphMappedIpv4 = (hostname) =>
-  hostname.match(/(?:::ffff:|:)(\\d{1,3}(?:\\.\\d{1,3}){3})$/iu)?.[1] ?? null;
-const isMurphIpLiteral = (hostname) =>
-  Boolean(readMurphNavigationIpv4(hostname) || readMurphMappedIpv4(hostname)) ||
-  hostname.includes(":");
-const isMurphPublicIpAddress = (value) => {
-  const hostname = normalizeMurphNavigationHostname(value);
-  const ipv4 = readMurphNavigationIpv4(readMurphMappedIpv4(hostname) || hostname);
-  if (ipv4) return isMurphPublicIpv4(ipv4);
-  return hostname.includes(":") && isMurphPublicIpv6(hostname);
-};
-const isMurphPublicNavigationHostStatic = (value) => {
-  const hostname = normalizeMurphNavigationHostname(value);
-  if (!hostname) return false;
-  if (isMurphIpLiteral(hostname)) return isMurphPublicIpAddress(hostname);
-  if (hostname === "localhost" || hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") || hostname.endsWith(".internal")) return false;
-  return hostname.includes(".");
-};
-let murphDnsLookup = null;
-try {
-  murphDnsLookup = (await import("node:dns/promises")).lookup;
-} catch {}
-const doesMurphHostnameResolvePublicly = async (hostname) => {
-  if (!murphDnsLookup) return false;
-  const records = await murphDnsLookup(hostname, { all: true, verbatim: true }).catch(() => null);
-  return Array.isArray(records) && records.length > 0 &&
-    records.every((record) => record && isMurphPublicIpAddress(record.address));
-};
-const isMurphPublicNavigationUrl = async (value) => {
-  try {
-    const url = new URL(value);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") ||
-      !isMurphPublicNavigationHostStatic(url.hostname)) {
-      return false;
-    }
-    const hostname = normalizeMurphNavigationHostname(url.hostname);
-    return isMurphIpLiteral(hostname) || await doesMurphHostnameResolvePublicly(hostname);
-  } catch {
-    return false;
-  }
-};
-await page.context().unroute("**/*").catch(() => {});
-await page.context().route("**/*", async (route) => {
-  if (!(await isMurphPublicNavigationUrl(route.request().url()))) {
-    await route.abort("blockedbyclient").catch(() => {});
-    return;
-  }
-  await route.continue().catch(() => {});
-});
-`.trim();
 }
 
 function sanitizeComputerDisplayUrl(value: string | null | undefined): string | null {
@@ -2590,11 +2226,15 @@ function readBrowserStateResult(value: unknown): {
 }
 
 function readRequiredBrowserActionStateResult(value: unknown): {
+  result: unknown;
   title: string | null;
   url: string | null;
 } {
   const state = readOptionalBrowserStateResult(value);
-  if (!state?.url || !sanitizeComputerDisplayUrl(state.url)) {
+  if (
+    !state?.url ||
+    !sanitizeComputerDisplayUrl(state.url)
+  ) {
     throw computerUseError({
       code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
       httpStatus: 502,
@@ -2603,7 +2243,13 @@ function readRequiredBrowserActionStateResult(value: unknown): {
     });
   }
 
-  return state;
+  return {
+    result: value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>).result ?? null
+      : null,
+    title: state.title,
+    url: state.url,
+  };
 }
 
 function readComputerSensitiveInputPreflightResult(value: unknown): {
@@ -2805,15 +2451,6 @@ function shouldDeleteDeterministicBrowserName(
     return false;
   }
   return run.expiresAt.getTime() >= now.getTime() - COMPUTER_DETERMINISTIC_BROWSER_ACCOUNT_DELETE_GRACE_MS;
-}
-
-async function defaultNavigationDnsLookup(
-  hostname: string,
-): Promise<readonly { address: string }[]> {
-  return await lookupDns(hostname, {
-    all: true,
-    verbatim: true,
-  });
 }
 
 function normalizeKernelNameSegment(value: string): string {

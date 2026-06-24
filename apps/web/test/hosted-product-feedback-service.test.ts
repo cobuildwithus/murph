@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
 
 const prismaMocks = vi.hoisted(() => ({
   createMany: vi.fn(),
@@ -57,6 +58,7 @@ describe("recordHostedProductFeedback", () => {
         expect.objectContaining({
           memberId: "member_123",
           relatedChangelogItemIdsJson: ["native-message-formatting"],
+          summary: "Interested in native message formatting.",
         }),
       ],
       skipDuplicates: true,
@@ -83,9 +85,35 @@ describe("recordHostedProductFeedback", () => {
     expect(second.recorded).toBe(true);
   });
 
+  it("accepts feature requests without changelog ids", async () => {
+    prismaMocks.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await recordHostedProductFeedback({
+      feedback: makeFeedback({
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+      }),
+      memberId: "member_123",
+    });
+
+    expect(result.recorded).toBe(true);
+    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [
+        expect.objectContaining({
+          kind: "feature_request",
+          relatedChangelogItemIdsJson: [],
+          summary: "Wants Strava integration support.",
+        }),
+      ],
+    }));
+  });
+
   it.each([
-    ["empty changelog ids", makeFeedback({ relatedChangelogItemIds: [] })],
+    ["empty changelog ids for shipped interest", makeFeedback({ relatedChangelogItemIds: [] })],
     ["unknown changelog ids", makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] })],
+    ["empty summary", makeFeedback({ summary: " \n\t " })],
+    ["oversized summary", makeFeedback({ summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH + 1) })],
   ])("rejects %s before persistence", async (_label, feedback) => {
     await expect(recordHostedProductFeedback({
       feedback,
@@ -103,6 +131,12 @@ describe("normalizeHostedProductFeedback", () => {
     expect(normalizeHostedProductFeedback(makeFeedback())).toEqual(makeFeedback());
   });
 
+  it("normalizes bounded summary text", () => {
+    expect(normalizeHostedProductFeedback(makeFeedback({
+      summary: "  Wants   better message formatting.  ",
+    })).summary).toBe("Wants better message formatting.");
+  });
+
   it("throws the hosted onboarding error type for rejected content", () => {
     expect(() =>
       normalizeHostedProductFeedback(
@@ -114,12 +148,15 @@ describe("normalizeHostedProductFeedback", () => {
 
 function makeFeedback(input: {
   idempotencyKey?: string;
+  kind?: "feature_interest" | "feature_request" | "frustration";
   relatedChangelogItemIds?: string[];
+  summary?: string;
 } = {}) {
   return {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
-    kind: "feature_interest" as const,
+    kind: input.kind ?? "feature_interest",
     relatedChangelogItemIds:
       input.relatedChangelogItemIds ?? ["native-message-formatting"],
+    summary: input.summary ?? "Interested in native message formatting.",
   };
 }

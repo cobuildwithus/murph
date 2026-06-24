@@ -432,6 +432,7 @@ describe("buildHostedDataExport", () => {
             idPresent: true,
             kind: "feature_interest",
             relatedChangelogItemIds: ["native-message-formatting"],
+            summary: "Interested in native message formatting.",
           },
         ],
       },
@@ -1774,6 +1775,7 @@ function makeHostedProductFeedbackRowForTest(input: {
     kind: "feature_interest",
     memberId: input.memberId,
     relatedChangelogItemIdsJson: ["native-message-formatting"],
+    summary: "Interested in native message formatting.",
   };
 }
 

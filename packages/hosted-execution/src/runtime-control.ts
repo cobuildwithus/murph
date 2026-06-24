@@ -688,15 +688,20 @@ export interface HostedRuntimeUsageRecordResponse {
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
+  "feature_request",
+  "frustration",
 ] as const;
 
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+
 export interface HostedRuntimeProductFeedbackRecord {
   idempotencyKey: string;
   kind: HostedProductFeedbackKind;
   relatedChangelogItemIds: string[];
+  summary: string;
 }
 
 export interface HostedRuntimeProductFeedbackRecordRequest {

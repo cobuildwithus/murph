@@ -1,19 +1,22 @@
 import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
-  hostedComputerDeliveryContextSchema,
+  hostedComputerOsControlRequestSchema,
   hostedComputerPauseForUserRequestSchema,
-  isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
+  type HostedComputerOsControlRequest,
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
@@ -65,7 +68,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -184,7 +187,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record product feedback only after the user explicitly expresses interest in shipped changelog items. Do not infer feedback silently, and do not submit new feature requests or conversation details.',
+    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -193,10 +196,18 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
       },
+      summary: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+        description:
+          'Concise product-only summary. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
+      },
       relatedChangelogItemIds: {
         type: 'array',
-        minItems: 1,
+        minItems: 0,
         maxItems: 7,
+        default: [],
         items: {
           type: 'string',
           maxLength: 120,
@@ -204,7 +215,25 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         },
       },
     },
-    required: ['kind', 'relatedChangelogItemIds'],
+    required: ['kind', 'summary'],
+    oneOf: [
+      {
+        properties: {
+          kind: { enum: ['feature_interest'] },
+          relatedChangelogItemIds: {
+            type: 'array',
+            minItems: 1,
+          },
+        },
+        required: ['kind', 'relatedChangelogItemIds'],
+      },
+      {
+        properties: {
+          kind: { enum: ['feature_request', 'frustration'] },
+        },
+        required: ['kind'],
+      },
+    ],
   },
 } as const
 
@@ -247,10 +276,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      resumeRunId: {
-        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
-        default: null,
-      },
       startUrl: {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
@@ -274,18 +299,40 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   },
 } as const
 
-type JsonSchemaObject = Record<string, unknown>
-
-const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
 }
 
-function buildComputerActInputSchema(): JsonSchemaObject {
-  const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
+type JsonSchemaObject = Record<string, unknown>
+
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    runId: { type: 'string', minLength: 1 },
+    code: {
+      type: 'string',
+      minLength: 1,
+      maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+      description:
+        'Playwright TypeScript/JavaScript source to execute against the current Kernel page. The page, context, and browser objects are available in scope. Return concise JSON-serializable data when useful.',
+    },
+    timeoutMs: {
+      type: 'integer',
+      minimum: 1000,
+      maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+      default: 15000,
+    },
+  },
+  required: ['runId', 'code'],
+} as const
+
+const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
+
+function buildComputerOsControlInputSchema(): JsonSchemaObject {
+  const generated = z.toJSONSchema(hostedComputerOsControlRequestSchema, { io: 'input' }) as JsonSchemaObject
   const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
 
   return {
@@ -315,8 +362,16 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
+    'Run bounded Playwright TypeScript/JavaScript against the current Kernel browser page for a computer run. Use normal Playwright locators and APIs for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, and page inspection. Use computer_observe when page state is needed before or after code execution.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
+} as const
+
+export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
+  namespace: 'murph',
+  name: 'computer_os_control',
+  description:
+    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. Use computer_observe before and after when page state is needed.',
+  inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
@@ -382,6 +437,7 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
   MURPH_COMPUTER_START_RUN_TOOL,
   MURPH_COMPUTER_OBSERVE_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
 ] as const
@@ -470,34 +526,42 @@ const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const submitProductFeedbackArgumentsSchema = z
   .object({
     kind: z.enum(HOSTED_PRODUCT_FEEDBACK_KINDS),
+    summary: z
+      .string()
+      .trim()
+      .min(1)
+      .max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
+      .transform((value) => value.replace(/\s+/gu, ' ')),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
-      .min(1)
       .max(7)
+      .default([]),
   })
   .strict()
+  .superRefine((feedback, context) => {
+    if (feedback.kind === 'feature_interest' && feedback.relatedChangelogItemIds.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'feature_interest requires relatedChangelogItemIds',
+        path: ['relatedChangelogItemIds'],
+      })
+    }
+  })
 
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
-  'resumeAfterMailboxItemId',
-  'resumeDeliveryContext',
-  'resumeRunId',
   'startUrl',
 ] as const
 
 const computerNavigationUrlSchema = z
   .string()
-  .url()
-  .refine(isHostedComputerNavigationUrl, {
-    message: 'Hosted computer navigation URLs must use http or https.',
-  })
+  .trim()
+  .min(1)
+  .max(4_000)
 
 const computerStartRunArgumentsSchema = z
   .object({
-    resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
-    resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
-    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
@@ -528,6 +592,43 @@ const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
 
   const { runId, ...body } = withRunId.data
   const parsedBody = hostedComputerActRequestSchema.safeParse(body)
+  if (!parsedBody.success) {
+    for (const issue of parsedBody.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  return {
+    ...parsedBody.data,
+    runId,
+  }
+})
+
+const computerOsControlArgumentsSchema = z.unknown().transform((value, ctx) => {
+  const withRunId = z
+    .object({
+      runId: computerRunIdSchema,
+    })
+    .passthrough()
+    .safeParse(value)
+  if (!withRunId.success) {
+    for (const issue of withRunId.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  const { runId, ...body } = withRunId.data
+  const parsedBody = hostedComputerOsControlRequestSchema.safeParse(body)
   if (!parsedBody.success) {
     for (const issue of parsedBody.error.issues) {
       ctx.addIssue({
@@ -626,6 +727,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'act'
   | 'finish'
   | 'observe'
+  | 'os-control'
   | 'start'
 
 export interface MurphDynamicToolExecutionResult {
@@ -668,6 +770,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'computer-act'
       args: HostedComputerActRequest & { runId: string }
+    }
+  | {
+      kind: 'computer-os-control'
+      args: HostedComputerOsControlRequest & { runId: string }
     }
   | {
       kind: 'computer-pause-for-user'
@@ -883,25 +989,22 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
-        schemaRootKeys: [
-          'runId',
-          'action',
-          'url',
-          'locator',
-          'value',
-          'text',
-          'key',
-          'deltaX',
-          'deltaY',
-          'delayMs',
-          'ms',
-          'state',
-          'timeoutMs',
-        ],
+        schemaRootKeys: ['runId', 'code', 'timeoutMs'],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
         ? { kind: 'computer-act', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
+    case MURPH_COMPUTER_OS_CONTROL_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerOsControlArgumentsSchema,
+        schemaName: 'murph.computer_os_control.input',
+        toolName: 'murph.computer_os_control',
+      })
+      return parsed.ok
+        ? { kind: 'computer-os-control', args: parsed.args }
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name: {
@@ -972,17 +1075,23 @@ function canExecuteComputerDynamicTools(
   return hostedToolContext?.computerToolsAvailable === true
 }
 
-function currentHostedMailboxItemId(
-  hostedToolContext: AssistantHostedToolContext | null,
-): string | null {
-  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
-  return itemIds[itemIds.length - 1] ?? null
-}
-
 function currentHostedDeliveryContext(
   hostedToolContext: AssistantHostedToolContext | null,
 ): HostedComputerDeliveryContext | null {
   return hostedToolContext?.currentHostedDeliveryContext() ?? null
+}
+
+function currentHostedMailboxItemId(
+  hostedToolContext: AssistantHostedToolContext | null,
+): string | null {
+  const itemIds = hostedToolContext?.currentHostedMailboxItemIds() ?? []
+  for (let index = itemIds.length - 1; index >= 0; index -= 1) {
+    const itemId = normalizeNullableString(itemIds[index])
+    if (itemId) {
+      return itemId
+    }
+  }
+  return null
 }
 
 export async function executeMurphDynamicToolRequest(input: {
@@ -1158,6 +1267,20 @@ export async function executeMurphDynamicToolRequest(input: {
         unknownOutcomeOnTransportError: true,
       })
     }
+    case 'computer-os-control': {
+      const { runId, ...body } = input.request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'os-control',
+          runId,
+        }),
+        sanitizer: 'os-control',
+        unknownOutcomeOnTransportError: true,
+      })
+    }
     case 'computer-pause-for-user': {
       const { runId, ...body } = input.request.args
       return await executeHostedComputerPauseForUserTool({
@@ -1301,16 +1424,14 @@ function buildHostedComputerStartRunBody(input: {
   args: ComputerStartRunToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
-  const { resumeRunId, startUrl } = input.args
+  const { startUrl } = input.args
+  const resumeAfterMailboxItemId = currentHostedMailboxItemId(input.hostedToolContext)
   return {
     goal: 'Hosted computer task.',
-    resumeAfterMailboxItemId: resumeRunId
-      ? currentHostedMailboxItemId(input.hostedToolContext)
-      : null,
-    resumeDeliveryContext: resumeRunId
+    resumeAfterMailboxItemId,
+    resumeDeliveryContext: resumeAfterMailboxItemId
       ? currentHostedDeliveryContext(input.hostedToolContext)
       : null,
-    resumeRunId,
     startUrl,
   }
 }
@@ -1502,16 +1623,35 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
   }
 
   const lines = [
-    readHostedComputerApiErrorDetailLine('browserAction', record.browserAction),
-    readHostedComputerApiErrorDetailLine('locator', record.locator),
+    readHostedComputerApiErrorDetailLine('codeHash', record.codeHash),
+    readHostedComputerApiErrorDetailLine('computerOsControl', record.computerOsControl),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
-    readHostedComputerApiErrorDetailLine('waitMs', record.waitMs),
-    readHostedComputerApiErrorDetailLine('kernelError', record.kernelError),
-    readHostedComputerApiErrorDetailLine('kernelStderr', record.kernelStderr),
-    readHostedComputerApiErrorDetailLine('kernelStdout', record.kernelStdout),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightError', record.kernelError),
+    readHostedComputerApiErrorDiagnosticBlock('playwrightStderr', record.kernelStderr),
+    readHostedComputerApiErrorDetailLine('kernelErrorPresent', record.kernelErrorPresent),
+    readHostedComputerApiErrorDetailLine('kernelStderrPresent', record.kernelStderrPresent),
+    readHostedComputerApiErrorDetailLine('kernelStdoutPresent', record.kernelStdoutPresent),
   ].filter((line): line is string => line !== null)
 
   return lines.length > 0 ? lines.join('\n') : null
+}
+
+function readHostedComputerApiErrorDiagnosticBlock(
+  label: string,
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const text = value.trim()
+  if (!text) {
+    return null
+  }
+
+  return text.includes('\n')
+    ? `${label}:\n${text}`
+    : `${label}: ${text}`
 }
 
 function readHostedComputerApiErrorDetailLine(
@@ -1549,6 +1689,7 @@ function isUnknownComputerOutcomeError(input: {
 
   return input.code === 'HOSTED_COMPUTER_EVAL_FAILED'
     || input.code === 'HOSTED_COMPUTER_ACTION_STATE_INVALID'
+    || input.code === 'HOSTED_COMPUTER_OS_CONTROL_FAILED'
 }
 
 function readSanitizedComputerPausePayload(payload: unknown): Record<string, unknown> {
@@ -1609,8 +1750,16 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
+        result: record.result ?? null,
         ...readStringField(record, 'title'),
         ...readStringOrNullField(record, 'url'),
+      }
+    case 'os-control':
+      return {
+        ...readStringField(record, 'action'),
+        ...readBooleanField(record, 'ok'),
+        ...readStringField(record, 'runId'),
+        ...readStringField(record, 'status'),
       }
     case 'finish':
       return {

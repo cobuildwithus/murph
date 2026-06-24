@@ -26,6 +26,7 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
@@ -98,6 +99,7 @@ import {
   requireBoolean,
   requireNumber,
   requireObject,
+  readOptionalStringArray,
   requireString,
   readNullableString,
 } from "./assertions.ts";
@@ -615,7 +617,12 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
   );
   assertAllowedObjectKeys(
     feedback,
-    new Set(["idempotencyKey", "kind", "relatedChangelogItemIds"]),
+    new Set([
+      "idempotencyKey",
+      "kind",
+      "relatedChangelogItemIds",
+      "summary",
+    ]),
     "Hosted runtime product feedback request feedback",
   );
   const idempotencyKey = requireString(
@@ -628,28 +635,21 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
     );
   }
   const kind = parseHostedProductFeedbackKind(feedback.kind);
-  const relatedChangelogItemIds = requireArray(
-    feedback.relatedChangelogItemIds,
-    "Hosted runtime product feedback relatedChangelogItemIds",
-  ).map((entry) => {
-    const id = requireString(
-      entry,
-      "Hosted runtime product feedback related changelog item id",
-    );
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) || id.length > 120) {
-      throw new TypeError(
-        "Hosted runtime product feedback related changelog item ids must be lowercase slugs.",
-      );
-    }
-    return id;
-  });
-  if (
-    relatedChangelogItemIds.length === 0 ||
-    relatedChangelogItemIds.length > 7 ||
-    new Set(relatedChangelogItemIds).size !== relatedChangelogItemIds.length
-  ) {
+  const summary = parseHostedProductFeedbackSummary(feedback.summary);
+  const relatedChangelogItemIds = parseHostedProductFeedbackSlugArray(
+    readOptionalStringArray(
+      feedback.relatedChangelogItemIds,
+      "Hosted runtime product feedback relatedChangelogItemIds",
+    ) ?? [],
+    {
+      itemLabel: "Hosted runtime product feedback related changelog item id",
+      label: "Hosted runtime product feedback relatedChangelogItemIds",
+      maxLength: 120,
+    },
+  );
+  if (kind === "feature_interest" && relatedChangelogItemIds.length === 0) {
     throw new TypeError(
-      "Hosted runtime product feedback must reference one to seven unique changelog items.",
+      "Hosted runtime product feedback feature interest must reference at least one changelog item.",
     );
   }
 
@@ -658,6 +658,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       idempotencyKey,
       kind,
       relatedChangelogItemIds,
+      summary,
     },
   };
 }
@@ -689,6 +690,45 @@ function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKi
     throw new TypeError("Hosted runtime product feedback kind is not supported.");
   }
   return kind as HostedProductFeedbackKind;
+}
+
+function parseHostedProductFeedbackSummary(value: unknown): string {
+  const summary = requireString(value, "Hosted runtime product feedback summary")
+    .trim()
+    .replace(/\s+/gu, " ");
+  if (
+    summary.length === 0 ||
+    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `Hosted runtime product feedback summary must be between 1 and ${HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH} characters.`,
+    );
+  }
+  return summary;
+}
+
+function parseHostedProductFeedbackSlugArray(
+  value: readonly string[],
+  options: {
+    itemLabel: string;
+    label: string;
+    maxLength: number;
+  },
+): string[] {
+  const entries = value.map((entry, index) => {
+    const slug = requireString(entry, `${options.itemLabel}[${index}]`);
+    if (
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) ||
+      slug.length > options.maxLength
+    ) {
+      throw new TypeError(`${options.itemLabel} must be a lowercase slug.`);
+    }
+    return slug;
+  });
+  if (entries.length > 7 || new Set(entries).size !== entries.length) {
+    throw new TypeError(`${options.label} must contain at most seven unique items.`);
+  }
+  return entries;
 }
 
 export function parseHostedRuntimeIssueExportRequest(

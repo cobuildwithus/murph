@@ -94,7 +94,7 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain("websearch_to_tsquery");
     expect(searchCall?.text).toContain("$1::text AS raw_q");
     expect(searchCall?.text).toContain(
-      "strict_word_similarity(name, query.raw_q)",
+      "strict_word_similarity(query.raw_q, name)",
     );
     expect(searchCall?.text).toContain("fts_candidates AS MATERIALIZED");
     expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");

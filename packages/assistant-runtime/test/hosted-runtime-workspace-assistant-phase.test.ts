@@ -248,7 +248,7 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 } as const;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -674,6 +674,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redactedLogEntries: [],
       },
       status: "processed",
+    });
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({

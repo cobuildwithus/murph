@@ -72,7 +72,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
-- bounded hosted product-feedback rows for explicit interest in published changelog items
+- bounded hosted product-feedback rows for explicit structured product feedback
 - Kernel-backed hosted computer runs and handoff checkpoints
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -127,18 +127,24 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
-- `HostedProductFeedback` owns assistant-captured feature interest in published
-  changelog items without storing model-authored free text
+- `HostedProductFeedback` owns assistant-captured structured product feedback
+  with only a bounded product-only summary, kind, and optional changelog ids,
+  without storing raw conversation text, health details, tags, topics, or provider payloads
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
-  runs resume only after a newer hosted `conversation.message` mailbox item for
-  the same member, not from model-supplied confirmation text or tool arguments.
-  `computer_act` runs one bounded browser action through server-owned Playwright code
-  against the current Kernel page; manual browser handoff remains available for
-  login, CAPTCHA, missing details, or direct user takeover, but is not the
-  default final-action boundary.
+  runs resume when normal `computer_start_run` selects the member's active
+  awaiting run and `apps/web` verifies a newer hosted `conversation.message`
+  mailbox item for the same member and delivery context; model-supplied run ids
+  or confirmation text are not proof.
+  `computer_act` runs bounded raw Playwright code against the current Kernel
+  page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
+  surfaces that cannot be operated through Playwright; manual browser handoff
+  remains available for login, CAPTCHA, missing details, or direct user
+  takeover, but is not the default final-action boundary. Each authenticated
+  handoff matches the active browser viewport to the opening screen before
+  showing the live view.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events

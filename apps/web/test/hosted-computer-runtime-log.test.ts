@@ -24,15 +24,17 @@ describe("hosted computer runtime logs", () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({});
   });
 
-  it("records metadata-only runtime logs for computer action failures", async () => {
+  it("records diagnostic runtime logs for computer action failures without raw action code", async () => {
     const error = computerUseError({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
-        kernelError: "locator.click: Timeout 20000ms exceeded",
-        kernelStderr: "page context closed",
+        kernelError: "Error: strict mode violation: button matched multiple elements",
+        kernelErrorPresent: true,
+        kernelStderrPresent: true,
+        kernelStdoutPresent: false,
       },
       httpStatus: 502,
-      message: "Computer browser evaluation failed: locator.click: Timeout 20000ms exceeded",
+      message: "Computer browser evaluation failed.",
       retryable: true,
     });
     const run = vi.fn(async () => {
@@ -41,13 +43,7 @@ describe("hosted computer runtime logs", () => {
 
     await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
       action: {
-        action: "click",
-        locator: {
-          by: "role",
-          exact: true,
-          name: "Place your order",
-          role: "button",
-        },
+        code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
         timeoutMs: 20000,
       },
       memberId: "member_123",
@@ -63,15 +59,15 @@ describe("hosted computer runtime logs", () => {
       level: "warn",
       phase: "error",
       redacted: {
-        browserActionKind: "click",
-        computerLocatorType: "role",
+        computerFailureCategory: "strict_mode_violation",
         computerOperationKind: "act",
         httpStatus: 502,
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,
+        playwrightCodeHash: expect.any(String),
         retryable: true,
-        safeErrorMessage: "Hosted computer tool failed.",
+        safeErrorMessage: "Computer browser evaluation failed.",
         timeoutMs: 20000,
         unknownOutcome: true,
       },
@@ -81,12 +77,14 @@ describe("hosted computer runtime logs", () => {
       "Place your order",
     );
     expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
-      "page context closed",
+      "strict mode violation",
     );
   });
 
-  it("records generic metadata for unexpected failures without leaking raw error text", async () => {
-    const error = new Error("browser crashed after visiting private checkout token");
+  it("records redacted unexpected failure messages and causes", async () => {
+    const error = new Error("browser crashed", {
+      cause: new Error("page context closed"),
+    });
     const run = vi.fn(async () => {
       throw error;
     });
@@ -109,13 +107,14 @@ describe("hosted computer runtime logs", () => {
         kernelErrorPresent: false,
         kernelStderrPresent: false,
         kernelStdoutPresent: false,
-        safeErrorMessage: "Hosted computer tool failed.",
+        computerErrorCause: "page context closed",
+        safeErrorMessage: "browser crashed",
         unknownOutcome: false,
       },
       userId: "member_123",
     });
-    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
-      "private checkout token",
+    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).toContain(
+      "page context closed",
     );
   });
 

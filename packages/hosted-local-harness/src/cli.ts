@@ -50,6 +50,9 @@ export async function runHostedLocalCli(
     case "up":
       await runUp(args, io);
       return;
+    case "worktree":
+      await runWorktree(args, io);
+      return;
     case "run":
       await runCommand(args, io);
       return;
@@ -61,7 +64,129 @@ export async function runHostedLocalCli(
   }
 }
 
-async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const [subcommand, slug, ...rest] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
+    printWorktreeHelp(io.stdout ?? process.stdout);
+    return;
+  }
+  if (!slug || slug === "--help" || slug === "-h") {
+    printWorktreeHelp(io.stdout ?? process.stdout);
+    return;
+  }
+
+  const {
+    acquireHostedLocalWorktreeLock,
+    ensureHostedLocalWorktreeDatabase,
+    formatHostedLocalWorktreeEnv,
+    removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
+    resolveHostedLocalWorktreeConfig,
+  } = await import("./dev-hosted-local/worktree.ts");
+
+  switch (subcommand) {
+    case "env": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        probePorts: false,
+        slug,
+      });
+      (io.stdout ?? process.stdout).write(formatHostedLocalWorktreeEnv(config));
+      return;
+    }
+    case "doctor": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        probePorts: false,
+        slug,
+      });
+      await runDoctor(["--profile", config.profileName, ...rest], {
+        ...io,
+        env: config.env,
+      });
+      return;
+    }
+    case "up": {
+      const config = await resolveHostedLocalWorktreeConfig({
+        env: io.env ?? process.env,
+        slug,
+      });
+      const lock = await acquireHostedLocalWorktreeLock(config);
+      let databaseState: { created: boolean } | null = null;
+      let databaseCreatedByThisInvocation = false;
+      let databaseCreationRecorded = false;
+      let stackBecameReady = false;
+      let primaryError: unknown = null;
+      try {
+        databaseState = await ensureHostedLocalWorktreeDatabase(config, {
+          onCreated: async () => {
+            databaseCreatedByThisInvocation = true;
+            await lock.recordDatabaseCreated();
+            databaseCreationRecorded = true;
+          },
+        });
+        if (databaseState.created && !databaseCreationRecorded) {
+          databaseCreatedByThisInvocation = true;
+          await lock.recordDatabaseCreated();
+          databaseCreationRecorded = true;
+        }
+        await runUp(["--profile", config.profileName], {
+          ...io,
+          env: config.env,
+        }, {
+          onReady: () => {
+            stackBecameReady = true;
+          },
+        });
+      } catch (error) {
+        primaryError = error;
+        throw error;
+      } finally {
+        let finalizationError: unknown = null;
+        try {
+          if (
+            (databaseState?.created || databaseCreatedByThisInvocation)
+            && !stackBecameReady
+          ) {
+            const cleanup =
+              await removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing(config);
+            if (cleanup.missingCryptoState && !cleanup.removed) {
+              (io.stderr ?? process.stderr).write(
+                `Warning: newly created worktree database ${config.databaseName} was left in place; drop it manually before retrying if startup failed before crypto state was written.\n`,
+              );
+            }
+          }
+        } catch (error) {
+          finalizationError = error;
+          (io.stderr ?? process.stderr).write(
+            `Warning: unable to verify or clean newly created worktree database ${config.databaseName}; drop it manually before retrying if startup failed before crypto state was written.\n`,
+          );
+        }
+        try {
+          await lock.release();
+        } catch (error) {
+          finalizationError ??= error;
+          (io.stderr ?? process.stderr).write(
+            `Warning: unable to release hosted-local worktree lock for ${config.databaseName}; remove the stale lock before retrying this slug.\n`,
+          );
+        }
+        if (primaryError === null && finalizationError !== null) {
+          throw finalizationError;
+        }
+      }
+      return;
+    }
+    default:
+      throw new Error(`Unknown hosted-local worktree command: ${subcommand}`);
+  }
+}
+
+async function runUp(
+  args: readonly string[],
+  io: HostedLocalCliIo,
+  options: {
+    onReady?: () => void | Promise<void>;
+  } = {},
+): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
   if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
     printUpHelp(io.stdout ?? process.stdout);
@@ -225,6 +350,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
       webBaseUrl: stack.webBaseUrl,
       workerBaseUrl: stack.workerBaseUrl,
     });
+    await options.onReady?.();
     if (terminationSignal) {
       await awaitTerminationCleanup();
       return;
@@ -360,7 +486,10 @@ async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promis
   }
 }
 
-async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+async function runDoctor(
+  args: readonly string[],
+  io: HostedLocalCliIo,
+): Promise<void> {
   const parsed = parseProfileArgs(args, "dev");
   const json = parsed.args.includes("--json");
   if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
@@ -488,6 +617,9 @@ function printHelp(stdout: NodeJS.WritableStream): void {
       "",
       "Usage:",
       "  hosted-local up [--profile dev]",
+      "  hosted-local worktree up <slug>",
+      "  hosted-local worktree doctor <slug> [--json]",
+      "  hosted-local worktree env <slug>",
       "  hosted-local e2e [scenario] [--profile e2e:stub] [--list]",
       "  hosted-local run [--profile dev] -- <command> [args...]",
       "  hosted-local doctor [--profile dev] [--json]",
@@ -509,6 +641,22 @@ function printProfiles(stdout: NodeJS.WritableStream): void {
 
 function printUpHelp(stdout: NodeJS.WritableStream): void {
   stdout.write("Usage: hosted-local up [--profile dev|worker-only]\n");
+}
+
+function printWorktreeHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write(
+    [
+      "Usage:",
+      "  hosted-local worktree up <slug>",
+      "  hosted-local worktree doctor <slug> [--json]",
+      "  hosted-local worktree env <slug>",
+      "",
+      "Stop the foreground worktree process directly; out-of-band down is disabled until process ownership is recorded.",
+      "",
+      "Slugs must use lowercase letters, digits, and hyphens.",
+      "",
+    ].join("\n"),
+  );
 }
 
 function printE2eHelp(stdout: NodeJS.WritableStream): void {

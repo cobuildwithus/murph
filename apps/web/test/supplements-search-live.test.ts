@@ -89,6 +89,13 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(blueprint[0]?.name).toMatch(/essential/iu);
   }, 120_000);
 
+  it("ignores weak catalog terms when specific product terms remain", async () => {
+    const nacGinger = await search("NAC ginger supplement");
+    expect(nacGinger[0]?.brand).toMatch(/blueprint/iu);
+    expect(nacGinger[0]?.name).toMatch(/nac/iu);
+    expect(nacGinger[0]?.name).toMatch(/ginger/iu);
+  }, 120_000);
+
   it("keeps finding products when the sub-brand line is typed exactly", async () => {
     const drFormulated = await search("Garden of Life Dr Formulated Probiotics");
     expect(drFormulated[0]?.brand).toMatch(/^Garden of Life/iu);

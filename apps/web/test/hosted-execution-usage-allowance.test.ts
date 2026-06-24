@@ -1020,7 +1020,7 @@ describe("resolveHostedAiUsageGate", () => {
       userNotice: {
         code: "trial_usage_limit_reached",
         message:
-          "You've reached the hosted AI usage included in your trial. Upgrade: https://withmurph.ai/home",
+          "You've reached the hosted AI usage included in your trial. Please finish checkout: https://withmurph.ai/home",
       },
     });
   });

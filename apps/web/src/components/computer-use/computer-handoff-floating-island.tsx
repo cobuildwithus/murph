@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { cn } from "@/src/lib/utils";
 
-const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset";
+const DEFAULT_STORAGE_KEY = "murph.computer-handoff.island-offset.v2";
 const VIEWPORT_MARGIN = 12;
 
 type Offset = { x: number; y: number };
+const DEFAULT_OFFSET: Offset = { x: 0, y: 0 };
 
 interface DragState {
   pointerId: number;
@@ -47,13 +48,14 @@ export function ComputerHandoffFloatingIsland({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 });
+  const [offset, setOffset] = useState<Offset>(DEFAULT_OFFSET);
   const [grabbing, setGrabbing] = useState(false);
 
   useEffect(() => {
+    const storedOffset = readStoredOffset(persistKey);
+    if (!storedOffset) return;
     const frame = window.requestAnimationFrame(() => {
-      const storedOffset = readStoredOffset(persistKey);
-      if (storedOffset) setOffset(storedOffset);
+      setOffset(storedOffset);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [persistKey]);

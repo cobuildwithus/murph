@@ -363,6 +363,7 @@ model HostedProductFeedback {
   memberId                    String       @map("member_id")
   kind                        String
   relatedChangelogItemIdsJson Json         @map("related_changelog_item_ids_json")
+  summary                     String?
   createdAt                   DateTime     @default(now()) @map("created_at")
   member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 

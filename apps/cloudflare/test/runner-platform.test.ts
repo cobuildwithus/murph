@@ -3024,7 +3024,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const providerFetchBaseUrlSource = {
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
       LINQ_API_BASE_URL: "http://172.17.0.1:4011/api/partner/v3",
-      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
       TELEGRAM_API_BASE_URL: "http://172.17.0.1:4012/",
       TELEGRAM_FILE_BASE_URL: "http://172.17.0.1:4013/file",
     };
@@ -3605,6 +3605,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
       relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
     });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",

@@ -202,6 +202,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
         relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
       },
     },
     name: "hosted product feedback recording",
@@ -328,6 +329,18 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     name: "hosted computer act",
     path: buildHostedComputerRunOperationPath({
       operation: "act",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      action: "clickMouse",
+      x: 120,
+      y: 240,
+    },
+    name: "hosted computer os control",
+    path: buildHostedComputerRunOperationPath({
+      operation: "os-control",
       runId: "run_123",
     }),
   },
