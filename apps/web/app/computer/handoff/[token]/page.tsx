@@ -13,6 +13,7 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
+const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
 
 export default async function ComputerHandoffPage({
   params,
@@ -100,11 +101,19 @@ export default async function ComputerHandoffPage({
     (await headers()).get("user-agent"),
   );
   try {
-    await service.ensureHandoffViewport({
-      memberId: session.member.id,
-      preset,
-      token,
-    });
+    await Promise.race([
+      service.ensureHandoffViewport({
+        memberId: session.member.id,
+        preset,
+        token,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("viewport resize timed out")),
+          HANDOFF_VIEWPORT_SSR_TIMEOUT_MS,
+        );
+      }),
+    ]);
   } catch (error) {
     console.warn("[computer-handoff] viewport resize failed", error);
   }
