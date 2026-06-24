@@ -13,8 +13,10 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
   compactWarmCodexThread,
-  executeCodexAppServerTurn,
+  executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
+  resolveMurphDynamicTools,
   stopWarmCodexAppServer,
+  type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 
@@ -64,6 +66,26 @@ const codexCommand = path.resolve(
 
 let stub: ScriptedStub | null = null
 const temporaryPaths: string[] = []
+
+function executeCodexAppServerTurn(
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+  },
+) {
+  return executeCodexAppServerTurnUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
+}
 
 async function requireScriptedStub(): Promise<ScriptedStub> {
   stub ??= await startScriptedResponsesStub()

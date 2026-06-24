@@ -10,9 +10,6 @@ import type {
   CodexAppServerTurnInput,
 } from '../assistant-codex.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
-import {
-  resolveMurphDynamicTools,
-} from './dynamic-tools.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
@@ -79,7 +76,7 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
+    dynamicTools: input.input.dynamicTools,
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
@@ -99,19 +96,6 @@ function buildCodexThreadResumeContextParams(
     modelProvider: normalizeNullableString(input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.sandbox),
   }
-}
-
-function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
-  return resolveMurphDynamicTools({
-    allowFinishWithoutReply: input.allowFinishWithoutReply,
-    allowMessageReactions: input.allowMessageReactions,
-    computerToolsAvailable:
-      input.hostedToolContext?.computerToolsAvailable === true,
-    progressUpdatesAvailable: input.progressDelivery != null,
-    connectedAppsAvailable: input.connectedAppsAvailable === true,
-    productFeedbackAvailable:
-      typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
-  })
 }
 
 export function buildCodexTurnStartParams(input: {

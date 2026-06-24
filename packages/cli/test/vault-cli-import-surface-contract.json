@@ -1,6 +1,7 @@
 [
   "@murphai/contracts",
   "@murphai/gateway-core",
+  "@murphai/health-metrics",
   "@murphai/importers",
   "@murphai/murph",
   "@murphai/operator-config",

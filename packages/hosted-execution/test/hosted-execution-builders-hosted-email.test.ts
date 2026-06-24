@@ -467,13 +467,13 @@ describe("hosted execution wake builders", () => {
     expect(
       buildHostedExecutionRuntimeControlWake({
         eventId: "runtime-control-1",
-        kind: "runtime.browser-vault-refresh-requested",
+        kind: "runtime.maintenance-requested",
         occurredAt,
         userId: "user_123",
       }),
     ).toEqual({
       eventId: "runtime-control-1",
-      kind: "runtime.browser-vault-refresh-requested",
+      kind: "runtime.maintenance-requested",
       occurredAt,
       userId: "user_123",
     });

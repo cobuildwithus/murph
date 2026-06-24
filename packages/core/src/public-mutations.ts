@@ -18,9 +18,8 @@ import {
   promoteInboxJournal as promoteInboxJournalInternal,
 } from "./canonical-mutations.ts";
 import {
-  acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
-  withCanonicalWriteLockScope,
+  withCanonicalWriteLock,
 } from "./operations/canonical-write-lock.ts";
 import {
   type CopyRawArtifactInput as RawCopyRawArtifactInput,
@@ -90,6 +89,11 @@ import { sanitizePathSegment } from "./path-safety.ts";
 
 import type { DateInput, ValidationIssue } from "./types.ts";
 
+export {
+  deleteEventInternal as deleteEvent,
+  upsertEventInternal as upsertEvent,
+};
+
 export interface CanonicalTextWriteInput {
   relativePath: string;
   content: string;
@@ -141,22 +145,6 @@ export interface ApplyCanonicalWriteBatchResult {
   textWrites: string[];
   jsonlAppends: string[];
   deletes: string[];
-}
-
-async function withCanonicalWriteLock<TResult>(
-  vaultRoot: string | undefined,
-  operation: () => Promise<TResult>,
-): Promise<TResult> {
-  const normalizedVaultRoot = vaultRoot ?? process.cwd();
-  return await withCanonicalWriteLockScope(normalizedVaultRoot, async () => {
-    const lock = await acquireCanonicalWriteLock(normalizedVaultRoot);
-
-    try {
-      return await operation();
-    } finally {
-      await lock.release();
-    }
-  });
 }
 
 function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResult>(
@@ -554,18 +542,6 @@ export async function deleteProvider(
   input: Parameters<typeof deleteProviderInternal>[0],
 ): ReturnType<typeof deleteProviderInternal> {
   return withCanonicalInputWriteLock(input, deleteProviderInternal);
-}
-
-export async function upsertEvent(
-  input: Parameters<typeof upsertEventInternal>[0],
-): ReturnType<typeof upsertEventInternal> {
-  return withCanonicalInputWriteLock(input, upsertEventInternal);
-}
-
-export async function deleteEvent(
-  input: Parameters<typeof deleteEventInternal>[0],
-): ReturnType<typeof deleteEventInternal> {
-  return withCanonicalInputWriteLock(input, deleteEventInternal);
 }
 
 export async function updateVaultSummary(

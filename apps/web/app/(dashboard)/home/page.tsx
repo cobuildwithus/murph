@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 import {
@@ -21,6 +22,10 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import {
+  type ConnectedAppCompletionSearchParams,
+  resolveConnectedAppCompletionDialogModel,
+} from "@/src/lib/connected-apps/connect-completion";
+import {
   resolveDeviceSyncCompletionDialogModel,
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
@@ -28,6 +33,8 @@ import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboard
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { issueHostedInvite } from "@/src/lib/hosted-onboarding/invite-service";
+import { requiresHostedBillingCheckout } from "@/src/lib/hosted-onboarding/lifecycle";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -37,9 +44,12 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Your personal health dashboard.",
 });
 
-type HomeSearchParams = DeviceSyncCompletionSearchParams & {
-  initialVisit?: string | string[] | undefined;
-};
+type HomeSearchParams =
+  & DeviceSyncCompletionSearchParams
+  & ConnectedAppCompletionSearchParams
+  & {
+    initialVisit?: string | string[] | undefined;
+  };
 
 export default async function HomePage({
   searchParams,
@@ -50,32 +60,51 @@ export default async function HomePage({
   const showInitialVisitDialog =
     readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
   const auth = await getHostedPageAuthSnapshot();
+  const member = auth.authenticatedMember;
+
+  if (
+    member
+    && member.suspendedAt === null
+    && requiresHostedBillingCheckout(member.billingStatus)
+  ) {
+    const invite = await issueHostedInvite({
+      channel: "web",
+      memberId: member.id,
+    });
+    redirect(`/join/${encodeURIComponent(invite.inviteCode)}`);
+  }
+
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
   const [
     showDeviceStep,
     usageGate,
-    completionDialog,
+    deviceSyncCompletionDialog,
+    connectedAppCompletionDialog,
     billingRef,
     initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
-      member: auth.authenticatedMember,
+      member,
     }),
-    auth.authenticatedMember
+    member
       ? resolveHostedAiUsageGate({
-          memberId: auth.authenticatedMember.id,
+          memberId: member.id,
           now: usageGateCheckedAt,
           prisma,
         })
       : Promise.resolve(null),
     resolveDeviceSyncCompletionDialogModel({
-      member: auth.authenticatedMember,
+      member,
       searchParams: resolvedSearchParams,
     }),
-    auth.authenticatedMember
+    resolveConnectedAppCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
+    member
       ? readHostedMemberStripeBillingRef({
-          memberId: auth.authenticatedMember.id,
+          memberId: member.id,
           prisma,
         })
       : Promise.resolve(null),
@@ -83,6 +112,9 @@ export default async function HomePage({
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
   ]);
+  // Each marker uses its own query key, so only one model is non-null per
+  // home load in normal use; device-sync wins the tiebreak if both fire.
+  const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
   const usageLimitNotice =
     usageGate && !usageGate.allowed && usageGate.userNotice
       ? usageGate.userNotice
@@ -98,8 +130,8 @@ export default async function HomePage({
     ? null
     : resolveHomeTrialBillingBannerVariant({
         billingRef,
-        billingStatus: auth.authenticatedMember?.billingStatus,
-        suspendedAt: auth.authenticatedMember?.suspendedAt,
+        billingStatus: member?.billingStatus,
+        suspendedAt: member?.suspendedAt,
       });
 
   return (

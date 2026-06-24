@@ -5,13 +5,13 @@ import {
   asArray,
   asPlainObject,
   buildSyntheticDeletionResourceId,
-  createRawArtifact,
+  createEvidencePart,
   finiteNumber,
   kilojoulesToKilocalories,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   pushDeletionObservation as pushSharedDeletionObservation,
-  pushRawArtifact,
+  pushEvidencePart,
   slugify,
   stringId,
   toIso,
@@ -20,7 +20,7 @@ import {
 
 import type {
   DeviceEventPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
@@ -177,7 +177,7 @@ function makeExternalRef(
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
   importedAt: string,
   deletion: PlainObject,
 ): void {
@@ -199,7 +199,7 @@ function pushDeletionObservation(
       deletion,
     });
 
-  pushSharedDeletionObservation(events, rawArtifacts, {
+  pushSharedDeletionObservation(events, evidenceParts, {
     provider: "strava",
     providerDisplayName: "Strava",
     resourceType,
@@ -218,12 +218,12 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
   const deletions = asObjectArray(request.deletions);
   const sourceWindow = asPlainObject(request.sourceWindow);
   const events: DeviceEventPayload[] = [];
-  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const evidenceParts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
     stringId(athlete?.id ?? athlete?.athlete_id ?? athlete?.athleteId);
 
-  pushRawArtifact(rawArtifacts, createRawArtifact("athlete", "athlete.json", athlete));
+  pushEvidencePart(evidenceParts, createEvidencePart("athlete", "athlete.json", athlete));
 
   for (const activity of activities) {
     const activityId = stringId(activity.id) ?? `activity-${events.length + 1}`;
@@ -258,7 +258,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
       ? `Strava ${firstString(activity.name)}`
       : `Strava ${sportName}`;
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `activity-${activityId}.json`, activity));
+    pushEvidencePart(evidenceParts, createEvidencePart(role, `activity-${activityId}.json`, activity));
 
     if (occurredAt && durationMinutes !== undefined) {
       events.push(
@@ -269,7 +269,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
           dayKey,
           source: "device",
           title: trimToLength(title, 160),
-          rawArtifactRoles: [role],
+          evidenceRoles: [role],
           externalRef: makeExternalRef("activity", activityId, version),
           fields: stripUndefined({
             activityType,
@@ -294,7 +294,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
   }
 
   for (const deletion of deletions) {
-    pushDeletionObservation(events, rawArtifacts, importedAt, deletion);
+    pushDeletionObservation(events, evidenceParts, importedAt, deletion);
   }
 
 
@@ -321,7 +321,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
     accountId,
     importedAt,
     events,
-    rawArtifacts,
+    evidenceParts,
     provenance,
   });
 }

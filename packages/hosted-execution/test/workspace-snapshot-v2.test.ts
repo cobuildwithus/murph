@@ -8,6 +8,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
   type HostedWorkspaceSnapshotV2Ref,
   buildHostedWorkspaceSnapshotV2Aad,
+  buildHostedWorkspaceSnapshotV2FingerprintSha256,
   createHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
   decodeHostedWorkspaceSnapshotV2DataKey,
@@ -39,6 +40,21 @@ describe("hosted workspace snapshot v2 refs", () => {
     expect(isHostedWorkspaceSnapshotV2Ref(parseHostedExecutionSnapshotRef(ref))).toBe(true);
     expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(ref))).toBeNull();
     expect(readHostedBrowserVaultSourceStateHash(parseHostedExecutionSnapshotRef(ref))).toBeNull();
+  });
+
+  it("builds a deterministic fingerprint for the complete v2 snapshot identity", () => {
+    const ref = createWorkspaceSnapshotV2Ref();
+    const fingerprint = buildHostedWorkspaceSnapshotV2FingerprintSha256(ref);
+
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+    expect(buildHostedWorkspaceSnapshotV2FingerprintSha256(ref)).toBe(fingerprint);
+    expect(buildHostedWorkspaceSnapshotV2FingerprintSha256({
+      ...ref,
+      archive: {
+        ...ref.archive,
+        encryptedObjectSha256: "c".repeat(64),
+      },
+    })).not.toBe(fingerprint);
   });
 
   it("rejects malformed archive metadata and AAD mismatches", () => {

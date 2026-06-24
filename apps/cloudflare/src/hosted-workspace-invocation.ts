@@ -164,6 +164,7 @@ export async function runHostedWorkspaceInvocation(
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
+      preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,
       providerFetchBaseUrlSource,
       providerFetchBaseUrls,
       proxyBoundUserIdHeader: true,

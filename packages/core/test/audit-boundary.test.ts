@@ -16,6 +16,7 @@ const CANONICAL_WRITE_ALLOWLIST = new Set([
   "domains/experiments.ts",
   "domains/shared.ts",
   "history/api.ts",
+  "integration-ingest-migration.ts",
   "junction-hr-zone-repair.ts",
   "mutations.ts",
   "operations/write-batch.ts",

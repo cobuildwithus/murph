@@ -151,7 +151,11 @@ the main checkout:
   hosted env var.
 - Codex subscription auth: let the harness read the normal local Codex auth
   location. The helper must never print or persist token JSON outside its
-  existing secret-safe env handoff.
+  existing secret-safe env handoff. Set `MURPH_DEV_USE_OPENAI_API_KEY=1` to
+  bypass the subscription seed and bill `OPENAI_API_KEY` for assistant turns
+  instead — opt-in escape hatch for when the local Codex subscription is
+  exhausted or unavailable; off by default so dev never silently re-routes to
+  the API key.
 - Stripe: rely on the local Stripe CLI login and the harness-managed
   `stripe listen` child. A worktree with a unique web port gets its own forward
   target.

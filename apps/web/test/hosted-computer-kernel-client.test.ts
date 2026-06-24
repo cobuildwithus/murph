@@ -129,9 +129,9 @@ describe("KernelComputerClient", () => {
       {
         viewport: {
           force: true,
-          height: 800,
-          refresh_rate: 60,
-          width: 1280,
+          height: 1080,
+          refresh_rate: 25,
+          width: 1920,
         },
       },
     );

@@ -52,6 +52,7 @@ import {
 import {
   sendEmailMessage,
   sendLinqMessage,
+  sendTelegramImageMessage,
   sendTelegramMessage,
   sendTelegramVoiceMemoMessage,
   startLinqTypingIndicator,
@@ -554,6 +555,67 @@ describe('assistant channels runtime seam', () => {
     expect(readJsonBody(fetchImplementation.mock.calls[2][1]?.body)).toMatchObject({
       chat_id: '456',
       text: 'b',
+    })
+  })
+
+  it('sends Telegram image response media through sendPhoto with a caption', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3001,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: 'Example image',
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/example.png',
+            },
+          ],
+          message: 'Here is an **example** image.',
+          replyToMessageId: ' 42 ',
+          target: '123:topic:9',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).resolves.toEqual({
+      cleanupMessages: [
+        { messageId: '3001', target: '123:topic:9' },
+      ],
+      providerMessageId: '3001',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendPhoto',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      caption: 'Here is an example image.',
+      caption_entities: [
+        {
+          length: 7,
+          offset: 11,
+          type: 'bold',
+        },
+      ],
+      chat_id: '123',
+      message_thread_id: 9,
+      photo: 'https://cdn.example.test/example.png',
+      reply_to_message_id: 42,
     })
   })
 

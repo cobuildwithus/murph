@@ -19,6 +19,8 @@ export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
 export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
+export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
+  "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =

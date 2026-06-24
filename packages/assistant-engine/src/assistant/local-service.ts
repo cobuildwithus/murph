@@ -560,6 +560,7 @@ export async function sendAssistantMessageLocal(
           : null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
+              connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               getDeliveryContext: () => ({
                 messageInput: currentInput,

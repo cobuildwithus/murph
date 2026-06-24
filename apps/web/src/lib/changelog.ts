@@ -56,6 +56,145 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-23",
+    publishedOn: "2026-06-23",
+    title: "Passkeys, and a handoff that fits your phone",
+    summary:
+      "Add a passkey as your second factor in one tap, computer handoff sizes to your phone from the first frame, and auto-replies remember the conversation that came before them.",
+    items: [
+      {
+        id: "passkey-mfa-setup",
+        kind: "feature",
+        priority: 5,
+        title: "Passkey two-factor in one tap",
+        summary:
+          "Settings has a new Security section. Tap once to enroll a passkey — Face ID, Touch ID, or your phone's secure enclave — as a second factor on your Murph account.",
+        relevanceTags: ["security", "settings", "passkeys", "auth"],
+        sourcePullRequests: [],
+        tryIt: {
+          href: "/settings",
+          label: "Set up a passkey",
+        },
+      },
+      {
+        id: "handoff-viewport-match",
+        kind: "feature",
+        priority: 5,
+        title: "Browser handoff matches your phone",
+        summary:
+          "When Murph hands the browser off to you, the page now sizes to your phone or laptop from the first frame — no more zoomed-out desktop on mobile.",
+        details:
+          "Murph reads your screen on the server, resizes the remote browser once, then renders. A pulse loader holds the page while everything lines up.",
+        relevanceTags: ["browser", "automation", "mobile"],
+        sourcePullRequests: [268],
+      },
+      {
+        id: "handoff-mobile-takeover-overlay",
+        kind: "feature",
+        priority: 4,
+        title: "Tap to take over on mobile",
+        summary:
+          "Mobile computer handoff now shows a minimal takeover overlay — one clear tap to jump in, type, paste, or finish — instead of fighting the streamed browser controls.",
+        relevanceTags: ["browser", "mobile", "automation"],
+        sourcePullRequests: [269],
+      },
+      {
+        id: "handoff-keyboard-paste",
+        kind: "feature",
+        priority: 4,
+        title: "Keyboard and paste in the handed-off browser",
+        summary:
+          "A dedicated Keyboard / Paste button focuses the streamed Safari iframe on every tap, so copy → focus → paste lands cleanly in the remote browser.",
+        relevanceTags: ["browser", "automation"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "handoff-on-demand-links",
+        kind: "feature",
+        priority: 4,
+        title: "Hand off the browser on request",
+        summary:
+          "Ask Murph to hand the browser off whenever you want a look — fresh inspection links work for any live computer-use session, not just the ones it paused itself.",
+        relevanceTags: ["browser", "automation"],
+        sourcePullRequests: [267],
+        tryIt: {
+          label: "Ask for a handoff",
+          prompt: "Hand the browser off to me so I can take a look.",
+        },
+      },
+      {
+        id: "auto-reply-cross-session-context",
+        kind: "improvement",
+        priority: 5,
+        title: "Auto-replies remember the conversation",
+        summary:
+          "When Murph auto-replies to a message that came in while you were away, the reply now sees context from your earlier sessions instead of starting from a blank slate.",
+        relevanceTags: ["reliability", "messaging", "assistant"],
+        sourcePullRequests: [262],
+      },
+      {
+        id: "os-control-typing-delay-removed",
+        kind: "improvement",
+        priority: 4,
+        title: "Snappier typing in browser tasks",
+        summary:
+          "Dropped the artificial OS-control typing delay, so Murph fills forms and types into web apps without the slow per-keystroke pause.",
+        relevanceTags: ["browser", "performance", "automation"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "connected-apps-tool-forwarding",
+        kind: "improvement",
+        priority: 4,
+        title: "Connected apps stay reachable",
+        summary:
+          "Closed a forwarding gap that silently dropped the connected-apps capability before it reached the Codex turn, so Gmail, Calendar, and the rest stay usable end-to-end.",
+        relevanceTags: ["integrations", "reliability", "assistant"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "supplement-search-quality",
+        kind: "improvement",
+        priority: 4,
+        title: "Sharper supplement search",
+        summary:
+          "Search now drops weak supplement tokens and uses the correct trigram operator, so brand and ingredient lookups land the product you meant.",
+        relevanceTags: ["supplements", "search"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "onboarding-dashboard-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Onboarding picks up where you left off",
+        summary:
+          "If you signed up but didn't finish onboarding, the dashboard sends you back to the hosted onboarding flow instead of dropping you into an empty home.",
+        relevanceTags: ["onboarding", "reliability"],
+        sourcePullRequests: [270],
+      },
+      {
+        id: "onboarding-followup-managed",
+        kind: "improvement",
+        priority: 3,
+        title: "Onboarding follow-ups reconcile cleanly",
+        summary:
+          "First-run setup questions got shorter, voice-memo answers are honored, and the onboarding follow-up automation reconciles its own state instead of leaving legacy reminders behind.",
+        relevanceTags: ["onboarding", "assistant", "automations"],
+        sourcePullRequests: [264],
+      },
+      {
+        id: "changelog-imessage-og-card",
+        kind: "improvement",
+        priority: 3,
+        title: "Changelog previews on iMessage",
+        summary:
+          "Sharing the changelog link on iMessage now renders a clean five-row digest in Murph's own palette, instead of a generic link preview.",
+        relevanceTags: ["changelog", "design", "imessage"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-06-22",
     publishedOn: "2026-06-22",
     title: "A more natural Murph",

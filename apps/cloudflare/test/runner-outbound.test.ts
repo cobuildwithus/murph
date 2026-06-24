@@ -56,6 +56,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -269,6 +270,14 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted runtime latency trace",
     path: HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  },
+  {
+    body: {
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "connected",
+    },
+    name: "hosted Codex auth update",
+    path: HOSTED_RUNTIME_CODEX_AUTH_PATH,
   },
   {
     body: {
@@ -586,6 +595,7 @@ describe("handleRunnerOutboundRequest", () => {
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+                    || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -695,6 +705,40 @@ describe("handleRunnerOutboundRequest", () => {
             source: "linq",
             type: "assistant_input_staged",
           },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted Codex auth updates without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_PATH}`, {
+        body: JSON.stringify({
+          attemptId: "hca_abcdefghijklmnop",
+          phase: "connected",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

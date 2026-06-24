@@ -1882,7 +1882,7 @@ describe("assistant delivery orchestration seam", () => {
     const session = createAssistantSession({
       binding: {
         actorId: "binding-actor",
-        channel: "telegram",
+        channel: "email",
         conversationKey: "binding-key",
         delivery: {
           kind: "thread",
@@ -1896,14 +1896,14 @@ describe("assistant delivery orchestration seam", () => {
     const media = [
       {
         kind: "image" as const,
-        url: "https://cdn.example.test/dead-bug/telegram.png",
-        alt: "Telegram unsupported image",
-        source: "telegram-unsupported",
+        url: "https://cdn.example.test/dead-bug/email.png",
+        alt: "Email unsupported image",
+        source: "email-unsupported",
       },
     ];
     runtimeState.outbox.deliverMessage.mockResolvedValue({
       delivery: {
-        channel: "telegram",
+        channel: "email",
         idempotencyKey: null,
         messageLength: 10,
         providerMessageId: "provider-text-only",
@@ -1934,7 +1934,7 @@ describe("assistant delivery orchestration seam", () => {
       }),
     ).resolves.toEqual({
       delivery: {
-        channel: "telegram",
+        channel: "email",
         idempotencyKey: null,
         messageLength: 10,
         providerMessageId: "provider-text-only",
@@ -1951,7 +1951,7 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: "telegram",
+        channel: "email",
         media: [],
         message: "reply body",
         turnId: "turn-media-unsupported",

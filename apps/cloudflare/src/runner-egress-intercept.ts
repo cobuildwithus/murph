@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildExaResearchScoutRequest,
-  createExaResearchScoutPublishedWindow,
+  clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
   parseExaResearchScoutRequestBody,
@@ -316,6 +316,34 @@ const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
   "provider_egress_token_mismatch",
   "write_fence_mismatch",
 ] as const;
+
+// Provider kinds whose tokenless authorization may fall back to the
+// container-identity active-user fence. Membership requires the upstream
+// operation to be either read-only/lookup (no third-party side effect) or
+// already gated by a Worker-owned bounded request shape that cannot be
+// steered into delivery state.
+//
+// Delivery providers (Linq, Telegram, WhatsApp) and ElevenLabs are
+// deliberately excluded: their authorized request matrices mutate
+// third-party messaging state or burn provider credit on caller-supplied
+// payloads, so they must continue to require either exact write-fence
+// headers or a provider-egress token. Those are attached only by the
+// runtime's wrapped fetch, which routes through the outbound-intent
+// journal that owns recipient binding and idempotency.
+//
+// The injected-credential sentinel is a known literal that any
+// in-container child process can reproduce; it is a "this header was set
+// by code that knew the convention" marker, not a capability proof. So
+// membership in this set is the only thing preventing a child process
+// from authorizing side-effecting calls by spoofing the sentinel during a
+// legitimate active turn.
+const HOSTED_PROVIDER_KINDS_WITH_ACTIVE_USER_FENCE_FALLBACK = new Set<string>([
+  "openai",
+  "murph_data_api",
+  "workers_ai_transcribe",
+  "exa",
+  "mapbox",
+]);
 type HostedActiveWriteFenceRejectReason =
   typeof HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS[number];
 type HostedProviderEgressTokenRejectReason =
@@ -689,7 +717,6 @@ async function maybeHandleHostedDataApiRequest(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
     ...input,
-    allowActiveUserFenceWithoutToken: true,
     providerKind: "murph_data_api",
   });
   if (!authorization.authorized) {
@@ -873,7 +900,6 @@ async function maybeHandleHostedTranscribeRequest(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
     ...input,
-    allowActiveUserFenceWithoutToken: true,
     providerKind: "workers_ai_transcribe",
   });
   if (!authorization.authorized) {
@@ -2525,18 +2551,29 @@ function readHostedExaResearchScoutRequestBody(
     return null;
   }
 
-  return parseExaResearchScoutRequestBody(parsed);
+  const request = parseExaResearchScoutRequestBody(parsed);
+  if (!request) {
+    return null;
+  }
+  const clamped = clampExaResearchScoutPublishedWindow({
+    now: new Date(),
+    since: request.since,
+    until: request.until,
+  });
+  if (!clamped) {
+    return null;
+  }
+  return { ...request, ...clamped };
 }
 
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
-  const publishedWindow = createExaResearchScoutPublishedWindow(new Date());
   return buildExaResearchScoutRequest({
     maxCandidates: input.numResults,
     profile: input.profile,
-    since: publishedWindow.since,
-    until: publishedWindow.until,
+    since: input.since,
+    until: input.until,
   });
 }
 
@@ -2942,6 +2979,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
+    || operation === "sendPhoto"
     || operation === "sendVoice"
     || operation === "sendChatAction"
     || operation === "deleteMessages"
@@ -2951,7 +2989,6 @@ function isAllowedTelegramOperation(operation: string): boolean {
 }
 
 async function authorizeHostedProviderEgress(input: {
-  allowActiveUserFenceWithoutToken?: boolean;
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   openAiPathnameSuffix?: string;
@@ -3014,7 +3051,7 @@ async function authorizeHostedProviderEgress(input: {
     });
   }
 
-  if (input.providerKind !== "openai" && input.allowActiveUserFenceWithoutToken !== true) {
+  if (!HOSTED_PROVIDER_KINDS_WITH_ACTIVE_USER_FENCE_FALLBACK.has(input.providerKind)) {
     if (!input.userId) {
       return {
         activeContainerIdentitySource: null,
@@ -3028,7 +3065,6 @@ async function authorizeHostedProviderEgress(input: {
         writeFence: null,
       };
     }
-
     return {
       activeContainerIdentitySource: null,
       authorized: false,
