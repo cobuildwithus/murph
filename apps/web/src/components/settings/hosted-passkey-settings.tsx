@@ -44,9 +44,8 @@ function PasskeySetup() {
   const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
 
   // The setup handler chains Privy calls and reads `user` after each one to advance.
-  // The `user` captured by the handler closure is stale after an `await`, since React
-  // hasn't re-rendered yet. A ref kept in sync each render gives the handler a fresh
-  // window into Privy's user state without waiting for React to commit.
+  // The `user` captured by the handler closure is stale after an `await`, so a ref
+  // tracks committed Privy user updates while the polling helper waits.
   const userRef = useRef<User | null>(user);
   useEffect(() => {
     userRef.current = user;
