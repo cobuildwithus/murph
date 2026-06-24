@@ -15,6 +15,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -117,6 +118,9 @@ export async function handleRunnerWebControlRequest(input: {
     return notFound();
   }
 
+  const isActionApprovalRequest =
+    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH
+    && input.request.method === "POST";
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
   const isBrowserVaultReplicaPublishRequest =
@@ -140,7 +144,8 @@ export async function handleRunnerWebControlRequest(input: {
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
-    isCheckpointRequest
+    isActionApprovalRequest
+    || isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
     || isRuntimeLatencyTraceRequest
