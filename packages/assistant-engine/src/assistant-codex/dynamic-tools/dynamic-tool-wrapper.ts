@@ -55,7 +55,8 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
      * `schema.shape` for plain ZodObject schemas. Should be passed explicitly
      * for any non-ZodObject schema (e.g. discriminated unions) — omitting it
      * produces a digest with empty rootKeysPresent, inflated unsafeRootKeyCount,
-     * and no path-level diagnostics, leaving only the validation fingerprint.
+     * and no nested-path diagnostics. Root-level diagnostics (path=`root`) and
+     * the validation fingerprint still emit.
      */
     schemaRootKeys?: readonly string[]
     toolName: string
