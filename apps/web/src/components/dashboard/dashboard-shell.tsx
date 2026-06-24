@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import Image from "next/image";
 
+import { DashboardOnboardingRecoveryRedirect } from "@/src/components/dashboard/dashboard-onboarding-recovery";
 import { Sidebar } from "@/src/components/dashboard/sidebar";
 import {
   SidebarChatWithMurphAction,
@@ -25,6 +26,7 @@ export function DashboardShell({
 }) {
   return (
     <SidebarProvider>
+      <DashboardOnboardingRecoveryRedirect enabled={sidebarAuth?.authenticated === true} />
       <Sidebar
         initialAuth={sidebarAuth}
         chatAction={(
