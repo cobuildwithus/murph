@@ -51,10 +51,11 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
     schema: T
     schemaName?: string
     /**
-     * Root-key list used in the validation digest. Required for schemas where
-     * `Object.keys(schema.shape)` is not the natural key set (e.g.
-     * discriminated unions). For plain ZodObject schemas this is derived from
-     * `schema.shape` automatically.
+     * Root-key list used in the validation digest. Auto-derived from
+     * `schema.shape` for plain ZodObject schemas. Should be passed explicitly
+     * for any non-ZodObject schema (e.g. discriminated unions) — omitting it
+     * produces a digest with empty rootKeysPresent, inflated unsafeRootKeyCount,
+     * and no path-level diagnostics, leaving only the validation fingerprint.
      */
     schemaRootKeys?: readonly string[]
     toolName: string
@@ -81,10 +82,9 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
 }
 
 function resolveSchemaRootKeys(schema: z.ZodTypeAny): readonly string[] {
-  // We only auto-derive for ZodObject; non-object schemas (e.g. discriminated
-  // unions) MUST pass `schemaRootKeys` explicitly at the call site. Returning
-  // an empty list on this path keeps the validation digest emittable even if
-  // a future caller forgets the explicit list — they lose the digest's
-  // root-key hint but still see the underlying validation error.
+  // Auto-derive only for ZodObject. For non-object schemas the caller should
+  // pass `schemaRootKeys` explicitly; the empty fallback here lets the digest
+  // still emit (just without root-key facts) rather than throwing during the
+  // validation-failure path and replacing the real Zod error with a TypeError.
   return schema instanceof z.ZodObject ? Object.keys(schema.shape) : []
 }
