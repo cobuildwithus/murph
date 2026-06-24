@@ -591,11 +591,15 @@ describe('channel helper seams', () => {
         identityId: null,
         media: [
           createVoiceMemoMedia({
-            sizeBytes: null,
-            transportRefs: {
-              telegram: {
-                sendMode: 'generate_at_delivery',
+            transport: {
+              generation: {
+                kind: 'elevenlabs_speech',
+                modelId: 'eleven_multilingual_v2',
+                outputFormat: 'mp3_44100_128',
+                text: 'Short memo',
+                voiceId: 'voice_murph',
               },
+              kind: 'telegram_generation',
             },
           }),
         ],
@@ -617,10 +621,15 @@ describe('channel helper seams', () => {
       ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
         media: [
           createVoiceMemoMedia({
-            transportRefs: {
-              telegram: {
-                sendMode: 'generate_at_delivery',
+            transport: {
+              generation: {
+                kind: 'elevenlabs_speech',
+                modelId: 'eleven_multilingual_v2',
+                outputFormat: 'mp3_44100_128',
+                text: 'Short memo',
+                voiceId: 'voice_murph',
               },
+              kind: 'telegram_generation',
             },
           }),
         ],
@@ -854,11 +863,15 @@ describe('channel helper seams', () => {
           identityId: null,
           media: [
             createVoiceMemoMedia({
-              sizeBytes: null,
-              transportRefs: {
-                telegram: {
-                  sendMode: 'generate_at_delivery',
+              transport: {
+                generation: {
+                  kind: 'elevenlabs_speech',
+                  modelId: 'eleven_multilingual_v2',
+                  outputFormat: 'mp3_44100_128',
+                  text: 'Short memo',
+                  voiceId: 'voice_murph',
                 },
+                kind: 'telegram_generation',
               },
             }),
           ],
@@ -901,18 +914,11 @@ describe('channel helper seams', () => {
     const media = [
       {
         kind: 'voice_memo' as const,
-        url: null,
-        mimeType: 'audio/mpeg' as const,
         filename: 'memo.mp3',
-        sizeBytes: 128,
-        transcript: 'Short memo',
-        source: 'elevenlabs' as const,
-        voiceId: 'voice_murph',
-        modelId: 'eleven_multilingual_v2',
-        transportRefs: {
-          linq: {
-            attachmentId: 'attachment_voice_1',
-          },
+        transcript: null,
+        transport: {
+          attachmentId: 'attachment_voice_1',
+          kind: 'linq_attachment' as const,
         },
       },
     ]
@@ -1056,10 +1062,9 @@ describe('channel helper seams', () => {
             ...media,
             createVoiceMemoMedia({
               filename: 'memo-2.mp3',
-              transportRefs: {
-                linq: {
-                  attachmentId: 'attachment_voice_2',
-                },
+              transport: {
+                attachmentId: 'attachment_voice_2',
+                kind: 'linq_attachment' as const,
               },
             }),
           ],
@@ -1113,10 +1118,18 @@ describe('channel helper seams', () => {
           idempotencyKey: null,
           identityId: null,
           media: [
-            ({
-              ...createVoiceMemoMedia(),
-              transportRefs: {},
-            } as ReturnType<typeof createVoiceMemoMedia>),
+            createVoiceMemoMedia({
+              transport: {
+                generation: {
+                  kind: 'elevenlabs_speech',
+                  modelId: 'eleven_multilingual_v2',
+                  outputFormat: 'mp3_44100_128',
+                  text: 'Short memo',
+                  voiceId: 'voice_murph',
+                },
+                kind: 'telegram_generation',
+              },
+            }),
           ],
           message: '',
           replyToMessageId: null,
@@ -1293,18 +1306,11 @@ function createVoiceMemoMedia(
 function createVoiceMemoMediaBase(): VoiceMemoMedia {
   return {
     kind: 'voice_memo' as const,
-    url: null,
-    mimeType: 'audio/mpeg' as const,
     filename: 'memo.mp3',
-    sizeBytes: 128,
-    transcript: 'Short memo',
-    source: 'elevenlabs' as const,
-    voiceId: 'voice_murph',
-    modelId: 'eleven_multilingual_v2',
-    transportRefs: {
-      linq: {
-        attachmentId: 'attachment_voice_1',
-      },
+    transcript: null,
+    transport: {
+      attachmentId: 'attachment_voice_1',
+      kind: 'linq_attachment' as const,
     },
   }
 }

@@ -36,12 +36,14 @@ export function normalizeAssistantResponseMediaList(
 }
 
 function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string {
-  if (media.kind === 'voice_memo') {
-    return [
-      'voice_memo',
-      media.transportRefs.linq?.attachmentId ?? media.url ?? media.transcript,
-    ].join(':')
+  if (media.kind === 'image') {
+    return `image:${media.url}`
   }
 
-  return `image:${media.url}`
+  switch (media.transport.kind) {
+    case 'linq_attachment':
+      return `voice_memo:linq:${media.transport.attachmentId}`
+    case 'telegram_generation':
+      return `voice_memo:generation:${JSON.stringify(media.transport.generation)}`
+  }
 }
