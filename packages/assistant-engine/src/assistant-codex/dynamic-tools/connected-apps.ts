@@ -20,6 +20,10 @@ import {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const CONNECTED_APPS_RESULT_MAX_BYTES = 120_000
+const CONNECTED_APPS_CALENDAR_CREATE_TOOL_SLUGS = new Set([
+  'GOOGLECALENDAR_CREATE_EVENT',
+  'OUTLOOK_CALENDAR_CREATE_EVENT',
+])
 
 // Composio tool results commonly include raw HTML email bodies (Gmail
 // FETCH_MESSAGE_BY_MESSAGE_ID) and similar markup-heavy payloads. The model
@@ -156,8 +160,21 @@ export async function executeConnectedAppsDynamicTool(input: {
 
     return connectedAppsTextResult(true, text)
   } catch {
+    if (isConnectedAppsCalendarCreateRequest(requestBody)) {
+      return connectedAppsTextResult(
+        false,
+        'calendar event creation failed or returned an ambiguous result. Do not retry the calendar-create call. Search the selected calendar for the event first, then explain the ambiguous outcome to the user before taking any further write action.',
+      )
+    }
     return connectedAppsTextResult(false, 'connected apps API is unavailable')
   }
+}
+
+function isConnectedAppsCalendarCreateRequest(
+  request: HostedConnectedAppsRequest,
+): boolean {
+  return request.operation === 'execute'
+    && CONNECTED_APPS_CALENDAR_CREATE_TOOL_SLUGS.has(request.input.toolSlug)
 }
 
 function toHostedConnectedAppsRequest(

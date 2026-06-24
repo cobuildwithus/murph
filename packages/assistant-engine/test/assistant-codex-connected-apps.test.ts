@@ -126,6 +126,50 @@ describe("murph connected-app dynamic tools", () => {
     });
   });
 
+  it("surfaces calendar-create failures as no-retry ambiguous outcomes", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => {
+        throw Object.assign(
+          new Error(
+            'Hosted connected apps failed with HTTP 400. {"error":{"code":"CONNECTED_APPS_PROVIDER_UNAVAILABLE","message":"The connected-app request could not be completed.","retryable":false}}',
+          ),
+          { status: 400, statusCode: 400 },
+        );
+      }),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "calendar",
+          agentApproved: true,
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(connectedApps.request).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult.success).toBe(false);
+    const text = result.rpcResult.contentItems[0]!.text;
+    expect(text).toContain("failed or returned an ambiguous result");
+    expect(text).toContain("Do not retry");
+    expect(text).toContain("Search the selected calendar");
+    expect(text).not.toContain("connected apps API is unavailable");
+  });
+
   it("does not call the control plane when connected apps are unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> => new Response());
     const result = await executeMurphDynamicToolRequest({
