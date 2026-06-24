@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import Script from "next/script";
 
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -48,8 +47,7 @@ export default async function RootLayout(input: { children: React.ReactNode }) {
             {input.children}
           </PhoneCountryCodeProvider>
         </AuthProvider>
-        <Analytics />
-        <SpeedInsights />
+        <VercelTelemetry />
         {process.env.NODE_ENV === "development" ? (
           <Script src="https://ui.sh/ui-picker.js" />
         ) : null}

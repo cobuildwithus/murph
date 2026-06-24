@@ -7,6 +7,7 @@ import type {
 import type {
   ComputerKernelClient,
 } from "../src/lib/computer-use/kernel-client";
+import { computerUseError } from "../src/lib/computer-use/errors";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
   ComputerHandoffRecord,
@@ -22,7 +23,7 @@ vi.mock("node:dns/promises", () => ({
 vi.stubEnv("HOSTED_COMPUTER_PROFILE_NAMESPACE", "test");
 
 describe("ComputerUseService", () => {
-  it("stores a durable awaiting-user pause and composes the handoff message", async () => {
+  it("stores a durable awaiting-user pause and returns the hosted handoff URL", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
@@ -38,7 +39,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -53,16 +53,14 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Can you log in here?\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
-      awaitingMessage: "Can you log in here?",
+      awaitingMessage: null,
       awaitingReason: "login_needed",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
       suggestedReply: "done",
     });
-    expect(store.run.awaitingMessage).not.toContain("/computer/handoff/");
     expect(store.handoff).toMatchObject({
       expiresAt: new Date("2026-06-17T12:20:00.000Z"),
       id: "hch_handoff123",
@@ -91,7 +89,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please confirm and book this appointment in the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -106,11 +103,8 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(
-      `Please confirm and book this appointment in the browser.\n\n${result.handoffUrl}`,
-    );
     expect(store.run).toMatchObject({
-      awaitingMessage: "Please confirm and book this appointment in the browser.",
+      awaitingMessage: null,
       awaitingReason: "final_confirmation",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
@@ -153,7 +147,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -162,7 +155,6 @@ describe("ComputerUseService", () => {
     expect(result.handoffUrl).toMatch(
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
     expect(store.run).toMatchObject({
       awaitingMessage: "Old login request.",
       awaitingReason: "login_needed",
@@ -215,13 +207,14 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
     });
 
-    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "expired",
     });
@@ -272,7 +265,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in?",
       pauseDeliveryContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
@@ -286,7 +278,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I book this appointment?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.run).toMatchObject({
       awaitingMessage: "Should I book this appointment?",
       awaitingReason: "final_confirmation",
@@ -337,7 +331,6 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Please reopen the browser.",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -347,7 +340,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
-    expect(result.message).toBe(`Should I submit this booking?\n\n${result.handoffUrl}`);
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "completed",
     });
@@ -395,7 +390,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       pauseDeliveryContext: {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
@@ -427,7 +421,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: null,
       memberId: "member_123",
-      message: "Should I book this appointment?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -460,7 +453,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -491,7 +483,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -530,8 +521,7 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
-      action: "click",
-      locator: { by: "role", exact: false, name: "Add to cart", role: "button" },
+      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 1_000,
@@ -541,7 +531,6 @@ describe("ComputerUseService", () => {
     await expect(service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
-      message: "Can you log in here?",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -555,12 +544,20 @@ describe("ComputerUseService", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "desktop",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
     expect(kernel.executePlaywrightCalls).toBe(0);
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toBeNull();
   });
 
-  it("rejects non-web start URLs before reaching Kernel", async () => {
+  it("passes arbitrary start URLs to Kernel navigation", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const startKernel = createFakeKernel();
     const startService = new ComputerUseService({
@@ -579,12 +576,15 @@ describe("ComputerUseService", () => {
     });
     await expect(startService.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "data:text/html,<h1>owned</h1>",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
     });
-    expect(startKernel.createdSessionIds).toEqual([]);
+    expect(startKernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(startKernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "data:text/html,<h1>owned</h1>",
+    );
   });
 
   it("does not restore terminal URL or title from a stale observe result", async () => {
@@ -678,7 +678,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).resolves.toMatchObject({
       runId: "hcr_run123",
@@ -691,7 +690,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
-  it("resumes an explicit run without deleting an unrelated stale sibling", async () => {
+  it("resumes the active awaiting run without deleting an unrelated stale sibling", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const appointmentsRun = createRunRecord({
       awaitingReason: "login_needed",
@@ -731,7 +730,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_appointments",
       startUrl: null,
     })).resolves.toMatchObject({
       runId: "hcr_appointments",
@@ -772,7 +770,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_skewed_old_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
@@ -782,7 +779,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("requires explicit resume to come from the paused delivery context", async () => {
+  it("requires server-owned resume proof to come from the paused delivery context", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "login_needed",
@@ -816,7 +813,6 @@ describe("ComputerUseService", () => {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
       },
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_CONTEXT_MISMATCH",
@@ -826,7 +822,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an awaiting run without a fresh user reply proof", async () => {
+  it("returns an awaiting run when hidden user reply proof is missing", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "login_needed",
@@ -844,10 +840,12 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: "hcr_run123",
       startUrl: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
+    })).resolves.toMatchObject({
+      awaitingReason: "login_needed",
+      reused: true,
+      runId: "hcr_run123",
+      status: "awaiting_user",
     });
     expect(store.run).toMatchObject({
       status: "awaiting_user",
@@ -887,7 +885,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
@@ -901,7 +898,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an explicit run while a handoff is still open", async () => {
+  it("does not resume the active awaiting run while a handoff is still open", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
       purpose: "login",
@@ -925,7 +922,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     });
 
@@ -972,7 +968,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
@@ -1013,7 +1008,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_EXPIRED",
@@ -1058,7 +1052,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1108,7 +1101,6 @@ describe("ComputerUseService", () => {
     const result = await service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     });
 
@@ -1162,7 +1154,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_EXPIRED",
@@ -1207,7 +1198,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
@@ -1226,7 +1216,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("does not resume an awaiting run without an explicit resume run id", async () => {
+  it("reuses an awaiting member run when no hidden resume proof exists", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "final_confirmation",
@@ -1244,7 +1234,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1277,7 +1266,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
@@ -1305,7 +1293,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1346,7 +1333,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1364,7 +1350,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1405,7 +1390,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -1422,7 +1406,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1464,7 +1447,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1509,7 +1491,6 @@ describe("ComputerUseService", () => {
 
     const result = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1529,10 +1510,9 @@ describe("ComputerUseService", () => {
       }),
     ]);
     expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
-    expect(kernel.executePlaywrightCalls).toBe(2);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("route(\"**/*\"");
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("page.goto(");
-    expect(kernel.executePlaywrightInputs[1]?.code ?? "").toContain("page.goto(");
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("page.goto(");
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("route(\"**/*\"");
     expect(store.run).toMatchObject({
       lastTitle: "Page",
       lastUrl: "https://example.test/",
@@ -1578,7 +1558,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       reused: false,
@@ -1618,7 +1597,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test/follow-up",
     })).resolves.toMatchObject({
       reused: false,
@@ -1632,7 +1610,7 @@ describe("ComputerUseService", () => {
     }));
   });
 
-  it("installs the public-network route guard before storing a blank browser live view", async () => {
+  it("stores a blank browser live view without extra navigation setup", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       memberRuns: [],
@@ -1652,19 +1630,13 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     })).resolves.toMatchObject({
       reused: false,
       status: "running",
     });
 
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    const guardCode = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(guardCode).toContain("route(\"**/*\"");
-    expect(guardCode).toContain("route.abort(\"blockedbyclient\")");
-    expect(guardCode).not.toContain("murphDnsPublicCache");
-    expect(guardCode).not.toContain("page.goto(");
+    expect(kernel.executePlaywrightCalls).toBe(0);
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
       status: "running",
@@ -1697,7 +1669,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test/intake",
     });
 
@@ -1736,7 +1707,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1773,7 +1743,6 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: null,
     });
 
@@ -1791,7 +1760,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects start URLs whose DNS resolves to private network addresses before creating a browser", async () => {
+  it("does not preflight start URL DNS before creating a browser", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -1804,24 +1773,20 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({
       kernel,
-      navigationDnsLookup: async () => [
-        { address: "93.184.216.34" },
-        { address: "169.254.169.254" },
-      ],
       now: () => now,
       store,
     });
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
     });
-    expect(kernel.createdBrowserInputs).toEqual([]);
-    expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.createdBrowserInputs).toHaveLength(1);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("https://dentist.example.test");
   });
 
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
@@ -1847,7 +1812,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
@@ -1898,7 +1862,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
@@ -1939,7 +1902,6 @@ describe("ComputerUseService", () => {
       store: firstStore,
     }).startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
     await new ComputerUseService({
@@ -1951,7 +1913,6 @@ describe("ComputerUseService", () => {
       store: secondStore,
     }).startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     });
 
@@ -1984,7 +1945,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
@@ -2015,7 +1975,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
@@ -2037,7 +1996,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       status: "running",
@@ -2072,7 +2030,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
@@ -2107,7 +2064,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
@@ -2147,7 +2103,6 @@ describe("ComputerUseService", () => {
     await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
-      message: "Should I place this order?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
@@ -2172,6 +2127,7 @@ describe("ComputerUseService", () => {
     });
     const kernel = createFakeKernel({
       executeResult: {
+        result: { clicked: true },
         title: "Order placed",
         url: "https://shop.example.test/order/confirmed?token=secret",
       },
@@ -2183,17 +2139,21 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "click",
-      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      code: "await page.getByRole('button', { name: 'Place order', exact: true }).click(); return { clicked: true };",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
     })).resolves.toEqual({
+      result: { clicked: true },
       title: "Order placed",
       url: "https://shop.example.test/order/confirmed?token=secret",
     });
 
     expect(kernel.executePlaywrightCalls).toBe(1);
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).not.toContain("route(\"**/*\"");
+    expect(code).toContain("getByRole('button', { name: 'Place order', exact: true })");
+    expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
@@ -2201,138 +2161,70 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects private goto action targets before reaching Kernel", async () => {
+  it("adds action context to Kernel browser evaluation failures", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
-      run: createRunRecord({ updatedAt: now }),
+      run: createRunRecord({
+        lastTitle: "Checkout",
+        lastUrl: "https://shop.example.test/checkout",
+        updatedAt: now,
+      }),
     });
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      executeResultForCall() {
+        throw computerUseError({
+          code: "HOSTED_COMPUTER_EVAL_FAILED",
+          details: {
+            kernelError: "Error: strict mode violation: button matched multiple elements",
+            kernelErrorPresent: true,
+            kernelStderrPresent: true,
+            kernelStdoutPresent: false,
+          },
+          httpStatus: 502,
+          message: "Computer browser evaluation failed.",
+          retryable: true,
+        });
+      },
+    });
     const service = new ComputerUseService({
       kernel,
-      navigationDnsLookup: async () => [{ address: "10.0.0.5" }],
       now: () => now,
       store,
     });
 
     await expect(service.act({
-      action: "goto",
+      code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
       memberId: "member_123",
       runId: "hcr_run123",
-      timeoutMs: 15000,
-      url: "https://private.example.test/admin",
+      timeoutMs: 20000,
     })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+      code: "HOSTED_COMPUTER_EVAL_FAILED",
+      details: {
+        codeHash: expect.any(String),
+        kernelError: "Error: strict mode violation: button matched multiple elements",
+        kernelErrorPresent: true,
+        kernelStderrPresent: true,
+        kernelStdoutPresent: false,
+        timeoutMs: 20000,
+      },
+      message: "Computer browser evaluation failed.",
+      retryable: true,
     });
-    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.executePlaywrightCalls).toBe(1);
     expect(store.run).toMatchObject({
+      lastTitle: "Checkout",
+      lastUrl: "https://shop.example.test/checkout",
       status: "running",
     });
   });
 
-  it("generates server-owned Playwright from a browser action without raw user source", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResults: [
-        {
-          sensitive: false,
-        },
-        {
-          title: "Checkout",
-          url: "https://shop.example.test/cart",
-          visibleText: "Added",
-        },
-      ],
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-
-    await expect(service.act({
-      action: "fill",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Email'); await page.context().cookies();//",
-      },
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-      value: "shopper@example.test",
-    })).resolves.toMatchObject({
-      title: "Checkout",
-      url: "https://shop.example.test/cart",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(2);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("shopper@example.test");
-    expect(kernel.executePlaywrightInputs[1]?.timeoutMs).toBe(18_000);
-    const generated = kernel.executePlaywrightInputs[1]?.code ?? "";
-    expect(generated).not.toContain("await (async () =>");
-    expect(generated).not.toContain("userResult");
-    expect(generated).toContain("page.getByLabel");
-    expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
-  });
-
-  it("shares one timeout budget across sensitive input preflight and action", async () => {
-    let nowMs = Date.parse("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResults: [
-        {
-          sensitive: false,
-        },
-        {
-          title: "Checkout",
-          url: "https://shop.example.test/cart",
-          visibleText: "Added",
-        },
-      ],
-      onExecutePlaywright(_executeInput, callIndex) {
-        if (callIndex === 0) {
-          nowMs += 14_000;
-        }
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => new Date(nowMs),
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: new Date(nowMs) }),
-      }),
-    });
-
-    await expect(service.act({
-      action: "fill",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Email",
-      },
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-      value: "shopper@example.test",
-    })).resolves.toMatchObject({
-      title: "Checkout",
-      url: "https://shop.example.test/cart",
-    });
-
-    expect(kernel.executePlaywrightCalls).toBe(2);
-    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18_000);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("timeout: 15000");
-    expect(kernel.executePlaywrightInputs[1]?.timeoutMs).toBe(4_000);
-    expect(kernel.executePlaywrightInputs[1]?.code ?? "").toContain("timeout: 1000");
-  });
-
-  it("allows zero-duration wait actions while reserving the result margin", async () => {
+  it("passes raw Playwright source through the wrapper", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
       executeResult: {
+        result: { waited: true },
         title: "Checkout",
         url: "https://shop.example.test/cart",
-        visibleText: "Ready",
       },
     });
     const service = new ComputerUseService({
@@ -2344,129 +2236,21 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "wait",
+      code: "await page.waitForTimeout(0); return { waited: true };",
       memberId: "member_123",
-      ms: 0,
       runId: "hcr_run123",
+      timeoutMs: 15000,
     })).resolves.toMatchObject({
       title: "Checkout",
       url: "https://shop.example.test/cart",
     });
 
     expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(3_000);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
-      "await page.waitForTimeout(0);",
-    );
-  });
-
-  it("rejects sensitive fill targets before serializing the input value to Kernel source", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResult: {
-        sensitive: true,
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-
-    await expect(service.act({
-      action: "fill",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Password",
-      },
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-      value: "canary-secret-password",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-password");
-  });
-
-  it("rejects short numeric code fill targets before serializing the input value", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResultForCall(executeInput, callIndex) {
-        if (callIndex === 0) {
-          expect(executeInput.code).toContain("target.getAttribute");
-          expect(executeInput.code).toContain("\"Code\"");
-          expect(executeInput.code).not.toContain("target.evaluate");
-          expect(executeInput.code).not.toContain("element.getAttribute");
-          expect(executeInput.code).not.toContain(".closest(");
-          expect(executeInput.code).not.toContain(".ownerDocument");
-          return { sensitive: true };
-        }
-        return {
-          title: "Checkout",
-          url: "https://shop.example.test/cart",
-        };
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-
-    await expect(service.act({
-      action: "fill",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Code",
-      },
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-      value: "123456",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("123456");
-  });
-
-  it("rejects malformed sensitive preflight results before serializing the input value", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResult: {},
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-
-    await expect(service.act({
-      action: "fill",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Email",
-      },
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-      value: "canary-secret-value",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_PREFLIGHT_INVALID",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-value");
+    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18000);
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain("await page.waitForTimeout(0); return { waited: true };");
+    expect(code).not.toContain("route(\"**/*\"");
+    expect(code).not.toContain("isMurphPublicNavigationUrl");
   });
 
   it("rejects malformed browser action state results as unknown outcomes", async () => {
@@ -2488,8 +2272,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "click",
-      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      code: "await page.getByRole('button', { name: 'Place order' }).click();",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
@@ -2526,8 +2309,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "click",
-      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      code: "await page.getByRole('button', { name: 'Place order' }).click();",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
@@ -2542,105 +2324,82 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects sensitive select targets before serializing the selected value to Kernel source", async () => {
+  it("accepts browser action state results with non-public final URLs", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        lastTitle: "Old title",
+        lastUrl: "https://old.example.test",
+        updatedAt: now,
+      }),
+    });
     const kernel = createFakeKernel({
       executeResult: {
-        sensitive: true,
+        result: { inspected: true },
+        title: "Internal",
+        url: "http://127.0.0.1/latest/meta-data",
       },
     });
     const service = new ComputerUseService({
       kernel,
       now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
+      store,
     });
 
     await expect(service.act({
-      action: "select",
-      locator: {
-        by: "label",
-        exact: false,
-        text: "Card expiration month",
-      },
+      code: "return { inspected: true };",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
-      value: "12",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    })).resolves.toMatchObject({
+      result: { inspected: true },
+      title: "Internal",
+      url: "http://127.0.0.1/latest/meta-data",
     });
     expect(kernel.executePlaywrightCalls).toBe(1);
-    const preflightCode = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(preflightCode).not.toContain("\"12\"");
-    for (
-      const sensitiveTerm of [
-        "bank",
-        "checking",
-        "savings",
-        "account",
-        "routing",
-        "ach",
-        "iban",
-        "swift",
-        "bic",
-      ]
-    ) {
-      expect(preflightCode).toContain(sensitiveTerm);
-    }
-    const sensitivePatterns = extractGeneratedSensitivePatterns(preflightCode);
-    for (const hint of [
-      "routing",
-      "Routing #",
-      "bank routing",
-      "account #",
-      "acct #",
-      "routingNumber",
-      "accountNumber",
-      "iban",
-    ]) {
-      expect(sensitivePatterns.some((pattern) => pattern.test(hint.toLowerCase()))).toBe(true);
-    }
+    expect(store.run).toMatchObject({
+      lastTitle: "Internal",
+      lastUrl: "http://127.0.0.1/latest/meta-data",
+      status: "running",
+    });
   });
 
-  it("uses the existing Kernel-side public-network route guard for browser actions", async () => {
+  it("runs raw browser actions without injecting a route guard", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
     });
     const kernel = createFakeKernel({
       executeResult: {
+        result: { navigated: true },
         title: "Public page",
         url: "https://example.com/checkout?token=secret#step",
-        visibleText: "Checkout",
       },
     });
     const service = new ComputerUseService({
       kernel,
-      navigationDnsLookup: async () => [{ address: "93.184.216.34" }],
       now: () => now,
       store,
     });
 
     await expect(service.act({
-      action: "goto",
+      code: "await page.goto('https://example.com/checkout', { waitUntil: 'domcontentloaded' }); return { navigated: true };",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
-      url: "https://example.com/checkout",
     })).resolves.toMatchObject({
+      result: { navigated: true },
       title: "Public page",
       url: "https://example.com/checkout?token=secret#step",
     });
 
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain("await page.goto('https://example.com/checkout'");
     expect(code).not.toContain("node:dns/promises");
     expect(code).not.toContain("unroute(\"**/*\"");
     expect(code).not.toContain("route(\"**/*\"");
     expect(code).not.toContain("route.abort(\"blockedbyclient\")");
-    expect(code).toContain("await page.goto(\"https://example.com/checkout\"");
-    expect(code).not.toContain("userResult");
+    expect(code).toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",
       lastUrl: "https://example.com/checkout",
@@ -2707,6 +2466,72 @@ describe("ComputerUseService", () => {
     });
     expect(store.handoff).toMatchObject({
       status: "open",
+    });
+  });
+
+  it("resizes the browser behind an open member-owned handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "mobile",
+      token: "handoff-token",
+    })).resolves.toBeUndefined();
+    expect(kernel.ensureBrowserViewportInputs).toEqual([
+      {
+        preset: "mobile",
+        sessionId: "kernel-session-1",
+      },
+    ]);
+  });
+
+  it("blocks browser resize when the handoff is no longer pending on the run", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: "hch_other_handoff",
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.ensureHandoffViewport({
+      memberId: "member_123",
+      preset: "mobile",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
+    });
+    expect(kernel.ensureBrowserViewportInputs).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: "hch_other_handoff",
+      status: "awaiting_user",
     });
   });
 
@@ -2960,7 +2785,6 @@ describe("ComputerUseService", () => {
 
     await expect(service.startRun({
       memberId: "member_123",
-      resumeRunId: null,
       startUrl: "https://dentist.example.test",
     })).resolves.toMatchObject({
       reused: false,
@@ -3318,9 +3142,8 @@ describe("ComputerUseService", () => {
       kernel.createdBrowserInputs[0]?.browserName,
     );
     expect(kernel.createdBrowserInputs.every((browserInput) => !("startUrl" in browserInput))).toBe(true);
-    expect(kernel.executePlaywrightInputs.some((executeInput) =>
-      executeInput.code.includes("route(\"**/*\"") &&
-      !executeInput.code.includes("page.goto(")
+    expect(kernel.executePlaywrightInputs.every((executeInput) =>
+      !executeInput.code.includes("route(\"**/*\"")
     )).toBe(true);
   });
 
@@ -3408,9 +3231,9 @@ describe("ComputerUseService", () => {
       }),
     ]);
     expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
-    const guardCode = kernel.executePlaywrightInputs.at(-1)?.code ?? "";
-    expect(guardCode).toContain("route(\"**/*\"");
-    expect(guardCode).not.toContain("page.goto(");
+    expect(kernel.executePlaywrightInputs.every((executeInput) =>
+      !executeInput.code.includes("route(\"**/*\"")
+    )).toBe(true);
   });
 
   it("deletes an orphan replacement browser before retrying a browserless login checkpoint", async () => {
@@ -4021,7 +3844,6 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
-      resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
@@ -4428,18 +4250,26 @@ describe("ComputerUseService", () => {
     const deleteProfile = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
+    const ensureBrowserViewport = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
     const ensureProfile = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
     const executePlaywright = vi.fn(async () => {
       throw new Error("Kernel should not be called.");
     });
+    const osControl = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
     const kernel: ComputerKernelClient = {
       createBrowser,
       deleteBrowserByIdOrName,
       deleteProfile,
+      ensureBrowserViewport,
       ensureProfile,
       executePlaywright,
+      osControl,
     };
     const service = new ComputerUseService({
       env: {
@@ -4459,6 +4289,7 @@ describe("ComputerUseService", () => {
     expect(createBrowser).not.toHaveBeenCalled();
     expect(deleteBrowserByIdOrName).not.toHaveBeenCalled();
     expect(deleteProfile).not.toHaveBeenCalled();
+    expect(ensureBrowserViewport).not.toHaveBeenCalled();
     expect(ensureProfile).not.toHaveBeenCalled();
     expect(executePlaywright).not.toHaveBeenCalled();
   });
@@ -5873,6 +5704,8 @@ function createFakeKernel(input: {
   createdSessionIds: string[];
   deletedProfileNames: string[];
   deletedSessionIds: string[];
+  ensureBrowserViewportInputs:
+    Parameters<ComputerKernelClient["ensureBrowserViewport"]>[0][];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
 } {
@@ -5885,6 +5718,7 @@ function createFakeKernel(input: {
     createdSessionIds: [],
     deletedProfileNames: [],
     deletedSessionIds: [],
+    ensureBrowserViewportInputs: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
     async createBrowser(browserInput) {
@@ -5912,6 +5746,9 @@ function createFakeKernel(input: {
     async deleteProfile(name: string) {
       this.deletedProfileNames.push(name);
     },
+    async ensureBrowserViewport(viewportInput) {
+      this.ensureBrowserViewportInputs.push(viewportInput);
+    },
     async ensureProfile() {},
     async executePlaywright(executeInput) {
       const callIndex = this.executePlaywrightCalls;
@@ -5929,14 +5766,8 @@ function createFakeKernel(input: {
         },
       };
     },
+    async osControl() {},
   };
-}
-
-function extractGeneratedSensitivePatterns(code: string): RegExp[] {
-  const sensitivePatternBlock = code.match(/const sensitivePatterns = \[([\s\S]*?)\];/u)?.[1] ?? "";
-  return [...sensitivePatternBlock.matchAll(/\/((?:\\.|[^/])+)\/u/g)].map(
-    (match) => new RegExp(match[1] ?? "", "u"),
-  );
 }
 
 function createFakeCrypto(input: {

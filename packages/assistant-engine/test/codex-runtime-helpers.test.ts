@@ -2423,6 +2423,206 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it('starts a fresh thread when resumed Codex transport fails before provider actions', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
+      {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+      },
+    )
+    const traceEvents: AssistantProviderTraceEvent[] = []
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after transport fallback',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-transport-failure',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-transport-failure',
+        turnId: 'turn-fallback-transport',
+      })
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              status: 'failed',
+            },
+          },
+        },
+      ],
+      providerActionCount: 0,
+      codexThreadId: 'resume-thread',
+      providerTurnId: 'turn-failed',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      conversationHistoryMessages: [
+        {
+          content: 'committed user context',
+          role: 'user',
+        },
+      ],
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('resume-thread'),
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      resumeSessionId: 'resume-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      prompt: expect.stringContaining('committed user context'),
+      resumeSessionId: undefined,
+    })
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.codexContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.codexThreadId).toBe(
+      'fresh-thread-after-transport-failure',
+    )
+    const resumeFailureTrace = findProviderTraceRawEvent(
+      traceEvents,
+      'codex.resume_failure',
+    )
+    expect(resumeFailureTrace).toMatchObject({
+      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
+      codexResumeFailureErrorKind: 'turn-failed',
+      codexResumeFailureProviderActionCount: 0,
+      codexResumeFailureTraceType: 'failure',
+      providerTraceKind: 'codex.resume_failure',
+    })
+    expect(String(resumeFailureTrace.codexResumeFailureErrorMessage)).toContain(
+      'stream disconnected before completion',
+    )
+    expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
+  })
+
+  it('starts a fresh thread when resumed Codex RPC fails before provider actions', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED',
+      'thread/resume failed before provider actions',
+      {
+        method: 'thread/resume',
+        retryable: false,
+      },
+    )
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after rpc fallback',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-rpc-failure',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-rpc-failure',
+        turnId: 'turn-fallback-rpc',
+      })
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [],
+      providerActionCount: 0,
+      codexThreadId: 'resume-thread',
+      providerTurnId: null,
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('resume-thread'),
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      resumeSessionId: 'resume-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      resumeSessionId: undefined,
+    })
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.codexContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.codexThreadId).toBe('fresh-thread-after-rpc-failure')
+  })
+
+  it('does not fresh-thread retry resumed Codex transport failures after provider actions', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
+      {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+      },
+    )
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              status: 'failed',
+            },
+          },
+        },
+      ],
+      providerActionCount: 1,
+      codexThreadId: 'resume-thread',
+      providerTurnId: 'turn-failed',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('resume-thread'),
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+    expect(attempt.error).toBe(expectedError)
+    expect(attempt.metadata.providerActionCount).toBe(1)
+  })
+
   it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',

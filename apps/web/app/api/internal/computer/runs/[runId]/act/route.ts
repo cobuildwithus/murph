@@ -5,6 +5,7 @@ import {
   resolveDecodedRouteParam,
   withJsonError,
 } from "@/src/lib/computer-use/http";
+import { withHostedComputerToolFailureRuntimeLog } from "@/src/lib/computer-use/runtime-log";
 
 export const POST = withJsonError(async (
   request: Request,
@@ -14,9 +15,14 @@ export const POST = withJsonError(async (
   const runId = await resolveDecodedRouteParam(context.params, "runId");
   const service = createComputerUseService();
 
-  return jsonOk(await service.act({
-    ...body,
+  return jsonOk(await withHostedComputerToolFailureRuntimeLog({
+    action: body,
     memberId,
-    runId,
+    operation: "act",
+    run: () => service.act({
+      ...body,
+      memberId,
+      runId,
+    }),
   }));
 });

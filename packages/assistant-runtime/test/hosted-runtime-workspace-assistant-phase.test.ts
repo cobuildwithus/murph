@@ -253,7 +253,7 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 } as const;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -687,6 +687,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redactedLogEntries: [],
       },
       status: "processed",
+    });
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3068,9 +3071,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         phase: "wake.running",
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
-          safeErrorMessage: "Bearer raw-token-value",
+          safeErrorMessage:
+            "Bearer raw-token-value https://api.openai.com/v1/responses",
           safeErrorPresent: true,
-          safeErrorLength: "Bearer raw-token-value".length,
+          safeErrorLength:
+            "Bearer raw-token-value https://api.openai.com/v1/responses".length,
           type: "input.reply-failed",
         },
       }],
@@ -3080,12 +3085,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
-      safeErrorLength: "Bearer raw-token-value".length,
-      safeErrorMessage: "Bearer [redacted]",
+      safeErrorLength:
+        "Bearer raw-token-value https://api.openai.com/v1/responses".length,
+      safeErrorMessage: "Bearer [redacted] <REDACTED_URL>",
       safeErrorPresent: true,
       type: "input.reply-failed",
     }));
     expect(JSON.stringify(logRequests)).not.toContain("raw-token-value");
+    expect(JSON.stringify(logRequests)).not.toContain("api.openai.com");
   });
 
   it("persists diagnostics when Codex context is missing and error text needs path redaction", async () => {
@@ -5350,6 +5357,45 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: "2026-04-27T00:09:00.000Z",
       progressed: true,
     }));
+  });
+
+  it("schedules an immediate assistant wake when the pending input index has work after system mailbox work", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("2026-04-27T00:10:00.000Z");
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+    }));
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(
+      mocks.resolveHostedPendingAssistantInputWakeAt.mock.calls[0]?.[0].now(),
+    ).toBe("2026-04-27T00:10:00.000Z");
   });
 
   it("runs pending assistant input before due system mailbox work", async () => {

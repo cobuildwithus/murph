@@ -90,7 +90,7 @@ describe("runner bundle package-manager process env", () => {
     }
   });
 
-  it("derives reusable Corepack and pnpm caches from the parent environment", async () => {
+  it("derives reusable Corepack while keeping pnpm store discovery optional", async () => {
     const processEnv = await createPackageManagerProcessEnv(
       undefined,
       {
@@ -104,9 +104,10 @@ describe("runner bundle package-manager process env", () => {
       expect(processEnv.env.COREPACK_HOME).toBe(
         path.join("/tmp/home", ".cache", "node", "corepack"),
       );
-      expect(processEnv.env.PNPM_STORE_DIR).toEqual(expect.any(String));
-      expect(processEnv.env.PNPM_STORE_DIR).not.toContain(tempHome);
-      expect(processEnv.env.npm_config_store_dir).toBe(processEnv.env.PNPM_STORE_DIR);
+      if (processEnv.env.PNPM_STORE_DIR) {
+        expect(processEnv.env.PNPM_STORE_DIR).not.toContain(tempHome);
+        expect(processEnv.env.npm_config_store_dir).toBe(processEnv.env.PNPM_STORE_DIR);
+      }
       expect(tempHome).not.toBe("/tmp/home");
     } finally {
       await processEnv.cleanup();

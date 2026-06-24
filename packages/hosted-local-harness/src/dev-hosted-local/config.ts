@@ -6,6 +6,7 @@ import {
   DEFAULT_WORKER_PORT,
   DEFAULT_WORKER_PROTOCOL,
   DEFAULT_STRIPE_ENV_FILE,
+  DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE,
   DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
   DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -39,6 +40,8 @@ export function resolveHostedLocalDevConfig(
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
     forceResetLocalTemporal: env.MURPH_DEV_FORCE_RESET_TEMPORAL === "1",
     linqWebhookPublicUrl: env.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim() || null,
+    linqWebhookRegistrationCachePath:
+      parseOptionalCachePath(env.MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE),
     linqWebhookTunnelConfigPath:
       env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim()
       || DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
@@ -80,6 +83,17 @@ function resolveHostedLocalTemporalConfig(
       || env.HOSTED_TEMPORAL_TASK_QUEUE?.trim()
       || DEFAULT_TEMPORAL_TASK_QUEUE,
   };
+}
+
+function parseOptionalCachePath(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE;
+  }
+  if (["0", "false", "none", "off"].includes(normalized.toLowerCase())) {
+    return null;
+  }
+  return normalized;
 }
 
 function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
@@ -224,6 +238,7 @@ export function printHelp(): void {
       "  MURPH_DEV_MINIO_DATA_DIR=.tmp/hosted-local-minio-r2 Persist local MinIO R2 data for interactive dev",
       "  MURPH_DEV_MINIO_PORT=9000           Pin the local MinIO R2-compatible S3 port",
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
+      "  MURPH_DEV_SKIP_TLS_PROXY=1          Skip the local HTTPS proxy (auto-runs when `caddy` is on PATH and ./Caddyfile exists)",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
       "  MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto  Auto-use a local Linq cloudflared config when Linq credentials are present; set 1 to require it or 0 to disable",
@@ -231,6 +246,7 @@ export function printHelp(): void {
       `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME=${DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME}  cloudflared named tunnel to run for local Linq webhooks`,
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
       "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
+      `  MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE=${DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE}  Cache local Linq webhook registration fingerprints; set 0 to disable`,
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
       "  MURPH_DEV_TEMPORAL=auto            Temporal mode: auto reuses a local Temporal listener or starts one; managed always starts one; external uses caller-supplied Temporal; disabled skips orchestration",
       "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for auto/managed mode",

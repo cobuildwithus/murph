@@ -16,6 +16,7 @@ describe("resolveHostedLocalDevConfig", () => {
       forceResetLocalDatabase: false,
       forceResetLocalTemporal: false,
       linqWebhookPublicUrl: null,
+      linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
       linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
       linqWebhookTunnelMode: "auto",
       linqWebhookTunnelName: "dev",
@@ -50,6 +51,7 @@ describe("resolveHostedLocalDevConfig", () => {
         MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
         MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://linq-webhook.example.test",
+        MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE: ".tmp/custom-linq-cache.json",
         MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
         MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: ".tmp/custom-linq-cloudflared.yml",
         MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "linq-dev",
@@ -78,6 +80,7 @@ describe("resolveHostedLocalDevConfig", () => {
       forceResetLocalDatabase: true,
       forceResetLocalTemporal: true,
       linqWebhookPublicUrl: "https://linq-webhook.example.test",
+      linqWebhookRegistrationCachePath: ".tmp/custom-linq-cache.json",
       linqWebhookTunnelConfigPath: ".tmp/custom-linq-cloudflared.yml",
       linqWebhookTunnelMode: "required",
       linqWebhookTunnelName: "linq-dev",
@@ -176,6 +179,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=.tmp/cloudflared-linq-webhook.yml");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
+    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE=.tmp/linq-webhook-registration.json");
     expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
     expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
     expect(output).toContain("MURPH_DEV_TEMPORAL=auto");

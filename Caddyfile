@@ -1,0 +1,29 @@
+# Local HTTPS dev proxy for passkey + Telegram bot domain.
+#
+# Why: WebAuthn rejects IP-address RP IDs, and Telegram /setdomain rejects
+# `localhost`. Both accept a real hostname over HTTPS. We resolve
+# `local.withmurph.ai` to 127.0.0.1 via /etc/hosts and terminate TLS here.
+# Next dev stays on http://127.0.0.1:3000 so internal harness callers keep
+# working unchanged.
+#
+# One-time setup:
+#   echo "127.0.0.1 local.withmurph.ai" | sudo tee -a /etc/hosts
+#   brew install caddy
+#   sudo caddy trust   # adds Caddy's local CA to the system trust store
+#
+# Run alongside `pnpm dev`:
+#   caddy run --config Caddyfile
+#
+# Then in your Privy dashboard add allowed origin:
+#   https://local.withmurph.ai:3443
+# And in @BotFather /setdomain:
+#   local.withmurph.ai
+
+{
+	auto_https disable_redirects
+	local_certs
+}
+
+local.withmurph.ai:3443 {
+	reverse_proxy 127.0.0.1:3000
+}

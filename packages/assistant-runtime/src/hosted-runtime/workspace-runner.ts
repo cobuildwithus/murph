@@ -532,11 +532,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    await mergePendingForegroundAssistantInputWake({
-      now: input.now,
-      result: assistantPhaseResult,
-      vaultRoot: input.vaultRoot,
-    });
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -622,6 +617,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
+    await reconcilePendingAssistantInputWake({
+      foregroundConversationWorkObserved,
+      now: input.now,
+      projectedWakeRequiresCheckpoint,
+      result: assistantPhaseResult,
+      vaultRoot: input.vaultRoot,
+    });
     await stageHostedConversationMailboxConsumedAckBestEffort({
       afterDurableCheckpoint,
       assistantPhaseResult,
@@ -1471,13 +1473,23 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
   });
 }
 
-async function mergePendingForegroundAssistantInputWake(input: {
+async function reconcilePendingAssistantInputWake(input: {
+  foregroundConversationWorkObserved: boolean;
   now?: (() => string) | null;
+  projectedWakeRequiresCheckpoint: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
 }): Promise<void> {
   if (input.result.nextWakeAt) {
-    return;
+    const nextWakeReason = input.result.nextWakeReason ?? "assistant";
+    if (
+      input.projectedWakeRequiresCheckpoint
+      ||
+      nextWakeReason !== "assistant"
+      || !hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now)
+    ) {
+      return;
+    }
   }
   const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
     now: input.now,
@@ -1487,11 +1499,8 @@ async function mergePendingForegroundAssistantInputWake(input: {
     return;
   }
 
-  mergeHostedAssistantWake({
-    reason: "assistant",
-    result: input.result,
-    wakeAt,
-  });
+  input.result.nextWakeAt = wakeAt;
+  input.result.nextWakeReason = "assistant";
 }
 
 async function notifyPendingForegroundAssistantInputWake(input: {

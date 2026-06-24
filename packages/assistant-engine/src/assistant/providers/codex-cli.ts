@@ -247,6 +247,7 @@ export async function executeCodexAssistantTurnAttempt(
     onTraceEvent: input.onTraceEvent,
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
+    productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
@@ -330,6 +331,14 @@ export async function executeCodexAssistantTurnAttempt(
       input.resume &&
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
+    ) {
+      result = await runFreshThreadFallback(input.resume)
+      codexContinuation = {
+        kind: 'thread-start' as const,
+      }
+    } else if (
+      input.resume &&
+      isCodexNoSideEffectResumeTransportFailure(error, failureContext)
     ) {
       result = await runFreshThreadFallback(input.resume)
       codexContinuation = {
@@ -507,6 +516,8 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
       input.input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.input.progressDelivery != null,
     connectedAppsAvailable: input.input.connectedAppsAvailable === true,
+    productFeedbackAvailable:
+      typeof input.input.productFeedbackRecorder?.recordProductFeedback === 'function',
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
@@ -657,6 +668,39 @@ function isCodexInvalidOutputResumeFailure(error: unknown): boolean {
     /\binput\.\d+\.output:\s*Invalid input\b/iu.test(
       readCodexDiagnosticErrorMessage(error) ?? '',
     )
+  )
+}
+
+function isCodexNoSideEffectResumeTransportFailure(
+  error: unknown,
+  failureContext: CodexAppServerTurnFailureContext | null,
+): boolean {
+  if (failureContext?.providerActionCount !== 0) {
+    return false
+  }
+
+  const errorCode = readCodexDiagnosticErrorCode(error)
+  if (
+    errorCode === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
+    errorCode === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED'
+  ) {
+    return true
+  }
+
+  if (
+    errorCode !== 'ASSISTANT_CODEX_FAILED' ||
+    isCodexInvalidOutputResumeFailure(error)
+  ) {
+    return false
+  }
+
+  const message = readCodexDiagnosticErrorMessage(error)?.toLowerCase() ?? ''
+  return (
+    /\bstream disconnected before completion\b/u.test(message) ||
+    /\berror sending request for url\b/u.test(message) ||
+    /\bconnection (?:aborted|closed|lost|refused|reset)\b/u.test(message) ||
+    /\bnetwork error\b/u.test(message) ||
+    /\bfetch failed\b/u.test(message)
   )
 }
 

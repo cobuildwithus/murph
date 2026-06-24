@@ -132,6 +132,8 @@ export {
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeProductFeedbackRecordRequest,
+  parseHostedRuntimeProductFeedbackRecordResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,

@@ -227,7 +227,7 @@ pnpm --dir apps/cloudflare verify
 - optional: copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` when you want to pin local Worker secrets or add provider-specific Worker vars; otherwise `pnpm dev` uses Wrangler's documented local process-env path for required Worker secrets and CLI `--var` overrides for local non-secret vars
 - run local Postgres on `127.0.0.1:5432`; by default `pnpm dev` ignores a pulled Vercel `DATABASE_URL` and uses the `murph_device_sync` database there
 - treat `127.0.0.1:5432/murph_device_sync` as the canonical local hosted debugging database for local Docker runs, including hosted runtime logs and AI usage rows
-- install or check the Temporal CLI with `pnpm temporal:cli:setup` or `pnpm temporal:cli:check`; `pnpm dev` and hosted-local E2E manage the local Temporal dev server and worker automatically. The managed dev server exposes the Temporal Web UI at `http://127.0.0.1:8233` by default, or at `MURPH_DEV_TEMPORAL_PORT + 1000` when the Temporal frontend port is overridden. Set `TEMPORAL_DEV_HEADLESS=1` only when you intentionally want no dashboard.
+- install or check the Temporal CLI with `pnpm temporal:cli:setup` or `pnpm temporal:cli:check`; `pnpm dev` and hosted-local E2E manage the local Temporal dev server and worker automatically. The managed dev server exposes the Temporal Web UI at `http://127.0.0.1:8233` by default, or at `MURPH_DEV_TEMPORAL_PORT + 1000` when the Temporal frontend port is overridden. Hosted-local E2E defaults to headless Temporal because those tests do not use the dashboard; for interactive `pnpm dev`, set `TEMPORAL_DEV_HEADLESS=1` only when you intentionally want no dashboard.
 - optional: set `MURPH_DEV_DATABASE_URL` or shell `DATABASE_URL` for a different local database; set `MURPH_DEV_USE_VERCEL_DATABASE_URL=1` only when you intentionally want the pulled Vercel development database
 - keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy credentials
 - optional: put local-only Stripe test checkout values in `.tmp/.env.hosted-local-stripe`; root `pnpm dev` loads that file after the Vercel env pull and before shell env overrides, so local `sk_test_...` and `price_...` values can override shared Development env without being committed
@@ -244,6 +244,20 @@ That variant keeps the check off the default `apps/web/.next-dev` lock and defau
 
 Startup readiness also POSTs the internal deploy-smoke route with `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, so `pnpm dev` proves the local Worker can boot the runner container and observe the prepared runner bundle before printing ready. Set `MURPH_DEV_SKIP_RUNNER_SMOKE=1` for a focused Worker-only debugging loop.
 
+For secondary worktrees, do not rely on ports alone. Use the hosted-local
+worktree helper so the database, generated local crypto state, Wrangler state,
+Next dist dir, optional MinIO data, and webhook tunnel target are isolated
+together:
+
+```bash
+pnpm hosted-local worktree doctor <slug>
+pnpm dev:worktree <slug>
+pnpm hosted-local worktree down <slug>
+```
+
+See `agent-docs/operations/hosted-local-worktree-dev.md` for the full contract
+and manual fallback.
+
 The repo verification baseline for docs/process-only and ordinary repo work remains:
 
 ```bash
@@ -258,6 +272,20 @@ pnpm verify:acceptance
 - The release source of truth is [`scripts/release-manifest.json`](scripts/release-manifest.json).
 - The Cloudflare deployment path is documented in [`apps/cloudflare/DEPLOY.md`](apps/cloudflare/DEPLOY.md).
 - Package-local operational details live in each package `README.md`.
+
+### Optional: local HTTPS dev (passkey, Telegram bot domain)
+
+Some flows need a real hostname over HTTPS — WebAuthn refuses `127.0.0.1`, and Telegram's `/setdomain` refuses `localhost`. The repo ships a [`Caddyfile`](Caddyfile) that terminates TLS for `local.withmurph.ai:3443` and forwards to the regular dev server on `http://127.0.0.1:3000`. `pnpm dev` auto-spawns it when both `caddy` is on PATH and the Caddyfile exists; otherwise it's skipped silently.
+
+One-time setup:
+
+```bash
+echo "127.0.0.1 local.withmurph.ai" | sudo tee -a /etc/hosts
+brew install caddy nss
+sudo caddy trust
+```
+
+Then `pnpm dev` runs as usual and the browser-facing URL becomes `https://local.withmurph.ai:3443`. Add that origin to the Privy dashboard allowlist and set the Telegram bot's `/setdomain` to `local.withmurph.ai` (Telegram ignores the port). Internal harness callers keep using `http://127.0.0.1:3000`. Set `MURPH_DEV_SKIP_TLS_PROXY=1` to opt out.
 
 ## License
 

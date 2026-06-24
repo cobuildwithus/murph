@@ -21,7 +21,10 @@ import type {
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
-import type { AssistantProgressDelivery } from '../turn-progress.js'
+import type {
+  AssistantProgressDelivery,
+  AssistantTurnProductFeedbackRecorder,
+} from '../turn-progress.js'
 import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -110,6 +113,7 @@ export interface AssistantProviderTurnInput {
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
   prompt?: string | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
   publicInternetFetch?: typeof fetch | null
@@ -171,6 +175,7 @@ export interface AssistantProviderTurnExecutionInput {
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
+  productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerConfig: AssistantProviderConfig
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null

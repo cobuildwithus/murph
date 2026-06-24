@@ -3024,7 +3024,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const providerFetchBaseUrlSource = {
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
       LINQ_API_BASE_URL: "http://172.17.0.1:4011/api/partner/v3",
-      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
       TELEGRAM_API_BASE_URL: "http://172.17.0.1:4012/",
       TELEGRAM_FILE_BASE_URL: "http://172.17.0.1:4013/file",
     };
@@ -3523,6 +3523,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith("/api/internal/hosted-execution/product-feedback/record")) {
+        return new Response(JSON.stringify({
+          feedbackId: "product_feedback_123",
+          recorded: true,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith("/api/internal/device-sync/runtime/snapshot")) {
         return new Response(JSON.stringify({
           connections: [],
@@ -3554,6 +3563,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.latencyTracePort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
+    expect(platform.productFeedbackPort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
     await platform.mailboxPort!.fetch({
       lanes: [{ importedSeq: "0", lane: "conversation" }],
@@ -3591,11 +3601,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
+    await platform.productFeedbackPort!.recordProductFeedback({
+      idempotencyKey: "a".repeat(64),
+      kind: "feature_interest",
+      relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
+    });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3606,6 +3622,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-runtime/latency",
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
+      "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {

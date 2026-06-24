@@ -165,7 +165,7 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain("websearch_to_tsquery");
     expect(searchCall?.text).toContain("$1::text AS raw_q");
     expect(searchCall?.text).toContain(
-      "strict_word_similarity(name, query.raw_q)",
+      "strict_word_similarity(query.raw_q, name)",
     );
     expect(searchCall?.text).toContain("fts_candidates AS MATERIALIZED");
     expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");
@@ -269,6 +269,29 @@ describe("supplements query helpers", () => {
     );
     expect(contaminantsCall?.text).not.toContain("threshold_basis IN");
     expect(contaminantsCall?.values).toEqual([["82118"], ["82118"]]);
+  });
+
+  it("drops weak supplement category terms before candidate selection", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "NAC ginger supplement",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(calls[1]?.values).toEqual(["nac ginger", false, 5, null]);
   });
 
   it.each(["42P01", "42703"])(
@@ -1179,13 +1202,15 @@ describe("supplements query helpers", () => {
 
     expect(sql).toContain("brand_candidates AS MATERIALIZED");
     expect(sql).toContain("brand = ANY($4::text[])");
+    expect(sql).toContain("$5::text AS product_q");
     expect(sql).toContain("data_origin NOT IN");
     expect(sql).toContain("'nyc_dohmh_consumer_products'");
     expect(sql).toContain("'king_county_consumer_products'");
     expect(sql).toContain("product_identity_match");
     expect(sql).toContain("WHERE product_identity_match = 1");
     expect(sql).toContain("websearch_to_tsquery('simple', product_q)");
-    expect(sql).toContain("strict_word_similarity(name, product_q)");
+    expect(sql).toContain("strict_word_similarity(product_q, name)");
+    expect(sql).toContain("strict_word_similarity(raw_q, name)");
     expect(sql).toContain(`"offMarket" ASC,
             data_origin_priority ASC`);
     expect(sql).toContain("data_origin_priority ASC");
@@ -1194,6 +1219,7 @@ describe("supplements query helpers", () => {
       false,
       1,
       ["Momentous"],
+      "calcium",
     ]);
   });
 
@@ -1240,12 +1266,12 @@ describe("supplements query helpers", () => {
     )).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
-        values: ["Life Magnesium", false, 1, ["Life"]],
+        values: ["Life Magnesium", false, 1, ["Life"], "magnesium"],
       },
     ]);
   });
 
-  it("keeps middle one-word brand candidates when a trailing product word also looks like a brand", async () => {
+  it("uses reordered multiword brand scopes to isolate product terms", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
@@ -1254,6 +1280,7 @@ describe("supplements query helpers", () => {
           return {
             rows: [
               { brand: "Blueprint" },
+              { brand: "Blueprint Bryan Johnson" },
               { brand: "Essentials" },
               { brand: "Garden of Life" },
             ],
@@ -1273,7 +1300,12 @@ describe("supplements query helpers", () => {
       "Bryan Johnson Blueprint Essentials",
       false,
       5,
-      ["Essentials", "Blueprint"],
+      [
+        "Blueprint Bryan Johnson",
+        "Essentials",
+        "Blueprint",
+      ],
+      "essentials",
     ]);
   });
 
@@ -1328,14 +1360,13 @@ describe("supplements query helpers", () => {
 
     const sql = calls[1]?.text ?? "";
 
-    expect(sql).toContain("replace(lower($1::text), '''', '')");
     expect(sql).toContain("replace(lower(name), '''', '')");
-    expect(sql).toContain("replace(lower(brand), '''', '')");
     expect(calls[1]?.values).toEqual([
       "Doctors Best Magnesium",
       false,
       3,
       ["Doctor's Best"],
+      "magnesium",
     ]);
   });
 
@@ -1418,10 +1449,10 @@ describe("supplements query helpers", () => {
     expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
       2,
     );
-    expect(calls.filter((call) => call.values.length === 4)).toEqual([
+    expect(calls.filter((call) => call.values.length === 5)).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
-        values: ["Momentous Calcium", false, 1, ["Momentous"]],
+        values: ["Momentous Calcium", false, 1, ["Momentous"], "calcium"],
       },
     ]);
   });
@@ -1458,6 +1489,7 @@ describe("supplements query helpers", () => {
       false,
       5,
       ["Garden of Life Dr. Formulated", "Garden of Life"],
+      "probiotics",
     ]);
   });
 
@@ -1498,6 +1530,7 @@ describe("supplements query helpers", () => {
         "Garden of Life MyKind Organics",
         "Garden of Life Sport",
       ],
+      "womens multi",
     ]);
   });
 

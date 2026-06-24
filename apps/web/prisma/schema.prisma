@@ -352,9 +352,23 @@ model HostedMember {
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  productFeedback                HostedProductFeedback[]
 
   @@index([billingStatus])
   @@map("hosted_member")
+}
+
+model HostedProductFeedback {
+  id                          String       @id
+  memberId                    String       @map("member_id")
+  kind                        String
+  relatedChangelogItemIdsJson Json         @map("related_changelog_item_ids_json")
+  summary                     String?
+  createdAt                   DateTime     @default(now()) @map("created_at")
+  member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+  @@map("hosted_product_feedback")
 }
 
 model HostedWebSession {

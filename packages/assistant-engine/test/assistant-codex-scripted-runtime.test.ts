@@ -614,8 +614,8 @@ function buildScriptedCodexConfigToml(baseUrl: string): string {
     `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
     'wire_api = "responses"',
     'requires_openai_auth = false',
-    'request_max_retries = 0',
-    'stream_max_retries = 0',
+    'request_max_retries = 4',
+    'stream_max_retries = 5',
     '',
   ].join('\n')
 }

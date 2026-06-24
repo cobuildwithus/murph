@@ -17,6 +17,7 @@ export {
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
+export * from './assistant/onboarding-followup-automation.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-runtime.js'

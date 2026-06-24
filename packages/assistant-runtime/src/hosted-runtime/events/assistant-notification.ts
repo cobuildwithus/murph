@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   sendAssistantNotification,
   upsertAssistantCronAutomation,
   type AssistantExecutionContext,
@@ -35,26 +36,6 @@ import { emitHostedAssistantProviderTraceLog } from "./provider-trace-log.ts";
 
 type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
 
-const ONBOARDING_FOLLOWUP_AUTOMATION_SLUG = "finish-onboarding-followup";
-const ONBOARDING_FOLLOWUP_AUTOMATION_TITLE = "Finish Murph onboarding follow-up";
-const ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
-  "assistant",
-  "scheduled",
-  "onboarding",
-  "murph-managed",
-  "murph-managed:onboarding-followup",
-];
-const ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
-  "This daily scheduled check continues Murph onboarding after hosted signup. The first scheduled occurrence is intentionally deferred until after the signup day.",
-  "",
-  "Before deciding, run `vault-cli assistant onboarding resume-context --format json`.",
-  "",
-  "Inspect `onboarding.status` first. If it is `completed`, run `vault-cli automation set-status finish-onboarding-followup --status archived`, then return skip. If the archive command fails, still return skip without messaging the user so this check can retry later.",
-  "",
-  "If `onboarding.status` is `open`, do not archive this automation and do not run `vault-cli assistant onboarding complete`. Use the resume-context output only as saved setup evidence so you do not re-ask facts the vault already knows.",
-  "",
-  "If onboarding is still genuinely open, send one brief, natural in-chat question for the next unresolved onboarding step. Ensure the question you are about to ask doesn't have an answer that has been saved to the user's vault already. We never want to ask the user something that they've already told us. Keep your next onboarding question low-pressure, do not mention internal state or this automation, and do not use a fixed script. The user's answer will be handled by the next normal Murph onboarding turn.",
-].join("\n");
 export async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
   executionContext: AssistantExecutionContext;
@@ -228,16 +209,13 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
-      instructions: ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
-      schedule: {
-        kind: "dailyLocal",
-        localTime: "13:30",
-      },
-      slug: ONBOARDING_FOLLOWUP_AUTOMATION_SLUG,
-      summary: "Daily setup continuation check until Murph onboarding is complete.",
-      tags: ONBOARDING_FOLLOWUP_AUTOMATION_TAGS,
-      title: ONBOARDING_FOLLOWUP_AUTOMATION_TITLE,
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vault: input.vaultRoot,
     });
     return job?.enabled ? job.state.nextRunAt : null;

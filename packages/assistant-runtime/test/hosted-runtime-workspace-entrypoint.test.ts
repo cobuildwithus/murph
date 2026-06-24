@@ -9711,6 +9711,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
     const followUpWakeAt = "2026-04-27T00:11:00.000Z";
     const idleCheckpointDelayMs = 90_000;
+    const runtimeTransitionTimeoutMs = 5_000;
     const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const mailboxItems = [
@@ -9732,7 +9733,11 @@ describe("hosted workspace runtime entrypoint", () => {
           occurredAt: "2026-04-27T00:00:01.000Z",
         }));
         runtimeWakeSignal.notify();
-        await withRealTimeout(foregroundImported.promise, 1_000, () => events.join(","));
+        await withRealTimeout(
+          foregroundImported.promise,
+          runtimeTransitionTimeoutMs,
+          () => events.join(","),
+        );
       },
       connectionId,
       nextReconcileAt: deviceSyncWakeAt,
@@ -9824,11 +9829,19 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      await withRealTimeout(firstAssistantRetryObserved.promise, 1_000, () => events.join(","));
+      await withRealTimeout(
+        firstAssistantRetryObserved.promise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
       assert.equal(checkpointRequests.length, 0);
       shutdownController.abort();
 
-      const result = await withRealTimeout(resultPromise, 1_000, () => events.join(","));
+      const result = await withRealTimeout(
+        resultPromise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
       const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);

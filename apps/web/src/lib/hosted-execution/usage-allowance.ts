@@ -1607,7 +1607,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
     return {
       code: "trial_usage_limit_reached",
       message:
-        `You've reached the hosted AI usage included in your trial. Upgrade: ${HOSTED_AI_USAGE_HOME_URL}`,
+        `You've reached the hosted AI usage included in your trial. Please finish checkout: ${HOSTED_AI_USAGE_HOME_URL}`,
     };
   }
 

@@ -193,7 +193,11 @@ async function resolveReusablePnpmStoreDir(
     return configuredStoreDir;
   }
 
-  return await resolvePnpmStorePath(source);
+  try {
+    return await resolvePnpmStorePath(source);
+  } catch {
+    return null;
+  }
 }
 
 function readConfiguredPnpmStoreDir(

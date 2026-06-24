@@ -1338,8 +1338,8 @@ describe("executeHostedMailboxEvent", () => {
       tags: [
         "assistant",
         "scheduled",
-        "onboarding",
         "murph-managed",
+        "onboarding",
         "murph-managed:onboarding-followup",
       ],
       title: "Finish Murph onboarding follow-up",
@@ -1349,20 +1349,48 @@ describe("executeHostedMailboxEvent", () => {
     expect(seedInput?.instructions).toContain(
       "vault-cli automation set-status finish-onboarding-followup --status archived",
     );
-    expect(seedInput?.instructions).toContain("Inspect `onboarding.status` first");
     expect(seedInput?.instructions).toContain(
-      "do not archive this automation and do not run `vault-cli assistant onboarding complete`",
+      "Goal: close or gently advance Murph onboarding after hosted signup without re-asking setup context the vault already knows.",
     );
-    expect(seedInput?.instructions).not.toContain(
-      "vault-cli assistant onboarding complete --reason user_answered",
+    expect(seedInput?.instructions).toContain("Success criteria:");
+    expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
+    expect(seedInput?.instructions).toContain(
+      "If `onboarding.status` is `open` but resume-context or the available recent user messages show the onboarding completion criteria are already satisfied through answers, saved setup facts, skipped individual fields, or deferrals, run `vault-cli assistant onboarding complete --reason user_answered`.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "If recent user messages show a clear overall onboarding opt-out, run `vault-cli assistant onboarding complete --reason user_declined` instead.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "If the output shows completed, archive this automation, then return skip.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Open status alone is not evidence that setup facts are missing.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "If most setup context is already present, ask about the next meaningful first-experiment setup or deferral decision instead of more intake.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Treat saved, skipped, declined individual fields, not-relevant, or clearly answered-in-chat setup context as resolved",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Before sending, triple-check resume-context and the available recent user messages for an answer to the question you would ask.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "The last thing we want is to bug the user after they already answered onboarding.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "return skip rather than sending a generic setup nudge",
+    );
+    expect(seedInput?.instructions).toContain(
+      "Output: send one brief, natural, low-pressure in-chat question only when a real unresolved step remains.",
     );
     expect(seedInput?.instructions).toContain(
       "The user's answer will be handled by the next normal Murph onboarding turn",
     );
+    expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "Ensure the question you are about to ask doesn't have an answer that has been saved to the user's vault already.",
+      "smallest genuinely unresolved onboarding step",
     );
-    expect(seedInput?.instructions).toContain("next unresolved onboarding step");
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,

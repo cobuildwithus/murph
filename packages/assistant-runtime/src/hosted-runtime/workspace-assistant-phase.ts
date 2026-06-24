@@ -225,6 +225,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
         generatedImageUploaderRequired: true,
+        ...(input.runtime.platform.productFeedbackPort
+          ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
+          : {}),
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
@@ -248,12 +251,21 @@ export async function runHostedWorkspaceAssistantPhase(
 
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
-    const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
-      executionContext,
+    const pendingAssistantInputWakeAt = await resolveInitialPendingAssistantInputWakeAt({
       hasFreshConversationInput,
       input,
-      wake,
     });
+    const shouldRunPendingAssistantInputFirst = pendingAssistantInputWakeAt !== null;
+    const systemMailboxMaintenance = shouldRunPendingAssistantInputFirst
+      ? emptyHostedSystemMailboxMaintenanceResult({
+        pendingAssistantInputWakeAt,
+      })
+      : await runSystemMailboxMaintenancePhase({
+        executionContext,
+        hasFreshConversationInput,
+        input,
+        wake,
+      });
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
@@ -661,6 +673,35 @@ function hasFreshHostedMailboxInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return input.initialMailboxImport.importResult.fetchedCount > 0;
+}
+
+async function resolveInitialPendingAssistantInputWakeAt(input: {
+  hasFreshConversationInput: boolean;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<string | null> {
+  if (input.hasFreshConversationInput) {
+    return null;
+  }
+
+  return await resolvePendingAssistantInputWakeAt(input.input);
+}
+
+function emptyHostedSystemMailboxMaintenanceResult(input: {
+  pendingAssistantInputWakeAt: string | null;
+}): {
+  continueAssistantLane: boolean;
+  deviceSyncMaintenanceRan: boolean;
+  initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
+  pendingAssistantInputWakeAt: string | null;
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null;
+} {
+  return {
+    continueAssistantLane: false,
+    deviceSyncMaintenanceRan: false,
+    initialProviderCleanupCheckpoint: null,
+    pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
+    result: null,
+  };
 }
 
 async function applyHostedManagedAutomationsBestEffort(input: {
@@ -1873,7 +1914,8 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
     return state;
   };
-  const pendingAssistantInputWakeAt = Object.hasOwn(input, "pendingAssistantInputWakeAt")
+  const hasPendingAssistantInputWakeOverride = Object.hasOwn(input, "pendingAssistantInputWakeAt");
+  let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
     ? input.pendingAssistantInputWakeAt ?? null
     : await resolvePendingAssistantInputWakeAt(phaseInput);
   const pendingAssistantInputBlocksMaintenance =
@@ -1914,6 +1956,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
+    pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
+  }
   const initialProviderCleanupDue =
     !shouldYieldAfterSystemMailboxPreparation
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
@@ -3298,6 +3343,8 @@ function resolveSkippedDeviceSyncWake(input: {
   if (
     handledDeviceSyncWake?.nextWakeAt === existingWakeAt
     && handledDeviceSyncWake.nextWakeReason === existingWakeReason
+    && !input.pendingAssistantInputWakeAt
+    && !shouldRescheduleSkippedDeviceSyncWake(input.input)
   ) {
     return null;
   }
@@ -3317,8 +3364,18 @@ function resolveHostedDeviceSyncFollowUpWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
 }): HostedRuntimeWakeCandidate | null {
-  const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake(input);
   const localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input.input);
+  const handledDeviceSyncWake = input.input.deviceSyncWorkspaceWakeHandled ?? null;
+  if (
+    localDeviceSyncScheduledWake?.at
+    && handledDeviceSyncWake !== null
+    && handledDeviceSyncWake?.nextWakeAt === input.input.workspace?.nextWakeAt
+    && handledDeviceSyncWake.nextWakeReason === input.input.workspace?.nextWakeReason
+  ) {
+    return localDeviceSyncScheduledWake;
+  }
+
+  const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake(input);
   const selectedDeviceSyncFollowUpWake = selectHostedRuntimeWakeCandidate([
     localDeviceSyncScheduledWake,
     skippedDeviceSyncWake,
@@ -3706,6 +3763,7 @@ function redactHostedRuntimeLogString(key: string, value: string): string | unde
   const redacted = normalized
     .replace(/<HOME_DIR>(?:\/[^\s)"']*)?/gu, "<REDACTED_PATH>")
     .replace(/file:\/\/[^\s)"']+/giu, "<REDACTED_PATH>")
+    .replace(/\bhttps?:\/\/[^\s)"']+/giu, "<REDACTED_URL>")
     .replace(/(^|[\s(])\/[^\s)"']+/gu, "$1<REDACTED_PATH>")
     .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(
@@ -3755,6 +3813,7 @@ function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
   return !(
     /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
+    || /\bhttps?:\/\//iu.test(value)
     || /\+\d[\d().\s-]{7,}\d/u.test(value)
     || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
       .test(value)
