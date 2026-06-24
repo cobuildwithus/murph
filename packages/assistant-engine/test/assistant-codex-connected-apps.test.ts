@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { compactConnectedAppsResult } from "../src/assistant-codex/dynamic-tools/connected-apps.ts";
 import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
@@ -108,6 +109,57 @@ describe("murph connected-app dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("strips HTML from Gmail-style message bodies while preserving link URLs, alt text, and inline content", async () => {
+    // Production Gmail responses ship the full HTML envelope under
+    // `data.messageText`. The compactor must rewrite the email body to
+    // plain text but must NOT silently drop link URLs (tracking links,
+    // unsubscribe, calendar invites) or image alt text — those are the
+    // bits a user typically asks Murph to act on.
+    const htmlBody = `<!doctype html><html><head><style>.x{color:red}</style></head>`
+      + `<body><table><tr><td><p>Hello&nbsp;<strong>Will</strong>,</p>`
+      + `<p>Thanks for your order #1234. Subtotal: $42.00</p>`
+      + `<p>Track it here: <a href="https://orders.example.com/1234">View order</a>.</p>`
+      + `<p>To stop these emails, <a href='https://example.com/unsub?u=42'>unsubscribe</a>.</p>`
+      + `<p><img src="https://cdn.example.com/logo.png" alt="Example Co logo"></p>`
+      + `<p>— Murph &amp; Co.</p></td></tr></table></body></html>`;
+    const result = compactConnectedAppsResult({
+      data: {
+        attachmentList: [],
+        labelIds: ["INBOX"],
+        messageId: "abc123",
+        messageText: htmlBody,
+        sender: "store@example.com",
+        subject: "Order #1234",
+      },
+      tool_schemas: {
+        // Schema description happens to mention `<p>` literally; under 200
+        // chars so the length gate skips it. Must remain untouched.
+        GMAIL_FETCH_EMAILS: {
+          description: "Fetch emails. Returns body with <p> tags when raw=true.",
+        },
+      },
+    }) as { data: { messageText: string }; tool_schemas: Record<string, { description: string }> };
+
+    const compactedBody = result.data.messageText;
+    // All structural HTML and the style block are stripped.
+    expect(compactedBody).not.toMatch(/<\/?(html|body|table|td|tr|p|strong|style|head|img)\b/iu);
+    expect(compactedBody).not.toMatch(/color:red/u);
+    // Email prose, link text, and link URLs all survive.
+    expect(compactedBody).toContain("Hello");
+    expect(compactedBody).toContain("Will");
+    expect(compactedBody).toContain("Thanks for your order #1234");
+    expect(compactedBody).toContain("View order (https://orders.example.com/1234)");
+    expect(compactedBody).toContain("unsubscribe (https://example.com/unsub?u=42)");
+    expect(compactedBody).toContain("[image: Example Co logo]");
+    expect(compactedBody).toContain("Murph & Co.");
+    // The strip cuts roughly half of an HTML envelope at minimum; this
+    // particular fixture should land well under the original byte length.
+    expect(compactedBody.length).toBeLessThan(htmlBody.length / 2);
+    expect(result.tool_schemas.GMAIL_FETCH_EMAILS.description).toBe(
+      "Fetch emails. Returns body with <p> tags when raw=true.",
+    );
   });
 
   it("fails closed instead of truncating an oversized provider result", async () => {
