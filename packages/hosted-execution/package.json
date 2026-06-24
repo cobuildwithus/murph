@@ -130,6 +130,7 @@
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
+    "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.4.3"
@@ -137,6 +138,7 @@
   "bundleDependencies": [
     "@murphai/core",
     "@murphai/device-syncd",
+    "@murphai/health-metrics",
     "@murphai/importers",
     "@murphai/runtime-state"
   ]

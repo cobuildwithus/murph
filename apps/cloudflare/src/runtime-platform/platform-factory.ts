@@ -7,6 +7,7 @@ import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.t
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
+import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
@@ -105,7 +106,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ),
         }
       : {}),
-    connectedAppsAvailable: transport !== null,
+    ...(transport
+      ? {
+          connectedApps: createHostedWebConnectedAppsPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+        }
+      : {}),
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
     ...(transport
       ? {

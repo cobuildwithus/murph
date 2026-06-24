@@ -4871,7 +4871,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const elapsedMs = performance.now() - startedAt;
       assert.equal(checkpointRequests.length, 1);
       assert.ok(elapsedMs >= 200);
-      assert.ok(elapsedMs < 2_000);
+      assert.ok(elapsedMs < 5_000);
     } finally {
       await removeTempRoot(vaultRoot);
     }

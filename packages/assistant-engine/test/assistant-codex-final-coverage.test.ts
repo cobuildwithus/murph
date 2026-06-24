@@ -48,8 +48,13 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
-  executeCodexAssistantTurnAttemptFromInput:
-    providerMocks.executeCodexAssistantTurnAttemptFromInput,
+  executeCodexAssistantTurnAttemptFromInput: (input: {
+    providerConfig: unknown
+    turn: Record<string, unknown>
+  }) => providerMocks.executeCodexAssistantTurnAttemptFromInput({
+    ...input.turn,
+    providerConfig: input.providerConfig,
+  }),
   resolveCodexAssistantTargetCapabilities:
     providerMocks.resolveCodexAssistantTargetCapabilities,
   resolveCodexAssistantCapabilities:
@@ -578,6 +583,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: flexCatalog.env,
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'local',
           privateIssueCaptureEnabled: false,
@@ -793,6 +799,7 @@ describe('Codex model catalog', () => {
           assistantCliContract: null,
           cliEnv: {},
           developerInstructions: null,
+          dynamicTools: [],
           diagnosticsPolicy: {
             environment: 'local',
             privateIssueCaptureEnabled: false,
@@ -940,6 +947,7 @@ describe('Codex model catalog', () => {
           assistantCliContract: null,
           cliEnv: {},
           developerInstructions: null,
+          dynamicTools: [],
           diagnosticsPolicy: {
             environment: 'local',
             privateIssueCaptureEnabled: false,
@@ -1051,6 +1059,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'local',
           privateIssueCaptureEnabled: true,
@@ -1164,6 +1173,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: true,
@@ -1295,6 +1305,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'local',
           privateIssueCaptureEnabled: false,
@@ -1387,6 +1398,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'local',
           privateIssueCaptureEnabled: false,
@@ -1479,6 +1491,7 @@ describe('Codex model catalog', () => {
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
+        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,

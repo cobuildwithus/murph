@@ -1,5 +1,5 @@
 import type { VaultReadModel } from "./read-model.ts";
-import { resolveWearableCanonicalMetricKey } from "@murphai/importers/device-providers/metric-catalog";
+import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
 
 import {
   buildActivitySessionMetricCandidate,

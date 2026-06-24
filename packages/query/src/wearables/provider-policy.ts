@@ -1,10 +1,10 @@
-import { resolveWearableMetricTolerance } from "@murphai/importers/device-providers/metric-catalog";
 import {
-  defaultDeviceProviderDescriptors,
-  resolveDeviceProviderDescriptor,
-  resolveDeviceProviderSourcePriority,
-  type DeviceProviderMetricFamily,
-} from "@murphai/importers/device-providers/provider-descriptors";
+  defaultWearableProviderDescriptors,
+  resolveWearableMetricTolerance,
+  resolveWearableProviderDescriptor,
+  resolveWearableProviderSourcePriority,
+  type WearableProviderMetricFamily,
+} from "@murphai/health-metrics";
 
 import {
   ACTIVITY_METRIC_KEYS,
@@ -17,7 +17,7 @@ import {
 } from "./types.ts";
 import { normalizeLowercaseString } from "./shared.ts";
 
-const DEFAULT_PROVIDER_PRIORITY_ORDER: readonly string[] = defaultDeviceProviderDescriptors.map(
+const DEFAULT_PROVIDER_PRIORITY_ORDER: readonly string[] = defaultWearableProviderDescriptors.map(
   (descriptor) => descriptor.provider,
 );
 
@@ -28,13 +28,13 @@ export function resolveWearableProviderPriority(
     metricFamily?: WearableMetricPolicyFamily;
   } = {},
 ): number {
-  const descriptor = resolveDeviceProviderDescriptor(provider);
+  const descriptor = resolveWearableProviderDescriptor(provider);
 
   if (!descriptor) {
     return 0;
   }
 
-  return resolveDeviceProviderSourcePriority(descriptor, {
+  return resolveWearableProviderSourcePriority(descriptor, {
     metric,
     metricFamily: options.metricFamily ?? inferDefaultMetricFamily(metric),
   });
@@ -93,10 +93,10 @@ export function hasDirectWearableProviderForSource(sourceProviderSlug: string | 
     return false;
   }
 
-  return Boolean(resolveDeviceProviderDescriptor(normalized));
+  return Boolean(resolveWearableProviderDescriptor(normalized));
 }
 
-export function inferDefaultMetricFamily(metric: WearableMetricKey): DeviceProviderMetricFamily | null {
+export function inferDefaultMetricFamily(metric: WearableMetricKey): WearableProviderMetricFamily | null {
   if (SLEEP_METRIC_KEYS.has(metric)) {
     return "sleep";
   }
@@ -117,7 +117,7 @@ export function inferDefaultMetricFamily(metric: WearableMetricKey): DeviceProvi
 }
 
 export function formatProviderName(provider: string): string {
-  const descriptor = resolveDeviceProviderDescriptor(provider);
+  const descriptor = resolveWearableProviderDescriptor(provider);
 
   if (descriptor?.displayName) {
     return descriptor.displayName;

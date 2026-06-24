@@ -1,6 +1,10 @@
 import {
   type EffectiveProtocolSnapshot,
   type CommonsProtocolRef,
+  type ProtocolFrontmatter,
+  type ProtocolRef,
+  FRONTMATTER_DOC_TYPES,
+  protocolFrontmatterSchema,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 
@@ -12,54 +16,9 @@ import {
   type VaultReadModel,
 } from "./read-model.ts";
 
-export const PROTOCOL_DOC_TYPE = "protocol";
+export const PROTOCOL_DOC_TYPE = FRONTMATTER_DOC_TYPES.protocol;
 export const PROTOCOL_FAMILY = "protocol";
 export const PROTOCOL_DIRECTORY = VAULT_LAYOUT.protocolsDirectory;
-
-type Sha256Digest = `sha256:${string}`;
-
-export interface ProtocolRef {
-  protocolId: string;
-  protocolRevisionId: Sha256Digest;
-  effectiveSpecHash: Sha256Digest;
-}
-
-export interface ProtocolEffectiveSpec {
-  doseSignature: string;
-  modality?: string;
-  frequency?: {
-    sessionsPerDay?: number;
-    sessionsPerWeek?: number;
-  };
-  durationMinutes?: {
-    min?: number;
-    max?: number;
-    target?: number;
-  };
-  temperatureC?: {
-    min?: number;
-    max?: number;
-    target?: number;
-  };
-  targetSessions?: number;
-  minimumUsefulSessions?: number;
-  instructions?: string[];
-  stopConditions?: string[];
-  notes?: string[];
-}
-
-export interface ProtocolFrontmatter {
-  schemaVersion: string;
-  docType: typeof PROTOCOL_DOC_TYPE;
-  protocolId: string;
-  slug: string;
-  title: string;
-  status: string;
-  commonsProtocolRef: CommonsProtocolRef;
-  effectiveSpec: ProtocolEffectiveSpec;
-  effectiveSpecHash: Sha256Digest;
-  protocolRevisionId: Sha256Digest;
-}
 
 export interface ProtocolSummary {
   id: string;
@@ -67,7 +26,7 @@ export interface ProtocolSummary {
   title: string;
   status: string | null;
   commonsProtocolRef: CommonsProtocolRef | null;
-  effectiveSpec: ProtocolEffectiveSpec | null;
+  effectiveSpec: ProtocolFrontmatter["effectiveSpec"] | null;
   effectiveSpecHash: string | null;
   protocolRevisionId: string | null;
   updatedAt: string | null;
@@ -144,34 +103,11 @@ function readObjectOrNull<TValue extends object>(value: unknown): TValue | null 
 export function readProtocolFrontmatter(
   attributes: Record<string, unknown>,
 ): ProtocolFrontmatter {
-  const commonsProtocolRef = readObjectOrNull<CommonsProtocolRef>(attributes.commonsProtocolRef);
-  const effectiveSpec = readObjectOrNull<ProtocolEffectiveSpec>(attributes.effectiveSpec);
-  if (
-    attributes.docType !== PROTOCOL_DOC_TYPE ||
-    typeof attributes.protocolId !== "string" ||
-    typeof attributes.slug !== "string" ||
-    typeof attributes.title !== "string" ||
-    typeof attributes.status !== "string" ||
-    !commonsProtocolRef ||
-    !effectiveSpec ||
-    typeof attributes.effectiveSpecHash !== "string" ||
-    typeof attributes.protocolRevisionId !== "string"
-  ) {
+  const parsed = protocolFrontmatterSchema.safeParse(attributes);
+  if (!parsed.success) {
     throw new TypeError("Protocol frontmatter is invalid.");
   }
-
-  return {
-    schemaVersion: typeof attributes.schemaVersion === "string" ? attributes.schemaVersion : "",
-    docType: PROTOCOL_DOC_TYPE,
-    protocolId: attributes.protocolId,
-    slug: attributes.slug,
-    title: attributes.title,
-    status: attributes.status,
-    commonsProtocolRef,
-    effectiveSpec,
-    effectiveSpecHash: attributes.effectiveSpecHash as Sha256Digest,
-    protocolRevisionId: attributes.protocolRevisionId as Sha256Digest,
-  };
+  return parsed.data;
 }
 
 function summarizeText(value: string | null): string | null {

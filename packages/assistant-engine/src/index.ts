@@ -12,6 +12,9 @@ export * from './assistant-context-snapshot.js'
 export {
   readAssistantCliSurfaceBootstrapContext,
 } from './assistant/cli-surface-bootstrap.js'
+export type {
+  AssistantConnectedAppsPort,
+} from './assistant/connected-apps-port.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,
 } from './assistant/issue-reporting.js'

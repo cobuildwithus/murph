@@ -9,7 +9,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, test } from "vitest";
 
 import {
-  executeCodexAppServerTurn,
+  executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
+  resolveMurphDynamicTools,
+  type CodexAppServerTurnInput,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -60,6 +62,26 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+
+function executeCodexAppServerTurn(
+  input: Omit<CodexAppServerTurnInput, "dynamicTools"> & {
+    dynamicTools?: CodexAppServerTurnInput["dynamicTools"]
+  },
+) {
+  return executeCodexAppServerTurnUnchecked({
+    ...input,
+    dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply,
+      allowMessageReactions: input.allowMessageReactions,
+      computerToolsAvailable:
+        input.hostedToolContext?.computerToolsAvailable === true,
+      connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      productFeedbackAvailable:
+        typeof input.productFeedbackRecorder?.recordProductFeedback === "function",
+      progressUpdatesAvailable: input.progressDelivery != null,
+    }),
+  })
+}
 
 afterEach(async () => {
   await Promise.all(

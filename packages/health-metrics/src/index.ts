@@ -1,4 +1,7 @@
 export * from "./types.ts";
+export * from "./sample-series-summary.ts";
+export * from "./wearable-metric-catalog.ts";
+export * from "./wearable-provider-catalog.ts";
 export * from "./catalog.ts";
 export * from "./normalize.ts";
 export * from "./record-ids.ts";
