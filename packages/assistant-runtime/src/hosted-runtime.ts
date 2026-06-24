@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedWorkspaceCheckpointResponse,
@@ -483,8 +484,9 @@ export interface HostedWorkspaceRuntimeJobImportContext {
 }
 
 interface HostedRuntimeWakeLatencySeed {
-  foregroundWaitResolvedAtEpochMs: number;
-  runtimeWakeNotifiedAtEpochMs: number | null;
+  foregroundWaitResolvedAtEpochMs?: number;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  runtimeWakeNotifiedAtEpochMs?: number | null;
 }
 
 function mergeHostedRuntimeLatencyTraceStagedMilestones(
@@ -530,6 +532,39 @@ function mergeHostedRuntimeLatencyPhaseBreakdown(
   return merged;
 }
 
+function readHostedRuntimeInvocationOrchestrationLatencyDiagnostics(
+  milestones: HostedRuntimeLatencyTraceStagedMilestones | null | undefined,
+): HostedRuntimeOrchestrationLatencyDiagnostics | null {
+  const orchestration = milestones?.phaseBreakdown?.orchestration;
+  return orchestration && Object.keys(orchestration).length > 0
+    ? { ...orchestration }
+    : null;
+}
+
+function withoutHostedRuntimeInvocationOrchestrationLatencyDiagnostics(
+  milestones: HostedRuntimeLatencyTraceStagedMilestones | null | undefined,
+): HostedRuntimeLatencyTraceStagedMilestones | null {
+  if (!milestones?.phaseBreakdown?.orchestration) {
+    return milestones ?? null;
+  }
+
+  const { orchestration: _orchestration, ...phaseBreakdown } = milestones.phaseBreakdown;
+  const nextMilestones: HostedRuntimeLatencyTraceStagedMilestones = { ...milestones };
+  const hasRemainingPhase = Boolean(
+    phaseBreakdown.dispatch
+      || phaseBreakdown.restore
+      || phaseBreakdown.boot
+      || phaseBreakdown.wake
+      || phaseBreakdown.provider,
+  );
+  if (hasRemainingPhase) {
+    nextMilestones.phaseBreakdown = phaseBreakdown;
+  } else {
+    delete nextMilestones.phaseBreakdown;
+  }
+  return nextMilestones;
+}
+
 function createHostedRuntimeWakeLatencySeed(
   notification: RuntimeWakeNotification | null | undefined,
 ): HostedRuntimeWakeLatencySeed | null {
@@ -539,7 +574,33 @@ function createHostedRuntimeWakeLatencySeed(
 
   return {
     foregroundWaitResolvedAtEpochMs: Date.now(),
+    ...(notification.orchestration ? { orchestration: notification.orchestration } : {}),
     runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
+  };
+}
+
+function createHostedRuntimeOrchestrationLatencySeed(
+  orchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null | undefined,
+): HostedRuntimeWakeLatencySeed | null {
+  return orchestration ? { orchestration } : null;
+}
+
+function mergeHostedRuntimeWakeLatencySeeds(
+  base: HostedRuntimeWakeLatencySeed | null | undefined,
+  extra: HostedRuntimeWakeLatencySeed | null | undefined,
+): HostedRuntimeWakeLatencySeed | null {
+  if (!base && !extra) {
+    return null;
+  }
+
+  const orchestration = {
+    ...(base?.orchestration ?? {}),
+    ...(extra?.orchestration ?? {}),
+  };
+  return {
+    ...(base ?? {}),
+    ...(extra ?? {}),
+    ...(Object.keys(orchestration).length > 0 ? { orchestration } : {}),
   };
 }
 
@@ -554,12 +615,18 @@ function createHostedRuntimeWakeInitialImportContext(
     latencyMilestones: {
       phaseBreakdown: {
         schemaVersion: 1,
-        wake: {
-          ...(seed.runtimeWakeNotifiedAtEpochMs === null
-            ? {}
-            : { runtimeWakeNotifiedAtEpochMs: seed.runtimeWakeNotifiedAtEpochMs }),
-          foregroundWaitResolvedAtEpochMs: seed.foregroundWaitResolvedAtEpochMs,
-        },
+        ...(seed.orchestration ? { orchestration: seed.orchestration } : {}),
+        ...(seed.foregroundWaitResolvedAtEpochMs === undefined
+          ? {}
+          : {
+              wake: {
+                ...(seed.runtimeWakeNotifiedAtEpochMs === null
+                  || seed.runtimeWakeNotifiedAtEpochMs === undefined
+                  ? {}
+                  : { runtimeWakeNotifiedAtEpochMs: seed.runtimeWakeNotifiedAtEpochMs }),
+                foregroundWaitResolvedAtEpochMs: seed.foregroundWaitResolvedAtEpochMs,
+              },
+            }),
       },
     },
   };
@@ -712,8 +779,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   try {
     const runtimePhaseStartedAt = new Date().toISOString();
+    const invocationOrchestrationLatencySeed = createHostedRuntimeOrchestrationLatencySeed(
+      readHostedRuntimeInvocationOrchestrationLatencyDiagnostics(options.latencyMilestones),
+    );
+    const baseLatencyMilestones =
+      withoutHostedRuntimeInvocationOrchestrationLatencyDiagnostics(options.latencyMilestones);
     const initialAssistantInputLatencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
-      ...(options.latencyMilestones ?? {}),
+      ...(baseLatencyMilestones ?? {}),
       runtimePhaseStartedAt,
     };
     emitPhaseLog({
@@ -825,17 +897,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // object already passed to the assistant_input_staged event. No new request,
     // await, or I/O: restore timings were returned in-memory by the restore call,
     // and the boot.nodeStartupMs (if any) rode in via options.latencyMilestones.
-    const incomingBoot = initialAssistantInputLatencyMilestones.phaseBreakdown?.boot;
-    const incomingDispatch = initialAssistantInputLatencyMilestones.phaseBreakdown?.dispatch;
-    initialAssistantInputLatencyMilestones.phaseBreakdown = {
-      schemaVersion: 1,
-      ...(incomingDispatch ? { dispatch: incomingDispatch } : {}),
-      ...(restored.restoreTiming ? { restore: restored.restoreTiming } : {}),
-      boot: {
-        ...(incomingBoot ?? {}),
-        restoreWasCold: restored.restoreWasCold,
-      },
-    };
+    initialAssistantInputLatencyMilestones.phaseBreakdown =
+      mergeHostedRuntimeLatencyPhaseBreakdown(
+        initialAssistantInputLatencyMilestones.phaseBreakdown ?? null,
+        {
+          schemaVersion: 1,
+          ...(restored.restoreTiming ? { restore: restored.restoreTiming } : {}),
+          boot: {
+            restoreWasCold: restored.restoreWasCold,
+          },
+        },
+      ) ?? {
+        schemaVersion: 1,
+        boot: {
+          restoreWasCold: restored.restoreWasCold,
+        },
+      };
     emitPhaseLog({
       details: {
         materializedArtifactPathCount: restored.materializedArtifactPaths.size,
@@ -990,7 +1067,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: restored.vaultRoot,
     });
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-      consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
+      mergeHostedRuntimeWakeLatencySeeds(
+        invocationOrchestrationLatencySeed,
+        consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
+      ),
     );
     emitPhaseLog({
       details: {

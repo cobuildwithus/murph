@@ -18,6 +18,7 @@ import {
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   buildHostedMailboxPayloadScope,
@@ -30,6 +31,7 @@ import {
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
+  sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -1133,6 +1135,30 @@ describe("hosted runtime control contracts", () => {
       changed: false,
       value: merged.value,
     });
+  });
+
+  it("sanitizes orchestration diagnostics with the package-owned phase schema", () => {
+    expect(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER).toBe(
+      "x-hosted-runtime-orchestration-latency",
+    );
+
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      activeWakeAccepted: true,
+      activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      extraLeaf: 1,
+      freshStartRequestedAtEpochMs: -1,
+      replacedStaleFence: "true",
+    })).toEqual({
+      activeWakeAccepted: true,
+      activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeStartedAtEpochMs: 1_777_000_000_100,
+    });
+
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      activeWakeAccepted: "true",
+      freshStartRequestedAtEpochMs: -1,
+    })).toBeNull();
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

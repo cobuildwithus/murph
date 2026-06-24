@@ -2167,7 +2167,7 @@ describe("cloudflare worker routes", () => {
       expect(alarms).not.toContain(runtimeNextWakeAt);
     });
 
-    it("sends a payloadless wake for an active fence", async () => {
+    it("sends activation diagnostics for an active fence wake", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
@@ -2198,6 +2198,10 @@ describe("cloudflare worker routes", () => {
         activeRuntime: {
           attemptId: token.attemptId,
           leaseGeneration: token.generation,
+          orchestration: {
+            activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+          },
           processingMode: "default",
           userId: "test-user",
         },
@@ -2242,6 +2246,10 @@ describe("cloudflare worker routes", () => {
         activeRuntime: {
           attemptId: oldToken.attemptId,
           leaseGeneration: oldToken.generation,
+          orchestration: {
+            activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+          },
           processingMode: "default",
           userId: "test-user",
         },

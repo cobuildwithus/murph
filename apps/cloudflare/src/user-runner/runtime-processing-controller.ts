@@ -252,10 +252,16 @@ export class RuntimeProcessingController {
     }
 
     const activeWakeStartedAtEpochMs = Date.now();
+    const inputAtActiveWakeStart = withRuntimeProcessingOrchestration(input.input, {
+      activeWakeStartedAtEpochMs,
+    });
     const containerResult = await ensureActiveRuntimeProcessing({
       activeRuntime: {
         attemptId: activeFence.attemptId,
         leaseGeneration: String(activeFence.generation),
+        ...(inputAtActiveWakeStart.orchestration
+          ? { orchestration: inputAtActiveWakeStart.orchestration }
+          : {}),
         processingMode: activeFence.processingMode,
         userId: record.userId,
       },
@@ -265,10 +271,9 @@ export class RuntimeProcessingController {
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
-    const inputAfterActiveWake = withRuntimeProcessingOrchestration(input.input, {
+    const inputAfterActiveWake = withRuntimeProcessingOrchestration(inputAtActiveWakeStart, {
       activeWakeAccepted: containerResult.kind === "accepted",
       activeWakeFinishedAtEpochMs: Date.now(),
-      activeWakeStartedAtEpochMs,
     });
 
     if (containerResult.kind === "accepted") {

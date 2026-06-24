@@ -933,6 +933,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   ] as const;
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
+  HostedRuntimeLatencyPhaseBreakdown["orchestration"]
+>;
+
+export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
+  "x-hosted-runtime-orchestration-latency";
 
 export type HostedRuntimeLatencyPhaseBreakdownJson = {
   [key: string]:
@@ -964,6 +970,28 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
 );
+
+export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
+  value: unknown,
+): HostedRuntimeOrchestrationLatencyDiagnostics | null {
+  if (!isHostedRuntimeLatencyPhaseBreakdownRecord(value)) {
+    return null;
+  }
+
+  const diagnostics: Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf> = {};
+  for (const [leafKey, leaf] of Object.entries(value)) {
+    if (
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.orchestration.has(leafKey)
+      && isHostedRuntimeLatencyPhaseBreakdownLeafSafe("orchestration", leafKey, leaf)
+    ) {
+      diagnostics[leafKey] = leaf;
+    }
+  }
+
+  return Object.keys(diagnostics).length > 0
+    ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
+    : null;
+}
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale

@@ -21,6 +21,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeOrchestrationLatencyDiagnostics,
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -64,13 +65,22 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
   "hf-home",
 ] as const;
 
+type HostedWorkspaceInvocationRuntimeWakeInput =
+  | number
+  | {
+      notifiedAtEpochMs?: number | null;
+      orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+    };
+
 export interface HostedWorkspaceInvocationOptions {
   dispatch?: {
     invokeReceivedAtEpochMs?: number;
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
-  onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
+  onRuntimeWakeReady?: (
+    sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
+  ) => void;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   runnerJobAcceptedAt?: string | null;
   shutdownSignal?: AbortSignal | null;
@@ -136,11 +146,11 @@ export async function runHostedWorkspaceInvocation(
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   let acceptingRuntimeWakes = true;
-  options.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
+  options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
     if (!acceptingRuntimeWakes) {
       return false;
     }
-    runtimeWakeSignal.notify(notifiedAtEpochMs);
+    runtimeWakeSignal.notify(wakeInput);
     return true;
   });
 

@@ -304,6 +304,7 @@ type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
   leaseGeneration: string;
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   processingMode?: RunnerRuntimeProcessingMode | null;
   userId: string;
 }
