@@ -1392,6 +1392,60 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
+  it("does not treat manual browser help as optional for final confirmation", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: now,
+    });
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      reused: true,
+      runId: "hcr_run123",
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
   it("resumes final confirmation from chat while an inspection handoff is open", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
