@@ -19,7 +19,7 @@ export const MURPH_GENERATE_SONG_TOOL = {
   namespace: 'murph',
   name: 'generate_song',
   description:
-    'Generate one original song or instrumental track using ElevenLabs and attach it as a native voice memo to the final response. Use only when the user explicitly asks for generated music or a song. Put requested lyrics, subject, style, instrumentation, mood, and vocal direction in prompt. If the user asks only for the song, attach it and leave final response text empty. This does not send directly.',
+    'Generate one original song or instrumental track using ElevenLabs and attach it as a native voice memo to the final response. Use when the user explicitly asks for generated music or a song, or as a brief personalized musical nudge for an eligible reminder, habit, or behavior-change experiment when a playful musical intervention may increase follow-through on a low-stakes action; it is not intended for every reminder. Default to an upbeat reggae groove when the user has no known genre preference and no other genre is a clearly better contextual fit. Keep the song short, state the requested action unmistakably, explain its personal benefit, and incorporate at most two supplied non-sensitive personal details. Do not invent personal details, shame the user, or expose information that could be embarrassing if the audio were overheard. Put requested lyrics, subject, style, instrumentation, mood, and vocal direction in prompt. If the user asks only for the song, attach it and leave final response text empty. This does not send directly.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
