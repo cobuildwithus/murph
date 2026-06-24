@@ -1,6 +1,9 @@
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  type AssistantInputCursor,
+  type AssistantInputEventRecord,
+  resolveAssistantInputEventPath,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -11,6 +14,7 @@ import {
 import {
   createStoreBackedAssistantInputSource,
 } from '../src/assistant/input-source.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -286,6 +290,98 @@ describe('store-backed assistant input source', () => {
     expect(result.nextCursor).toEqual(eligible.cursor)
   })
 
+  it('terminates mixed createdAt pagination after crossing the scan boundary', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-mixed-created-at-scan-',
+    )
+    const knownInputIds: string[] = []
+    for (let index = 0; index < 100; index += 1) {
+      const occurredAt = new Date(Date.UTC(2026, 3, 22, 9, 0, index))
+        .toISOString()
+      const stored = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        now: new Date(occurredAt),
+        event: createStoredInboxInput({
+          captureId: `scan_known_${String(index).padStart(3, '0')}`,
+          occurredAt,
+          text: `known scan input ${index}`,
+          threadId: 'chat_1',
+        }),
+      })
+      knownInputIds.push(stored.inputId)
+    }
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      event: createStoredInboxInput({
+        captureId: 'scan_mixed_a',
+        occurredAt: '2026-04-22T10:00:03.000Z',
+        text: 'A created at 02 occurred at 03',
+        threadId: 'chat_1',
+      }),
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:03.000Z'),
+      event: createStoredInboxInput({
+        captureId: 'scan_mixed_b',
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        text: 'B created at 03 occurred at 01',
+        threadId: 'chat_1',
+      }),
+    })
+    const third = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:04.000Z'),
+      event: createStoredInboxInput({
+        captureId: 'scan_mixed_l',
+        occurredAt: '2026-04-22T10:00:02.000Z',
+        text: 'L legacy cursor occurred at 02',
+        threadId: 'chat_1',
+      }),
+    })
+    await writeAssistantInputEventRecord(vaultRoot, {
+      ...third,
+      cursor: {
+        ...third.cursor,
+        createdAt: null,
+      },
+    })
+    const source = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+
+    const orderedInputIds: string[] = []
+    let afterCursor: AssistantInputCursor | null = null
+    for (let pageCount = 0; pageCount < 5; pageCount += 1) {
+      const page = await source.listInputCandidates({
+        afterCursor,
+        knownInputIds,
+        limit: 1,
+      })
+      if (page.inputs.length === 0) {
+        afterCursor = page.nextCursor
+        break
+      }
+      orderedInputIds.push(page.inputs[0]!.event.inputId)
+      afterCursor = page.nextCursor
+    }
+
+    expect(new Set(orderedInputIds).size).toBe(orderedInputIds.length)
+    expect(orderedInputIds).toEqual([
+      first.inputId,
+      third.inputId,
+      second.inputId,
+    ])
+
+    const finalPage = await source.listInputCandidates({
+      afterCursor,
+      knownInputIds,
+      limit: 1,
+    })
+    expect(finalPage.inputs).toEqual([])
+  })
+
   it('returns rapid staged conversation inputs after a cursor in one batch', async () => {
     const { vaultRoot } = await createAssistantInputSourceVault(
       'assistant-input-source-store-rapid-',
@@ -381,6 +477,54 @@ function createStoredHostedMailboxInput(input: {
       laneSeq: input.laneSeq,
     }),
   }
+}
+
+function createStoredInboxInput(input: {
+  captureId: string
+  occurredAt: string
+  text: string
+  threadId: string
+}) {
+  return {
+    content: {
+      text: input.text,
+    },
+    conversation: {
+      accountId: 'acct_1',
+      actorId: 'actor_1',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: input.threadId,
+      threadIsDirect: true,
+    },
+    occurredAt: input.occurredAt,
+    receivedAt: input.occurredAt,
+    sourceRef: {
+      captureId: input.captureId,
+      kind: 'inbox-capture' as const,
+      source: 'linq',
+      version: null,
+    },
+  }
+}
+
+async function writeAssistantInputEventRecord(
+  vaultRoot: string,
+  record: AssistantInputEventRecord,
+): Promise<void> {
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    resolveAssistantInputEventPath({
+      inputId: record.inputId,
+      paths,
+    }),
+    `${JSON.stringify({
+      schema: 'murph.assistant-input-event.v1',
+      schemaVersion: 1,
+      value: record,
+    })}\n`,
+    { mode: 0o600 },
+  )
 }
 
 function createHostedMailboxSourceRef(input: {

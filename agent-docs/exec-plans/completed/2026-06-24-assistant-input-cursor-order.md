@@ -1,48 +1,64 @@
-# Assistant Input Cursor Ordering
+# Fix assistant input cursor mixed timestamp ordering
+
+Status: completed
+Created: 2026-06-24
+Updated: 2026-06-24
 
 ## Goal
 
-Fix assistant input cursor pagination so distinct inputs at the same instant are
-never skipped, and collapse duplicated timestamp comparator logic onto the
-contracts owner without adding new package edges.
+- Assistant input pagination must terminate and return each stored input once
+  when legacy cursors without `createdAt` coexist with new cursors that include
+  `createdAt`.
+
+## Success criteria
+
+- Mixed `createdAt`/`occurredAt` cursor ordering uses a partner-independent
+  timestamp key.
+- `listAssistantInputEvents` paginates the A/B/L mixed-state regression until
+  empty without duplicates.
+- `createStoreBackedAssistantInputSource` proves the same mixed-state ordering
+  after crossing its 100-record scan boundary.
+- Focused assistant-engine tests, package/diff verification, and typecheck pass.
+
+## Scope
+
+- In scope: `packages/assistant-engine` input cursor tests and any minimal
+  comparator correction needed in `input-store.ts`.
+- Out of scope: migrations, new runtime state, repeated-cursor guards, or
+  broader assistant admission refactors.
 
 ## Constraints
 
-- Keep the existing assistant/core comparator API names where callers already
-  use them.
-- Preserve instant-first timestamp ordering semantics.
-- Avoid broad refactors or compatibility scaffolding.
-- Do not touch unrelated active work.
+- Technical constraints: keep the comparator stateless and retain existing
+  tie-breakers after timestamp comparison.
+- Product/process constraints: land on `main`, commit through
+  `scripts/finish-task`, and push `main` after verification.
 
-## State
+## Risks and mitigations
 
-Completed.
+1. Risk: source-level pagination can still loop if filtering skips a full scan
+   page and the cursor order is unstable.
+   Mitigation: add a source-backed regression with 100 known records before the
+   mixed A/B/L records.
 
-## Plan
+## Tasks
 
-1. Route assistant/core/hosted timestamp comparison through
-   `@murphai/contracts`.
-2. Let assistant input cursor ordering fall through to source/input tie-breakers
-   when timestamp instants compare equal, using each cursor's own stable
-   timestamp key (`createdAt ?? occurredAt`).
-3. Add production-faithful `limit: 1` pagination regressions for equal
-   instants with different timestamp encodings.
-4. Add a mixed nullable/non-null `createdAt` regression that drains pages until
-   empty and proves no input repeats or disappears.
-5. Run focused verification and finish with a scoped commit/PR.
+1. Re-read current comparator and existing cursor tests.
+2. Patch or confirm the partner-independent timestamp key.
+3. Add mixed-state store and source regressions.
+4. Run focused tests plus required verification.
+5. Final-review, finish-task commit, and push `main`.
+
+## Decisions
+
+- The current `main` comparator already uses `cursor.createdAt ??
+  cursor.occurredAt`; this task will keep production code unchanged unless a
+  later verification pass finds another partner-dependent ordering path.
 
 ## Verification
 
-- `git diff --check`
-- `pnpm exec vitest run --config vitest.config.ts test/assistant-input-store.test.ts`
-  from `packages/assistant-engine`
-- `pnpm typecheck`
-- `pnpm --dir packages/assistant-runtime build`
-- `pnpm --dir packages/hosted-local-harness test`
-- `bash scripts/workspace-verify.sh test:diff packages/assistant-engine/src/assistant/input-store.ts packages/assistant-engine/src/assistant/shared.ts packages/assistant-engine/test/assistant-input-store.test.ts packages/assistant-runtime/src/hosted-runtime/callbacks.ts packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/src/hosted-runtime/timestamp-order.ts packages/core/src/time.ts`
-- `pnpm test:smoke`
-- ReviewGPT PR review on PR 281 found a mixed-null cursor transitivity issue;
-  fixed in this plan and re-verified with the focused assistant input-store test.
-Status: completed
-Updated: 2026-06-24
+- Commands to run: focused Vitest for assistant input store/source tests,
+  `pnpm --dir packages/assistant-engine test:coverage`, `pnpm test:diff` for
+  the touched files, and `pnpm typecheck`.
+- Expected outcomes: all commands pass.
 Completed: 2026-06-24

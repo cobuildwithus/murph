@@ -1247,10 +1247,10 @@ describe('assistant input event store', () => {
     )
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
-      now: new Date('2026-04-22T10:00:30.000Z'),
+      now: new Date('2026-04-22T10:00:02.000Z'),
       event: {
         content: {
-          text: 'created later, occurred latest',
+          text: 'A created at 02 occurred at 03',
         },
         conversation: {
           accountId: 'acct_1',
@@ -1260,8 +1260,8 @@ describe('assistant input event store', () => {
           threadId: 'chat_1',
           threadIsDirect: true,
         },
-        occurredAt: '2026-04-22T10:00:20.000Z',
-        receivedAt: '2026-04-22T10:00:20.000Z',
+        occurredAt: '2026-04-22T10:00:03.000Z',
+        receivedAt: '2026-04-22T10:00:03.000Z',
         sourceRef: {
           captureId: 'mixed_a',
           kind: 'inbox-capture',
@@ -1272,10 +1272,10 @@ describe('assistant input event store', () => {
     })
     const second = await upsertAssistantInputEvent({
       vault: vaultRoot,
-      now: new Date('2026-04-22T10:00:40.000Z'),
+      now: new Date('2026-04-22T10:00:03.000Z'),
       event: {
         content: {
-          text: 'created latest, occurred earliest',
+          text: 'B created at 03 occurred at 01',
         },
         conversation: {
           accountId: 'acct_1',
@@ -1285,8 +1285,8 @@ describe('assistant input event store', () => {
           threadId: 'chat_1',
           threadIsDirect: true,
         },
-        occurredAt: '2026-04-22T10:00:10.000Z',
-        receivedAt: '2026-04-22T10:00:10.000Z',
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        receivedAt: '2026-04-22T10:00:01.000Z',
         sourceRef: {
           captureId: 'mixed_b',
           kind: 'inbox-capture',
@@ -1297,10 +1297,10 @@ describe('assistant input event store', () => {
     })
     const third = await upsertAssistantInputEvent({
       vault: vaultRoot,
-      now: new Date('2026-04-22T10:00:50.000Z'),
+      now: new Date('2026-04-22T10:00:04.000Z'),
       event: {
         content: {
-          text: 'legacy cursor without createdAt',
+          text: 'L legacy cursor occurred at 02',
         },
         conversation: {
           accountId: 'acct_1',
@@ -1310,8 +1310,8 @@ describe('assistant input event store', () => {
           threadId: 'chat_1',
           threadIsDirect: true,
         },
-        occurredAt: '2026-04-22T10:00:15.000Z',
-        receivedAt: '2026-04-22T10:00:15.000Z',
+        occurredAt: '2026-04-22T10:00:02.000Z',
+        receivedAt: '2026-04-22T10:00:02.000Z',
         sourceRef: {
           captureId: 'mixed_c',
           kind: 'inbox-capture',
@@ -1346,8 +1346,8 @@ describe('assistant input event store', () => {
 
     expect(new Set(orderedInputIds).size).toBe(orderedInputIds.length)
     expect(orderedInputIds).toEqual([
-      third.inputId,
       first.inputId,
+      third.inputId,
       second.inputId,
     ])
 
