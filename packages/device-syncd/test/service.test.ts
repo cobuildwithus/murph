@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
-import { createDeviceSyncService } from "../src/service.ts";
+import {
+  createDeviceSyncService,
+  resolveDeviceSyncStoreNextWakeAt,
+} from "../src/service.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -3679,6 +3683,61 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
   close();
 });
 
+test("device sync store next wake reads scheduled reconciles and queued jobs without providers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-store-next-wake");
+  const stateDatabasePath = path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH);
+  const store = new SqliteDeviceSyncStore(stateDatabasePath);
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction Account",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+      },
+      connectedAt: "2026-03-17T09:00:00.000Z",
+      nextReconcileAt: "2026-03-17T12:00:00.000Z",
+    });
+
+    assert.equal(
+      resolveDeviceSyncStoreNextWakeAt({
+        vaultRoot,
+      }),
+      "2026-03-17T12:00:00.000Z",
+    );
+
+    store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-03-17T11:00:00.000Z",
+      kind: "retry",
+      payload: {},
+      priority: 10,
+      provider: account.provider,
+    });
+
+    assert.equal(
+      resolveDeviceSyncStoreNextWakeAt({
+        stateDatabasePath,
+        vaultRoot: "/unused-vault-root",
+      }),
+      "2026-03-17T11:00:00.000Z",
+    );
+
+    assert.equal(
+      resolveDeviceSyncStoreNextWakeAt({
+        stateDatabasePath,
+        vaultRoot: "/unused-vault-root",
+      }),
+      "2026-03-17T11:00:00.000Z",
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test("device sync service stops queued work when a provider failure requires reauthorization", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-retry");
   const { service, store, close } = createServiceFixture({
@@ -5048,7 +5107,6 @@ test("sqlite store splits connection, credential, and observation state into exp
     "created_at",
     "updated_at",
   ]);
-
   const credentialRow = readCredentialStateForTesting(store, created.id);
   assert.ok(credentialRow);
   assert.equal(credentialRow.credential_kind, "oauth_tokens");
