@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 
 interface DashboardOnboardingRecoveryResponse {
   redirectPath: string | null;
@@ -13,12 +17,17 @@ export function DashboardOnboardingRecoveryRedirect({
 }: {
   enabled: boolean;
 }) {
+  const { refresh } = useRouter();
+  const [failed, setFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+
   useEffect(() => {
     if (!enabled) {
       return;
     }
 
     let cancelled = false;
+    setFailed(false);
 
     async function recoverDashboardOnboarding() {
       try {
@@ -31,9 +40,24 @@ export function DashboardOnboardingRecoveryRedirect({
 
         if (!cancelled && response.redirectPath) {
           window.location.assign(response.redirectPath);
+          return;
         }
-      } catch {
-        // Active-access gates still own the visible error if recovery is unavailable.
+
+        if (!cancelled) {
+          refresh();
+        }
+      } catch (error) {
+        if (
+          error instanceof HostedOnboardingApiError
+          && error.code === "AUTH_REQUIRED"
+        ) {
+          window.location.assign("/");
+          return;
+        }
+
+        if (!cancelled) {
+          setFailed(true);
+        }
       }
     }
 
@@ -42,7 +66,25 @@ export function DashboardOnboardingRecoveryRedirect({
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, refresh, retryNonce]);
 
-  return null;
+  if (!enabled || !failed) {
+    return null;
+  }
+
+  return (
+    <div
+      className="rounded-md border border-border bg-background p-4 text-sm"
+      role="alert"
+    >
+      <p className="text-muted-foreground">Could not reopen checkout.</p>
+      <button
+        className="mt-3 rounded-md border border-border px-3 py-1.5 text-foreground"
+        onClick={() => setRetryNonce((value) => value + 1)}
+        type="button"
+      >
+        Try again
+      </button>
+    </div>
+  );
 }
