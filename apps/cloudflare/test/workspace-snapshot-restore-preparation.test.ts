@@ -63,7 +63,7 @@ describe("workspace snapshot restore preparation", () => {
       expect(getUrl.hostname).toBe("account123.r2.cloudflarestorage.com");
       expect(getUrl.pathname).toContain("/murph-test/");
       expect(getUrl.searchParams.get("X-Amz-Date")).toMatch(/^\d{8}T\d{6}Z$/u);
-      expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("300");
+      expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("3600");
 
       const decoded = decodeHostedWorkspaceSnapshotV2DataKey(
         prepared?.dataKey ?? "",
