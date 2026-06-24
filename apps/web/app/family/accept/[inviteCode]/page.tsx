@@ -121,7 +121,7 @@ function renderInvite(input: {
           <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
         ) : (
           <div className="flex flex-col gap-2">
-            <FamilyInviteSignInButton />
+            <FamilyInviteSignInButton bindingLabel={webBindingLabel} />
             <p className="text-xs leading-5 text-muted-foreground">
               {`Sign in with the ${webBindingLabel} this invite was sent to, and we'll bring you back here.`}
             </p>

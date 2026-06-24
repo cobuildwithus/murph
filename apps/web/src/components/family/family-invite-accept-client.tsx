@@ -60,7 +60,7 @@ export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
   );
 }
 
-export function FamilyInviteSignInButton() {
+export function FamilyInviteSignInButton(props: { bindingLabel: string }) {
   const [open, setOpen] = useState(false);
 
   function handleCompleted(_payload: HostedPrivyCompletionPayload) {
@@ -78,7 +78,7 @@ export function FamilyInviteSignInButton() {
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion
         title="Sign in to join Murph Family"
-        description="Use the same phone or account you want to use with Murph."
+        description={`Use the same ${props.bindingLabel} this invite was sent to.`}
       />
     </>
   );

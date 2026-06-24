@@ -5,12 +5,14 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedFamilyInviteAcceptanceView: vi.fn(),
+  signInButtonProps: null as { bindingLabel: string } | null,
   signInButtonRendered: false,
   webAcceptButtonProps: null as { inviteCode: string } | null,
 }));
 
 vi.mock("@/src/components/family/family-invite-accept-client", () => ({
-  FamilyInviteSignInButton() {
+  FamilyInviteSignInButton(props: { bindingLabel: string }) {
+    mocks.signInButtonProps = props;
     mocks.signInButtonRendered = true;
     return createElement("button", { "data-family-sign-in": "true" }, "Sign in to join");
   },
@@ -47,6 +49,7 @@ const EMAIL_BOUND_VIEW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.signInButtonProps = null;
   mocks.signInButtonRendered = false;
   mocks.webAcceptButtonProps = null;
   mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue(EMAIL_BOUND_VIEW);
@@ -57,6 +60,7 @@ test("renders the web sign-in path for unauthenticated email-bound invites", asy
   const markup = await renderFamilyAcceptPage();
 
   expect(mocks.signInButtonRendered).toBe(true);
+  expect(mocks.signInButtonProps).toEqual({ bindingLabel: "email address" });
   expect(markup).toContain("Sign in to join");
   expect(markup).toContain("Sign in with the email address this invite was sent to");
   expect(markup).not.toContain("Continue in Telegram");
