@@ -339,8 +339,16 @@ function clampCardText(
   return trimmed.slice(0, maxLength).trimEnd();
 }
 
+/**
+ * Round display numbers to the precision a reader actually wants: whole units
+ * for typical magnitudes (47 bpm, 117 minutes), one decimal for small values
+ * where the integer would lose meaningful resolution (1.7 kg). Two-decimal
+ * trailing digits in a headline card just read as noise.
+ */
 function formatCompactNumber(value: number): string {
-  return String(Math.round(value * 100) / 100);
+  const decimals = Math.abs(value) >= 10 ? 0 : 1;
+  const factor = 10 ** decimals;
+  return String(Math.round(value * factor) / factor);
 }
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DownloadIcon } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 
 import {
   HostedOnboardingApiError,
@@ -231,28 +231,20 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
-        <div className="flex items-center justify-between pb-4">
-          <div className="min-w-0">
-            <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-              Export vault
-            </span>
-            <p className="font-serif text-base tracking-tight text-foreground">
-              Download your data as JSON
-            </p>
-          </div>
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+          <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+          <span className="font-serif text-base tracking-tight text-foreground">
+            Export vault
+          </span>
           <Button disabled={exportPending || deletePending} onClick={openExportDialog} size="default" type="button" variant="ghost">
             {exportPending ? "Exporting..." : "Export"}
           </Button>
         </div>
-        <div className="flex items-center justify-between pt-4">
-          <div className="min-w-0">
-            <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-              Delete account
-            </span>
-            <p className="font-serif text-base tracking-tight text-foreground">
-              Permanently delete your account and all your data
-            </p>
-          </div>
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pt-4">
+          <Trash2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+          <span className="font-serif text-base tracking-tight text-foreground">
+            Delete account
+          </span>
           <Button disabled={deletePending} onClick={openDialog} size="default" type="button" variant="destructive">
             Delete
           </Button>
@@ -291,7 +283,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
           </div>
           <div className="flex flex-col gap-2">
             <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
-              <DownloadIcon data-icon="inline-start" />
+              <Download data-icon="inline-start" />
               {exportPending ? "Preparing..." : "Download vault JSON"}
             </Button>
             <Button type="button" size="xl" variant="ghost" onClick={closeExportDialog} disabled={exportPending} className="w-full">
