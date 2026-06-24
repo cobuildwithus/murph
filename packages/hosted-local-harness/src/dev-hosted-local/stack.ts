@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -809,6 +809,19 @@ export async function startHostedLocalDevStack(input: {
       });
     if (webProcess) {
       children.push(webProcess);
+    }
+    throwIfAbortSignalAborted(input.abortSignal);
+
+    const tlsProxyProcess = config.skipWeb
+      ? null
+      : maybeStartTlsProxy({
+        pipeOutput: input.pipeOutput,
+        runtimeEnv,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+    if (tlsProxyProcess) {
+      children.push(tlsProxyProcess);
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
@@ -2263,6 +2276,41 @@ function writeRunnerContainerSmokeWarning(
       `[setup] deploy-smoke failure: ${redactHostedLocalDiagnosticText(detail)}\n`,
     ].join(""),
   );
+}
+
+function maybeStartTlsProxy(input: {
+  pipeOutput?: boolean;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget?: NodeJS.WritableStream;
+  stdoutTarget?: NodeJS.WritableStream;
+}): BufferedNamedChildProcess | null {
+  if (input.runtimeEnv.MURPH_DEV_SKIP_TLS_PROXY === "1") {
+    return null;
+  }
+
+  const caddyfilePath = path.join(repoRoot, "Caddyfile");
+  if (!existsSync(caddyfilePath)) {
+    return null;
+  }
+
+  try {
+    execFileSync("which", ["caddy"], { stdio: "ignore" });
+  } catch {
+    (input.stderrTarget ?? process.stderr).write(
+      "[tls-proxy] Caddyfile found but `caddy` is not on PATH; skipping local HTTPS proxy. Install with `brew install caddy` to enable.\n",
+    );
+    return null;
+  }
+
+  return spawnChildProcess("tls-proxy", "caddy", [
+    "run",
+    "--config",
+    caddyfilePath,
+  ], input.runtimeEnv, {
+    pipeOutput: input.pipeOutput,
+    stderrTarget: input.stderrTarget,
+    stdoutTarget: input.stdoutTarget,
+  });
 }
 
 async function maybeStartStripeWebhookListener(input: {

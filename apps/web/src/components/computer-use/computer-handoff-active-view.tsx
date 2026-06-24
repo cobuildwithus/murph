@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowUpRight, CheckCircle2, Monitor } from "lucide-react";
+import { track } from "@vercel/analytics";
+import { ArrowUpRight, CheckCircle2, Keyboard, Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
@@ -25,13 +26,40 @@ export function ComputerHandoffActiveView({
   liveViewUrl,
 }: ComputerHandoffActiveViewProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const successAnchorRef = useRef<HTMLAnchorElement>(null);
+  const phaseRef = useRef(phase);
+  const terminalRef = useRef(false);
+  const focusReportedRef = useRef(false);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     if (phase.kind === "done") {
       successAnchorRef.current?.focus();
     }
   }, [phase.kind]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (terminalRef.current) return;
+      if (phaseRef.current.kind !== "idle") return;
+      terminalRef.current = true;
+      track("handoff_abandoned");
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
+  const onEnableFocus = () => {
+    iframeRef.current?.focus({ preventScroll: true });
+    if (!focusReportedRef.current) {
+      focusReportedRef.current = true;
+      track("live_view_focus_enabled");
+    }
+  };
 
   const onDone = async () => {
     setPhase({ kind: "saving" });
@@ -50,6 +78,8 @@ export function ComputerHandoffActiveView({
         setPhase({ kind: "idle", error: "Could not complete. Try again." });
         return;
       }
+      terminalRef.current = true;
+      track("handoff_completed");
       setPhase({ kind: "done", redirectTo: data.redirectTo });
       window.location.href = data.redirectTo;
     } catch {
@@ -62,6 +92,7 @@ export function ComputerHandoffActiveView({
   return (
     <>
       <iframe
+        ref={iframeRef}
         allow={iframeAllow}
         className="block h-dvh w-full border-0 bg-foreground"
         referrerPolicy="no-referrer"
@@ -80,22 +111,39 @@ export function ComputerHandoffActiveView({
             </span>
           }
         >
-          <div className="flex items-center gap-2">
-            {idleError ? (
-              <span role="alert" className="text-xs text-destructive">
-                {idleError}
-              </span>
-            ) : null}
-            <Button
-              type="button"
-              size="lg"
-              onClick={onDone}
-              disabled={phase.kind !== "idle"}
-              aria-label="Mark this done and reply to Murph"
-            >
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              Done
-            </Button>
+          <div className="flex max-w-[calc(100vw-6rem)] flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {idleError ? (
+                <span role="alert" className="text-xs text-destructive">
+                  {idleError}
+                </span>
+              ) : null}
+              <Button
+                type="button"
+                size="lg"
+                onClick={onDone}
+                disabled={phase.kind !== "idle"}
+                aria-label="Mark this done and reply to Murph"
+              >
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                Done
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                onClick={onEnableFocus}
+                disabled={phase.kind !== "idle"}
+                aria-label="Focus the private page so the keyboard and paste work"
+              >
+                <Keyboard className="h-4 w-4" aria-hidden="true" />
+                Keyboard<span className="hidden sm:inline"> / Paste</span>
+              </Button>
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Copy your password, tap Keyboard / Paste, then paste with the
+              keyboard icon inside the page.
+            </p>
           </div>
         </ComputerHandoffFloatingIsland>
       </div>

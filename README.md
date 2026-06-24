@@ -273,6 +273,20 @@ pnpm verify:acceptance
 - The Cloudflare deployment path is documented in [`apps/cloudflare/DEPLOY.md`](apps/cloudflare/DEPLOY.md).
 - Package-local operational details live in each package `README.md`.
 
+### Optional: local HTTPS dev (passkey, Telegram bot domain)
+
+Some flows need a real hostname over HTTPS — WebAuthn refuses `127.0.0.1`, and Telegram's `/setdomain` refuses `localhost`. The repo ships a [`Caddyfile`](Caddyfile) that terminates TLS for `local.withmurph.ai:3443` and forwards to the regular dev server on `http://127.0.0.1:3000`. `pnpm dev` auto-spawns it when both `caddy` is on PATH and the Caddyfile exists; otherwise it's skipped silently.
+
+One-time setup:
+
+```bash
+echo "127.0.0.1 local.withmurph.ai" | sudo tee -a /etc/hosts
+brew install caddy nss
+sudo caddy trust
+```
+
+Then `pnpm dev` runs as usual and the browser-facing URL becomes `https://local.withmurph.ai:3443`. Add that origin to the Privy dashboard allowlist and set the Telegram bot's `/setdomain` to `local.withmurph.ai` (Telegram ignores the port). Internal harness callers keep using `http://127.0.0.1:3000`. Set `MURPH_DEV_SKIP_TLS_PROXY=1` to opt out.
+
 ## License
 
 Murph is licensed under Apache-2.0. The published `@murphai/*` packages now carry Apache 2.0 metadata and include a copy of the license text in their package contents. See [`LICENSE`](LICENSE) for the full terms.

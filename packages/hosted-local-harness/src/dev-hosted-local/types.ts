@@ -43,6 +43,7 @@ export type HostedLocalChildProcessName =
   | "stripe"
   | "temporal-server"
   | "temporal-worker"
+  | "tls-proxy"
   | "web";
 
 export interface HostedExecutionOidcIdentity {
