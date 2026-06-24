@@ -354,6 +354,7 @@ model HostedMember {
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   productFeedback                HostedProductFeedback[]
+  sensitiveActionChallenges      HostedSensitiveActionChallenge[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -403,6 +404,20 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedSensitiveActionChallenge {
+  tokenHash   String       @id @map("token_hash")
+  memberId    String       @map("member_id")
+  kind        String
+  bindingHash String       @map("binding_hash")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  expiresAt   DateTime     @map("expires_at")
+  member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_sensitive_action_challenge")
 }
 
 model HostedConnectedAppsSession {

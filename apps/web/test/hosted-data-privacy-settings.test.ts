@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
       "data-hosted-settings-session-state": "true",
     }),
   ),
+  authorize: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
@@ -48,6 +49,10 @@ vi.mock("react", async () => {
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
+  useSensitiveActionAuthorization: () => ({ authorize: mocks.authorize }),
 }));
 
 vi.mock("@/src/lib/browser-vault/loader", () => ({
@@ -108,10 +113,17 @@ let cleanupRender: (() => Promise<void> | void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.authorize.mockResolvedValue({
+    signature: `0x${"11".repeat(65)}`,
+    token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+  });
   mocks.loadBrowserVaultReplica.mockResolvedValue({
     client: {
       replica: createBrowserVaultReplicaForTest(),
     },
+    deviceSyncImportPending: false,
+    freshness: "fresh",
+    refreshPending: false,
     replicaRef: {
       dataVersion: "d".repeat(64),
     },
@@ -182,6 +194,7 @@ describe("HostedDataPrivacySettings", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
+    expect(mocks.authorize).not.toHaveBeenCalled();
     expect(mocks.loadBrowserVaultReplica).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
@@ -228,7 +241,12 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Download vault JSON", window);
 
+    expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
       emptyOnUnauthorized: false,
       endpoint: "/api/settings/vault-export/session",
       knownReplicaRef: null,
@@ -239,6 +257,60 @@ describe("HostedDataPrivacySettings", () => {
     assert.equal(downloadedBlobs.length, 1);
     await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"schema\": \"murph.browser-vault-replica\"");
     await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"entity-title\"");
+  });
+
+  test("does not download the vault when the replica is stale or a refresh is still pending", async () => {
+    mockHostedVaultExportFlowState();
+    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
+      client: {
+        replica: createBrowserVaultReplicaForTest(),
+      },
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+      replicaRef: {
+        dataVersion: "d".repeat(64),
+      },
+      state: "ready",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const createObjectURL = vi.fn(() => "blob:vault-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window, "URL", {
+      configurable: true,
+      value: {
+        createObjectURL,
+        revokeObjectURL,
+      },
+    });
+    const clickDownloadLink = vi.fn();
+    Object.defineProperty(window.HTMLElement.prototype, "click", {
+      configurable: true,
+      value: clickDownloadLink,
+    });
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Download vault JSON", window);
+
+    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(clickDownloadLink).not.toHaveBeenCalled();
   });
 
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {
@@ -264,9 +336,14 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Delete account", window);
 
+    expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
         confirmationPhrase: "DELETE MY ACCOUNT",
       },
       url: "/api/settings/privacy/delete",

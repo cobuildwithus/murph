@@ -8,6 +8,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
+import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
@@ -54,7 +55,19 @@ const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
-export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
+export function HostedDataPrivacySettings(props: {
+  authenticated: boolean;
+  authorizationEnabled?: boolean;
+}) {
+  if (props.authorizationEnabled === false) {
+    return <HostedDataPrivacyUnavailable authenticated={props.authenticated} />;
+  }
+
+  return <HostedDataPrivacySettingsAuthorized authenticated={props.authenticated} />;
+}
+
+function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) {
+  const { authorize } = useSensitiveActionAuthorization();
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
@@ -109,7 +122,9 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     setExportSuccess(null);
 
     try {
+      const authorization = await authorize("vault.export");
       const result = await loadBrowserVaultReplica({
+        authorization,
         emptyOnUnauthorized: false,
         endpoint: "/api/settings/vault-export/session",
         knownReplicaRef: null,
@@ -117,6 +132,16 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
 
       if (result.state !== "ready") {
         throw new Error("Your vault is not ready to export yet.");
+      }
+
+      if (
+        result.freshness !== "fresh"
+        || result.refreshPending
+        || result.deviceSyncImportPending
+      ) {
+        throw new Error(
+          "Your vault is still being prepared. Try the export again in a moment.",
+        );
       }
 
       const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
@@ -145,9 +170,10 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     setDialogError(null);
 
     try {
+      const authorization = await authorize("account.delete");
       const response = await requestHostedOnboardingJson<HostedAccountDeleteResponse>({
         method: "POST",
-        payload: { confirmationPhrase },
+        payload: { authorization, confirmationPhrase },
         url: "/api/settings/privacy/delete",
       });
       setCleanupPending(hasIncompleteCleanup(response.result));
@@ -262,7 +288,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
               Export your vault
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads your account, messaging, wearable, and usage records as JSON.
+              Downloads your current dashboard data as a JSON file.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
@@ -346,6 +372,40 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   );
 }
 
+function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
+  if (!props.authenticated) {
+    return (
+      <HostedSettingsSessionState
+        authenticated={false}
+        signedOutDescription="Sign in to export your data or delete your account."
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Alert role="status">
+        <AlertTitle>Secure approval unavailable</AlertTitle>
+        <AlertDescription>
+          Passkey-protected vault export and account deletion are temporarily unavailable.
+        </AlertDescription>
+      </Alert>
+      <div className="divide-y divide-[rgba(196,168,130,0.25)]">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+          <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+          <span className="font-serif text-base tracking-tight text-muted-foreground">Export vault</span>
+          <Button disabled size="default" type="button" variant="ghost">Export</Button>
+        </div>
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pt-4">
+          <Trash2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+          <span className="font-serif text-base tracking-tight text-muted-foreground">Delete account</span>
+          <Button disabled size="default" type="button" variant="destructive">Delete</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function hasIncompleteCleanup(result: HostedAccountDeleteResponse["result"]): boolean {
   const vendorStatuses = [
     result.vendorAccounts.privyUser.status,
@@ -370,6 +430,10 @@ function formatVaultExportError(error: unknown): string {
 
   if (error.message === "Your vault is not ready to export yet.") {
     return error.message;
+  }
+
+  if (/BROWSER_VAULT_SESSION_NOT_FRESH/u.test(error.message)) {
+    return "Your vault is still being prepared. Try the export again in a moment.";
   }
 
   if (/HTTP 401/u.test(error.message)) {
