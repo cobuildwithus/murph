@@ -468,6 +468,57 @@ test('linq runtime preserves exact underscore-delimited message text', async () 
   })
 })
 
+test('linq runtime accepts punctuation inside text decoration spans', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{
+    body?: string | Blob
+    method: string
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    seenRequests.push({
+      body: init.body,
+      method: init.method,
+      url,
+    })
+
+    return createJsonResponse({
+      message: {
+        id: 'message-1',
+      },
+    })
+  })
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message: 'Scheduled time: **8:30 a.m. America/New_York**.',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(seenRequests.length, 1)
+  assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
+    message: {
+      parts: [
+        {
+          text_decorations: [
+            {
+              range: [16, 42],
+              style: 'bold',
+            },
+          ],
+          type: 'text',
+          value: 'Scheduled time: 8:30 a.m. America/New_York.',
+        },
+      ],
+    },
+  })
+})
+
 test('linq runtime creates, uploads, and sends voice memo attachments without replay keys', async () => {
   const env = {
     LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',

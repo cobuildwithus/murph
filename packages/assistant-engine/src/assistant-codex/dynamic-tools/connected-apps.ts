@@ -21,6 +21,16 @@ import {
 
 const CONNECTED_APPS_RESULT_MAX_BYTES = 120_000
 
+// Composio tool results commonly include raw HTML email bodies (Gmail
+// FETCH_MESSAGE_BY_MESSAGE_ID) and similar markup-heavy payloads. The model
+// processes plain text just as well and pays per token for every markup
+// character, so strip HTML to text before serializing. Only strings that look
+// HTML-shaped get touched; everything else (descriptions, slugs, schemas)
+// passes through unchanged.
+const CONNECTED_APPS_HTML_MIN_LENGTH = 200
+const CONNECTED_APPS_HTML_TAG_SENTINEL =
+  /<(?:!doctype|html|body|head|table|div|p|span|br|a\s|img|h[1-6]|td|tr|style|script)\b/iu
+
 export const MURPH_CONNECTED_APPS_MANAGE_TOOL = {
   namespace: 'murph',
   name: 'connected_apps_manage',
@@ -173,7 +183,8 @@ export async function executeConnectedAppsDynamicTool(input: {
     const response = await input.connectedApps.request(requestBody, {
       signal: input.abortSignal ?? null,
     })
-    const text = serializeConnectedAppsResult(response.result)
+    const compacted = compactConnectedAppsResult(response.result)
+    const text = serializeConnectedAppsResult(compacted)
     if (!text) {
       return connectedAppsTextResult(
         false,
@@ -209,6 +220,76 @@ function serializeConnectedAppsResult(value: unknown): string | null {
   } catch {
     return null
   }
+}
+
+// Walks the provider result and replaces any HTML-shaped string with its
+// stripped plain-text equivalent. Non-string values, short strings, and
+// strings without HTML tag markers pass through untouched, so this only
+// affects payloads that would otherwise burn tokens on markup (chiefly Gmail
+// message bodies). Exported for the unit test.
+export function compactConnectedAppsResult(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length < CONNECTED_APPS_HTML_MIN_LENGTH) return value
+    if (!CONNECTED_APPS_HTML_TAG_SENTINEL.test(value)) return value
+    return stripHtmlForConnectedAppsResult(value)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => compactConnectedAppsResult(item))
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = compactConnectedAppsResult(v)
+    }
+    return out
+  }
+  return value
+}
+
+function stripHtmlForConnectedAppsResult(value: string): string {
+  return value
+    // Drop noise: style/script/head blocks carry no model-useful signal and
+    // they account for most of the markup volume in Gmail HTML envelopes.
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, ' ')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/giu, ' ')
+    // Preserve the most semantically important attributes: a hyperlink's
+    // href (tracking links, order URLs, calendar invites, unsubscribe) and
+    // an image's alt text. Both get folded into the surrounding text so the
+    // model sees the destination/label even though the tag is gone.
+    .replace(
+      /<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/giu,
+      (_match, href: string, label: string) => {
+        const trimmed = label.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim()
+        return trimmed && trimmed !== href ? `${trimmed} (${href})` : href
+      },
+    )
+    .replace(
+      /<img\b[^>]*\balt\s*=\s*['"]([^'"]+)['"][^>]*>/giu,
+      (_match, alt: string) => `[image: ${alt}]`,
+    )
+    // Block-level breaks become real newlines so flowing prose survives.
+    .replace(/<br\s*\/?>/giu, '\n')
+    .replace(/<\/(?:p|div|li|tr|h[1-6])>/giu, '\n')
+    // Every remaining tag goes; we've already pulled out the bits that
+    // carried information beyond their text content.
+    .replace(/<[^>]+>/gu, ' ')
+    .replace(/&nbsp;/giu, ' ')
+    .replace(/&amp;/giu, '&')
+    .replace(/&lt;/giu, '<')
+    .replace(/&gt;/giu, '>')
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;/giu, "'")
+    .replace(/&#(\d+);/gu, (_match, code: string) => {
+      const num = Number(code)
+      return Number.isInteger(num) && num >= 32 && num <= 0x10ffff
+        ? String.fromCodePoint(num)
+        : ' '
+    })
+    .replace(/\s+\n/gu, '\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .replace(/[ \t]{2,}/gu, ' ')
+    .trim()
 }
 
 function connectedAppsTextResult(success: boolean, text: string) {

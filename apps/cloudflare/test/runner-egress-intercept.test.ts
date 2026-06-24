@@ -1400,6 +1400,53 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("denies a second deploy-smoke OpenAI request after the live model turn fence is consumed", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn()
+      .mockResolvedValueOnce({
+        active: true,
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+      })
+      .mockResolvedValueOnce({ active: false });
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const firstResponse = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    const secondResponse = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects deploy-smoke Responses WebSocket egress because the model is not handshake-visible", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
