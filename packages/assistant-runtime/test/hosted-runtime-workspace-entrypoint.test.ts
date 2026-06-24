@@ -10121,10 +10121,13 @@ async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void
 
 describe("hosted runtime shutdown signal", () => {
   test("an already-signalled shutdown checkpoints immediately instead of waiting out the idle window", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const shutdownController = new AbortController();
+    const retryWakeAt = "2026-04-15T00:05:00.000Z";
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -10180,8 +10183,11 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, retryWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, retryWakeAt);
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   }, 30_000);
@@ -10540,7 +10546,9 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.ok(checkpointRequests[0]?.inboxMediaRetentionWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, checkpointRequests[0]?.inboxMediaRetentionWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }

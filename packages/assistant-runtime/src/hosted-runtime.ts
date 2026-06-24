@@ -1584,10 +1584,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
               }
             : null,
-          retryInboxMediaRetentionOnShutdown: isHostedInboxMediaRetentionWakeDue({
-            nowMs: Date.now(),
-            workspace: workspaceRead.workspace,
-          }) || committedInboxMediaRetentionWakeDue,
           resolveAssistantSessionId: (codexThreadId) =>
             findAssistantSessionIdByCodexThreadId(restored.vaultRoot, codexThreadId),
           shutdownSignal: options.shutdownSignal ?? null,
@@ -2089,10 +2085,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     pendingWork: false,
     providerName: null,
     recordUsage: null,
-    retryInboxMediaRetentionOnShutdown: isHostedInboxMediaRetentionWakeDue({
-      nowMs: Date.now(),
-      workspace: input.workspace,
-    }),
     resolveAssistantSessionId: null,
     shutdownSignal: input.shutdownSignal,
     vaultRoot: input.vaultRoot,

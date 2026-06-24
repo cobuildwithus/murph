@@ -181,6 +181,22 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     if (activeFence.processingMode !== requestedProcessingMode) {
+      const activeRuntimePresent =
+        await this.readActiveRuntimeFenceWithoutWake({
+          activeFence,
+          commandBudget: input.commandBudget,
+          record,
+        });
+      if (activeRuntimePresent === false) {
+        return await this.replaceStartRequiredRuntimeFence({
+          activeFence,
+          commandBudget: input.commandBudget,
+          input: input.input,
+          record,
+          runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+        });
+      }
+
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_busy",
