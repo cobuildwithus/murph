@@ -46,6 +46,7 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
 import BiomarkersPage, {

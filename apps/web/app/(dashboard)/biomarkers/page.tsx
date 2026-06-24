@@ -7,7 +7,7 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import {
@@ -22,6 +22,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function BiomarkersPage() {
+  const auth = await getHostedDashboardPageAuthSnapshot();
   const index = getGeneratedHealthCommonsWebBiomarkerIndex();
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
     .filter((entry) => entry.published && !entry.hidden)
@@ -37,7 +38,6 @@ export default async function BiomarkersPage() {
     }))
     .sort((a, b) => a.title.localeCompare(b.title));
 
-  const auth = await getHostedPageAuthSnapshot();
   const showDeviceStep = await shouldShowHomeDeviceSyncStep({
     member: auth.authenticatedMember,
   });

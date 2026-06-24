@@ -389,6 +389,10 @@ The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
 reply when direct takeover is needed, or finish without reply when no additional
 user-visible message is useful.
+If the user asks to see the current paused browser screen without taking over,
+call `computer_pause_for_user` with `handoffPurpose: "screen_inspection"` to
+create or refresh the handoff URL. Do not restart the browser task just to get a
+screen link.
 
 A handoff with `handoffPurpose: "managed_login"` opens Kernel's secure
 hosted login flow. Every other handoff purpose opens a live view of the

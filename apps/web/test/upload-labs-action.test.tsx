@@ -72,6 +72,7 @@ vi.mock("@/src/components/ui/auth-button", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({

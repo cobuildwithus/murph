@@ -760,6 +760,11 @@ function createStore(input: {
       }
     : null;
   return {
+    attachAwaitingRunHandoff: vi.fn(async (attachInput) => ({
+      ...input.run,
+      pausedAt: attachInput.now,
+      pendingHandoffId: attachInput.newPendingHandoffId,
+    })),
     async attachRunBrowser() {
       throw new Error("attachRunBrowser should not be called.");
     },
