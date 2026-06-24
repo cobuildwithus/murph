@@ -20,7 +20,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
   AssistantChannelDependencies,
-  'sendTelegram' | 'sendLinq' | 'sendLinqVoiceMemo' | 'sendEmail' | 'signal'
+  'sendTelegram' | 'sendTelegramImage' | 'sendLinq' | 'sendLinqVoiceMemo' | 'sendEmail' | 'signal'
 >
 
 export interface AssistantHostedDeviceConnectLink {
@@ -266,6 +266,9 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
   if (typeof input.sendTelegram === 'function') {
     dependencies.sendTelegram = input.sendTelegram
   }
+  if (typeof input.sendTelegramImage === 'function') {
+    dependencies.sendTelegramImage = input.sendTelegramImage
+  }
   if (typeof input.sendLinq === 'function') {
     dependencies.sendLinq = input.sendLinq
   }
@@ -279,6 +282,7 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
     input.signal &&
     (
       dependencies.sendTelegram ||
+      dependencies.sendTelegramImage ||
       dependencies.sendLinq ||
       dependencies.sendLinqVoiceMemo ||
       dependencies.sendEmail
@@ -289,6 +293,7 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
 
   return (
     dependencies.sendTelegram ||
+    dependencies.sendTelegramImage ||
     dependencies.sendLinq ||
     dependencies.sendLinqVoiceMemo ||
     dependencies.sendEmail

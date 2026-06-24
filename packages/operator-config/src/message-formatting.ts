@@ -2,6 +2,7 @@ export type MessageTextDecorationStyle =
   | 'bold'
   | 'italic'
   | 'strikethrough'
+  | 'underline'
 
 export interface MessageTextDecoration {
   range: [number, number]
@@ -22,10 +23,13 @@ type OpenMarkdownDecoration = MarkdownDecorationToken & {
   content: string
 }
 
+// Keep longer markers before their prefixes so `**bold**` is not read as `*italic*`.
 const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
   { marker: '**', style: 'bold' },
   { marker: '~~', style: 'strikethrough' },
+  { marker: '++', style: 'underline' },
   { marker: '_', style: 'italic' },
+  { marker: '*', style: 'italic' },
 ]
 
 export function renderMarkdownMessageText(value: string): DecoratedMessageText {

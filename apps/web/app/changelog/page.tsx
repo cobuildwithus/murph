@@ -35,6 +35,55 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "passkey-mfa-setup": (
+    <ChecklistMock
+      label="Security"
+      items={[
+        { label: "Passkey enrolled", done: true },
+        { label: "Face ID or Touch ID", done: true },
+        { label: "Required at sign-in", done: true },
+      ]}
+    />
+  ),
+  "handoff-viewport-match": (
+    <StatBlock
+      label="Handoff browser"
+      before="Desktop"
+      after="Phone-shaped"
+      caption="from the first frame"
+    />
+  ),
+  "handoff-mobile-takeover-overlay": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Paused at checkout — tap Take over to confirm and pay.",
+        },
+      ]}
+    />
+  ),
+  "os-control-typing-delay-removed": (
+    <StatBlock
+      label="Browser typing"
+      before="Per-key pause"
+      after="Snappy"
+      caption="OS-control delay removed"
+    />
+  ),
+  "auto-reply-cross-session-context": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Pick up where we left off last night?" },
+        {
+          from: "murph",
+          body: "Yeah — you wanted the protein floor at 140g and to retry the early lift. Still good?",
+        },
+      ]}
+    />
+  ),
   "native-message-formatting": (
     <PhoneMock
       channel="iMessage"

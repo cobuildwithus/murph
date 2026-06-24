@@ -23,6 +23,7 @@ import { inferAssistantBindingDelivery } from '../src/assistant/channels/registr
 import type { AssistantChannelActivityHandle } from '../src/assistant/channels/types.ts'
 
 const FIXED_NOW = new Date('2026-04-08T12:34:56.000Z')
+type ImageMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
 type VoiceMemoMedia = Extract<AssistantResponseMedia, { kind: 'voice_memo' }>
 
 beforeEach(() => {
@@ -763,6 +764,71 @@ describe('channel helper seams', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+    })
+  })
+
+  it('routes Telegram image media through the dedicated image sender', async () => {
+    const sendTelegram = vi.fn()
+    const sendTelegramImage = vi.fn().mockResolvedValue({
+      cleanupMessages: [
+        { messageId: '  telegram-photo-1  ', target: '  telegram-chat  ' },
+      ],
+      providerMessageId: '  telegram-photo-1  ',
+      target: '  telegram-chat  ',
+      targetKind: 'thread',
+    })
+    const media: ImageMedia[] = [
+      {
+        alt: 'Example image',
+        kind: 'image',
+        source: 'test',
+        url: 'https://cdn.example.test/example.png',
+      },
+    ]
+
+    expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
+        media,
+        message: 'Here is the image.',
+      }),
+    ).toBe(false)
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: '  telegram-image-key  ',
+        identityId: null,
+        media,
+        message: 'Here is the image.',
+        replyToMessageId: '  reply-photo  ',
+      },
+      {
+        sendTelegram,
+        sendTelegramImage,
+      },
+    )
+
+    expect(sendTelegram).not.toHaveBeenCalled()
+    expect(sendTelegramImage).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-image-key',
+      media,
+      message: 'Here is the image.',
+      replyToMessageId: 'reply-photo',
+      target: 'telegram-chat',
+    })
+    expect(delivery).toMatchObject({
+      channel: 'telegram',
+      cleanupMessages: [
+        { messageId: 'telegram-photo-1', target: 'telegram-chat' },
+      ],
+      idempotencyKey: 'telegram-image-key',
+      messageLength: 18,
+      providerMessageId: 'telegram-photo-1',
+      providerThreadId: null,
+      target: 'telegram-chat',
+      targetKind: 'thread',
     })
   })
 
