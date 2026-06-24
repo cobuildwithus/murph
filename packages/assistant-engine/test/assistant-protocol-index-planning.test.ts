@@ -330,6 +330,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           progressUpdatesAvailable: false,
+          voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -371,6 +372,7 @@ describe('assistant protocol index planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: true,
           progressUpdatesAvailable: false,
+          voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -397,6 +399,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: true,
+          voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -424,6 +427,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: linqSmsReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
+          voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -449,6 +453,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
+          voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -470,6 +475,7 @@ describe('assistant protocol index planning', () => {
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           allowMessageReactions: false,
+          voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -525,6 +531,7 @@ describe('assistant protocol index planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           computerToolsAvailable: true,
           progressUpdatesAvailable: false,
+          voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),

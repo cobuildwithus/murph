@@ -663,7 +663,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     ["non-object versions", []],
     ["extra malformed entry", {
       "consumer-health-data-notice": "2026-04-29",
-      "privacy-policy": "2026-04-29",
+      "privacy-policy": "2026-06-24",
       "terms-of-service": "2026-04-29",
       extra: 123,
     }],
@@ -846,7 +846,7 @@ function createWhatsAppPrismaHarness(input: {
         ? {
             documentVersionsJson: input.consentDocumentVersionsJson ?? {
               "consumer-health-data-notice": "2026-04-29",
-              "privacy-policy": "2026-04-29",
+              "privacy-policy": "2026-06-24",
               "terms-of-service": "2026-04-29",
             },
             grantedAt: now,

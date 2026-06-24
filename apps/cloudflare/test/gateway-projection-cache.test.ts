@@ -245,6 +245,110 @@ describe("HostedGatewayProjectionCache", () => {
     expect(permissions).toHaveLength(0);
   });
 
+  it("accepts newer snapshots when generatedAt offsets sort lexically older", async () => {
+    const store = createCache();
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-08T00:30:00+01:00",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        title: "Thread",
+        titleSource: "thread-title",
+        lastMessagePreview: "offset older",
+        lastActivityAt: "2026-04-08T00:30:00+01:00",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          channel: "email",
+          identityId: "identity-1",
+          participantId: "participant-1",
+          threadId: "thread-1",
+          directness: "direct",
+          reply: {
+            kind: "thread",
+            target: "thread-1",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-offset-older",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-08T00:30:00+01:00",
+        actorDisplayName: "Alex",
+        text: "offset older",
+        attachments: [],
+      }],
+      permissions: [],
+    });
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-08T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        title: "Thread",
+        titleSource: "thread-title",
+        lastMessagePreview: "utc newer",
+        lastActivityAt: "2026-04-08T00:00:00.000Z",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          channel: "email",
+          identityId: "identity-1",
+          participantId: "participant-1",
+          threadId: "thread-1",
+          directness: "direct",
+          reply: {
+            kind: "thread",
+            target: "thread-1",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-utc-newer",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        actorDisplayName: "Alex",
+        text: "utc newer",
+        attachments: [],
+      }],
+      permissions: [],
+    });
+
+    const conversation = await store.getConversation({
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+    });
+    const messages = await store.readMessages({
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+      oldestFirst: true,
+      limit: 10,
+    });
+
+    expect(conversation?.lastMessagePreview).toBe("utc newer");
+    expect(messages.messages.map((message) => message.messageId)).toEqual([
+      "message-utc-newer",
+    ]);
+  });
+
+  it("rejects offset-less snapshot timestamps at the cache boundary", async () => {
+    const store = createCache();
+
+    await expect(store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-08T00:00:00.000",
+      conversations: [],
+      messages: [],
+      permissions: [],
+    })).rejects.toThrow(/explicit offset/u);
+  });
+
   it("keeps operator permission decisions applied across later runtime snapshots", async () => {
     const store = createCache();
 
@@ -527,6 +631,23 @@ describe("gateway permission overrides", () => {
     expect(merged?.permissions[0]).toEqual(permission);
   });
 
+  it("advances snapshot freshness by instant when override offsets sort lexically older", () => {
+    const permission = createGatewayPermissionOverrideTestPermission({
+      resolvedAt: "2026-04-06T00:00:00.000Z",
+    });
+    const snapshot = createGatewayPermissionOverrideTestSnapshot(permission, {
+      generatedAt: "2026-04-06T00:30:00+01:00",
+    });
+
+    const merged = mergeGatewayPermissionOverrides(snapshot, [
+      createGatewayPermissionOverrideTestOverride(permission),
+    ]);
+
+    expect(merged).not.toBe(snapshot);
+    expect(merged?.generatedAt).toBe("2026-04-06T00:00:00.000Z");
+    expect(merged?.permissions[0]).toEqual(permission);
+  });
+
   it("sorts overrides and normalizes blank notes", () => {
     const parsed = readGatewayPermissionOverrides([
       {
@@ -564,6 +685,17 @@ describe("gateway permission overrides", () => {
         parsed[1]!,
       ]),
     ).toBe(false);
+  });
+
+  it("rejects offset-less permission override timestamps", () => {
+    expect(() => readGatewayPermissionOverrides([
+      {
+        note: null,
+        requestId: "request-a",
+        resolvedAt: "2026-04-06T00:10:00.000",
+        status: "approved",
+      },
+    ])).toThrow("gateway projection cache state is invalid.");
   });
 
   it("fails closed on malformed cache-state input with the renamed error text", () => {

@@ -165,18 +165,11 @@ function createHostedVoiceMemoMedia(
   return {
     filename: "memo.mp3",
     kind: "voice_memo",
-    mimeType: "audio/mpeg",
-    modelId: "eleven_multilingual_v2",
-    sizeBytes: 128,
-    source: "elevenlabs",
-    transcript: "Short memo",
-    transportRefs: {
-      linq: {
-        attachmentId: "attachment_voice_1",
-      },
+    transcript: null,
+    transport: {
+      attachmentId: "attachment_voice_1",
+      kind: "linq_attachment",
     },
-    url: null,
-    voiceId: "voice_murph",
     ...overrides,
   };
 }
@@ -849,6 +842,65 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects[0]?.effectId).toBe("intent_fresh");
     expect(sideEffects[0]?.deliveryPhase).toBe("background_retry");
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
+  });
+
+  it("orders background delivery candidates by instant when createdAt offsets differ", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_later",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_later",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_222222222222222222222222",
+        identityId: "identity_1",
+        intentId: "intent_later",
+        lastError: null,
+        message: "later instant",
+        nextAttemptAt: "2026-04-08T00:00:00.000Z",
+        replyToMessageId: "later-message",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_2",
+        threadIsDirect: true,
+        turnId: "turn_later",
+      },
+      {
+        actorId: "actor_earlier",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:30:00+01:00",
+        dedupeKey: "dedupe_earlier",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_111111111111111111111111",
+        identityId: "identity_1",
+        intentId: "intent_earlier",
+        lastError: null,
+        message: "earlier instant",
+        nextAttemptAt: "2026-04-08T00:30:00+01:00",
+        replyToMessageId: "earlier-message",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_earlier",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_earlier");
+    expect(sideEffects[0]?.payload.message).toBe("earlier instant");
   });
 
   it("uses all preferred current-turn deliveries before older due backlog", async () => {
@@ -2152,6 +2204,48 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(wakeAt).toBe("2026-04-08T00:10:01.000Z");
+    vi.useRealTimers();
+  });
+
+  it("preserves overdue retryable next attempts as stable wakes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:01:30.000Z"));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_linq",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_linq",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_linq",
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: {
+          code: "LINQ_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "hello linq",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_linq",
+      },
+    ]);
+
+    const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(wakeAt).toBe("2026-04-08T00:01:00.000Z");
     vi.useRealTimers();
   });
 
@@ -4172,11 +4266,15 @@ describe("hosted runtime callbacks", () => {
     const effect = createEffect({
       media: [
         createHostedVoiceMemoMedia({
-          sizeBytes: null,
-          transportRefs: {
-            telegram: {
-              sendMode: "generate_at_delivery",
+          transport: {
+            generation: {
+              kind: "elevenlabs_speech",
+              modelId: "eleven_multilingual_v2",
+              outputFormat: "mp3_44100_128",
+              text: "Short memo",
+              voiceId: "voice_murph",
             },
+            kind: "telegram_generation",
           },
         }),
       ],

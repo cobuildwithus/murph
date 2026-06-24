@@ -4071,6 +4071,115 @@ test("hosted full snapshots report config-only Codex home continuity", async () 
   }
 });
 
+test("hosted full snapshots exclude managed Codex ChatGPT auth", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-auth-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const managedAuthJson = buildManagedCodexAuthJson();
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      "{\"providerSessionId\":\"thread-test\",\"resumeRouteId\":\"route-test\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "auth.json"),
+      managedAuthJson,
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "credentials.json"),
+      "{\"placeholder\":true}\n",
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/auth.json",
+        root: "operator-home",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/credentials.json",
+        root: "operator-home",
+      }),
+      null,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      bundle: snapshot.bundle,
+      workspaceRoot: path.join(workspaceRoot, "restore"),
+    });
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "auth.json"), "utf8"),
+      { code: "ENOENT" },
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "credentials.json"), "utf8"),
+      { code: "ENOENT" },
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted full snapshots exclude unmanaged Codex ChatGPT auth", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-auth-invalid-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    await mkdir(vaultRoot, { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "auth.json"),
+      buildUnmanagedCodexAuthJson(),
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/auth.json",
+        root: "operator-home",
+      }),
+      null,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      bundle: snapshot.bundle,
+      workspaceRoot: path.join(workspaceRoot, "restore"),
+    });
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "auth.json"), "utf8"),
+      { code: "ENOENT" },
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted snapshots report invalid and archived live Codex rollout paths", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-invalid-"));
 
@@ -5161,6 +5270,51 @@ async function createHostedCodexContinuityBundle(input: {
     bundle,
     rolloutRelativePath,
   };
+}
+
+function buildManagedCodexAuthJson(): string {
+  return JSON.stringify({
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgpt",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: {
+      access_token: "fixture",
+      account_id: "account-1234",
+      id_token: buildFakeJsonJwtPayload({
+        iss: "https://auth.openai.com",
+        sub: "user-1",
+      }),
+      refresh_token: "fixture",
+    },
+  }) + "\n";
+}
+
+function buildUnmanagedCodexAuthJson(): string {
+  const managed = JSON.parse(buildManagedCodexAuthJson()) as CodexAuthJsonFixture;
+  return JSON.stringify({
+    ...managed,
+    OPENAI_API_KEY: "",
+  }) + "\n";
+}
+
+interface CodexAuthJsonFixture {
+  OPENAI_API_KEY: null | string;
+  auth_mode: string;
+  last_refresh: string;
+  tokens: {
+    access_token: string;
+    account_id: string;
+    id_token: string;
+    refresh_token: string;
+  };
+}
+
+function buildFakeJsonJwtPayload(payload: Record<string, unknown>): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString("base64url"),
+    Buffer.from(JSON.stringify(payload), "utf8").toString("base64url"),
+    "signature",
+  ].join(".");
 }
 
 function buildBundleRef(overrides: Partial<HostedExecutionBundleRef> = {}): HostedExecutionBundleRef {

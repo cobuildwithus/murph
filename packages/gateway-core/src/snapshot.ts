@@ -33,6 +33,7 @@ import {
   sameGatewayConversationSession,
 } from './opaque-ids.ts'
 import { createGatewayInvalidRuntimeIdError } from './errors.ts'
+import { parseGatewayTimestampMs } from './shared.ts'
 
 export interface GatewayEventEmission
   extends Omit<GatewayEvent, 'cursor' | 'schema'> {}
@@ -198,7 +199,7 @@ export function listGatewayOpenPermissionsFromSnapshot(
     .map((permission) => gatewayPermissionRequestSchema.parse(permission))
     .sort(
       (left, right) =>
-        left.requestedAt.localeCompare(right.requestedAt) ||
+        compareGatewayTimestampsAscending(left.requestedAt, right.requestedAt) ||
         left.requestId.localeCompare(right.requestId),
     )
 }
@@ -372,9 +373,34 @@ export function compareGatewayMessagesAscending(
   right: GatewayMessage,
 ): number {
   return (
-    left.createdAt.localeCompare(right.createdAt) ||
+    compareGatewayTimestampsAscending(left.createdAt, right.createdAt) ||
     left.messageId.localeCompare(right.messageId)
   )
+}
+
+export function compareGatewayTimestampsAscending(
+  left: string,
+  right: string,
+): number {
+  if (left === right) {
+    return 0
+  }
+
+  const leftMs = parseGatewayTimestampMs(left)
+  const rightMs = parseGatewayTimestampMs(right)
+  const leftValid = Number.isFinite(leftMs)
+  const rightValid = Number.isFinite(rightMs)
+
+  if (leftValid && rightValid) {
+    if (leftMs === rightMs) {
+      return 0
+    }
+    return leftMs < rightMs ? -1 : 1
+  }
+  if (leftValid !== rightValid) {
+    return leftValid ? -1 : 1
+  }
+  return left.localeCompare(right)
 }
 
 export function deriveLastMessagePreview(message: GatewayMessage | null): string | null {
@@ -494,7 +520,7 @@ function compareGatewayEventEmissionsAscending(
   right: GatewayEventEmission,
 ): number {
   return (
-    left.createdAt.localeCompare(right.createdAt) ||
+    compareGatewayTimestampsAscending(left.createdAt, right.createdAt) ||
     left.kind.localeCompare(right.kind) ||
     (left.sessionKey ?? '').localeCompare(right.sessionKey ?? '') ||
     (left.messageId ?? '').localeCompare(right.messageId ?? '') ||
@@ -515,7 +541,7 @@ function compareNullableTimestampsDescending(
   if (right === null) {
     return -1
   }
-  return right.localeCompare(left)
+  return compareGatewayTimestampsAscending(right, left)
 }
 
 function resolveGatewayReadStartIndex(

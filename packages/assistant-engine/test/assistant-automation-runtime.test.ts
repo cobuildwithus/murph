@@ -309,6 +309,31 @@ function createCaptureSummary(
   ]).items[0]!
 }
 
+function createAutomationInputSummary(input: {
+  inputId: string
+  occurredAt: string
+  receivedAt?: string | null
+}) {
+  return {
+    inputId: input.inputId,
+    optionalInboxCaptureId: null,
+    source: 'telegram',
+    conversation: {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+    occurredAt: input.occurredAt,
+    receivedAt: input.receivedAt ?? null,
+    text: 'hello',
+    attachmentCount: 0,
+    actorIsSelf: false,
+  }
+}
+
 function createCaptureDetail(
   overrides: Partial<InboxShowResult['capture']> = {},
 ): InboxShowResult['capture'] {
@@ -1232,6 +1257,12 @@ describe('assistant automation shared helpers', () => {
     const shared = await vi.importActual<typeof import('../src/assistant/automation/shared.ts')>(
       '../src/assistant/automation/shared.ts',
     )
+    const inputSummary = await vi.importActual<
+      typeof import('../src/assistant/automation/input-summary.ts')
+    >('../src/assistant/automation/input-summary.ts')
+    const autoReplyRetry = await vi.importActual<
+      typeof import('../src/assistant/automation/auto-reply-retry.ts')
+    >('../src/assistant/automation/auto-reply-retry.ts')
 
     const earlier = {
       captureId: 'capture-1',
@@ -1255,6 +1286,48 @@ describe('assistant automation shared helpers', () => {
         later,
       ),
     ).toBeGreaterThan(0)
+    expect(
+      shared.compareAssistantCaptureOrder(
+        {
+          captureId: 'capture-offset-earlier',
+          createdAt: '2026-04-08T00:30:00+01:00',
+          occurredAt: '2026-04-08T00:30:00+01:00',
+        },
+        {
+          captureId: 'capture-utc-later',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      ),
+    ).toBeLessThan(0)
+    expect(
+      inputSummary.compareAssistantInputSummaryOrder(
+        createAutomationInputSummary({
+          inputId: 'input-offset-earlier',
+          occurredAt: '2026-04-08T00:30:00+01:00',
+          receivedAt: '2026-04-08T00:30:00+01:00',
+        }),
+        createAutomationInputSummary({
+          inputId: 'input-utc-later',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          receivedAt: '2026-04-08T00:00:00.000Z',
+        }),
+      ),
+    ).toBeLessThan(0)
+    expect(
+      autoReplyRetry.compareAssistantAutoReplyReceiptRecency(
+        createTurnReceipt({
+          status: 'completed',
+          turnId: 'turn-offset-earlier',
+          updatedAt: '2026-04-08T00:30:00+01:00',
+        }),
+        createTurnReceipt({
+          status: 'completed',
+          turnId: 'turn-utc-later',
+          updatedAt: '2026-04-08T00:00:00.000Z',
+        }),
+      ),
+    ).toBeLessThan(0)
     expect(shared.normalizeEnabledChannels([' telegram ', '', 'telegram', 'linq '])).toEqual([
       'telegram',
       'linq',

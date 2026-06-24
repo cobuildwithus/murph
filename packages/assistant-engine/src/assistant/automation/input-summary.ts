@@ -2,6 +2,7 @@ import type {
   AssistantInputCandidate,
   AssistantInputConversationRef,
 } from '../input-source.js'
+import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutomationInputSummary {
   inputId: string
@@ -57,5 +58,5 @@ export function compareAssistantInputSummaryOrder(
 
   return leftTimestamp === rightTimestamp
     ? left.inputId.localeCompare(right.inputId)
-    : leftTimestamp.localeCompare(rightTimestamp)
+    : compareAssistantTimestampsAscending(leftTimestamp, rightTimestamp)
 }

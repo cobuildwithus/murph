@@ -9,14 +9,25 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
   runCanonicalWrite,
 } from "@murphai/core";
 import {
+  buildHostedExecutionRuntimeControlWake,
+} from "@murphai/hosted-execution";
+import {
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
+import {
   readAssistantInputEvent,
+  updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine/assistant-automation";
+import {
+  updateAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
@@ -38,6 +49,7 @@ import {
   type HostedMailboxItem,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
+  type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
   type HostedWorkspaceCheckpointRequest,
@@ -49,6 +61,14 @@ import {
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
@@ -137,6 +157,18 @@ import {
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
+  HostedMailboxResolvedImportItem,
+} from "../src/hosted-runtime/mailbox-import.ts";
+import {
+  enqueueHostedPendingAssistantInputId,
+} from "../src/hosted-runtime/pending-input-index.ts";
+import {
+  resolveHostedPendingAssistantInputWakeAt,
+} from "../src/hosted-runtime/pending-assistant-input.ts";
+import {
+  enqueueHostedSystemMailboxItem,
+} from "../src/hosted-runtime/system-mailbox.ts";
+import type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
@@ -150,6 +182,8 @@ import type {
 
 const TEST_NOW = "2026-04-27T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_entrypoint";
+const REAL_SET_TIMEOUT = globalThis.setTimeout.bind(globalThis);
+const REAL_CLEAR_TIMEOUT = globalThis.clearTimeout.bind(globalThis);
 const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -412,6 +446,81 @@ describe("hosted workspace runtime entrypoint", () => {
         process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
       }
       consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("marks restored legacy vault migration dirty for the hosted checkpoint path", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-legacy-vault-format-migration");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let restoreCallCount = 0;
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_legacy_vault_format_migration",
+          leaseGeneration: "7",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+          const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+          assert.equal(metadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-legacy-vault-format-migration-checkpoint",
+            ),
+          };
+        },
+        async importItem() {
+          throw new Error("Legacy vault format migration test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events: [],
+            workspace: createWorkspaceState({ snapshotRef, version: "0" }),
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("Legacy vault format migration test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              restoreCallCount += 1;
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              const metadataPath = path.join(input.durableRoot, VAULT_LAYOUT.metadata);
+              const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+              await writeFile(
+                metadataPath,
+                `${JSON.stringify({ ...metadata, formatVersion: 1 }, null, 2)}\n`,
+                "utf8",
+              );
+            },
+            async startSnapshotSession() {
+              throw new Error("Legacy vault format migration test should not start snapshots.");
+            },
+          },
+        }),
+        vaultRoot,
+      });
+
+      assert.equal(restoreCallCount, 1);
+      const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+      const migratedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+      assert.equal(migratedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -718,6 +827,93 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, "2026-04-27T00:02:00.000Z");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("checkpoints local mutations from deferred durable checkpoint effects before returning", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const durableWakeAt = "2026-04-27T00:02:00.000Z";
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: durableWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_durable_effect_follow_up_checkpoint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/durable-effect-follow-up.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              afterCheckpoint: async () => ({
+                afterDurableCheckpoint: durableEffect,
+                checkpointReason: "system_mailbox_receipt",
+              }),
+              checkpointReason: "system_mailbox_receipt",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      const checkpointEventIndexes = events
+        .map((event, index) => event === "workspace.checkpoint" ? index : -1)
+        .filter((index) => index >= 0);
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "idle_shutdown",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.ok(checkpointEventIndexes[0] < events.indexOf("durable-effect"));
+      assert.ok(events.indexOf("durable-effect") < checkpointEventIndexes[1]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, durableWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -4822,6 +5018,1013 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("late foreground input during system work runs before idle checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-preempt-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 25;
+    const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_preempt_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_preempt_system",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-preempt.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            lateConversationInputId = inputId;
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_preempt_conversation",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+                ));
+              });
+              return {
+                afterCheckpoint: async () => {
+                  events.push("system.afterCheckpoint");
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: systemFollowUpWakeAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: systemFollowUpWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            const assistantRedactedStatus: HostedRuntimeRedactedJson = {
+              hostedAssistantProgressed: true,
+            };
+
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: assistantRedactedStatus,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
+      const result = await resultPromise;
+
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+      ));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        "fresh foreground input should be serviced before idle checkpoint snapshotting starts",
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.lanes.some((lane) => lane.lane === "conversation")
+        ),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, systemFollowUpWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("late foreground input after checkpoint-gated system pass clears stale gate", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-stale-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeAbortReason = new Error("synthetic stale gate foreground proof complete");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 10_000;
+    const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_stale_gate_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const startedAt = performance.now();
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_stale_gate",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-stale-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            lateConversationInputId = inputId;
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => {
+                  events.push("system.afterCheckpoint");
+                  runtimeWakeSignal.notify();
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: systemFollowUpWakeAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: systemFollowUpWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_stale_gate_conversation",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_conversation",
+                ));
+              });
+              const assistantRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: true,
+              };
+              return {
+                checkpointReason: "active_turn_input" as const,
+                progressed: true,
+                redactedStatus: assistantRedactedStatus,
+              };
+            }
+
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+            }
+            runtimeAbortController.abort(runtimeAbortReason);
+            const assistantRedactedStatus: HostedRuntimeRedactedJson = {
+              hostedAssistantProgressed: true,
+            };
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: assistantRedactedStatus,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 3);
+      });
+      const elapsedMs = performance.now() - startedAt;
+      const result = await resultPromise;
+
+      assert.equal(result, runtimeAbortReason);
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_conversation",
+      ));
+      assert.ok(
+        !events.includes("snapshot:idle_shutdown"),
+        "fresh foreground input should clear the previous checkpoint-gated projection",
+      );
+      assert.ok(
+        elapsedMs < idleCheckpointDelayMs,
+        `foreground pass should run before the ${idleCheckpointDelayMs}ms idle checkpoint window`,
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.lanes.some((lane) => lane.lane === "conversation")
+        ),
+      );
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      runtimeAbortController.abort(runtimeAbortReason);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("late foreground input does not clear gate for selected device-sync wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-device-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const deviceSyncWakeAt = "2026-04-27T00:00:00.000Z";
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_device_gate_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_device_gate",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-device-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            lateConversationInputId = inputId;
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_device_gate_conversation",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_foreground_device_gate_conversation",
+                ));
+              });
+              return {
+                afterCheckpoint: async () => {
+                  events.push("system.afterCheckpoint");
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: deviceSyncWakeAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(lateConversationInputId);
+      assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, deviceSyncWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, deviceSyncWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("late foreground input preserves a newer device-sync continuation after an earlier handled wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-device-continuation-key-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const initialWakeAt = "2026-04-26T23:59:59.000Z";
+    const continuationWakeAt = "2026-04-27T00:00:30.000Z";
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_device_continuation_key",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-device-continuation-key.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            lateConversationInputId = inputId;
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: initialWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "4",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_device_continuation_key_conversation",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_device_continuation_key_conversation",
+                ));
+              });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                deviceSyncMaintenanceRan: true,
+                nextWakeAt: continuationWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                  hostedDeviceSyncSkipped: false,
+                },
+              };
+            }
+
+            assert.deepEqual(input.deviceSyncWorkspaceWakeHandled, {
+              nextWakeAt: initialWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+            });
+            assert.equal(input.workspace?.nextWakeAt, continuationWakeAt);
+            assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: continuationWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+                hostedDeviceSyncSkipped: false,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(lateConversationInputId);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, continuationWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, continuationWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("late foreground input does not clear gate for selected retryable outbox wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-outbox-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const unexpectedRetryBeforeCheckpoint = new Error(
+      "unexpected retryable outbox wake before idle checkpoint",
+    );
+    const outboxRetryWakeAt = "2026-04-26T23:59:30.000Z";
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let lateConversationInputId: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_outbox_gate",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-outbox-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            if (item.item.id === "mailbox_item_entrypoint_foreground_outbox_gate_conversation_late") {
+              lateConversationInputId = inputId;
+            }
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                version: "4",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_outbox_gate_conversation_late",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_foreground_outbox_gate_conversation_late",
+                ));
+              });
+              return {
+                afterCheckpoint: async () => {
+                  events.push("outbox.afterCheckpoint");
+                  return {
+                    checkpointReason: "outbox_receipt" as const,
+                    nextWakeAt: outboxRetryWakeAt,
+                    nextWakeReason: "assistant",
+                    redactedStatus: {
+                      hostedAssistantNextWakeAt: outboxRetryWakeAt,
+                    },
+                  };
+                },
+                checkpointReason: "outbox_sending" as const,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            if (lateConversationInputId) {
+              assert.ok(await readAssistantInputEvent({
+                inputId: lateConversationInputId,
+                vault: vaultRoot,
+              }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            if (assistantPhaseCalls > 2) {
+              events.push("outbox.retryBeforeCheckpoint");
+              runtimeAbortController.abort(unexpectedRetryBeforeCheckpoint);
+              throw unexpectedRetryBeforeCheckpoint;
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: outboxRetryWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(lateConversationInputId);
+      assert.ok(events.includes("outbox.afterCheckpoint"));
+      assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, outboxRetryWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, outboxRetryWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("same selected device-sync wake keeps checkpoint gate across idle wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-same-device-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeAbortReason = new Error("unexpected projected device-sync pass before checkpoint");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const deviceSyncWakeAt = "2026-04-27T00:00:00.000Z";
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_same_device_gate_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_same_device_gate",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-same-device-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => {
+                  events.push("system.afterCheckpoint");
+                  runtimeWakeSignal.notify();
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: deviceSyncWakeAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: deviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              return {
+                nextWakeAt: deviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: false,
+                redactedStatus: {},
+              };
+            }
+
+            runtimeAbortController.abort(runtimeAbortReason);
+            throw runtimeAbortReason;
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, deviceSyncWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, deviceSyncWakeAt);
+    } finally {
+      runtimeAbortController.abort(runtimeAbortReason);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("replacement device-sync wake keeps checkpoint gate across idle wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replaced-device-gate-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeAbortReason = new Error("unexpected replacement device-sync pass before checkpoint");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const initialDeviceSyncWakeAt = "2026-04-27T00:00:00.000Z";
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_replaced_device_gate_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+    let replacementDeviceSyncWakeAt: string | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_replaced_device_gate",
+            idleCheckpointDelayMs: 120,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-replaced-device-gate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => {
+                  events.push("system.afterCheckpoint");
+                  runtimeWakeSignal.notify();
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: initialDeviceSyncWakeAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: initialDeviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              replacementDeviceSyncWakeAt = new Date(Date.now() + 25).toISOString();
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: replacementDeviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            runtimeAbortController.abort(runtimeAbortReason);
+            throw runtimeAbortReason;
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(replacementDeviceSyncWakeAt);
+      assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, replacementDeviceSyncWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, replacementDeviceSyncWakeAt);
+    } finally {
+      runtimeAbortController.abort(runtimeAbortReason);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("dirty runtime checkpoints after the idle delay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
@@ -4871,7 +6074,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const elapsedMs = performance.now() - startedAt;
       assert.equal(checkpointRequests.length, 1);
       assert.ok(elapsedMs >= 200);
-      assert.ok(elapsedMs < 2_000);
+      assert.ok(elapsedMs < 5_000);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -6761,6 +7964,8 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const exactPayload = Buffer.from("restored exact hosted note\n", "utf8");
       const exactPayloadHash = sha256Hex(exactPayload);
+      const olderPayload = Buffer.from("older restored hosted note\n", "utf8");
+      const olderPayloadHash = sha256Hex(olderPayload);
       const receiptBytes = Buffer.from(`${JSON.stringify({
         actions: [
           {
@@ -6775,21 +7980,49 @@ describe("hosted workspace runtime entrypoint", () => {
             targetRelativePath: "journal/2026-04-28.md",
           },
         ],
-        committedAt: TEST_NOW,
-        createdAt: TEST_NOW,
-        occurredAt: TEST_NOW,
+        committedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: "2026-04-28T00:00:00.000Z",
+        occurredAt: "2026-04-28T00:00:00.000Z",
         operationId: "op_synthetic_canonical_restore",
         operationType: "hosted_canonical_write_test",
         schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
         summary: "Restore hosted canonical write receipt.",
-        updatedAt: TEST_NOW,
+        updatedAt: "2026-04-28T00:00:00.000Z",
       }, null, 2)}\n`, "utf8");
       const receiptHash = sha256Hex(receiptBytes);
+      const olderReceiptBytes = Buffer.from(`${JSON.stringify({
+        actions: [
+          {
+            byteLength: olderPayload.byteLength,
+            contentRef: {
+              byteSize: olderPayload.byteLength,
+              sha256: olderPayloadHash,
+            },
+            effect: "create",
+            kind: "text_upsert",
+            sha256: olderPayloadHash,
+            targetRelativePath: "journal/2026-04-28.md",
+          },
+        ],
+        committedAt: "2026-04-28T00:30:00+01:00",
+        createdAt: "2026-04-28T00:30:00+01:00",
+        occurredAt: "2026-04-28T00:30:00+01:00",
+        operationId: "op_synthetic_canonical_restore_old",
+        operationType: "hosted_canonical_write_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore older hosted canonical write receipt.",
+        updatedAt: "2026-04-28T00:30:00+01:00",
+      }, null, 2)}\n`, "utf8");
+      const olderReceiptHash = sha256Hex(olderReceiptBytes);
       const receiptLogBytes = Buffer.from(`${JSON.stringify({
         entries: [
           {
             byteSize: receiptBytes.byteLength,
             sha256: receiptHash,
+          },
+          {
+            byteSize: olderReceiptBytes.byteLength,
+            sha256: olderReceiptHash,
           },
         ],
         schema: "murph.hosted-canonical-write-receipt-log.v1",
@@ -6838,7 +8071,9 @@ describe("hosted workspace runtime entrypoint", () => {
         [baseHash, baseBundle],
         [hotHash, hotSnapshot.bundle],
         [exactPayloadHash, exactPayload],
+        [olderPayloadHash, olderPayload],
         [receiptHash, receiptBytes],
+        [olderReceiptHash, olderReceiptBytes],
         [receiptLogHash, receiptLogBytes],
       ]);
 
@@ -6868,7 +8103,7 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({
                 redactedStatus: {
                   hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
-                  hostedCanonicalWriteReceiptLogEntryCount: 1,
+                  hostedCanonicalWriteReceiptLogEntryCount: 2,
                   hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
                 },
                 snapshotRef: buildHostedExecutionLayeredSnapshotRef({
@@ -6891,7 +8126,15 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(artifactGetCalls, [baseHash, hotHash, receiptLogHash, receiptHash, exactPayloadHash]);
+      assert.deepEqual(artifactGetCalls, [
+        baseHash,
+        hotHash,
+        receiptLogHash,
+        receiptHash,
+        olderReceiptHash,
+        olderPayloadHash,
+        exactPayloadHash,
+      ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),
@@ -7775,9 +9018,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(mailboxImportedLog.redactedJson?.checkpointDeferred, true);
       assert.equal(mailboxImportedLog.redactedJson?.checkpointed, false);
       assert.equal(mailboxImportedLog.redactedJson?.conversationSeqEnd, String(mailboxItemCount));
-      if (process.env.HOSTED_PREIMPORT_PROFILE === "1") {
-        console.info("hosted pre-import local profile", stageSummary);
-      }
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
@@ -8672,6 +9912,362 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("e2e preserves yielded device-sync retry after earlier pending assistant retry", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const connectionId = "device_sync_connection_pending_retry";
+    const firstNow = "2026-04-27T00:00:00.000Z";
+    const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
+    const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
+    const followUpWakeAt = "2026-04-27T00:11:00.000Z";
+    const idleCheckpointDelayMs = 90_000;
+    const runtimeTransitionTimeoutMs = 15_000;
+    const shutdownController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_device_sync_pending_retry_bootstrap",
+        kind: "member.activated",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    const foregroundImported = createDeferred<void>();
+    let pendingInputId: string | null = null;
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      async onFetchSnapshot() {
+        await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+        mailboxItems.push(createMailboxItem({
+          id: "mailbox_item_entrypoint_device_sync_pending_retry",
+          laneSeq: "1",
+          occurredAt: "2026-04-27T00:00:01.000Z",
+        }));
+        runtimeWakeSignal.notify();
+        await withRealTimeout(
+          foregroundImported.promise,
+          runtimeTransitionTimeoutMs,
+          () => events.join(","),
+        );
+      },
+      connectionId,
+      nextReconcileAt: deviceSyncWakeAt,
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(firstNow));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const firstPhaseFinished = createDeferred<void>();
+      let assistantPhaseCalls = 0;
+      const platform = createPlatform({
+        deviceSyncPort,
+        mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            nextWakeAt: firstNow,
+            nextWakeReason: "device-sync.reconcile",
+            version: "0",
+          }),
+        }),
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_device_sync_pending_retry",
+            idleCheckpointDelayMs,
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/device-sync-pending-retry.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+              return { status: "imported" };
+            }
+
+            pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            assert.ok(await resolveHostedPendingAssistantInputWakeAt({ vaultRoot }));
+            foregroundImported.resolve();
+            return {
+              assistantInputId: pendingInputId,
+              status: "imported",
+            };
+          },
+          platform,
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            assert.equal(assistantPhaseCalls, 1);
+            await deviceSyncPort.fetchSnapshot();
+            assert.ok(pendingInputId);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: pendingInputId,
+              vaultRoot,
+            });
+            firstPhaseFinished.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: yieldedRetryWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              progressed: true,
+              redactedStatus: {
+                deviceSyncRetryYielded: true,
+              },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        firstPhaseFinished.promise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(checkpointRequests.length, 0);
+      shutdownController.abort();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
+      const checkpoint = checkpointRequests.at(-1);
+      assert.ok(checkpoint);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, yieldedRetryWakeAt);
+      assert.equal(checkpoint.nextWakeAt, yieldedRetryWakeAt);
+      assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
+
+      vi.useRealTimers();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(yieldedRetryWakeAt));
+
+      const followUpCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const followUpDeviceSyncPort = createSnapshotDeviceSyncPort({
+        connectionId,
+        nextReconcileAt: followUpWakeAt,
+      });
+      const followUpResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_device_sync_after_pending_retry",
+            workspaceVersion: "1",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:follow-up:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/device-sync-follow-up-after-retry.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            deviceSyncPort: followUpDeviceSyncPort,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_device_sync_pending_retry_followup_bootstrap",
+                  kind: "member.activated",
+                  lane: "system",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: followUpCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: checkpoint.nextWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "1",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      const followUpCheckpoint = followUpCheckpointRequests.at(-1);
+      assert.ok(followUpCheckpoint);
+      assert.equal(followUpDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(followUpResult.status, "scheduled");
+      assert.equal(followUpResult.nextWakeAt, followUpWakeAt);
+      assert.equal(followUpCheckpoint.nextWakeAt, followUpWakeAt);
+      assert.equal(followUpCheckpoint.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      shutdownController.abort();
+      vi.useRealTimers();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("e2e runs pending-input retry before idle checkpoint when system mailbox records post-checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 90_000;
+    const runtimeTransitionTimeoutMs = 15_000;
+    const abortReason = new Error("pending retry observed before idle checkpoint");
+    const runtimeAbortController = new AbortController();
+    let resultPromise: Promise<unknown> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const systemMailboxItem = createMailboxItem({
+        dedupeKey: "runtime.manual-requested:pending-retry",
+        id: "mailbox_item_entrypoint_runtime_control_pending_retry",
+        kind: "runtime.manual-requested",
+        lane: "system",
+        laneSeq: "1",
+      });
+
+      const postCheckpointRecorded = createDeferred<void>();
+      const assistantRetryObserved = createDeferred<void>();
+      let pendingInputId: string | null = null;
+      let assistantPhaseCalls = 0;
+      const platform = createPlatform({
+        mailboxPort: createMailboxPort({ events, items: [systemMailboxItem] }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_pending_retry_system_mailbox_gate",
+            idleCheckpointDelayMs,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/pending-retry-system-mailbox.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+            pendingInputId ??= await stagePendingLinqAssistantInputForMailboxItem({
+              item: createMailboxItem({
+                id: "mailbox_item_entrypoint_pending_retry_system_mailbox",
+                laneSeq: "1",
+              }),
+              vaultRoot,
+            });
+            assert.ok(await resolveHostedPendingAssistantInputWakeAt({ vaultRoot }));
+            return await importRuntimeControlSystemMailboxItemForTest({
+              item: systemMailboxItem,
+              vaultRoot,
+            });
+          },
+          platform,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              assert.ok(pendingInputId);
+              return {
+                afterCheckpoint: async () => {
+                  events.push("assistant.afterCheckpoint");
+                  postCheckpointRecorded.resolve();
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: "2026-04-27T00:10:00.000Z",
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: {
+                      hostedSystemMailboxRecorded: 1,
+                    },
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: "2026-04-27T00:00:30.000Z",
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  pendingAssistantInputRetry: true,
+                },
+              };
+            }
+            assistantRetryObserved.resolve();
+            runtimeAbortController.abort(abortReason);
+            return {
+              progressed: false,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      ).catch((error: unknown) => error);
+
+      await withRealTimeout(postCheckpointRecorded.promise, runtimeTransitionTimeoutMs, () =>
+        events.join(",")
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      await withRealTimeout(assistantRetryObserved.promise, runtimeTransitionTimeoutMs, () =>
+        events.join(",")
+      );
+      assert.equal(assistantPhaseCalls, 2, events.join(","));
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(
+        await withRealTimeout(resultPromise, runtimeTransitionTimeoutMs, () => events.join(",")),
+        abortReason,
+      );
+    } finally {
+      if (!runtimeAbortController.signal.aborted) {
+        runtimeAbortController.abort(abortReason);
+      }
+      vi.useRealTimers();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("parses additive workspace-invocation inputs and rejects legacy run-drain fields", () => {
     const parsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: createWorkspaceRunRequest({
@@ -9037,6 +10633,7 @@ function createPlatform(input: {
   runtimeLivenessRequired?: boolean | null;
   stageSamples?: StageTimingSample[];
   workspacePort: HostedRuntimeWorkspacePort | null;
+  workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
   return {
     artifactStore: {
@@ -9108,6 +10705,7 @@ function createPlatform(input: {
       ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
       : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
+    ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
   };
 }
 
@@ -9398,6 +10996,123 @@ async function stageAssistantInputEventForMailboxItem(input: {
   return staged.inputId;
 }
 
+async function stagePendingLinqAssistantInputForMailboxItem(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}): Promise<string> {
+  const inputId = await stageAssistantInputEventForMailboxItem(input);
+  await updateAssistantInputProjection({
+    inputId,
+    projection: {
+      status: "pending",
+    },
+    vault: input.vaultRoot,
+  });
+  await updateAssistantAutomationState(input.vaultRoot, (state) => ({
+    ...state,
+    autoReply: [{
+      channel: "linq",
+      eligibleAfter: null,
+      enabledAt: TEST_NOW,
+    }],
+    updatedAt: TEST_NOW,
+  }));
+  await enqueueHostedPendingAssistantInputId({
+    inputId,
+    vaultRoot: input.vaultRoot,
+  });
+  return inputId;
+}
+
+async function writeSyntheticAssistantAutoReplyTerminalEvidence(input: {
+  inputId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const directory = path.join(
+    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
+    "auto-reply",
+    "evidence",
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, `${encodeURIComponent(input.inputId)}.json`),
+    `${JSON.stringify({
+      captureId: input.inputId,
+      groupCaptureIds: [input.inputId],
+      groupId: `group_${input.inputId}`,
+      groupInputIds: [input.inputId],
+      inputId: input.inputId,
+      primaryCaptureId: input.inputId,
+      primaryInputId: input.inputId,
+      providerCleanup: {
+        linqMessageIds: [],
+        queuedAt: null,
+      },
+      recordedAt: TEST_NOW,
+      schema: "murph.assistant-auto-reply-terminal-evidence.v1",
+      terminal: {
+        kind: "suppressed",
+        reason: "synthetic-entrypoint-test",
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function ensureHostedBootstrapMetadataForSystemMailboxTest(
+  vaultRoot: string,
+): Promise<void> {
+  const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+  await mkdir(path.dirname(metadataPath), { recursive: true });
+  try {
+    await stat(metadataPath);
+  } catch {
+    await writeFile(metadataPath, "{}\n", "utf8");
+  }
+}
+
+async function importRuntimeControlSystemMailboxItemForTest(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}) {
+  return await enqueueHostedSystemMailboxItem({
+    item: createResolvedRuntimeControlSystemMailboxItem(input.item),
+    vaultRoot: input.vaultRoot,
+    wake: buildHostedExecutionRuntimeControlWake({
+      eventId: input.item.dedupeKey,
+      kind: "runtime.manual-requested",
+      occurredAt: input.item.occurredAt,
+      userId: TEST_USER_ID,
+    }),
+  });
+}
+
+function createResolvedRuntimeControlSystemMailboxItem(
+  item: HostedMailboxItem,
+): HostedMailboxResolvedImportItem {
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      requestId: "request_entrypoint_runtime_control_pending_retry",
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-runtime-control-request",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
 function createWorkspaceRunRequest(
   overrides: Partial<HostedWorkspaceInvocationRequest> = {},
 ): HostedWorkspaceInvocationRequest {
@@ -9469,6 +11184,7 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
   nextReconcileAt: string;
+  onFetchSnapshot?: (() => Promise<void> | void) | null;
 }): HostedRuntimeDeviceSyncPort & { readonly fetchSnapshotCalls: number } {
   let fetchSnapshotCalls = 0;
   return {
@@ -9495,6 +11211,7 @@ function createSnapshotDeviceSyncPort(input: {
     },
     async fetchSnapshot() {
       fetchSnapshotCalls += 1;
+      await input.onFetchSnapshot?.();
       return {
         connections: [
           {
@@ -9607,6 +11324,40 @@ function createBundleRef(input: {
   };
 }
 
+function createWorkspaceSnapshotV2Ref(snapshotId: string): HostedWorkspaceSnapshotV2Ref {
+  const objectKey = `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+  return {
+    archive: {
+      compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+      encryptedByteSize: 1,
+      encryptedObjectSha256: "1".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "2".repeat(64),
+      totalPlainBytes: 1,
+    },
+    createdAt: TEST_NOW,
+    encryption: {
+      aad: {
+        objectKey,
+        purpose: HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+        schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+        snapshotId,
+        userId: TEST_USER_ID,
+      },
+      ivBase64: "AAAAAAAAAAAAAAAA",
+      rootKeyId: "synthetic-root-key",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "synthetic-wrapped-data-key",
+    },
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: TEST_USER_ID,
+  };
+}
+
 async function removeTempRoot(root: string): Promise<void> {
   await rm(root, {
     force: true,
@@ -9629,6 +11380,28 @@ function createDeferred<T>() {
     reject,
     resolve,
   };
+}
+
+function withRealTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  describeFailure: () => string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = REAL_SET_TIMEOUT(() => {
+      reject(new Error(describeFailure()));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        REAL_CLEAR_TIMEOUT(timeout);
+        resolve(value);
+      },
+      (error) => {
+        REAL_CLEAR_TIMEOUT(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void> {

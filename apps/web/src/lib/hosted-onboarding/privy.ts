@@ -90,6 +90,37 @@ export async function syncHostedPrivyMemberIdMetadata(input: {
   return true;
 }
 
+export async function readHostedPrivyUserById(privyUserId: string): Promise<HostedPrivyUser> {
+  const client = getHostedPrivyManagementClient();
+
+  if (!client) {
+    throw hostedOnboardingError({
+      code: "PRIVY_CONFIG_REQUIRED",
+      httpStatus: 503,
+      message: "Secure approval is temporarily unavailable.",
+      retryable: true,
+    });
+  }
+
+  try {
+    const user = await client.users()._get(privyUserId);
+    if (!user || typeof user !== "object" || Reflect.get(user, "id") !== privyUserId) {
+      throw new TypeError("Privy user lookup returned an unexpected user.");
+    }
+    return user as HostedPrivyUser;
+  } catch (error) {
+    if (isHostedOnboardingError(error)) {
+      throw error;
+    }
+    throw hostedOnboardingError({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
+      message: "Secure approval is temporarily unavailable.",
+      retryable: true,
+    });
+  }
+}
+
 // Deletes the Privy user record itself (account deletion). Returns false when
 // the management client is not configured; throws when the Privy API call fails.
 export async function deleteHostedPrivyUser(privyUserId: string): Promise<boolean> {

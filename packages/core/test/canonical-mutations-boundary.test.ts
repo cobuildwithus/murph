@@ -6,26 +6,36 @@ import { test, vi } from "vitest";
 
 import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
 
-vi.mock("../src/operations/canonical-write-lock.ts", () => ({
-  acquireCanonicalWriteLock: async () => ({
-    metadata: {
-      pid: process.pid,
-      command: "vitest",
-      startedAt: "2026-03-13T12:00:00.000Z",
-      host: "test-host",
+vi.mock("../src/operations/canonical-write-lock.ts", () => {
+  const withCanonicalWriteLockScope = vi.fn(
+    async (_vaultRoot: string, run: () => Promise<unknown>) => {
+      return await run();
     },
-    relativePath: ".runtime/locks/canonical-write",
-    release: async () => {},
-  }),
-  assertCanonicalWriteLockScope: vi.fn(),
-  inspectCanonicalWriteLock: async () => ({
-    state: "unlocked" as const,
-    relativePath: ".runtime/locks/canonical-write",
-  }),
-  withCanonicalWriteLockScope: vi.fn(async (_vaultRoot: string, run: () => Promise<unknown>) => {
-    return await run();
-  }),
-}));
+  );
+
+  return {
+    acquireCanonicalWriteLock: async () => ({
+      metadata: {
+        pid: process.pid,
+        command: "vitest",
+        startedAt: "2026-03-13T12:00:00.000Z",
+        host: "test-host",
+      },
+      relativePath: ".runtime/locks/canonical-write",
+      release: async () => {},
+    }),
+    assertCanonicalWriteLockScope: vi.fn(),
+    inspectCanonicalWriteLock: async () => ({
+      state: "unlocked" as const,
+      relativePath: ".runtime/locks/canonical-write",
+    }),
+    withCanonicalWriteLock: vi.fn(
+      async (vaultRoot: string | undefined, run: () => Promise<unknown>) =>
+        withCanonicalWriteLockScope(vaultRoot ?? process.cwd(), run),
+    ),
+    withCanonicalWriteLockScope,
+  };
+});
 
 import {
   addActivitySession,

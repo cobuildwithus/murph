@@ -4,7 +4,7 @@ import { normalizeTimestamp, stripUndefined } from "../shared.ts";
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
-  DeviceRawArtifactPayload,
+  DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import type { NormalizedDeviceBatch } from "./types.ts";
 
@@ -19,7 +19,7 @@ export interface ObservationEventOptions {
   timeZone?: string;
   title: string;
   note?: string;
-  rawArtifactRoles?: string[];
+  evidenceRoles?: string[];
   externalRef: DeviceExternalRefPayload;
 }
 
@@ -30,7 +30,7 @@ export interface MetricEmissionContext<T> {
   dayKey?: string;
   observationGrain?: string;
   timeZone?: string;
-  rawArtifactRoles?: string[];
+  evidenceRoles?: string[];
   externalRef: (facet?: string) => DeviceExternalRefPayload;
 }
 
@@ -245,16 +245,16 @@ export function makeNormalizedDeviceBatch(
     source: "device",
     events: options.events,
     samples: options.samples,
-    rawArtifacts: options.rawArtifacts,
+    evidenceParts: options.evidenceParts,
     provenance: options.provenance,
   });
 }
 
-export function createRawArtifact(
+export function createEvidencePart(
   role: string,
   fileName: string,
   content: unknown,
-): DeviceRawArtifactPayload | null {
+): DeviceEvidencePartPayload | null {
   if (content === undefined || content === null) {
     return null;
   }
@@ -279,15 +279,15 @@ export function createRawArtifact(
   };
 }
 
-export function pushRawArtifact(
-  rawArtifacts: DeviceRawArtifactPayload[],
-  artifact: DeviceRawArtifactPayload | null,
+export function pushEvidencePart(
+  evidenceParts: DeviceEvidencePartPayload[],
+  artifact: DeviceEvidencePartPayload | null,
 ): void {
   if (!artifact) {
     return;
   }
 
-  rawArtifacts.push(artifact);
+  evidenceParts.push(artifact);
 }
 
 function buildDeletionArtifactIdentity(options: DeletionObservationOptions): string {
@@ -366,7 +366,7 @@ export function pushObservationEvent(
       source: "device",
       title: trimToLength(options.title, 160),
       note: options.note ? trimToLength(options.note, 4000) : undefined,
-      rawArtifactRoles: options.rawArtifactRoles,
+      evidenceRoles: options.evidenceRoles,
       externalRef: options.externalRef,
       fields: stripUndefined({
         metric: options.metric,
@@ -407,7 +407,7 @@ export function emitObservationMetrics<T>(
       note: descriptor.note
         ? resolveMetricDescriptorValue(descriptor.note, context.source)
         : undefined,
-      rawArtifactRoles: context.rawArtifactRoles,
+      evidenceRoles: context.evidenceRoles,
       externalRef: context.externalRef(
         descriptor.facet
           ? resolveMetricDescriptorValue(descriptor.facet, context.source)
@@ -419,18 +419,18 @@ export function emitObservationMetrics<T>(
 
 export function pushDeletionObservation(
   events: DeviceEventPayload[],
-  rawArtifacts: DeviceRawArtifactPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
   options: DeletionObservationOptions,
 ): void {
   const deletionArtifact = buildDeletionArtifactDescriptor(options);
 
-  if (rawArtifacts.some((artifact) => artifact.role === deletionArtifact.role)) {
+  if (evidenceParts.some((artifact) => artifact.role === deletionArtifact.role)) {
     return;
   }
 
-  pushRawArtifact(
-    rawArtifacts,
-    createRawArtifact(
+  pushEvidencePart(
+    evidenceParts,
+    createEvidencePart(
       deletionArtifact.role,
       deletionArtifact.fileName,
       deletionArtifact.content,
@@ -447,7 +447,7 @@ export function pushDeletionObservation(
       note: options.sourceEventType
         ? trimToLength(`Webhook event: ${options.sourceEventType}`, 4000)
         : undefined,
-      rawArtifactRoles: [deletionArtifact.role],
+      evidenceRoles: [deletionArtifact.role],
       externalRef: options.makeExternalRef(
         options.resourceType,
         options.resourceId,

@@ -1,6 +1,8 @@
 import {
+  compareGatewayTimestampsAscending,
   gatewayPermissionRequestSchema,
   gatewayProjectionSnapshotSchema,
+  isGatewayIsoTimestamp,
   type GatewayPermissionRequest,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
@@ -29,7 +31,7 @@ export function mergeGatewayPermissionOverrides(
       return permission;
     }
 
-    if (override.resolvedAt.localeCompare(generatedAt) > 0) {
+    if (compareGatewayTimestampsAscending(override.resolvedAt, generatedAt) > 0) {
       generatedAt = override.resolvedAt;
     }
 
@@ -135,7 +137,7 @@ function parseGatewayPermissionResolutionOverride(
   }
 
   const resolvedAt = record.resolvedAt;
-  if (typeof resolvedAt !== "string" || Number.isNaN(Date.parse(resolvedAt))) {
+  if (typeof resolvedAt !== "string" || !isGatewayIsoTimestamp(resolvedAt)) {
     invalidGatewayProjectionCacheState();
   }
 

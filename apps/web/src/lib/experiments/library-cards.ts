@@ -6,6 +6,10 @@ import {
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
 import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  buildExperimentRunCardSummary,
+  type ExperimentRunCardSummary,
+} from "@/src/lib/experiments/run-card-summary";
 import type { ExperimentProtocol, ExperimentRunProjection } from "@/src/types/experiments";
 
 export type ExperimentCardStatusVariant = "default" | "secondary" | "outline" | "destructive";
@@ -27,6 +31,7 @@ export interface ExperimentLibraryCard {
   description: string;
   hasPrivateData: boolean;
   runStatus?: ExperimentRunStatus;
+  runSummary?: ExperimentRunCardSummary;
   searchText: string;
   startedOn?: string | null;
   trackedExperimentId?: string;
@@ -121,6 +126,7 @@ function protocolToCard(
     description,
     hasPrivateData: privateRun !== null,
     runStatus: privateRun?.status,
+    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
     startedOn,
     trackedExperimentId: privateRun?.id,
     searchText: [

@@ -939,6 +939,7 @@ exit 1
       bundledWorkspaceDependencies: [
         '@murphai/core',
         '@murphai/device-syncd',
+        '@murphai/health-metrics',
         '@murphai/importers',
         '@murphai/runtime-state',
       ],

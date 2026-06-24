@@ -52,6 +52,7 @@ import {
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
 import {
+  type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
@@ -66,6 +67,11 @@ import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   parseGenerateVoiceMemoArguments,
 } from './dynamic-tools/generate-voice-memo.js'
+import {
+  executeGenerateSongDynamicTool,
+  MURPH_GENERATE_SONG_TOOL,
+  parseGenerateSongArguments,
+} from './dynamic-tools/generate-song.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
@@ -288,7 +294,7 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   namespace: 'murph',
   name: 'computer_observe',
   description:
-    'Read the current browser state for a computer run, including URL, title, and visible page text. Use before acting on a resumed run.',
+    'Read the current browser state (URL, title, visible page text) for a computer run. Use only when starting or resuming a run, after an unknown-outcome failure or computer_os_control fallback, or when the previous computer_act could not return enough state. Do not routinely observe before or after every computer_act — a successful computer_act already returns the state needed for the next decision.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -317,7 +323,7 @@ const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
       minLength: 1,
       maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
       description:
-        'Playwright TypeScript/JavaScript source to execute against the current Kernel page. The page, context, and browser objects are available in scope. Return concise JSON-serializable data when useful.',
+        'A complete Playwright macro-step, not one primitive interaction. The page, context, and browser objects are in scope. Combine all deterministic operations that can safely run without another model decision: navigation, locator-based queries, form fields, selection, clicking, bounded waits via locator.waitFor() / page.waitForURL() / page.waitForLoadState(), and final verification. Return only compact JSON-serializable state (URL, title, relevant text, errors) needed for the next decision.',
     },
     timeoutMs: {
       type: 'integer',
@@ -362,7 +368,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Run bounded Playwright TypeScript/JavaScript against the current Kernel browser page for a computer run. Use normal Playwright locators and APIs for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, and page inspection. Use computer_observe when page state is needed before or after code execution.',
+    'Execute one coherent browser macro-step against the current Kernel page using bounded Playwright TypeScript/JavaScript. Combine navigation, inspection, waits, known form entry, selection, clicking or submission, and final verification in a single call whenever the next operation does not require new model judgment. Split into a second call only at: ambiguity in user intent, missing user data, sensitive input (passwords, payment details, one-time codes), irreversible confirmation, an unknown page transition, or the per-call timeout. Prefer locator.waitFor(), page.waitForURL(), and page.waitForLoadState() over fixed sleeps. Return compact JSON-serializable state (URL, title, relevant text, errors) so the next decision does not need a follow-up computer_observe.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -370,7 +376,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. Use computer_observe before and after when page state is needed.',
+    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_observe once to confirm the resulting page state.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
@@ -387,7 +393,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
         anyOf: [
           {
             type: 'string',
-            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help'],
+            enum: ['managed_login', 'login', 'payment', 'card', 'captcha', 'manual_browser_help'],
           },
           { type: 'null' },
         ],
@@ -428,6 +434,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -450,47 +457,56 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
-export function resolveMurphDynamicTools(input: {
+export interface MurphDynamicToolAvailability {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
-}): readonly MurphDynamicTool[] {
-  return MURPH_DYNAMIC_TOOLS.filter((tool) => {
-    if (tool === MURPH_SEND_PROGRESS_UPDATE_TOOL) {
-      return input.progressUpdatesAvailable !== false
-    }
+  voiceMemoGenerationAvailable?: boolean | null
+}
 
-    if (tool === MURPH_FINISH_WITHOUT_REPLY_TOOL) {
-      return input.allowFinishWithoutReply !== false
-    }
+type AvailabilityPredicate = (
+  availability: MurphDynamicToolAvailability,
+) => boolean
 
-    if (tool === MURPH_REACT_TO_MESSAGE_TOOL) {
-      return input.allowMessageReactions === true
-    }
+const ALWAYS_AVAILABLE: AvailabilityPredicate = () => true
 
-    if (tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL) {
-      return input.productFeedbackAvailable === true
-    }
+// Two default semantics, kept explicit so each tool's gate is obvious:
+//   defaultOn  → the tool is available unless the caller passes `false`.
+//   defaultOff → the tool is available only if the caller passes `true`.
+const defaultOn = (
+  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
+): AvailabilityPredicate => (a) => read(a) !== false
+const defaultOff = (
+  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
+): AvailabilityPredicate => (a) => read(a) === true
 
-    if (
-      MURPH_COMPUTER_DYNAMIC_TOOLS.some((computerTool) => computerTool === tool)
-    ) {
-      return input.computerToolsAvailable === true
-    }
+const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
+  new Map<MurphDynamicTool, AvailabilityPredicate>([
+    [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
+    [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
+    [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
+      (tool) =>
+        [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
+    ),
+    ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.map(
+      (tool) =>
+        [tool, defaultOff((a) => a.connectedAppsAvailable)] as const,
+    ),
+  ])
 
-    if (
-      MURPH_CONNECTED_APPS_DYNAMIC_TOOLS.some(
-        (connectedAppsTool) => connectedAppsTool === tool,
-      )
-    ) {
-      return input.connectedAppsAvailable === true
-    }
-
-    return true
-  })
+export function resolveMurphDynamicTools(
+  availability: MurphDynamicToolAvailability,
+): readonly MurphDynamicTool[] {
+  return MURPH_DYNAMIC_TOOLS.filter((tool) =>
+    (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
+  )
 }
 
 export function listMurphDynamicToolNames(): string[] {
@@ -760,6 +776,10 @@ export type MurphDynamicToolRequest =
       args: GenerateVoiceMemoToolArgs
     }
   | {
+      kind: 'generate-song'
+      args: GenerateSongToolArgs
+    }
+  | {
       kind: 'computer-start-run'
       args: ComputerStartRunToolArgs
     }
@@ -793,6 +813,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-voice-memo-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-generate-song-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -918,6 +942,20 @@ export function readMurphDynamicToolRequest(
 
       return {
         kind: 'generate-voice-memo',
+        args: parsed.args,
+      }
+    }
+    case MURPH_GENERATE_SONG_TOOL.name: {
+      const parsed = parseGenerateSongArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-generate-song-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'generate-song',
         args: parsed.args,
       }
     }
@@ -1097,7 +1135,6 @@ function currentHostedMailboxItemId(
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
-  connectedAppsAvailable?: boolean | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -1130,6 +1167,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid computer tool arguments')
     case 'invalid-generate-voice-memo-arguments':
       return toolTextResult(false, 'invalid voice memo generation arguments')
+    case 'invalid-generate-song-arguments':
+      return toolTextResult(false, 'invalid song generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
@@ -1224,15 +1263,30 @@ export async function executeMurphDynamicToolRequest(input: {
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
+    case 'generate-song': {
+      return await executeGenerateSongDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
     case 'connected-apps-manage':
     case 'connected-apps-search':
-    case 'connected-apps-execute':
+    case 'connected-apps-execute': {
+      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      if (!connectedApps) {
+        return toolTextResult(
+          false,
+          'connected apps are unavailable without hosted connected-app transport',
+        )
+      }
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
-        available: input.connectedAppsAvailable === true,
-        fetchImpl: input.fetchImpl,
+        connectedApps,
         request: input.request,
       })
+    }
     case 'computer-start-run': {
       return await executeHostedComputerStartRunTool({
         abortSignal: input.abortSignal ?? null,

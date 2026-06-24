@@ -359,6 +359,21 @@ test("history helpers normalize optional values and ordering helpers", () => {
   assert.ok(compareIsoTimestamps(earlier, later, "desc") > 0);
   assert.ok(compareIsoTimestamps(sameTimesLeft, sameTimesRight, "asc") < 0);
   assert.ok(compareIsoTimestamps(sameTimesLeft, sameTimesRight, "desc") > 0);
+  assert.ok(
+    compareIsoTimestamps(
+      {
+        occurredAt: "2026-04-08T00:30:00+01:00",
+        recordedAt: "2026-04-08T00:30:01+01:00",
+        id: "evt_offset_earlier",
+      },
+      {
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        recordedAt: "2026-04-08T00:00:01.000Z",
+        id: "evt_utc_later",
+      },
+      "asc",
+    ) < 0,
+  );
   assert.equal(heading("Notes"), "## Notes");
   assert.equal(bulletList(undefined), "- none");
   assert.equal(bulletList(["alpha", "beta"]), "- alpha\n- beta");
@@ -373,6 +388,12 @@ test("frontmatter helpers round-trip nested values and reject invalid shapes", (
       empty: "",
       enabled: true,
       count: 2,
+      numericString: "1234567890",
+      negativeNumericString: "-1001234567890",
+      booleanString: "true",
+      nullString: "null",
+      decimalString: "1.5",
+      telegramTopicTarget: "-1001234567890:topic:42",
       nested: {
         tags: ["sleep", "energy"],
         metadata: {
@@ -387,6 +408,12 @@ test("frontmatter helpers round-trip nested values and reject invalid shapes", (
   const parsed = parseFrontmatterDocument(markdown);
 
   assert.equal(parsed.attributes.title, "Morning Note");
+  assert.equal(parsed.attributes.numericString, "1234567890");
+  assert.equal(parsed.attributes.negativeNumericString, "-1001234567890");
+  assert.equal(parsed.attributes.booleanString, "true");
+  assert.equal(parsed.attributes.nullString, "null");
+  assert.equal(parsed.attributes.decimalString, "1.5");
+  assert.equal(parsed.attributes.telegramTopicTarget, "-1001234567890:topic:42");
   assert.deepEqual(parsed.attributes.nested, {
     tags: ["sleep", "energy"],
     metadata: {
@@ -396,6 +423,12 @@ test("frontmatter helpers round-trip nested values and reject invalid shapes", (
   assert.deepEqual(parsed.attributes.emptyArray, []);
   assert.deepEqual(parsed.attributes.emptyObject, {});
   assert.equal(parsed.body, "Keep the walks short and consistent.\n");
+  assert.match(markdown, /numericString: "1234567890"/u);
+  assert.match(markdown, /negativeNumericString: "-1001234567890"/u);
+  assert.match(markdown, /booleanString: "true"/u);
+  assert.match(markdown, /nullString: "null"/u);
+  assert.match(markdown, /decimalString: "1.5"/u);
+  assert.match(markdown, /telegramTopicTarget: -1001234567890:topic:42/u);
   assert.match(markdown, /emptyArray: \[\]/u);
   assert.match(markdown, /emptyObject: \{\}/u);
 

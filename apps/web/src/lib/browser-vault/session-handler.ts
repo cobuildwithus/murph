@@ -63,6 +63,7 @@ export function createBrowserVaultSessionRoute(input: {
         auth.member.id,
       ).catch(() => false),
     ]);
+
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       workspace?.browserVaultReplicaRef ?? null,
       "Hosted browser vault session workspace replica ref",

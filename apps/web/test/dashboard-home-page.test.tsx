@@ -323,7 +323,7 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Your trial just ended/);
-  assert.match(markup, /Billing is still finishing up/);
+  assert.match(markup, /Start Pulse to keep Murph replying/);
   assert.doesNotMatch(markup, /Resets in/u);
 });
 

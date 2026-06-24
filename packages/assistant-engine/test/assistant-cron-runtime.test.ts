@@ -913,6 +913,79 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('computes status next run by timestamp order instead of string order', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-24T05:11:00.000Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-status-timestamp-order-',
+    )
+
+    getVaultAutomationStore(vaultRoot).push(
+      {
+        automationId: 'automation-daily-0830',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-06-24T05:10:00.000Z',
+        instructions: 'Send the morning check-in.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'linq_chat_morning',
+          identityId: 'identity-1',
+          participantId: 'participant-1',
+          threadId: 'thread-1',
+        },
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '08:30',
+        },
+        slug: 'morning-check-in',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Morning check-in',
+        updatedAt: '2026-06-24T05:10:00.000Z',
+      },
+      {
+        automationId: 'automation-one-shot-0900',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-06-24T05:10:00.000Z',
+        instructions: 'Send the one-shot check-in.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'linq_chat_morning',
+          identityId: 'identity-1',
+          participantId: 'participant-1',
+          threadId: 'thread-1',
+        },
+        schedule: {
+          at: '2026-06-24T09:00:00-04:00',
+          kind: 'at',
+        },
+        slug: 'one-shot-check-in',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'One-shot check-in',
+        updatedAt: '2026-06-24T05:10:00.000Z',
+      },
+    )
+
+    const jobs = await listAssistantCronJobs(vaultRoot)
+    const status = await getAssistantCronStatus(vaultRoot)
+
+    expect(jobs.map((job) => [job.name, job.state.nextRunAt])).toEqual([
+      ['Morning check-in', '2026-06-24T12:30:00.000Z'],
+      ['One-shot check-in', '2026-06-24T09:00:00-04:00'],
+    ])
+    expect(status.nextRunAt).toBe('2026-06-24T12:30:00.000Z')
+  })
+
   it('toggles local jobs and rejects re-enabling expired one-shot schedules', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))

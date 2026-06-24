@@ -21,9 +21,9 @@ function expectSyntheticDeletionArtifact(
       externalRef?: {
         resourceId?: string;
       };
-      rawArtifactRoles?: string[];
+      evidenceRoles?: string[];
     }>;
-    rawArtifacts?: Array<{
+    evidenceParts?: Array<{
       content: unknown;
       fileName: string;
       mediaType?: string;
@@ -36,10 +36,10 @@ function expectSyntheticDeletionArtifact(
   sourceEventType: string,
 ) {
   expect(normalized.events).toHaveLength(1);
-  expect(normalized.rawArtifacts).toHaveLength(1);
+  expect(normalized.evidenceParts).toHaveLength(1);
 
-  const rawArtifact = normalized.rawArtifacts?.[0];
-  expect(rawArtifact).toEqual({
+  const evidencePart = normalized.evidenceParts?.[0];
+  expect(evidencePart).toEqual({
     role: expect.stringMatching(
       new RegExp(
         `^deletion:${resourceType}:${sourceEventType}:[0-9a-f]{64}$`,
@@ -61,9 +61,9 @@ function expectSyntheticDeletionArtifact(
       sourceEventType,
     },
   });
-  expect(rawArtifact?.role).not.toContain(occurredAt);
-  expect(rawArtifact?.fileName).not.toContain(occurredAt.replaceAll(":", "-"));
-  expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([rawArtifact?.role]);
+  expect(evidencePart?.role).not.toContain(occurredAt);
+  expect(evidencePart?.fileName).not.toContain(occurredAt.replaceAll(":", "-"));
+  expect(normalized.events?.[0]?.evidenceRoles).toEqual([evidencePart?.role]);
   expect(normalized.events?.[0]?.externalRef?.resourceId).toMatch(
     /^deleted-[0-9a-f]{16}$/u,
   );
@@ -72,9 +72,9 @@ function expectSyntheticDeletionArtifact(
 describe("pushDeletionObservation", () => {
   it("persists a metadata-only deletion artifact", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -84,7 +84,7 @@ describe("pushDeletionObservation", () => {
       makeExternalRef,
     });
 
-    expect(rawArtifacts).toEqual([
+    expect(evidenceParts).toEqual([
       {
         role: expect.stringMatching(
           /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
@@ -100,14 +100,14 @@ describe("pushDeletionObservation", () => {
         },
       },
     ]);
-    expect(events[0]?.rawArtifactRoles).toEqual([rawArtifacts[0]?.role]);
+    expect(events[0]?.evidenceRoles).toEqual([evidenceParts[0]?.role]);
   });
 
   it("uses distinct deletion artifact roles for separate delete observations", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -116,7 +116,7 @@ describe("pushDeletionObservation", () => {
       sourceEventType: "sleep.deleted",
       makeExternalRef,
     });
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -126,7 +126,7 @@ describe("pushDeletionObservation", () => {
       makeExternalRef,
     });
 
-    expect(rawArtifacts.map((artifact) => artifact.role)).toEqual([
+    expect(evidenceParts.map((artifact) => artifact.role)).toEqual([
       expect.stringMatching(
         /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
       ),
@@ -134,18 +134,18 @@ describe("pushDeletionObservation", () => {
         /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
       ),
     ]);
-    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
-    expect(events.map((event) => event.rawArtifactRoles)).toEqual([
-      [rawArtifacts[0]?.role],
-      [rawArtifacts[1]?.role],
+    expect(evidenceParts[0]?.role).not.toEqual(evidenceParts[1]?.role);
+    expect(events.map((event) => event.evidenceRoles)).toEqual([
+      [evidenceParts[0]?.role],
+      [evidenceParts[1]?.role],
     ]);
   });
 
   it("keeps distinct deletion identities when the source event type changes", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -154,7 +154,7 @@ describe("pushDeletionObservation", () => {
       sourceEventType: "sleep.deleted",
       makeExternalRef,
     });
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -164,18 +164,18 @@ describe("pushDeletionObservation", () => {
       makeExternalRef,
     });
 
-    expect(rawArtifacts).toHaveLength(2);
-    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
-    expect(rawArtifacts[0]?.fileName).not.toEqual(rawArtifacts[1]?.fileName);
-    expect(events.map((event) => event.rawArtifactRoles)).toEqual([
-      [rawArtifacts[0]?.role],
-      [rawArtifacts[1]?.role],
+    expect(evidenceParts).toHaveLength(2);
+    expect(evidenceParts[0]?.role).not.toEqual(evidenceParts[1]?.role);
+    expect(evidenceParts[0]?.fileName).not.toEqual(evidenceParts[1]?.fileName);
+    expect(events.map((event) => event.evidenceRoles)).toEqual([
+      [evidenceParts[0]?.role],
+      [evidenceParts[1]?.role],
     ]);
   });
 
   it("collapses exact duplicate delete observations that share identical metadata", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
     const deletion = {
       provider: "oura",
@@ -187,10 +187,10 @@ describe("pushDeletionObservation", () => {
       makeExternalRef,
     } satisfies Parameters<typeof pushDeletionObservation>[2];
 
-    pushDeletionObservation(events, rawArtifacts, deletion);
-    pushDeletionObservation(events, rawArtifacts, deletion);
+    pushDeletionObservation(events, evidenceParts, deletion);
+    pushDeletionObservation(events, evidenceParts, deletion);
 
-    expect(rawArtifacts.map((artifact) => ({
+    expect(evidenceParts.map((artifact) => ({
       role: artifact.role,
       fileName: artifact.fileName,
     }))).toEqual([
@@ -201,7 +201,7 @@ describe("pushDeletionObservation", () => {
         fileName: expect.stringMatching(/^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u),
       },
     ]);
-    expect(events.map((event) => event.rawArtifactRoles)).toEqual([[rawArtifacts[0]?.role]]);
+    expect(events.map((event) => event.evidenceRoles)).toEqual([[evidenceParts[0]?.role]]);
   });
 });
 
@@ -333,7 +333,7 @@ describe("normalizeOuraSnapshot", () => {
       ],
     });
 
-    expect(normalized.rawArtifacts).toEqual([
+    expect(normalized.evidenceParts).toEqual([
       {
         role: expect.stringMatching(
           /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
@@ -349,7 +349,7 @@ describe("normalizeOuraSnapshot", () => {
         },
       },
     ]);
-    expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([normalized.rawArtifacts?.[0]?.role]);
+    expect(normalized.events?.[0]?.evidenceRoles).toEqual([normalized.evidenceParts?.[0]?.role]);
   });
 
   it("dedupes overlapping deleted-sleep and deletions inputs", () => {
@@ -373,9 +373,9 @@ describe("normalizeOuraSnapshot", () => {
       ],
     });
 
-    expect(normalized.rawArtifacts).toHaveLength(1);
+    expect(normalized.evidenceParts).toHaveLength(1);
     expect(normalized.events).toHaveLength(1);
-    expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([normalized.rawArtifacts?.[0]?.role]);
+    expect(normalized.events?.[0]?.evidenceRoles).toEqual([normalized.evidenceParts?.[0]?.role]);
   });
 
   it("dedupes alias-equivalent deletions when a stable id is missing", () => {
@@ -402,17 +402,17 @@ describe("normalizeOuraSnapshot", () => {
       ],
     });
 
-    expect(normalized.rawArtifacts).toHaveLength(1);
+    expect(normalized.evidenceParts).toHaveLength(1);
     expect(normalized.events).toHaveLength(1);
     expect(normalized.events?.[0]?.externalRef?.resourceId).toMatch(/^deleted-[0-9a-f]{16}$/u);
-    expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([normalized.rawArtifacts?.[0]?.role]);
+    expect(normalized.events?.[0]?.evidenceRoles).toEqual([normalized.evidenceParts?.[0]?.role]);
   });
 
   it("keeps distinct deletion artifacts when sanitized file names would otherwise collide", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -421,7 +421,7 @@ describe("normalizeOuraSnapshot", () => {
       sourceEventType: "sleep/deleted",
       makeExternalRef,
     });
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -431,17 +431,17 @@ describe("normalizeOuraSnapshot", () => {
       makeExternalRef,
     });
 
-    expect(rawArtifacts).toHaveLength(2);
-    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
-    expect(rawArtifacts[0]?.fileName).not.toEqual(rawArtifacts[1]?.fileName);
+    expect(evidenceParts).toHaveLength(2);
+    expect(evidenceParts[0]?.role).not.toEqual(evidenceParts[1]?.role);
+    expect(evidenceParts[0]?.fileName).not.toEqual(evidenceParts[1]?.fileName);
     expect(events).toHaveLength(2);
   });
 
   it("keeps distinct deletion identities when tuple members contain delimiters", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -450,7 +450,7 @@ describe("normalizeOuraSnapshot", () => {
       sourceEventType: "deleted",
       makeExternalRef,
     });
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep:123",
@@ -460,20 +460,20 @@ describe("normalizeOuraSnapshot", () => {
       makeExternalRef,
     });
 
-    expect(rawArtifacts).toHaveLength(2);
-    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
-    expect(rawArtifacts[0]?.fileName).not.toEqual(rawArtifacts[1]?.fileName);
-    expect(events.map((event) => event.rawArtifactRoles)).toEqual([
-      [rawArtifacts[0]?.role],
-      [rawArtifacts[1]?.role],
+    expect(evidenceParts).toHaveLength(2);
+    expect(evidenceParts[0]?.role).not.toEqual(evidenceParts[1]?.role);
+    expect(evidenceParts[0]?.fileName).not.toEqual(evidenceParts[1]?.fileName);
+    expect(events.map((event) => event.evidenceRoles)).toEqual([
+      [evidenceParts[0]?.role],
+      [evidenceParts[1]?.role],
     ]);
   });
 
   it("omits missing source event types from artifact strings instead of serializing undefined", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
-    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+    const evidenceParts: Parameters<typeof pushDeletionObservation>[1] = [];
 
-    pushDeletionObservation(events, rawArtifacts, {
+    pushDeletionObservation(events, evidenceParts, {
       provider: "oura",
       providerDisplayName: "Oura",
       resourceType: "sleep",
@@ -484,10 +484,10 @@ describe("normalizeOuraSnapshot", () => {
     });
 
     expect(events).toHaveLength(1);
-    expect(rawArtifacts).toHaveLength(1);
-    expect(rawArtifacts[0]?.role).not.toContain("undefined");
-    expect(rawArtifacts[0]?.fileName).not.toContain("undefined");
-    expect(rawArtifacts[0]?.content).toEqual({
+    expect(evidenceParts).toHaveLength(1);
+    expect(evidenceParts[0]?.role).not.toContain("undefined");
+    expect(evidenceParts[0]?.fileName).not.toContain("undefined");
+    expect(evidenceParts[0]?.content).toEqual({
       occurredAt: "2026-04-10T00:00:00.000Z",
       provider: "oura",
       resourceId: "sleep_123",

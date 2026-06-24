@@ -9,7 +9,6 @@ import {
 import {
   isObjectRecord,
   normalizeOptionalString,
-  readBooleanEnv,
   requireConfiguredString,
 } from "./shared.ts";
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
@@ -64,7 +63,6 @@ export interface HostedDeployAutomationEnvironment {
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
   containerSshKey: HostedContainerSshKey | null;
-  hostedEmailSendBindingEnabled: boolean;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -104,10 +102,6 @@ export function readHostedDeployAutomationEnvironment(
     containerSshKey: normalizeContainerSshKey(
       source.CF_CONTAINER_SSH_PUBLIC_KEY,
       source.CF_CONTAINER_SSH_KEY_NAME,
-    ),
-    hostedEmailSendBindingEnabled: readBooleanEnv(
-      source.CF_HOSTED_EMAIL_SEND_BINDING_ENABLED,
-      true,
     ),
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
