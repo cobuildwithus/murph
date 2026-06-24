@@ -10,6 +10,7 @@ import {
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
 import {
+  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import type {
@@ -69,7 +70,6 @@ import type {
   HostedRuntimePlatform,
   HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
-import { compareHostedIsoTimestampsAscending } from "./timestamp-order.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
