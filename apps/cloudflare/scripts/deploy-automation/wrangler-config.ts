@@ -40,10 +40,7 @@ export function buildHostedWranglerDeployConfig(
     vars.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = environment.allowedRunnerSecretKeys;
   }
 
-  const sendEmailBindings = buildHostedEmailSendBindings(
-    environment.workerVars,
-    environment.hostedEmailSendBindingEnabled,
-  );
+  const sendEmailBindings = buildHostedEmailSendBindings(environment.workerVars);
   const buildRunnerContainerConfig = (input: {
     className: string;
     maxInstances: number;
@@ -173,15 +170,10 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
 
 function buildHostedEmailSendBindings(
   workerVars: Readonly<Record<string, string>>,
-  enabled: boolean,
 ): Array<{
   allowed_sender_addresses?: string[];
   name: string;
 }> {
-  if (!enabled) {
-    return [];
-  }
-
   const senderIdentity = resolveHostedEmailSenderIdentity(workerVars);
   if (!senderIdentity) {
     return [];

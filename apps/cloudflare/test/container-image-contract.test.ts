@@ -46,7 +46,6 @@ function createDeployEnvironment() {
     },
     containerMaxInstances: 1000,
     containerSshKey: null,
-    hostedEmailSendBindingEnabled: true,
     logHeadSamplingRate: 1,
     maxEventAttempts: "3",
     retryDelayMs: "30000",
