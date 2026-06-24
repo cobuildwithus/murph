@@ -339,7 +339,7 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(mocks.runPackageHostedWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
-  it("threads dispatch stamps into latencyMilestones.phaseBreakdown alongside or without boot", async () => {
+  it("threads orchestration and dispatch stamps into latencyMilestones.phaseBreakdown", async () => {
     const capturedInvocationInputs: Record<string, unknown>[] = [];
     mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: Record<string, unknown>) => {
       capturedInvocationInputs.push(input);
@@ -371,12 +371,26 @@ describe("runHostedWorkspaceInvocation", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       nodeStartupMs: 4200,
+      orchestration: {
+        temporalActivityStartedAtEpochMs: 1_776_999_999_900,
+        cloudflareRouteReceivedAtEpochMs: 1_776_999_999_950,
+        activeWakeAccepted: false,
+        replacedStaleFence: true,
+        freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
+      },
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
       supervisorEnv,
     });
     expect(capturedInvocationInputs[0]?.latencyMilestones).toEqual({
       phaseBreakdown: {
         schemaVersion: 1,
+        orchestration: {
+          temporalActivityStartedAtEpochMs: 1_776_999_999_900,
+          cloudflareRouteReceivedAtEpochMs: 1_776_999_999_950,
+          activeWakeAccepted: false,
+          replacedStaleFence: true,
+          freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
+        },
         dispatch: {
           containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
           invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -407,6 +421,7 @@ describe("runHostedWorkspaceInvocation", () => {
     await runHostedWorkspaceInvocation(createJob("attempt_no_breakdown"), {
       dispatch: {},
       nodeStartupMs: null,
+      orchestration: {},
       supervisorEnv,
     });
     const bareInput = capturedInvocationInputs[2];

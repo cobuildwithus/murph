@@ -9,6 +9,7 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLogRequest,
   HostedRuntimeWebStatusResponse,
   HostedWorkspaceInvocationResult,
@@ -86,6 +87,7 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export type RuntimeInvocationInput = {
+  orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
   processingMode?: "default" | "inbox_media_retention" | null;
   userId: string;
@@ -702,6 +704,7 @@ export class RuntimeInvocationService {
 
     return await invokeHostedExecutionContainerRunner({
       job: input.job,
+      orchestration: input.input.orchestration ?? null,
       runnerContainerName: input.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       userId: input.input.userId,
