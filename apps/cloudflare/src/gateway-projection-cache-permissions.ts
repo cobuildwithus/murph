@@ -2,6 +2,7 @@ import {
   compareGatewayTimestampsAscending,
   gatewayPermissionRequestSchema,
   gatewayProjectionSnapshotSchema,
+  isGatewayIsoTimestamp,
   type GatewayPermissionRequest,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
@@ -136,7 +137,7 @@ function parseGatewayPermissionResolutionOverride(
   }
 
   const resolvedAt = record.resolvedAt;
-  if (typeof resolvedAt !== "string" || Number.isNaN(Date.parse(resolvedAt))) {
+  if (typeof resolvedAt !== "string" || !isGatewayIsoTimestamp(resolvedAt)) {
     invalidGatewayProjectionCacheState();
   }
 

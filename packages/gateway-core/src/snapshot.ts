@@ -33,6 +33,7 @@ import {
   sameGatewayConversationSession,
 } from './opaque-ids.ts'
 import { createGatewayInvalidRuntimeIdError } from './errors.ts'
+import { parseGatewayTimestampMs } from './shared.ts'
 
 export interface GatewayEventEmission
   extends Omit<GatewayEvent, 'cursor' | 'schema'> {}
@@ -385,8 +386,8 @@ export function compareGatewayTimestampsAscending(
     return 0
   }
 
-  const leftMs = Date.parse(left)
-  const rightMs = Date.parse(right)
+  const leftMs = parseGatewayTimestampMs(left)
+  const rightMs = parseGatewayTimestampMs(right)
   const leftValid = Number.isFinite(leftMs)
   const rightValid = Number.isFinite(rightMs)
 
