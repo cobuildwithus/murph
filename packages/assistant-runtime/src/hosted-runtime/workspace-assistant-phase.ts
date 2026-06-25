@@ -1381,7 +1381,7 @@ function createHostedDeviceActivityAutomationWakeCandidate(
 ): HostedRuntimeWakeCandidate | null {
   return createHostedRuntimeWakeCandidate(
     result?.nextWakeAt ?? null,
-    HOSTED_ASSISTANT_WAKE_REASON,
+    HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   );
 }
 

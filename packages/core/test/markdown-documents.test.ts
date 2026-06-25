@@ -352,7 +352,7 @@ describe("markdown document primitives", () => {
     expect(skipped.record.schedule).toEqual(retargeted.record.schedule);
   });
 
-  it("rejects partial and mixed device activity cursor shapes", async () => {
+  it("rejects partial device activity cursor shapes", async () => {
     const vaultRoot = await makeVaultRoot();
 
     await expect(
@@ -363,23 +363,6 @@ describe("markdown document primitives", () => {
             kind: "deviceActivity",
             after: "2026-06-07T11:00:00.000Z",
             afterOccurredAt: "2026-06-07T10:30:00.000Z",
-          },
-        }),
-      }),
-    ).rejects.toMatchObject({
-      code: "VAULT_INVALID_INPUT",
-    });
-
-    await expect(
-      upsertAutomation({
-        vaultRoot,
-        ...createAutomationPayload({
-          schedule: {
-            kind: "deviceActivity",
-            after: "2026-06-07T11:00:00.000Z",
-            afterOccurredAt: "2026-06-07T10:30:00.000Z",
-            afterEntityId: "evt_walk",
-            afterEntityIds: ["evt_old"],
           },
         }),
       }),

@@ -1058,7 +1058,7 @@ describe('assistant cron runtime orchestration', () => {
     const parentAutomationId = 'automation-device-activity-listener'
     const parentAutomation: MockAutomationRecord = {
       automationId: parentAutomationId,
-      continuityPolicy: 'preserve',
+      continuityPolicy: 'fresh',
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about imported runs.',
       route: {

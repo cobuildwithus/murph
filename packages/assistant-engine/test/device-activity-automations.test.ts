@@ -222,6 +222,48 @@ describe('device activity triggered automations', () => {
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledTimes(3)
   })
 
+  it('attaches parent authority for fresh listener occurrences without preserving a session', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_fresh_run',
+        continuityPolicy: 'fresh',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Fresh run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      matched: 1,
+      scheduled: 1,
+    })
+
+    const [queued] = await readQueuedCronJobs(vaultRoot)
+    expect(queued?.tags).toContain('system:assistant-device-activity-parent:auto_fresh_run')
+    expect(queued?.tags?.some((tag) =>
+      tag.startsWith('system:assistant-device-activity-authority:'),
+    )).toBe(true)
+    expect(queued?.tags?.some((tag) =>
+      tag.startsWith('system:assistant-device-activity-occurrence:'),
+    )).toBe(true)
+    expect(queued?.target.sessionId).toBeNull()
+  })
+
   it('schedules WHOOP sleep sessions when the activity kind is sleep or a sleep alias', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -446,7 +488,8 @@ describe('device activity triggered automations', () => {
       createDeviceActivityAutomation({
         activityKind: 'run',
         after: '2026-06-07T12:05:00.000Z',
-        afterEntityIds: ['evt_run_a'],
+        afterOccurredAt: '2026-06-07T12:01:00.000Z',
+        afterEntityId: 'evt_run_a',
         automationId: 'auto_run',
         instructions: 'Report run progress.',
       }),
@@ -541,7 +584,8 @@ describe('device activity triggered automations', () => {
         ...createDeviceActivityAutomation({
           activityKind: 'run',
           after: '2026-06-07T12:05:00.000Z',
-          afterEntityIds: ['evt_run_a'],
+          afterOccurredAt: '2026-06-07T12:01:00.000Z',
+          afterEntityId: 'evt_run_a',
           automationId: 'auto_run',
           instructions: 'Report run progress.',
         }),
@@ -639,6 +683,88 @@ describe('device activity triggered automations', () => {
         afterEntityId: 'evt_run_consumed',
         expectedActivityKind: 'run',
         expectedSource: undefined,
+        lookup: 'auto_run',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('does not recreate a consumed occurrence when the same activity is rescored later', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_rescored',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          recordedAt: '2026-06-07T12:10:00.000Z',
+          title: 'Rescored run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:11:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      matched: 1,
+      scheduled: 1,
+    })
+
+    await markQueuedCronJobsConsumed(vaultRoot, '2026-06-07T12:11:30.000Z')
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:10:00.000Z',
+        afterOccurredAt: '2026-06-07T12:05:00.000Z',
+        afterEntityId: 'evt_run_rescored',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_rescored',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          recordedAt: '2026-06-07T12:30:00.000Z',
+          title: 'Rescored run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:31:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:31:00.000Z',
+      scheduled: 0,
+    })
+
+    const retainedJobs = await readQueuedCronJobs(vaultRoot)
+    expect(retainedJobs).toHaveLength(1)
+    expect(retainedJobs[0]?.enabled).toBe(false)
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:30:00.000Z',
+        afterOccurredAt: '2026-06-07T12:05:00.000Z',
+        afterEntityId: 'evt_run_rescored',
         lookup: 'auto_run',
         vaultRoot,
       }),
@@ -859,8 +985,10 @@ function createDueRequireSendAutomation(input: {
 function createDeviceActivityAutomation(input: {
   activityKind?: string
   after: string
-  afterEntityIds?: string[]
+  afterEntityId?: string
+  afterOccurredAt?: string
   automationId?: string
+  continuityPolicy?: 'fresh' | 'preserve'
   instructions?: string
   source?: 'whoop' | 'whoop_v2'
   tags?: string[]
@@ -868,7 +996,7 @@ function createDeviceActivityAutomation(input: {
   const automationId = input.automationId ?? 'auto_walk'
   return {
     automationId,
-    continuityPolicy: 'preserve',
+    continuityPolicy: input.continuityPolicy ?? 'preserve',
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',
     instructions: input.instructions ?? 'Ask how the walk felt.',
@@ -885,7 +1013,8 @@ function createDeviceActivityAutomation(input: {
     schedule: {
       kind: 'deviceActivity',
       after: input.after,
-      ...(input.afterEntityIds ? { afterEntityIds: input.afterEntityIds } : {}),
+      ...(input.afterOccurredAt ? { afterOccurredAt: input.afterOccurredAt } : {}),
+      ...(input.afterEntityId ? { afterEntityId: input.afterEntityId } : {}),
       ...(input.source ? { source: input.source } : {}),
       ...(input.activityKind ? { activityKind: input.activityKind } : {}),
     },

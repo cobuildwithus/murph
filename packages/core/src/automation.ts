@@ -205,41 +205,20 @@ function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDevice
   return parsed.data;
 }
 
-function normalizeAutomationDeviceActivityCursorEntityIds(value: unknown): string[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (!Array.isArray(value)) {
-    throw new VaultError("VAULT_INVALID_INPUT", "schedule.afterEntityIds must be an array.");
-  }
-
-  const entityIds = [...new Set(value.map((entry) => requireString(entry, "schedule.afterEntityIds[]")))]
-    .sort();
-  return entityIds.length > 0 ? entityIds : undefined;
-}
-
 function normalizeAutomationDeviceActivityCursorEntityId(value: unknown): string | undefined {
   return optionalString(value, "schedule.afterEntityId", 240) ?? undefined;
 }
 
 function assertAutomationDeviceActivityCursorShape(input: {
   afterEntityId?: string;
-  afterEntityIds?: readonly string[];
   afterOccurredAt?: string;
 }): void {
   const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
   const hasScalarEntityId = input.afterEntityId !== undefined;
-  const hasLegacyEntityIds = input.afterEntityIds !== undefined;
   if (hasScalarOccurredAt !== hasScalarEntityId) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
       "schedule.afterOccurredAt and schedule.afterEntityId must be provided together.",
-    );
-  }
-  if (hasLegacyEntityIds && (hasScalarOccurredAt || hasScalarEntityId)) {
-    throw new VaultError(
-      "VAULT_INVALID_INPUT",
-      "schedule.afterEntityIds cannot be mixed with schedule.afterOccurredAt or schedule.afterEntityId.",
     );
   }
 }
@@ -325,10 +304,8 @@ function normalizeAutomationSchedule(
         ? undefined
         : normalizeAutomationIsoTimestamp(object.afterOccurredAt, "schedule.afterOccurredAt");
       const afterEntityId = normalizeAutomationDeviceActivityCursorEntityId(object.afterEntityId);
-      const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(object.afterEntityIds);
       assertAutomationDeviceActivityCursorShape({
         afterEntityId,
-        afterEntityIds,
         afterOccurredAt,
       });
 
@@ -337,7 +314,6 @@ function normalizeAutomationSchedule(
         after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
         ...(afterOccurredAt ? { afterOccurredAt } : {}),
         ...(afterEntityId ? { afterEntityId } : {}),
-        ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -464,7 +440,6 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
         after: schedule.after,
         ...(schedule.afterOccurredAt ? { afterOccurredAt: schedule.afterOccurredAt } : {}),
         ...(schedule.afterEntityId ? { afterEntityId: schedule.afterEntityId } : {}),
-        ...(schedule.afterEntityIds ? { afterEntityIds: schedule.afterEntityIds } : {}),
         ...(schedule.source ? { source: schedule.source } : {}),
         ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
       };
@@ -752,7 +727,6 @@ export async function advanceAutomationDeviceActivityCursor(
     const cursor = resolveAdvancedDeviceActivityCursor({
       currentAfter: existingRecord.schedule.after,
       currentAfterEntityId: existingRecord.schedule.afterEntityId,
-      currentAfterEntityIds: existingRecord.schedule.afterEntityIds,
       currentAfterOccurredAt: existingRecord.schedule.afterOccurredAt,
       nextAfter: after,
       nextAfterEntityId: afterEntityId,
@@ -776,7 +750,6 @@ export async function advanceAutomationDeviceActivityCursor(
         after: cursor.after,
         afterOccurredAt: cursor.afterOccurredAt,
         afterEntityId: cursor.afterEntityId,
-        afterEntityIds: undefined,
       },
       slug: existingRecord.slug,
       status: existingRecord.status,
@@ -808,7 +781,6 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
 function resolveAdvancedDeviceActivityCursor(input: {
   currentAfter: string;
   currentAfterEntityId?: string;
-  currentAfterEntityIds?: readonly string[];
   currentAfterOccurredAt?: string;
   nextAfter: string;
   nextAfterEntityId: string;
@@ -824,7 +796,6 @@ function resolveAdvancedDeviceActivityCursor(input: {
       after: input.currentAfter,
       ...(input.currentAfterOccurredAt ? { afterOccurredAt: input.currentAfterOccurredAt } : {}),
       ...(input.currentAfterEntityId ? { afterEntityId: input.currentAfterEntityId } : {}),
-      ...(input.currentAfterEntityIds ? { afterEntityIds: input.currentAfterEntityIds } : {}),
     },
     keys: [nextKey],
   });

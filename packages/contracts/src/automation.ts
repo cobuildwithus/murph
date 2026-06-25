@@ -97,26 +97,17 @@ export const automationScheduleDeviceActivitySchema = z
     after: isoTimestampSchema(),
     afterOccurredAt: isoTimestampSchema().optional(),
     afterEntityId: z.string().min(1).optional(),
-    afterEntityIds: z.array(z.string().min(1)).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
     activityKind: automationDeviceActivityKindSchema.optional(),
   })
   .superRefine((schedule, ctx) => {
     const hasScalarOccurredAt = schedule.afterOccurredAt !== undefined;
     const hasScalarEntityId = schedule.afterEntityId !== undefined;
-    const hasLegacyEntityIds = schedule.afterEntityIds !== undefined;
     if (hasScalarOccurredAt !== hasScalarEntityId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Device activity cursor must include afterOccurredAt and afterEntityId together.",
         path: hasScalarOccurredAt ? ["afterEntityId"] : ["afterOccurredAt"],
-      });
-    }
-    if (hasLegacyEntityIds && (hasScalarOccurredAt || hasScalarEntityId)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Device activity cursor cannot mix afterEntityIds with afterOccurredAt/afterEntityId.",
-        path: ["afterEntityIds"],
       });
     }
   })
@@ -126,7 +117,6 @@ export interface DeviceActivityCoverageCursor {
   after: string;
   afterOccurredAt?: string;
   afterEntityId?: string;
-  afterEntityIds?: readonly string[];
 }
 
 export interface DeviceActivityCoverageKey {
@@ -170,7 +160,7 @@ export function deviceActivityCoverageKeyIsAfterCursor(
     }) > 0;
   }
 
-  return cursor.afterEntityIds !== undefined && !cursor.afterEntityIds.includes(key.entityId);
+  return false;
 }
 
 export function resolveNextDeviceActivityCoverageCursor(input: {

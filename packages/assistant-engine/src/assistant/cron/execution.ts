@@ -39,6 +39,7 @@ import {
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
   readAssistantDeviceActivityAuthorityTag,
+  readAssistantDeviceActivityOccurrenceTag,
   readAssistantDeviceActivityParentAutomationTag,
 } from '../device-activity-cron-tags.js'
 import {
@@ -863,12 +864,14 @@ async function resolveDeviceActivityParentAuthorityError(input: {
   }
 
   const parentAutomationId = readAssistantDeviceActivityParentAutomationTag(input.job.job.tags)
-  if (!parentAutomationId) {
-    return null
-  }
-
   const expectedAuthorityKey = readAssistantDeviceActivityAuthorityTag(input.job.job.tags)
-  if (!expectedAuthorityKey) {
+  const occurrenceKey = readAssistantDeviceActivityOccurrenceTag(input.job.job.tags)
+  if (!parentAutomationId) {
+    return expectedAuthorityKey || occurrenceKey
+      ? ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+      : null
+  }
+  if (!expectedAuthorityKey || !occurrenceKey) {
     return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
   }
 

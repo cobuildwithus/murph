@@ -92,20 +92,6 @@ function requireStringValue(value: unknown, fieldName: string): string {
   return normalized;
 }
 
-function normalizeDeviceActivityCursorEntityIds(value: unknown): string[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (!Array.isArray(value)) {
-    throw new Error("schedule.afterEntityIds must be an array.");
-  }
-
-  const entityIds = [...new Set(value.map((entry) =>
-    requireStringValue(entry, "schedule.afterEntityIds[]")
-  ))].sort();
-  return entityIds.length > 0 ? entityIds : undefined;
-}
-
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -116,17 +102,12 @@ function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefin
 
 function assertDeviceActivityCursorShape(input: {
   afterEntityId?: string;
-  afterEntityIds?: readonly string[];
   afterOccurredAt?: string;
 }): void {
   const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
   const hasScalarEntityId = input.afterEntityId !== undefined;
-  const hasLegacyEntityIds = input.afterEntityIds !== undefined;
   if (hasScalarOccurredAt !== hasScalarEntityId) {
     throw new Error("schedule.afterOccurredAt and schedule.afterEntityId must be provided together.");
-  }
-  if (hasLegacyEntityIds && (hasScalarOccurredAt || hasScalarEntityId)) {
-    throw new Error("schedule.afterEntityIds cannot be mixed with schedule.afterOccurredAt or schedule.afterEntityId.");
   }
 }
 
@@ -252,10 +233,8 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       const afterEntityId = normalizeDeviceActivityCursorEntityId(object.afterEntityId);
       const source = normalizeDeviceActivitySource(object.source);
       const activityKind = normalizeDeviceActivityKind(object.activityKind);
-      const afterEntityIds = normalizeDeviceActivityCursorEntityIds(object.afterEntityIds);
       assertDeviceActivityCursorShape({
         afterEntityId,
-        afterEntityIds,
         afterOccurredAt,
       });
       return {
@@ -263,7 +242,6 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         after,
         ...(afterOccurredAt ? { afterOccurredAt } : {}),
         ...(afterEntityId ? { afterEntityId } : {}),
-        ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };

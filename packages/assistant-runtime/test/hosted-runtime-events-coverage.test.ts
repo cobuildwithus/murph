@@ -207,7 +207,7 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 
-  it("returns an assistant wake when a device activity automation schedules notification work", async () => {
+  it("returns a device-sync continuation wake when device activity automation schedules notification work", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity",
@@ -238,12 +238,12 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toMatchObject({
       mailboxLane: "device-sync",
       nextWakeAt: "2026-04-08T00:10:05.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: "device-sync.reconcile",
       postCheckpointRecord: null,
     });
   });
 
-  it("returns an assistant wake when a device activity automation handoff is already due", async () => {
+  it("returns a device-sync continuation wake when a device activity automation handoff is already due", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity_due",
@@ -274,7 +274,7 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toMatchObject({
       mailboxLane: "device-sync",
       nextWakeAt: "2026-04-08T00:10:05.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: "device-sync.reconcile",
       postCheckpointRecord: null,
     });
   });

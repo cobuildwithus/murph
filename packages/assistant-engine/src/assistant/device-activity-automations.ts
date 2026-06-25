@@ -491,9 +491,7 @@ function buildDeviceActivityAutomationNotificationJob(input: {
       input.automation.tags,
       [
         ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
-        input.automation.continuityPolicy === 'preserve'
-          ? buildAssistantDeviceActivityParentAutomationTag(input.automation.automationId)
-          : null,
+        buildAssistantDeviceActivityParentAutomationTag(input.automation.automationId),
         buildAssistantDeviceActivityAuthorityTag(
           buildDeviceActivityAutomationAuthorityKey(input.automation),
         ),
@@ -537,8 +535,6 @@ function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
     .update(input.automation.automationId)
     .update('\0')
     .update(input.activity.entityId)
-    .update('\0')
-    .update(input.activity.triggeredAt)
     .digest('hex')
     .slice(0, 40)
 }

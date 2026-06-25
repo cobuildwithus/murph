@@ -881,7 +881,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an assistant wake when idle device sync matches device activity automation", async () => {
+  it("schedules a device-sync continuation wake when idle device sync matches device activity automation", async () => {
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
       deviceSyncSkipped: false,
@@ -930,12 +930,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:00:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
   });
 
-  it("schedules an assistant wake when idle device sync finds an already due activity handoff", async () => {
+  it("schedules a device-sync continuation wake when idle device sync finds an already due activity handoff", async () => {
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
       deviceSyncSkipped: false,
@@ -984,7 +984,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:00:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
   });
