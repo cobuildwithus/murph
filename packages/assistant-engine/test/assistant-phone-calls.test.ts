@@ -75,7 +75,7 @@ describe("assistant phone calls", () => {
     })).toEqual([]);
   });
 
-  it("keys calls by accepted input, destination, and disclosure scope instead of mutable brief prose", () => {
+  it("keys calls by accepted input and the exact bounded brief", () => {
     const first = createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: BASE_SCOPE,
@@ -115,7 +115,7 @@ describe("assistant phone calls", () => {
     });
 
     expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
-    expect(reworded).toBe(first);
+    expect(reworded).not.toBe(first);
     expect(differentDisclosure).not.toBe(first);
     expect(differentInput).not.toBe(first);
     expect(() => createPhoneCallRequestKey({

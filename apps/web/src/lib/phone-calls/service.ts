@@ -9,6 +9,9 @@ import type {
   HostedPhoneCallResult,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
+import {
+  hostedPhoneCallBriefSchema,
+} from "@murphai/hosted-execution/phone-calls";
 
 import { getPrisma } from "../prisma";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
@@ -82,6 +85,10 @@ export async function createHostedPhoneCall(input: {
     if (existing.memberId !== input.memberId) {
       throw new Error("Hosted phone call request key collision.");
     }
+    assertHostedPhoneCallBriefMatches({
+      actual: existing.briefJson,
+      expected: input.brief,
+    });
     return {
       phoneCallId: existing.id,
       status: toStartResponseStatus(existing.status),
@@ -161,5 +168,36 @@ function isRequestKeyUniqueConstraintTarget(value: unknown): boolean {
     || value === "request_key"
     || value.includes("requestKey")
     || value.includes("request_key")
+  );
+}
+
+function assertHostedPhoneCallBriefMatches(input: {
+  actual: unknown;
+  expected: HostedPhoneCallBrief;
+}): void {
+  const actual = hostedPhoneCallBriefSchema.safeParse(input.actual);
+  if (!actual.success || stableJson(actual.data) !== stableJson(input.expected)) {
+    throw new Error("Hosted phone call request key collision.");
+  }
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(stabilizeJsonValue(value));
+}
+
+function stabilizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stabilizeJsonValue(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => [key, stabilizeJsonValue(entryValue)]),
   );
 }

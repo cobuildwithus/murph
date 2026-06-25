@@ -107,6 +107,34 @@ describe("createHostedPhoneCall", () => {
     expect(store.updateCalls).toEqual([]);
   });
 
+  it("fails closed when a duplicate request key carries a different brief", async () => {
+    const existing = buildHostedPhoneCall({
+      briefJson: VALID_BRIEF,
+      providerCallId: "retell_existing",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({
+      createError: createUniqueRequestKeyError(["requestKey"]),
+      existing,
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: {
+        ...VALID_BRIEF,
+        goal: "Ask whether the office is open on Friday, June 26, 2026.",
+        successCriteria: "The office confirms whether it is open that Friday.",
+      },
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).rejects.toThrow("request key collision");
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateCalls).toEqual([]);
+  });
+
   it("fails closed when a duplicate request key belongs to another member", async () => {
     const existing = buildHostedPhoneCall({
       memberId: "member_2",

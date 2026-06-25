@@ -82,14 +82,12 @@ export function createPhoneCallRequestKey(input: {
   const digest = createHash('sha256')
     .update(stableJson({
       acceptedInputIds: [...input.scope.acceptedInputIds],
-      allowTransferToUser: input.brief.allowTransferToUser,
       assistantTurnOrdinal: input.scope.assistantTurnOrdinal,
+      brief: input.brief,
       conversationId: input.scope.conversationId,
       inboundMailboxItemIds: [...input.scope.inboundMailboxItemIds],
       recipientKey: input.scope.recipientKey,
       schema: 'murph.create-phone-call.request-key.v1',
-      shareableFacts: input.brief.shareableFacts,
-      toPhoneNumber: input.brief.to.phoneNumber,
       turnId: input.scope.turnId,
     }))
     .digest('hex')

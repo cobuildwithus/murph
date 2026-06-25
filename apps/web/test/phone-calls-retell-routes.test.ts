@@ -89,6 +89,31 @@ describe("Retell ask_murph route", () => {
     });
   });
 
+  it("accepts signed ask_murph payloads with long Retell transcripts", async () => {
+    const longTranscript = "caller ".repeat(50 * 1024);
+    const response = await askMurphRoute.POST(signedRetellRequest({
+      payload: {
+        args: {
+          question: "The office needs guidance. What should I do?",
+        },
+        call: {
+          call_id: "retell_call_123",
+          metadata: {
+            murph_phone_call_id: "hpc_123",
+          },
+          transcript: longTranscript,
+        },
+        name: "ask_murph",
+      },
+      url: "https://join.example.test/api/retell/functions/ask-murph",
+    }));
+
+    expect(response.status).toBe(200);
+    const consultInput = mocks.consultPhoneCall.mock.calls.at(-1)?.[0];
+    expect(consultInput?.question).toBe("The office needs guidance. What should I do?");
+    expect(consultInput?.transcript).toHaveLength(longTranscript.length);
+  });
+
   it("rejects ask_murph calls that do not carry the Murph call id", async () => {
     const response = await askMurphRoute.POST(signedRetellRequest({
       payload: {
@@ -166,6 +191,38 @@ describe("Retell ask_murph route", () => {
     });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts signed call_analyzed webhooks with long Retell transcripts", async () => {
+    const longTranscript = "agent ".repeat(120 * 1024);
+
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_analysis: {
+            custom_analysis_data: {
+              outcome: "completed",
+              result: "Booked.",
+            },
+          },
+          call_id: "retell_call_123",
+          metadata: {
+            murph_phone_call_id: "hpc_123",
+          },
+          transcript: longTranscript,
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(204);
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledWith({
+      call: expect.objectContaining({
+        call_id: "retell_call_123",
+        transcript: expect.stringMatching(/^agent /u),
+      }),
+    });
   });
 });
 

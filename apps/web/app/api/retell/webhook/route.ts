@@ -7,7 +7,7 @@ import {
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
-const RETELL_WEBHOOK_MAX_BODY_BYTES = 512 * 1024;
+const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
