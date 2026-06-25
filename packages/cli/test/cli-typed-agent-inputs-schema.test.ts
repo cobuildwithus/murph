@@ -563,6 +563,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'regimen import-json',
     'recipe import-json',
     'research scout',
+    'research scout-batch',
     'samples import-json',
     'scheduled-log import-json',
     'social-history import-json',

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_CATEGORY,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
+  MAX_RESEARCH_SCOUT_BATCH_LANES,
   parseExaResearchScoutRequestBody,
+  researchScoutBatchInputSchema,
+  researchScoutBatchPayloadSchema,
   researchScoutProfileSchema,
 } from "../src/exa-research-scout.ts";
 
@@ -71,6 +75,87 @@ describe("Exa research scout contracts", () => {
         conditionsOrConcerns: ["mayo clinic"],
       })
     ).toThrow(/non-identifying categories/u);
+  });
+
+  it("bounds batch lanes while reusing compact profile validation", () => {
+    expect(researchScoutBatchPayloadSchema.parse({
+      lanes: [
+        {
+          label: "sleep",
+          profile: {
+            topics: ["sleep"],
+            behaviors: ["morning light"],
+          },
+        },
+      ],
+    })).toMatchObject({
+      lanes: [
+        {
+          label: "sleep",
+          profile: {
+            topics: ["sleep"],
+            behaviors: ["morning light"],
+            biomarkers: [],
+            supplements: [],
+            conditionsOrConcerns: [],
+            goals: [],
+            activeExperiments: [],
+          },
+        },
+      ],
+    });
+
+    expect(() =>
+      researchScoutBatchPayloadSchema.parse({
+        lanes: Array.from({ length: MAX_RESEARCH_SCOUT_BATCH_LANES + 1 }, (_, index) => ({
+          label: `lane ${index + 1}`,
+          profile: {
+            topics: ["sleep"],
+          },
+        })),
+      })
+    ).toThrow();
+    expect(() =>
+      researchScoutBatchPayloadSchema.parse({
+        lanes: [
+          {
+            label: "sleep",
+            profile: {},
+          },
+        ],
+      })
+    ).toThrow(/at least one compact profile tag/u);
+  });
+
+  it("defaults batch candidate requests per lane without widening the single-call cap", () => {
+    expect(researchScoutBatchInputSchema.parse({
+      lanes: [
+        {
+          label: "sleep",
+          profile: {
+            topics: ["sleep"],
+          },
+        },
+      ],
+      since: VALID_INPUT.since,
+      until: VALID_INPUT.until,
+    }).maxCandidatesPerLane).toBe(DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE);
+
+    expect(() =>
+      researchScoutBatchInputSchema.parse({
+        lanes: [
+          {
+            label: "sleep",
+            profile: {
+              topics: ["sleep"],
+            },
+          },
+        ],
+        since: VALID_INPUT.since,
+        until: VALID_INPUT.until,
+        maxCandidatesPerLane: 13,
+      })
+    ).toThrow();
   });
 
   it("rejects drift from the exact request shape", () => {
