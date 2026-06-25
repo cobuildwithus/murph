@@ -65,6 +65,7 @@ export interface HostedLocalDevHarness {
   stderrTail(maxChars?: number): string;
   stop(): Promise<void>;
   stdoutTail(maxChars?: number): string;
+  testControls: boolean;
   waitForHostedCompletion(
     userId: string,
     input?: {
@@ -91,6 +92,7 @@ export async function startHostedLocalDevHarness(input: {
   statusHeaders?: (userId: string) => HeadersInit;
   statusPath?: (userId: string) => string;
   streamLogs?: boolean;
+  testControls?: boolean;
 }): Promise<HostedLocalDevHarness> {
   const config = resolveHostedLocalDevConfig(input.env);
   const workerBaseUrl =
@@ -99,6 +101,7 @@ export async function startHostedLocalDevHarness(input: {
   const statusPath = input.statusPath ?? ((userId: string) => buildCloudflareHostedControlUserStatusPath(userId));
   const statusHeaders = input.statusHeaders ?? (() => ({}));
   const streamLogs = input.streamLogs === true;
+  const testControls = input.testControls === true;
   const persistDirOverride = input.persistDirOverride?.trim() || null;
   const createdTempPersistDir = persistDirOverride === null
     ? await mkdtemp(path.join(os.tmpdir(), input.persistDirPrefix))
@@ -184,11 +187,12 @@ export async function startHostedLocalDevHarness(input: {
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
-      runHostedAlarmInvocationForTest,
-      runHostedManualInvocationForTest,
+      runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
+      runHostedManualInvocationForTest: requireTestControls(runHostedManualInvocationForTest),
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
+        assertHostedLocalTestControlsAvailable("runHostedAlarmForTest");
         return await requestJsonForRuntime<{ ok: true }>(
           `/__test/users/${encodeURIComponent(userId)}/alarm`,
           {
@@ -207,6 +211,7 @@ export async function startHostedLocalDevHarness(input: {
         nextWakeAt: string | null;
         ok: true;
       }> => {
+        assertHostedLocalTestControlsAvailable("startStuckInvocationForTest");
         const searchParams = new URLSearchParams();
         if (typeof stuckInput?.startedAgoMs === "number") {
           searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
@@ -227,6 +232,7 @@ export async function startHostedLocalDevHarness(input: {
       runtimeEnv: stack.runtimeEnv,
       workerRuntimeEnv: stack.workerRuntimeEnv,
       stop,
+      testControls,
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
       stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",
       waitForHostedCompletion: async (
@@ -288,7 +294,7 @@ export async function startHostedLocalDevHarness(input: {
             && hasLocalMailboxDrainEvidence(status)
           ) {
             nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
-            await runHostedManualInvocationForTest(userId)
+            await maybeRunHostedManualRecovery(userId)
               .catch(() => expireRunnerActivityForTest(userId).catch(() => {}));
             await sleep(pollIntervalMs);
             continue;
@@ -312,8 +318,8 @@ export async function startHostedLocalDevHarness(input: {
             })
           ) {
             nextStaleInFlightRecoveryAt = now + hostedLocalCompletionRetryMs;
-            await expireRunnerActivityForTest(userId)
-              .then(() => runHostedManualInvocationForTest(userId))
+            await maybeExpireRunnerActivityForRecovery(userId)
+              .then(() => maybeRunHostedManualRecovery(userId))
               .catch(() => nudgeHostedUserBestEffort(userId));
             await sleep(pollIntervalMs);
             continue;
@@ -490,6 +496,7 @@ export async function startHostedLocalDevHarness(input: {
   }
 
   async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("expireRunnerActivityForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
       {
@@ -504,6 +511,7 @@ export async function startHostedLocalDevHarness(input: {
   }
 
   async function dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("dropRunnerActiveOperationForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/container-active-operation-drop`,
       {
@@ -543,6 +551,38 @@ export async function startHostedLocalDevHarness(input: {
         signal: AbortSignal.timeout(hostedLocalRunUntilIdleTimeoutMs),
       },
     );
+  }
+
+  async function maybeRunHostedManualRecovery(userId: string): Promise<unknown> {
+    if (!testControls) {
+      await nudgeHostedUserBestEffort(userId);
+      return null;
+    }
+    return await runHostedManualInvocationForTest(userId);
+  }
+
+  async function maybeExpireRunnerActivityForRecovery(userId: string): Promise<unknown> {
+    if (!testControls) {
+      await nudgeHostedUserBestEffort(userId);
+      return null;
+    }
+    return await expireRunnerActivityForTest(userId);
+  }
+
+  function requireTestControls<TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => Promise<TResult>,
+  ): (...args: TArgs) => Promise<TResult> {
+    return async (...args: TArgs): Promise<TResult> => {
+      assertHostedLocalTestControlsAvailable(fn.name || "test control");
+      return await fn(...args);
+    };
+  }
+
+  function assertHostedLocalTestControlsAvailable(controlName: string): void {
+    if (testControls) {
+      return;
+    }
+    throw new Error(`${controlName} requires hosted-local test controls. Mark the scenario with testControls: true instead of enabling the test Worker entrypoint globally.`);
   }
 }
 
