@@ -32,6 +32,12 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
   {
+    slug: 'strength-training',
+    name: 'strength-training',
+    triggerHint:
+      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
@@ -42,12 +48,6 @@ export const ASSISTANT_SKILLS = [
     name: 'sleep-recovery-readiness',
     triggerHint:
       'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
-  },
-  {
-    slug: 'strength-training',
-    name: 'strength-training',
-    triggerHint:
-      'Use for ordinary strength and resistance-training questions for generally healthy adults: beginner or experienced plans, general strength and function, hypertrophy, maximal strength, power, gym/home/calisthenics setup, progression, plateaus, competition preparation, and adherence coaching. Do not use for diagnosis, rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
   },
   {
     slug: 'computer-use',

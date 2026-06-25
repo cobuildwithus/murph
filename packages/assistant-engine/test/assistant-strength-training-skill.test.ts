@@ -35,7 +35,7 @@ describe('assistant strength training skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'strength-training: Use for ordinary strength and resistance-training questions for generally healthy adults',
+      'strength-training: Use for evidence-informed strength or resistance training plans',
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',

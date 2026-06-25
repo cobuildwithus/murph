@@ -55,7 +55,7 @@ Apply only modifiers that change the plan:
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
 
-When a visual would materially improve exercise understanding, use Murph's exercise catalog images or existing assistant media surfaces when available rather than creating another image workflow.
+When a visual would materially improve exercise understanding, use Murph's available response-media or image support only if the current runtime exposes it. Otherwise give compact form cues in text rather than inventing a separate image workflow.
 
 The boundaries below apply even when no reference is loaded.
 

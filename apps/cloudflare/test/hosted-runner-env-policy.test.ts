@@ -17,6 +17,8 @@ describe("hosted assistant runner env policy", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -41,6 +43,7 @@ describe("hosted assistant runner env policy", () => {
     });
     expect(env.HOSTED_AI_USAGE_REPORTING_SECRET).toBeUndefined();
     expect(env.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
+    expect(env.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBeUndefined();
   });
 
   it("does not forward unsupported hosted assistant api key alias vars", () => {
