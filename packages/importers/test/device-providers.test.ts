@@ -2059,7 +2059,7 @@ test("prepareDeviceProviderSnapshotImport keeps date-only WHOOP body measurement
   assert.equal(secondWeightEvent?.recordedAt, "2026-06-26T12:00:00.000Z");
   assert.equal(firstWeightEvent?.dayKey, "2026-06-24");
   assert.equal(secondWeightEvent?.dayKey, "2026-06-24");
-  assert.equal(firstWeightEvent?.externalRef?.resourceId, "2026-06-24");
+  assert.equal(firstWeightEvent?.externalRef?.resourceId, "date:2026-06-24");
   assert.equal(secondWeightEvent?.externalRef?.resourceId, firstWeightEvent?.externalRef?.resourceId);
 });
 
@@ -2209,10 +2209,10 @@ test("importDeviceProviderSnapshot supersedes legacy WHOOP body measurement date
     assert.equal(replayWeight?.id, legacyWeight?.id);
     assert.equal(replayWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
     assert.equal(replayWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
-    assert.equal(replayWeight?.externalRef?.resourceId, "2026-06-24");
+    assert.equal(replayWeight?.externalRef?.resourceId, "date:2026-06-24");
     assert.equal(liveWeightRecords.length, 1);
     assert.equal(liveWeightRecords[0]?.id, legacyWeight?.id);
-    assert.equal(storedExternalRefResourceId(liveWeightRecords[0]), "2026-06-24");
+    assert.equal(storedExternalRefResourceId(liveWeightRecords[0]), "date:2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -2282,16 +2282,107 @@ test("importDeviceProviderSnapshot does not alias WHOOP body measurements to imp
     );
 
     assert.notEqual(olderWeight?.id, julyWeight?.id);
-    assert.equal(olderWeight?.externalRef?.resourceId, "2026-06-24");
-    assert.equal(julyWeight?.externalRef?.resourceId, "2026-07-01");
+    assert.equal(olderWeight?.externalRef?.resourceId, "date:2026-06-24");
+    assert.equal(julyWeight?.externalRef?.resourceId, "date:2026-07-01");
     assert.equal(liveWeightRecords.length, 2);
     assert.deepEqual(
       liveWeightRecords.map((record) => storedExternalRefResourceId(record)).sort(),
-      ["2026-06-24", "2026-07-01"],
+      ["date:2026-06-24", "date:2026-07-01"],
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test("importDeviceProviderSnapshot keeps adjacent legacy WHOOP body dates distinct during replay", async () => {
+  async function exercise(order: "corrected-first" | "adjacent-first") {
+    const vaultRoot = await makeTempDirectory(`murph-whoop-body-adjacent-${order}`);
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-06-25T00:00:00.000Z",
+        timezone: "America/New_York",
+      });
+
+      const legacyImport = await coreRuntime.importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        accountId: "whoop-user-1",
+        importedAt: "2026-06-25T12:00:00.000Z",
+        events: [{
+          kind: "observation",
+          occurredAt: "2026-06-25T12:00:00.000Z",
+          recordedAt: "2026-06-25T12:00:00.000Z",
+          dayKey: "2026-06-24",
+          title: "WHOOP weight",
+          externalRef: {
+            system: "whoop",
+            resourceType: "body-measurement",
+            resourceId: "2026-06-25",
+            facet: "weight",
+          },
+          fields: {
+            metric: "weight",
+            observationGrain: "summary",
+            value: 78.2,
+            unit: "kg",
+          },
+        }],
+      });
+      const importSnapshot = (date: string, updatedAt: string, weightKilogram: number) =>
+        importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+          {
+            provider: "whoop",
+            vaultRoot,
+            snapshot: {
+              accountId: "whoop-user-1",
+              importedAt: updatedAt,
+              bodyMeasurements: {
+                date,
+                updated_at: updatedAt,
+                weight_kilogram: weightKilogram,
+              },
+            },
+          },
+          {
+            corePort: coreRuntime,
+          },
+        );
+
+      const correctedJune24 = () => importSnapshot("2026-06-24", "2026-06-25T12:00:00.000Z", 78.2);
+      const adjacentJune25 = () => importSnapshot("2026-06-25", "2026-06-25T13:00:00.000Z", 79.1);
+      const firstReplay = order === "corrected-first" ? await correctedJune24() : await adjacentJune25();
+      const secondReplay = order === "corrected-first" ? await adjacentJune25() : await correctedJune24();
+      const records = (
+        await Promise.all(
+          [...new Set([
+            ...legacyImport.eventShardPaths,
+            ...firstReplay.eventShardPaths,
+            ...secondReplay.eventShardPaths,
+          ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+        )
+      ).flat();
+      const liveWeightRecords = latestLiveRecords(records)
+        .filter((record) => record.kind === "observation" && record.metric === "weight")
+        .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+
+      assert.equal(liveWeightRecords.length, 2);
+      assert.deepEqual(liveWeightRecords.map((record) => record.dayKey), ["2026-06-24", "2026-06-25"]);
+      assert.deepEqual(
+        liveWeightRecords.map((record) => storedExternalRefResourceId(record)),
+        ["date:2026-06-24", "date:2026-06-25"],
+      );
+      assert.equal(
+        liveWeightRecords.find((record) => record.dayKey === "2026-06-24")?.id,
+        legacyImport.events.find((event) => event.kind === "observation" && event.metric === "weight")?.id,
+      );
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+
+  await exercise("corrected-first");
+  await exercise("adjacent-first");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {

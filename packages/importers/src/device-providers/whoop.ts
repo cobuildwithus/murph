@@ -531,11 +531,14 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const bodyMeasurementDayKey = bodyMeasurement
     ? bodyMeasurementExplicitDayKey ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
     : undefined;
-  const bodyMeasurementResourceId = firstDayKey(bodyMeasurementObservedAt) ??
-    bodyMeasurementExplicitDayKey ??
-    firstDayKey(bodyMeasurementRecordedAt) ??
-    "current";
-  const bodyMeasurementLegacyResourceId = bodyMeasurementExplicitDayKey && !bodyMeasurementMeasuredAt
+  const isDateOnlyBodyMeasurement = Boolean(bodyMeasurementExplicitDayKey && !bodyMeasurementMeasuredAt);
+  const bodyMeasurementResourceId = isDateOnlyBodyMeasurement
+    ? `date:${bodyMeasurementExplicitDayKey}`
+    : firstDayKey(bodyMeasurementObservedAt) ??
+      bodyMeasurementExplicitDayKey ??
+      firstDayKey(bodyMeasurementRecordedAt) ??
+      "current";
+  const bodyMeasurementLegacyResourceId = isDateOnlyBodyMeasurement
     ? firstDayKey(bodyMeasurementUpdatedAt) ?? firstDayKey(importedAt)
     : undefined;
   const bodyMeasurementLegacyResourceIds =

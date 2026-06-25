@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,6 +86,27 @@ function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): str
   }
 
   return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
+}
+
+function junctionFallbackSummaryResourceId(
+  input: {
+    observedAtRaw: string;
+    resourceSlug: string;
+    sourceProviderSlug: string;
+    sourceType?: string;
+    sourceInstanceId?: string;
+  },
+): string {
+  return `${input.resourceSlug}-${createHash("sha256")
+    .update(JSON.stringify([
+      input.resourceSlug,
+      input.sourceProviderSlug,
+      input.sourceType,
+      input.sourceInstanceId,
+      input.observedAtRaw,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
 }
 
 function assertCompactSummaryObservationFields(fields: Record<string, unknown> | undefined): void {
@@ -816,6 +838,95 @@ test("Junction workout summaries derive computed start day from embedded end off
   assert.equal(workoutEvent?.dayKey, "2026-06-24");
 });
 
+test("Junction workout summaries keep id-less fallback identity stable when correcting start day", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-idless-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const startAt = "2026-06-25T03:45:00.000Z";
+    const endAt = "2026-06-25T04:15:00.000Z";
+    const legacyResourceId = junctionFallbackSummaryResourceId({
+      resourceSlug: "workouts",
+      sourceProviderSlug: "whoop",
+      sourceType: "wearable",
+      observedAtRaw: endAt,
+    });
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "activity_session",
+        occurredAt: startAt,
+        recordedAt: endAt,
+        dayKey: "2026-06-24",
+        title: "Junction workout",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-whoop-workouts",
+          resourceId: legacyResourceId,
+          facet: "session",
+        },
+        fields: {
+          durationMinutes: 30,
+          activityType: "run",
+          workout: {
+            sourceApp: "whoop",
+            startedAt: startAt,
+            endedAt: endAt,
+            exercises: [],
+          },
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          summaries: {
+            workouts: [{
+              source: {
+                provider: "whoop",
+                type: "wearable",
+              },
+              start: startAt,
+              end: endAt,
+              timezone_offset: "-04:00",
+              sport_name: "Run",
+            }],
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveWorkoutRecords = latestLiveRecords(records).filter((record) => record.kind === "activity_session");
+
+    assert.equal(replayImport.events.find((event) => event.kind === "activity_session")?.id, legacyImport.events[0]?.id);
+    assert.equal(liveWorkoutRecords.length, 1);
+    assert.equal(storedExternalRefResourceId(liveWorkoutRecords[0]), legacyResourceId);
+    assert.equal(liveWorkoutRecords[0]?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction workout summaries trust embedded offset timestamps before separate offset metadata", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-06-25T12:00:00.000Z",
@@ -839,6 +950,42 @@ test("Junction workout summaries trust embedded offset timestamps before separat
   assert.equal(workoutEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
   assert.equal(workoutEvent?.dayKey, "2026-06-25");
   assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries trust calendar_date over offset-derived workout days", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-whoop-calendar-start",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "wearable",
+          start: "2026-09-28T05:45:00.000Z",
+          end: "2026-09-28T06:15:00.000Z",
+          timezone_offset: "-04:00",
+          sport_name: "Run",
+        },
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-whoop-calendar-computed-start",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "wearable",
+          end: "2026-09-28T06:15:00.000Z",
+          durationSeconds: 1800,
+          timezone_offset: "-04:00",
+          sport_name: "Run",
+        },
+      ],
+    },
+  });
+  const workoutEvents = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+
+  assert.equal(workoutEvents.length, 2);
+  assert.deepEqual(workoutEvents.map((event) => event.dayKey), ["2026-09-27", "2026-09-27"]);
 });
 
 test("Junction workout summaries without provider offset defer canonical day to vault timezone", async () => {

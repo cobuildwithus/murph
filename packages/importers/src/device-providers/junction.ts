@@ -1791,7 +1791,7 @@ function pushWorkoutSummary(
     source: "device",
     title,
     evidenceRoles: resourceContext.evidenceRoles,
-    externalRef: makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session"),
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
     dataOrigin: buildDataOrigin(entry, resourceContext, workoutTimestamp),
     fields: stripUndefined({
       durationMinutes,
@@ -1822,6 +1822,11 @@ function resolveJunctionWorkoutDayKey(
   occurredAt: string,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string | undefined {
+  const calendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
+  if (calendarDayKey) {
+    return calendarDayKey;
+  }
+
   const startDayKey = resolveJunctionLocalDayKey(entry, startAtRaw, occurredAt);
   if (stringId(startAtRaw) !== undefined) {
     return startDayKey ?? timestamp.dayKey;

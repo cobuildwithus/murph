@@ -1602,7 +1602,7 @@ async function indexLatestEventsByExternalRef(
 ): Promise<EventExternalRefIndex> {
   const latestByRefKey = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
-  const grouped = new Map<string, EventSpineEntry<EventRecord>[]>();
+  const entriesById = new Map<string, EventSpineEntry<EventRecord>[]>();
 
   for (const relativePath of relativePaths) {
     const resolved = resolveVaultPath(vaultRoot, relativePath);
@@ -1627,25 +1627,41 @@ async function indexLatestEventsByExternalRef(
         Math.max(maxRevisionById.get(parsed.data.id) ?? 0, eventSpineRevision(parsed.data)),
       );
 
-      if (!parsed.data.externalRef) {
-        continue;
-      }
-
-      const refKey = eventExternalRefKey(parsed.data.externalRef);
-      const group = grouped.get(refKey) ?? [];
+      const group = entriesById.get(parsed.data.id) ?? [];
       group.push({ relativePath, record: parsed.data });
-      grouped.set(refKey, group);
+      entriesById.set(parsed.data.id, group);
     }
   }
 
-  for (const [refKey, group] of grouped) {
-    // Collapse spine revisions per event id first; raw revision counts are not
-    // comparable across different event ids (a deleted duplicate's tombstone
-    // must not outrank a surviving live copy of the same provider record).
-    // The collapse drops ids whose latest revision is deleted, so a fully
-    // tombstoned ref yields no match and re-imports append a fresh event,
-    // bounded by the deterministic-id skip for identical content.
-    const latest = selectLatestEventSpineEntry(collapseEventSpineEntries(group));
+  const groupedByRefKey = new Map<string, EventSpineEntry<EventRecord>[]>();
+
+  for (const group of entriesById.values()) {
+    // Collapse each event id globally before indexing external refs. An event
+    // whose latest revision moved to a corrected ref must not remain
+    // discoverable through an older historical ref.
+    const latestForId = selectLatestEventSpineEntry(collapseEventSpineEntries(group));
+    if (!latestForId) {
+      continue;
+    }
+
+    const externalRefEntry = latestForId.record.externalRef
+      ? latestForId
+      : selectLatestEventSpineEntry(group.filter((entry) => entry.record.externalRef));
+
+    if (!externalRefEntry?.record.externalRef) {
+      continue;
+    }
+
+    const refKey = eventExternalRefKey(externalRefEntry.record.externalRef);
+    const refGroup = groupedByRefKey.get(refKey) ?? [];
+    refGroup.push(latestForId);
+    groupedByRefKey.set(refKey, refGroup);
+  }
+
+  for (const [refKey, group] of groupedByRefKey) {
+    // Preserve the prior duplicate-ref behavior: if multiple live ids still
+    // claim one external ref, reconcile against the latest comparable spine.
+    const latest = selectLatestEventSpineEntry(group);
 
     if (latest) {
       latestByRefKey.set(refKey, latest.record);
@@ -1653,6 +1669,10 @@ async function indexLatestEventsByExternalRef(
   }
 
   return { latestByRefKey, maxRevisionById };
+}
+
+function isCompatibleLegacyExternalRefMatch(existing: EventRecord, incoming: EventRecord): boolean {
+  return existing.kind === incoming.kind && existing.dayKey === incoming.dayKey;
 }
 
 // Device-sync ingestion invariant 4: merge is idempotent on the record's own
@@ -1690,21 +1710,27 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const legacyRefKeys = entry.legacyExternalRefs
       .map((legacyExternalRef) => eventExternalRefKey(legacyExternalRef))
       .filter((legacyRefKey) => legacyRefKey !== refKey);
-    const matchedEntries = [
-      { refKey, record: index.latestByRefKey.get(refKey) },
-      ...legacyRefKeys.map((legacyRefKey) => ({
+    const legacyMatchedEntries = legacyRefKeys
+      .map((legacyRefKey) => ({
         refKey: legacyRefKey,
         record: index.latestByRefKey.get(legacyRefKey),
-      })),
+      }))
+      .filter((match): match is { refKey: string; record: EventRecord } => {
+        if (!match.record) {
+          return false;
+        }
+
+        return isCompatibleLegacyExternalRefMatch(match.record, entry.record);
+      });
+    const matchedEntries = [
+      { refKey, record: index.latestByRefKey.get(refKey) },
+      ...legacyMatchedEntries,
     ].filter((match): match is { refKey: string; record: EventRecord } => Boolean(match.record));
     const primaryMatch = matchedEntries.find((match) => match.refKey === refKey);
     const latest = primaryMatch?.record ?? matchedEntries[0]?.record;
 
     if (!latest) {
       index.latestByRefKey.set(refKey, entry.record);
-      for (const legacyRefKey of legacyRefKeys) {
-        index.latestByRefKey.set(legacyRefKey, entry.record);
-      }
       appendEntries.push(entry);
       records.push(entry.record);
       continue;
@@ -1748,9 +1774,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
       skippedDuplicateCount += 1;
-      for (const legacyRefKey of legacyRefKeys) {
-        index.latestByRefKey.set(legacyRefKey, latest);
-      }
       records.push(latest);
       continue;
     }
@@ -1768,7 +1791,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, superseding);
     for (const legacyRefKey of legacyRefKeys) {
-      index.latestByRefKey.set(legacyRefKey, superseding);
+      index.latestByRefKey.delete(legacyRefKey);
     }
     index.maxRevisionById.set(latest.id, revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
