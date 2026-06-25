@@ -369,9 +369,11 @@ export function hasHostedAccountGroupMembershipAccess(input: {
 
 export async function readHostedFamilyAccessForMember(input: {
   memberId: string;
+  now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
   const membership = await prisma.hostedAccountGroupMembership.findFirst({
     orderBy: {
       createdAt: "asc",
@@ -394,11 +396,20 @@ export async function readHostedFamilyAccessForMember(input: {
     return null;
   }
 
-  const [activeMembershipCount, billedSeatCount] = await Promise.all([
+  const [activeMembershipCount, pendingInviteCount, billedSeatCount] = await Promise.all([
     prisma.hostedAccountGroupMembership.count({
       where: {
         groupId: membership.groupId,
         status: "active",
+      },
+    }),
+    prisma.hostedAccountGroupInvite.count({
+      where: {
+        expiresAt: {
+          gt: now,
+        },
+        groupId: membership.groupId,
+        status: "pending",
       },
     }),
     readHostedFamilyBilledSeatCountTx({
@@ -409,7 +420,7 @@ export async function readHostedFamilyAccessForMember(input: {
   if (billedSeatCount === null) {
     return null;
   }
-  if (activeMembershipCount > billedSeatCount) {
+  if (activeMembershipCount + pendingInviteCount > billedSeatCount) {
     return null;
   }
 
@@ -1018,11 +1029,13 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   }
 
   const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
-  const billingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(input.subscription.status);
+  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
+    input.subscription.status,
+  );
   if (!familySeatItem) {
-    const failClosedBillingStatus = billingStatus === HostedBillingStatus.active
+    const failClosedBillingStatus = stripeBillingStatus === HostedBillingStatus.active
       ? HostedBillingStatus.unpaid
-      : billingStatus;
+      : stripeBillingStatus;
     await writeHostedAccountGroupStripeBillingTx({
       billingStatus: failClosedBillingStatus,
       currentBillingPhase: null,
@@ -1043,9 +1056,21 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
+  const activeMembershipCount = await input.tx.hostedAccountGroupMembership.count({
+    where: {
+      groupId: group.id,
+      status: "active",
+    },
+  });
+  const activeMembersFitPaidSeats = activeMembershipCount <= familySeatItem.billedSeatCount;
+  const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
+      !activeMembersFitPaidSeats
+    ? HostedBillingStatus.unpaid
+    : stripeBillingStatus;
   const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
-    currentBillingPhase: input.subscription.status === "active" ? "paid" : null,
+    currentBillingPhase:
+      input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
     currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
     ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
     billedSeatCount: familySeatItem.billedSeatCount,
@@ -1069,6 +1094,12 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   }
 
   if (billingStatus === HostedBillingStatus.active) {
+    await revokeNewestHostedFamilyPendingInvitesToFitBilledSeatsTx({
+      billedSeatCount: familySeatItem.billedSeatCount,
+      groupId: group.id,
+      now: input.dispatchContext.eventCreatedAt ?? new Date(),
+      tx: input.tx,
+    });
     const activations = await activateHostedFamilyGroupMembersForActiveBillingTx({
       groupId: group.id,
       occurredAt: input.dispatchContext.eventCreatedAt ?? new Date(),
@@ -1112,12 +1143,19 @@ export async function createHostedFamilyBillingCheckout(input: {
         message: "Only the family plan owner can start family billing.",
       });
     }
+
+    await lockHostedMemberRow(tx, group.ownerMemberId);
     if (hasHostedAccountGroupAccess(group)) {
       return {
         alreadyActive: true,
         url: null,
       };
     }
+    await assertHostedFamilyOwnerCanStartBillingTx({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      tx,
+    });
 
     const currentBillingRef = await readHostedAccountGroupStripeBillingRef({
       groupId: group.id,
@@ -1210,6 +1248,11 @@ export async function updateHostedFamilySeatCount(input: {
     }
 
     await lockHostedMemberRow(tx, group.ownerMemberId);
+    await assertHostedFamilyOwnerCanStartBillingTx({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      tx,
+    });
 
     const [billingRef, activeMemberships, pendingInvites] = await Promise.all([
       readHostedAccountGroupStripeBillingRef({
@@ -1266,13 +1309,6 @@ export async function updateHostedFamilySeatCount(input: {
     const stripeItem = await requireHostedStripeApi().subscriptionItems.update(
       seatChange.stripeSubscriptionItemId,
       updateParams,
-      {
-        idempotencyKey: buildHostedFamilySeatQuantityIdempotencyKey({
-          groupId: input.groupId,
-          stripeSubscriptionItemId: seatChange.stripeSubscriptionItemId,
-          targetSeatCount,
-        }),
-      },
     );
 
     if (stripeItem.quantity !== targetSeatCount) {
@@ -1416,8 +1452,9 @@ export async function createHostedAccountGroupForOwnerTx(input: {
   const groupId = input.groupId ?? generateHostedAccountGroupId();
 
   await lockHostedMemberRow(input.tx, input.ownerMemberId);
-  await assertHostedFamilyMemberNotDirectPaidTx({
-    memberId: input.ownerMemberId,
+  await assertHostedFamilyOwnerCanStartBillingTx({
+    groupId,
+    ownerMemberId: input.ownerMemberId,
     tx: input.tx,
   });
 
@@ -1458,6 +1495,11 @@ export async function ensureHostedAccountGroupForOwnerTx(input: {
     },
   });
   if (existingGroup) {
+    await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+      groupId: existingGroup.id,
+      memberId: input.ownerMemberId,
+      tx: input.tx,
+    });
     if (!hasHostedAccountGroupAccess(existingGroup)) {
       await assertHostedFamilyMemberNotDirectPaidTx({
         memberId: input.ownerMemberId,
@@ -2348,6 +2390,62 @@ async function readConfirmedHostedFamilyBilledSeatCountTx(input: {
   return billedSeatCount;
 }
 
+async function revokeNewestHostedFamilyPendingInvitesToFitBilledSeatsTx(input: {
+  billedSeatCount: number;
+  groupId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const [activeMemberships, pendingInvites] = await Promise.all([
+    input.tx.hostedAccountGroupMembership.count({
+      where: {
+        groupId: input.groupId,
+        status: "active",
+      },
+    }),
+    input.tx.hostedAccountGroupInvite.findMany({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        id: true,
+      },
+      where: {
+        expiresAt: {
+          gt: input.now,
+        },
+        groupId: input.groupId,
+        status: "pending",
+      },
+    }),
+  ]);
+  const excessPendingInvites = activeMemberships + pendingInvites.length - input.billedSeatCount;
+  if (excessPendingInvites <= 0) {
+    return;
+  }
+
+  const revokedInviteIds = pendingInvites
+    .slice(0, excessPendingInvites)
+    .map((invite) => invite.id);
+  if (revokedInviteIds.length === 0) {
+    return;
+  }
+
+  await input.tx.hostedAccountGroupInvite.updateMany({
+    data: {
+      status: "revoked",
+    },
+    where: {
+      groupId: input.groupId,
+      id: {
+        in: revokedInviteIds,
+      },
+      status: "pending",
+    },
+  });
+}
+
 async function assertHostedFamilySeatAvailableTx(input: {
   billedSeatCount?: number;
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
@@ -2467,6 +2565,22 @@ async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
       message: "This member is already in another active family plan.",
     });
   }
+}
+
+async function assertHostedFamilyOwnerCanStartBillingTx(input: {
+  groupId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+    groupId: input.groupId,
+    memberId: input.ownerMemberId,
+    tx: input.tx,
+  });
+  await assertHostedFamilyMemberNotDirectPaidTx({
+    memberId: input.ownerMemberId,
+    tx: input.tx,
+  });
 }
 
 async function assertHostedFamilyMemberNotDirectPaidTx(input: {
@@ -2927,17 +3041,4 @@ function buildHostedFamilyStripeMetadata(
     kind: HOSTED_FAMILY_STRIPE_METADATA_KIND,
     ownerMemberId: group.ownerMemberId,
   };
-}
-
-function buildHostedFamilySeatQuantityIdempotencyKey(input: {
-  groupId: string;
-  stripeSubscriptionItemId: string;
-  targetSeatCount: number;
-}): string {
-  return [
-    "hosted-family-seat-count",
-    input.groupId,
-    input.stripeSubscriptionItemId,
-    `seats-${input.targetSeatCount}`,
-  ].join(":");
 }

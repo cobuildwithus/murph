@@ -987,8 +987,12 @@ describe("hosted Family plan", () => {
     }));
   });
 
-  it("fails closed for family access when the active group is over the billed seat count", async () => {
-    const tx = createTxMock({ activeMembershipCount: 5 });
+  it("fails closed for family access when active plus pending seats exceed billed seats", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 3,
+      billedSeatCount: 4,
+      pendingInviteCount: 2,
+    });
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
       group: {
         billingStatus: HostedBillingStatus.active,
@@ -1004,6 +1008,7 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedFamilyAccessForMember({
       memberId: "member_mom",
+      now: new Date("2026-06-18T12:00:00.000Z"),
       prisma: tx,
     })).resolves.toBeNull();
 
@@ -1011,6 +1016,15 @@ describe("hosted Family plan", () => {
       where: {
         groupId: "hbag_family",
         status: "active",
+      },
+    });
+    expect(tx.hostedAccountGroupInvite.count).toHaveBeenCalledWith({
+      where: {
+        expiresAt: {
+          gt: new Date("2026-06-18T12:00:00.000Z"),
+        },
+        groupId: "hbag_family",
+        status: "pending",
       },
     });
   });
@@ -1109,6 +1123,78 @@ describe("hosted Family plan", () => {
       occurredAt: eventCreatedAt,
       prisma: tx,
       sourceEventId: "family-subscription:sub_family",
+    });
+  });
+
+  it("fails closed when Stripe seats drop below active Family memberships", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 3,
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: 2,
+      }),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: 2,
+        currentBillingPhase: null,
+      }),
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.unpaid,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
+  it("revokes newest pending invites when Stripe seats drop below active plus pending seats", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      pendingInviteCount: 2,
+    });
+    tx.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([
+      { id: "inv_newest" },
+      { id: "inv_oldest" },
+    ]);
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: 3,
+      }),
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).toHaveBeenCalledWith({
+      data: {
+        status: "revoked",
+      },
+      where: {
+        groupId: "hbag_family",
+        id: {
+          in: ["inv_newest"],
+        },
+        status: "pending",
+      },
     });
   });
 
@@ -1366,6 +1452,46 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("rejects Family checkout when an inactive owner group belongs to a sponsored member", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        id: "hbag_sponsor",
+        ownerMemberId: "member_sponsor",
+        suspendedAt: null,
+      },
+      groupId: "hbag_sponsor",
+      memberId: "member_owner",
+      role: "member",
+      status: "active",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
   it("requires the per-seat Family Stripe price env and ignores the old fixed price env", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
@@ -1518,10 +1644,8 @@ describe("hosted Family plan", () => {
         proration_behavior: "always_invoice",
         quantity: 3,
       },
-      {
-        idempotencyKey: expect.stringContaining("seats-3"),
-      },
     );
+    expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(2);
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 

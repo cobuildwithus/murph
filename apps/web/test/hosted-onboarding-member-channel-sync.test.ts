@@ -269,6 +269,9 @@ describe("hosted onboarding member channel sync", () => {
           status: "active",
         })),
       },
+      hostedAccountGroupInvite: {
+        count: vi.fn(async () => 0),
+      },
       label: "test-prisma-tx",
     };
     mocks.readHostedMemberSnapshot.mockResolvedValue({

@@ -1436,6 +1436,9 @@ describe("completeHostedPrivyVerification", () => {
           status: "active",
         })),
       },
+      hostedAccountGroupInvite: {
+        count: vi.fn(async () => 0),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({}),

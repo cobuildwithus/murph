@@ -155,5 +155,8 @@ function createFamilyAccessPrisma(input: {
       count: vi.fn(async () => input.activeMembershipCount),
       findFirst: vi.fn(async () => input.membership),
     },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
   };
 }

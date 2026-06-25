@@ -2006,6 +2006,9 @@ function createAllowanceTx(input: {
           }
         : null),
     },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
@@ -2140,6 +2143,9 @@ function createGatePrisma(input: {
             status: "active",
           }
         : null),
+    },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn(async () => input.familyAccessActive

@@ -134,14 +134,14 @@ async function startHostedRuntimeFamilyPlanCheckout(
     };
   }
 
-  if (!ownerSnapshot && await hasActiveHostedFamilyAccess({
+  if (await hasActiveHostedFamilyAccess({
     memberId,
     prisma,
   })) {
     return {
       alreadyActive: false,
       billingActive: false,
-      billingStatus: "none",
+      billingStatus: ownerSnapshot?.billingStatus ?? "none",
       checkoutUrl: null,
       owner: false,
       preparedInvite: null,

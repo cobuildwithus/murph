@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedFamilyTelegramInviteUrl: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
+  hostedAccountGroupFindUnique: vi.fn(),
   hasActiveHostedFamilyAccess: vi.fn(),
   issueHostedFamilyInviteTx: vi.fn(),
   readHostedOnboardingEnvironment: vi.fn(),
@@ -48,11 +49,15 @@ let seatsRoute: typeof import("../app/api/settings/billing/family/seats/route");
 beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+  mocks.hostedAccountGroupFindUnique.mockResolvedValue({ id: "hbag_family" });
   mocks.getPrisma.mockReturnValue({
+    hostedAccountGroup: {
+      findUnique: mocks.hostedAccountGroupFindUnique,
+    },
     $transaction: vi.fn((callback) =>
       callback({
         hostedAccountGroup: {
-          findUnique: vi.fn().mockResolvedValue({ id: "hbag_family" }),
+          findUnique: mocks.hostedAccountGroupFindUnique,
         },
       }),
     ),
@@ -167,6 +172,25 @@ test("updates paid Family seat count explicitly", async () => {
     prisma: expect.any(Object),
     targetSeatCount: 3,
   });
+});
+
+test("does not create a Family owner group from the seats route", async () => {
+  mocks.hostedAccountGroupFindUnique.mockResolvedValueOnce(null);
+
+  const response = await seatsRoute.PATCH(
+    new Request("https://join.example.test/api/settings/billing/family/seats", {
+      body: JSON.stringify({ seatCount: 3 }),
+      headers: { "content-type": "application/json", origin: "https://join.example.test" },
+      method: "PATCH",
+    }),
+  );
+
+  expect(response.status).toBe(404);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_GROUP_NOT_FOUND" },
+  });
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
 });
 
 test("rejects an empty invite target", async () => {

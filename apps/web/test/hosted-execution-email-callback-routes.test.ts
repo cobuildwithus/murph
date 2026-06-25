@@ -557,6 +557,9 @@ describe("hosted execution email callback routes", () => {
 function createPrismaMock() {
   const consumedNonces = new Set<string>();
   const transactionClient = {
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
     hostedWebInternalRequestNonce: {
       create: vi.fn(async (input: {
         data: {
@@ -593,6 +596,9 @@ function createPrismaMock() {
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async (): Promise<unknown | null> => null),
+    },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn(async (): Promise<unknown | null> => null),

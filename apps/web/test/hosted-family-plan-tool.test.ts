@@ -328,4 +328,40 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   });
+
+  it("does not create checkout for a sponsored member with an inactive owner group", async () => {
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+      billingActive: false,
+      billingStatus: "not_started",
+      seats: {
+        active: 1,
+        billed: 0,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 1,
+      },
+    });
+    mocks.hasActiveHostedFamilyAccess.mockResolvedValueOnce(true);
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_child",
+      request: {
+        action: "start_checkout",
+      },
+    })).resolves.toMatchObject({
+      action: "start_checkout",
+      result: {
+        billingStatus: "not_started",
+        checkoutUrl: null,
+        owner: false,
+        preparedInvite: null,
+        unavailableReason: "already_sponsored",
+      },
+    });
+
+    expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  });
 });

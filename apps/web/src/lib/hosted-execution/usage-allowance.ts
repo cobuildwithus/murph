@@ -219,6 +219,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
   const familyAccess = await readHostedFamilyAccessForMember({
     memberId: input.memberId,
+    now: input.at,
     prisma: input.tx,
   });
   if (!familyAccess) {
