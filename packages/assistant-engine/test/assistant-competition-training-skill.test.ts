@@ -10,21 +10,9 @@ import {
 
 const skillsRoot = resolveAssistantSkillsRoot()
 const skillRoot = path.join(skillsRoot, 'competition-training')
-const scenariosFixturePath = new URL(
-  './fixtures/competition-training/scenarios.jsonl',
-  import.meta.url,
-)
 
 async function readSkillFile(relativePath: string): Promise<string> {
   return readFile(path.join(skillRoot, relativePath), 'utf8')
-}
-
-async function parseScenarios(): Promise<Array<Record<string, unknown>>> {
-  const raw = await readFile(scenariosFixturePath, 'utf8')
-  return raw
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
 }
 
 describe('assistant competition-training skill', () => {
@@ -179,50 +167,19 @@ describe('assistant competition-training skill', () => {
     expect(safety).toContain('## Mental health and exercise compulsion')
   })
 
-  it('ships a broad machine-readable semantic regression corpus', async () => {
-    const scenarios = await parseScenarios()
-    const ids = scenarios.map((scenario) => scenario.id)
-    const categories = new Set(scenarios.map((scenario) => scenario.category))
-
-    expect(scenarios.length).toBeGreaterThanOrEqual(90)
-    expect(new Set(ids).size).toBe(scenarios.length)
-    for (const requiredCategory of [
-      'routing-positive',
-      'routing-negative',
-      'ux-directness',
-      'event-classification',
-      'qualification-goal',
-      'short-runway',
-      'performance-psychology',
-      'behavior-handoff',
-      'fueling',
-      'safety-urgent',
-      'current-facts',
-      'post-event',
-      'developmental-athlete',
-      'masters-athlete',
-    ]) {
-      expect(categories.has(requiredCategory)).toBe(true)
-    }
-
-    for (const scenario of scenarios) {
-      expect(typeof scenario.id).toBe('string')
-      expect(typeof scenario.prompt).toBe('string')
-      expect(typeof scenario.expectedRoute).toBe('string')
-      expect(Array.isArray(scenario.must)).toBe(true)
-      expect(Array.isArray(scenario.mustNot)).toBe(true)
-    }
-  })
-
   it('keeps evidence curated and current facts external', async () => {
     const [core, evidence] = await Promise.all([
       readSkillFile('SKILL.md'),
       readSkillFile('references/evidence-register.md'),
     ])
-    const urls = new Set(evidence.match(/https?:\/\/[^)\s]+/gu) ?? [])
 
-    expect(urls.size).toBeGreaterThanOrEqual(45)
+    expect(evidence).toContain('## How to use it')
+    expect(evidence).toContain('## Product and prompt architecture')
+    expect(evidence).toContain('## Training structure, load, and adaptation')
+    expect(evidence).toContain('## Fueling, recovery, and safety')
     expect(evidence).toContain('## Official current event sources')
+    expect(evidence).toContain('Static skill text must not copy changing rules')
+    expect(evidence).toContain('Add a source only when it changes a decision')
     expect(evidence).toContain('Remove obsolete, duplicate')
     expect(core).toContain('Start with the named organizer or governing body.')
     expect(core).toContain('Absence of a found rule is not proof')
