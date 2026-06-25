@@ -68,7 +68,11 @@ describe("assistant phone calls", () => {
     expect(resolveAssistantPhoneCallAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-cron",
-    })).toEqual(["assistant_input", "manual_input"]);
+    })).toEqual([]);
+    expect(resolveAssistantPhoneCallAcceptedInputIds({
+      acceptedInputItems,
+      turnTrigger: "automation-auto-reply",
+    })).toEqual([]);
   });
 
   it("keys calls by accepted input, destination, and disclosure scope instead of mutable brief prose", () => {

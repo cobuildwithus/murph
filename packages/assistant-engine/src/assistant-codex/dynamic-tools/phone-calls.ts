@@ -112,15 +112,25 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   source: AssistantAcceptedTurnInputSource
   turnTrigger: string | null
 }): boolean {
+  if (!isManualPhoneCallTurnTrigger(input.turnTrigger)) {
+    return false
+  }
+
   switch (input.source) {
     case 'assistant-input':
     case 'manual':
       return true
     case 'initial':
-      return input.turnTrigger !== 'automation-cron'
+      return true
     case 'system':
       return false
   }
+}
+
+function isManualPhoneCallTurnTrigger(turnTrigger: string | null): boolean {
+  return turnTrigger === null ||
+    turnTrigger === 'manual-ask' ||
+    turnTrigger === 'manual-deliver'
 }
 
 function stableJson(value: unknown): string {

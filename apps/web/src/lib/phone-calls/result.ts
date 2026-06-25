@@ -28,7 +28,7 @@ import {
 } from "./retell-payloads";
 
 interface HostedPhoneCallWebhookTx {
-  notificationPrisma?: Prisma.TransactionClient;
+  appendResultNotification(call: HostedPhoneCall): Promise<void>;
   hostedPhoneCall: {
     findUnique(input: {
       where:
@@ -109,7 +109,6 @@ export async function handleRetellCallEnded(input: {
 export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
   prisma?: HostedPhoneCallWebhookStore;
-  resultHandler?: (callId: string) => Promise<void>;
 }): Promise<void> {
   logRetellStorageModeMismatch(input.call);
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
@@ -149,36 +148,7 @@ export async function handleRetellCallAnalyzed(input: {
         id: target.call.id,
       },
     });
-    if (input.resultHandler) {
-      await input.resultHandler(stored.id);
-      return;
-    }
-
-    await appendPhoneCallResultNotificationTx({
-      call: stored,
-      prisma: requirePhoneCallNotificationTransaction(tx),
-    });
-  });
-}
-
-export async function handlePhoneCallResult(input: {
-  callId: string;
-}): Promise<void> {
-  const prisma = getPrisma();
-  await prisma.$transaction(async (tx) => {
-    const call = await tx.hostedPhoneCall.findUnique({
-      where: {
-        id: input.callId,
-      },
-    });
-    if (!call) {
-      return;
-    }
-
-    await appendPhoneCallResultNotificationTx({
-      call,
-      prisma: tx,
-    });
+    await tx.appendResultNotification(stored);
   });
 }
 
@@ -293,7 +263,10 @@ function resolveHostedPhoneCallWebhookStore(
   const prisma = getPrisma();
   return {
     $transaction: async (callback) => prisma.$transaction(async (tx) => callback({
-      notificationPrisma: tx,
+      appendResultNotification: async (call) => appendPhoneCallResultNotificationTx({
+        call,
+        prisma: tx,
+      }),
       hostedPhoneCall: {
         findUnique: async (args) => {
           if ("id" in args.where) {
@@ -329,13 +302,6 @@ function resolveHostedPhoneCallWebhookStore(
       },
     })),
   };
-}
-
-function requirePhoneCallNotificationTransaction(tx: HostedPhoneCallWebhookTx): Prisma.TransactionClient {
-  if (!tx.notificationPrisma) {
-    throw new Error("Phone call notification transaction is unavailable.");
-  }
-  return tx.notificationPrisma;
 }
 
 export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallResult {

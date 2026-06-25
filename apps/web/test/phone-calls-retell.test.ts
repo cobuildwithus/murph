@@ -200,7 +200,6 @@ describe("Retell phone-call result handling", () => {
   });
 
   it("handles call_analyzed idempotently and notifies only after the first update", async () => {
-    const resultHandler = vi.fn(async () => {});
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
     });
@@ -218,12 +217,10 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
-      resultHandler,
     });
     await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
-      resultHandler,
     });
 
     expect(store.updateManyCalls).toHaveLength(2);
@@ -247,12 +244,12 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_123",
       },
     }]);
-    expect(resultHandler).toHaveBeenCalledTimes(1);
-    expect(resultHandler).toHaveBeenCalledWith("hpc_123");
+    expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
+      "hpc_123",
+    ]);
   });
 
   it("recovers call_analyzed by Murph metadata when the provider id write was lost", async () => {
-    const resultHandler = vi.fn(async () => {});
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         id: "hpc_123",
@@ -275,7 +272,6 @@ describe("Retell phone-call result handling", () => {
         },
       },
       prisma: store.prisma,
-      resultHandler,
     });
 
     expect(store.findUniqueCalls[0]).toEqual({
@@ -295,17 +291,19 @@ describe("Retell phone-call result handling", () => {
       },
     });
     expect(store.updateManyCalls[0]!.where).not.toHaveProperty("providerCallId");
-    expect(resultHandler).toHaveBeenCalledWith("hpc_123");
+    expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
+      "hpc_123",
+    ]);
   });
 
   it("rolls back call_analyzed when notification enqueue fails so Retell replay can notify", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
+      appendResultNotification: vi
+        .fn(async (_call: HostedPhoneCall) => {})
+        .mockRejectedValueOnce(new Error("mailbox unavailable"))
+        .mockResolvedValueOnce(undefined),
     });
-    const resultHandler = vi
-      .fn(async (_callId: string) => {})
-      .mockRejectedValueOnce(new Error("mailbox unavailable"))
-      .mockResolvedValueOnce(undefined);
     const call = {
       call_analysis: {
         custom_analysis_data: {
@@ -319,7 +317,6 @@ describe("Retell phone-call result handling", () => {
     await expect(handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
-      resultHandler,
     })).rejects.toThrow("mailbox unavailable");
 
     expect(store.currentCall()?.analyzedAt).toBeNull();
@@ -327,10 +324,12 @@ describe("Retell phone-call result handling", () => {
     await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
-      resultHandler,
     });
 
-    expect(resultHandler).toHaveBeenCalledTimes(2);
+    expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
+      "hpc_123",
+      "hpc_123",
+    ]);
     expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
   });
 });
@@ -427,14 +426,20 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
 }
 
 function createWebhookStore(input: {
+  appendResultNotification?: (call: HostedPhoneCall) => Promise<void>;
   call: HostedPhoneCall;
 }) {
   let currentCall: HostedPhoneCall | null = input.call;
+  const appendResultNotificationCalls: HostedPhoneCall[] = [];
   const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
   const findUniqueOrThrowCalls: RetellWebhookFindUniqueOrThrowInput[] = [];
   const updateManyCalls: RetellWebhookUpdateManyInput[] = [];
 
   const tx: RetellWebhookTx = {
+    appendResultNotification: async (call) => {
+      appendResultNotificationCalls.push(call);
+      await input.appendResultNotification?.(call);
+    },
     hostedPhoneCall: {
       findUnique: async (args) => {
         findUniqueCalls.push(args);
@@ -487,6 +492,7 @@ function createWebhookStore(input: {
   };
 
   return {
+    appendResultNotificationCalls,
     currentCall: () => currentCall,
     findUniqueCalls,
     findUniqueOrThrowCalls,
