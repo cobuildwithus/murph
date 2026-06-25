@@ -1725,8 +1725,9 @@ function pushWorkoutSummary(
     startAtRaw,
     resourceContext.sourceProviderSlug,
   );
+  const endAtRaw = firstValueFromPaths(entry, ["endAt", "end_at", "end", "timeEnd", "time_end"]);
   const endAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["endAt", "end_at", "end", "timeEnd", "time_end"]),
+    endAtRaw,
     resourceContext.sourceProviderSlug,
   );
   const movingTimeMinutes = resolveWorkoutMovingTimeMinutes(entry);
@@ -1747,7 +1748,7 @@ function pushWorkoutSummary(
   const workoutTimestamp = occurredAt
     ? withTimestampOverride(timestamp, {
       occurredAt,
-      dayKey: resolveJunctionLocalDayKey(entry, startAtRaw, occurredAt) ?? timestamp.dayKey,
+      dayKey: resolveJunctionWorkoutDayKey(entry, startAtRaw, endAtRaw, occurredAt, timestamp),
       observedAtRaw: stringId(startAtRaw) ?? occurredAt,
     })
     : timestamp;
@@ -1808,6 +1809,48 @@ function pushWorkoutSummary(
       }),
     }),
   }));
+}
+
+function resolveJunctionWorkoutDayKey(
+  entry: PlainObject,
+  startAtRaw: unknown,
+  endAtRaw: unknown,
+  occurredAt: string,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  const startDayKey = resolveJunctionLocalDayKey(entry, startAtRaw, occurredAt);
+  if (stringId(startAtRaw) !== undefined) {
+    return startDayKey ?? timestamp.dayKey;
+  }
+
+  const endOffsetSeconds = readEmbeddedTimestampOffsetSeconds(endAtRaw);
+  if (endOffsetSeconds !== undefined) {
+    const endOffsetDayKey = extractLocalDayKeyFromUtcOffset(occurredAt, endOffsetSeconds);
+    if (endOffsetDayKey) {
+      return endOffsetDayKey;
+    }
+  }
+
+  const computedOccurredDayKey = resolveJunctionLocalDayKey(entry, occurredAt, occurredAt, "utc");
+  if (computedOccurredDayKey) {
+    return computedOccurredDayKey;
+  }
+
+  if (
+    timestamp.observedAtRaw
+    && (timestamp.timestampSemantics === "floating" || isDateOnlyJunctionTimestamp(timestamp.observedAtRaw))
+  ) {
+    return timestamp.dayKey;
+  }
+
+  return undefined;
+}
+
+function readEmbeddedTimestampOffsetSeconds(value: unknown): number | undefined {
+  const rawTimestamp = stringId(value)?.trim();
+  const offset = rawTimestamp ? /([+-]\d{2}:?\d{2})$/u.exec(rawTimestamp)?.[1] : undefined;
+  const offsetMinutes = offset ? parseJunctionTimeZoneOffsetMinutes(offset) : undefined;
+  return offsetMinutes === undefined ? undefined : offsetMinutes * 60;
 }
 
 function pushMealSummary(

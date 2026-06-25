@@ -663,6 +663,55 @@ test("Junction WHOOP workout summaries use provider offset local day across UTC 
   assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
 });
 
+test("Junction workout summaries derive provider day from computed start with provider offset", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-end-duration-offset-local-24",
+        end: "2026-06-25T04:15:00.000Z",
+        durationSeconds: 1800,
+        updated_at: "2026-06-25T04:20:00.000Z",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries derive computed start day from embedded end offset", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-end-duration-embedded-offset-local-24",
+        end: "2026-06-25T00:15:00-04:00",
+        durationSeconds: 1800,
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+});
+
 test("Junction workout summaries trust embedded offset timestamps before separate offset metadata", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-06-25T12:00:00.000Z",
