@@ -31,6 +31,9 @@ import {
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
+import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 
@@ -146,9 +149,12 @@ type HostedAiUsageAllowancePeriodResolution =
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
-    reason: "trial_expired_pending_billing";
+    reason: Extract<
+      HostedAiUsageGateDeniedReason,
+      "hosted_access_inactive" | "trial_expired_pending_billing"
+    >;
     retryAfter: Date;
-    userNotice: HostedAiUsageGateUserNotice;
+    userNotice: HostedAiUsageGateUserNotice | null;
   };
 
 interface HostedAiUsageAllowanceBillingRef {
@@ -165,6 +171,10 @@ interface HostedAiUsageAllowanceBillingRef {
 
 interface HostedAiUsageAllowanceThreadContainerRef {
   monthlyUsageLimitUsdMicros: bigint;
+  owner: {
+    billingStatus: HostedBillingStatus;
+    suspendedAt: Date | null;
+  };
 }
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
@@ -521,6 +531,12 @@ export async function resolveHostedAiUsageGate(input: {
         threadContainer: {
           select: {
             monthlyUsageLimitUsdMicros: true,
+            owner: {
+              select: {
+                billingStatus: true,
+                suspendedAt: true,
+              },
+            },
           },
         },
         billingStatus: true,
@@ -594,6 +610,12 @@ export async function readHostedAiUsageGate(input: {
         threadContainer: {
           select: {
             monthlyUsageLimitUsdMicros: true,
+            owner: {
+              select: {
+                billingStatus: true,
+                suspendedAt: true,
+              },
+            },
           },
         },
         billingStatus: true,
@@ -848,6 +870,12 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       threadContainer: {
         select: {
           monthlyUsageLimitUsdMicros: true,
+          owner: {
+            select: {
+              billingStatus: true,
+              suspendedAt: true,
+            },
+          },
         },
       },
       id: true,
@@ -1113,14 +1141,34 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     ?? getHostedDefaultBillingPlanCode();
   const billingPhase = parseHostedBillingPhase(input.billingRef?.currentBillingPhase);
   const checkoutOffer = parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer);
-  const threadContainerLimitUsdMicros =
-    normalizeHostedThreadContainerUsageLimitUsdMicros(input.threadContainer);
 
-  if (threadContainerLimitUsdMicros !== null) {
+  if (input.threadContainer) {
     const period = resolveHostedAiUsageBillingOrCalendarPeriod({
       at: input.at,
       billingRef: input.billingRef,
     });
+    const threadContainerLimitUsdMicros =
+      normalizeHostedThreadContainerUsageLimitUsdMicros(input.threadContainer);
+
+    if (
+      threadContainerLimitUsdMicros === null
+      || !hasHostedMemberActiveAccess(input.threadContainer.owner)
+    ) {
+      return {
+        billingPlanCode,
+        kind: "denied",
+        limitUsdMicros: threadContainerLimitUsdMicros ?? 0n,
+        periodEnd: period.periodEnd,
+        periodStart: period.periodStart,
+        reason: "hosted_access_inactive",
+        retryAfter: resolveHostedAiUsageInactiveRetryAfter({
+          at: input.at,
+          periodEnd: period.periodEnd,
+        }),
+        userNotice: null,
+      };
+    }
+
     return {
       billingPlanCode,
       kind: "period",
@@ -1173,6 +1221,15 @@ function normalizeHostedThreadContainerUsageLimitUsdMicros(
 ): bigint | null {
   const limit = threadContainer?.monthlyUsageLimitUsdMicros ?? null;
   return typeof limit === "bigint" && limit > 0n ? limit : null;
+}
+
+function resolveHostedAiUsageInactiveRetryAfter(input: {
+  at: Date;
+  periodEnd: Date;
+}): Date {
+  return input.periodEnd.getTime() > input.at.getTime()
+    ? input.periodEnd
+    : new Date(input.at.getTime() + 15 * 60_000);
 }
 
 function resolveHostedAiUsageBillingOrCalendarPeriod(input: {

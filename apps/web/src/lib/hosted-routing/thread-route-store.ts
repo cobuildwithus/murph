@@ -1,12 +1,10 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionConversationMessageChannel,
 } from "@murphai/hosted-execution";
 
 import {
-  createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
@@ -19,9 +17,6 @@ import type {
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
-
-export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
-  4_500_000n;
 
 export type HostedThreadRouteChannel = Extract<
   HostedExecutionConversationMessageChannel,
@@ -119,81 +114,4 @@ export async function readHostedThreadRouteByExternalThread(input: {
     containerMemberId: row.containerMemberId,
     owner: row.container.owner,
   };
-}
-
-export async function createHostedThreadContainerTx(input: {
-  memberId: string;
-  monthlyUsageLimitUsdMicros?: bigint | null;
-  ownerMemberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  const monthlyUsageLimitUsdMicros = normalizeHostedThreadContainerUsageLimit(
-    input.monthlyUsageLimitUsdMicros,
-  );
-
-  await input.prisma.hostedThreadContainer.create({
-    data: {
-      memberId: input.memberId,
-      monthlyUsageLimitUsdMicros,
-      ownerMemberId: input.ownerMemberId,
-    },
-  });
-}
-
-export async function ensureHostedThreadRouteTx(input: {
-  channel: HostedThreadRouteChannel;
-  containerMemberId: string;
-  prisma: Prisma.TransactionClient;
-  threadId: string | number;
-}): Promise<void> {
-  const threadLookupKey = createHostedExternalThreadLookupKey({
-    channel: input.channel,
-    threadId: input.threadId,
-  });
-
-  if (!threadLookupKey) {
-    throw new TypeError(
-      "Hosted thread route requires a supported channel and non-empty thread id.",
-    );
-  }
-
-  const existing = await input.prisma.hostedThreadRoute.findUnique({
-    select: {
-      containerMemberId: true,
-    },
-    where: {
-      channel_threadLookupKey: {
-        channel: input.channel,
-        threadLookupKey,
-      },
-    },
-  });
-
-  if (existing) {
-    if (existing.containerMemberId !== input.containerMemberId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
-        httpStatus: 409,
-        message: "This external thread is already routed to another container.",
-      });
-    }
-
-    return;
-  }
-
-  await input.prisma.hostedThreadRoute.create({
-    data: {
-      channel: input.channel,
-      containerMemberId: input.containerMemberId,
-      threadLookupKey,
-    },
-  });
-}
-
-function normalizeHostedThreadContainerUsageLimit(value: bigint | null | undefined): bigint {
-  const limit = value ?? HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS;
-  if (limit <= 0n) {
-    throw new TypeError("Hosted thread container monthly usage limit must be positive.");
-  }
-  return limit;
 }

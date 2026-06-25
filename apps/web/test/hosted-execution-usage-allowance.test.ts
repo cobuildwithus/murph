@@ -1508,6 +1508,29 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("denies thread-container usage when the owner authority is inactive", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      reason: "hosted_access_inactive",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
   it("uses usage-period spend for billing periods before allowing", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -1883,6 +1906,8 @@ function createGatePrisma(input: {
   scheduledBillingPlanCode?: string | null;
   spentUsdMicros: bigint;
   threadContainerLimitUsdMicros?: bigint | null;
+  threadContainerOwnerBillingStatus?: HostedBillingStatus;
+  threadContainerOwnerSuspendedAt?: Date | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
@@ -1892,7 +1917,13 @@ function createGatePrisma(input: {
   const periodEnd = input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z");
   const threadContainer = input.threadContainerLimitUsdMicros == null
     ? null
-    : { monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros };
+    : {
+        monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
+        owner: {
+          billingStatus: input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
+          suspendedAt: input.threadContainerOwnerSuspendedAt ?? null,
+        },
+      };
   const defaultPeriod = {
     billingPlanCode: input.billingPlanCode ?? "launch_monthly",
     blockedAt: null,
