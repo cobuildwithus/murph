@@ -2218,8 +2218,8 @@ test("importDeviceProviderSnapshot supersedes legacy WHOOP body measurement date
   }
 });
 
-test("importDeviceProviderSnapshot tombstones duplicate legacy WHOOP body measurement refs", async () => {
-  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-legacy-duplicate");
+test("importDeviceProviderSnapshot does not alias WHOOP body measurements to import day when updated_at exists", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-import-day-alias");
   try {
     await coreRuntime.initializeVault({
       vaultRoot,
@@ -2227,89 +2227,68 @@ test("importDeviceProviderSnapshot tombstones duplicate legacy WHOOP body measur
       timezone: "America/New_York",
     });
 
-    const snapshot = {
-      accountId: "whoop-user-1",
-      importedAt: "2026-06-25T12:00:00.000Z",
-      bodyMeasurements: {
-        date: "2026-06-24",
-        updated_at: "2026-06-25T12:00:00.000Z",
-        weight_kilogram: 78.2,
-      },
-    };
-    const correctedImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    const julyImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
         provider: "whoop",
         vaultRoot,
-        snapshot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-07-01",
+            updated_at: "2026-07-01T12:00:00.000Z",
+            weight_kilogram: 79.4,
+          },
+        },
       },
       {
         corePort: coreRuntime,
       },
     );
-    const legacyImport = await coreRuntime.importDeviceBatch({
-      vaultRoot,
-      provider: "whoop",
-      accountId: "whoop-user-1",
-      importedAt: "2026-06-25T12:05:00.000Z",
-      events: [{
-        kind: "observation",
-        occurredAt: "2026-06-25T12:00:00.000Z",
-        recordedAt: "2026-06-25T12:05:00.000Z",
-        dayKey: "2026-06-24",
-        title: "WHOOP weight",
-        externalRef: {
-          system: "whoop",
-          resourceType: "body-measurement",
-          resourceId: "2026-06-25",
-          facet: "weight",
-        },
-        fields: {
-          metric: "weight",
-          observationGrain: "summary",
-          value: 78.2,
-          unit: "kg",
-        },
-      }],
-    });
-    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    const olderImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
         provider: "whoop",
         vaultRoot,
-        snapshot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            updated_at: "2026-06-25T12:00:00.000Z",
+            weight_kilogram: 78.2,
+          },
+        },
       },
       {
         corePort: coreRuntime,
       },
     );
-    const correctedWeight = correctedImport.events.find(
+    const julyWeight = julyImport.events.find(
       (event) => event.kind === "observation" && event.metric === "weight",
     );
-    const legacyWeight = legacyImport.events.find(
-      (event) => event.kind === "observation" && event.metric === "weight",
-    );
-    const replayWeight = replayImport.events.find(
+    const olderWeight = olderImport.events.find(
       (event) => event.kind === "observation" && event.metric === "weight",
     );
     const records = (
       await Promise.all(
         [...new Set([
-          ...correctedImport.eventShardPaths,
-          ...legacyImport.eventShardPaths,
-          ...replayImport.eventShardPaths,
+          ...julyImport.eventShardPaths,
+          ...olderImport.eventShardPaths,
         ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
       )
     ).flat();
     const liveWeightRecords = latestLiveRecords(records).filter(
       (record) => record.kind === "observation" && record.metric === "weight",
     );
-    const legacyRows = records.filter((record) => record.id === legacyWeight?.id);
 
-    assert.equal(replayWeight?.id, correctedWeight?.id);
-    assert.notEqual(legacyWeight?.id, correctedWeight?.id);
-    assert.equal(liveWeightRecords.length, 1);
-    assert.equal(liveWeightRecords[0]?.id, correctedWeight?.id);
-    assert.equal(storedExternalRefResourceId(liveWeightRecords[0]), "2026-06-24");
-    assert.equal(legacyRows.some((record) => isDeletedEventLifecycle(record.lifecycle)), true);
+    assert.notEqual(olderWeight?.id, julyWeight?.id);
+    assert.equal(olderWeight?.externalRef?.resourceId, "2026-06-24");
+    assert.equal(julyWeight?.externalRef?.resourceId, "2026-07-01");
+    assert.equal(liveWeightRecords.length, 2);
+    assert.deepEqual(
+      liveWeightRecords.map((record) => storedExternalRefResourceId(record)).sort(),
+      ["2026-06-24", "2026-07-01"],
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

@@ -535,17 +535,13 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     bodyMeasurementExplicitDayKey ??
     firstDayKey(bodyMeasurementRecordedAt) ??
     "current";
-  const bodyMeasurementLegacyResourceIds = [
-    firstDayKey(bodyMeasurementUpdatedAt),
-    firstDayKey(importedAt),
-  ].filter((candidate): candidate is string =>
-    Boolean(
-      bodyMeasurementExplicitDayKey
-        && !bodyMeasurementMeasuredAt
-        && candidate
-        && candidate !== bodyMeasurementResourceId,
-    )
-  );
+  const bodyMeasurementLegacyResourceId = bodyMeasurementExplicitDayKey && !bodyMeasurementMeasuredAt
+    ? firstDayKey(bodyMeasurementUpdatedAt) ?? firstDayKey(importedAt)
+    : undefined;
+  const bodyMeasurementLegacyResourceIds =
+    bodyMeasurementLegacyResourceId && bodyMeasurementLegacyResourceId !== bodyMeasurementResourceId
+      ? [bodyMeasurementLegacyResourceId]
+      : [];
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));

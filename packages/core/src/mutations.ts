@@ -1545,7 +1545,6 @@ interface EventExternalRefReconciliation {
   forceAppendIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
   supersededCount: number;
-  tombstonedLegacyCount: number;
 }
 
 // externalRef.version is intentionally NOT part of the reconcile identity:
@@ -1677,7 +1676,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const forceAppendIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
-  let tombstonedLegacyCount = 0;
 
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
@@ -1712,10 +1710,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    const tombstoneEntries: PreparedJsonlEntry<EventRecord>[] = [];
-    const matchedIds = new Set<string>();
-    matchedIds.add(latest.id);
-
     for (const match of matchedEntries) {
       // externalRef identity does not include kind. Event spines are kind-stable,
       // so device reconciliation must reject under-faceted provider refs instead
@@ -1725,35 +1719,19 @@ async function reconcileDeviceEventEntriesByExternalRef(
           "EVENT_KIND_MISMATCH",
           `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
             `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
-            `"${match.record.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+          `"${match.record.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
         );
       }
+    }
 
-      if (match.record.id === latest.id || matchedIds.has(match.record.id)) {
-        continue;
-      }
-
-      matchedIds.add(match.record.id);
-      const revision = Math.max(
-        eventSpineRevision(match.record),
-        index.maxRevisionById.get(match.record.id) ?? 0,
-      ) + 1;
-      const tombstone: EventRecord = {
-        ...match.record,
-        recordedAt: entry.record.recordedAt,
-        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
-      };
-      assertContractShape(
-        eventRecordSchema,
-        tombstone,
-        "EVENT_CONTRACT_INVALID",
-        "Legacy externalRef tombstone is invalid.",
+    const matchedIds = new Set(matchedEntries.map((match) => match.record.id));
+    if (matchedIds.size > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
+          "ambiguous legacy cleanup must be repaired explicitly.",
       );
-      forceAppendIds.add(match.record.id);
-      index.maxRevisionById.set(match.record.id, revision);
-      index.latestByRefKey.set(match.refKey, latest);
-      tombstoneEntries.push({ relativePath: toEventLedgerFile(tombstone.occurredAt), record: tombstone });
-      tombstonedLegacyCount += 1;
     }
 
     // externalRef identity does not include kind. Event spines are kind-stable,
@@ -1770,7 +1748,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
       skippedDuplicateCount += 1;
-      appendEntries.push(...tombstoneEntries);
       for (const legacyRefKey of legacyRefKeys) {
         index.latestByRefKey.set(legacyRefKey, latest);
       }
@@ -1794,7 +1771,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       index.latestByRefKey.set(legacyRefKey, superseding);
     }
     index.maxRevisionById.set(latest.id, revision);
-    appendEntries.push(...tombstoneEntries);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
     records.push(superseding);
     supersededCount += 1;
@@ -1806,7 +1782,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     forceAppendIds,
     skippedDuplicateCount,
     supersededCount,
-    tombstonedLegacyCount,
   };
 }
 
@@ -1895,7 +1870,6 @@ async function reconcileEventImportEntriesByExternalRef(
     forceAppendIds,
     skippedDuplicateCount,
     supersededCount,
-    tombstonedLegacyCount: 0,
   };
 }
 
@@ -2146,7 +2120,6 @@ function buildDeviceBatchAuditSummary(input: {
   sampleCount: number;
   skippedDuplicateCount: number;
   supersededCount: number;
-  tombstonedLegacyCount: number;
 }): string {
   const dedupeNotes: string[] = [];
 
@@ -2156,10 +2129,6 @@ function buildDeviceBatchAuditSummary(input: {
 
   if (input.supersededCount > 0) {
     dedupeNotes.push(`${input.supersededCount} event(s) updated in place by externalRef`);
-  }
-
-  if (input.tombstonedLegacyCount > 0) {
-    dedupeNotes.push(`${input.tombstonedLegacyCount} legacy event(s) tombstoned by externalRef`);
   }
 
   const dedupeSuffix = dedupeNotes.length > 0 ? ` (${dedupeNotes.join(", ")})` : "";
@@ -2864,7 +2833,6 @@ export async function importDeviceBatch({
           sampleCount: sampleRecords.length,
           skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
           supersededCount: eventReconciliation.supersededCount,
-          tombstonedLegacyCount: eventReconciliation.tombstonedLegacyCount,
         }),
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
