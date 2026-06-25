@@ -28,6 +28,7 @@ import {
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
+  createAssistantCronCanonicalRuntimeRecord,
   findAssistantCronCanonicalRuntimeRecord,
   removeAssistantCronCanonicalRuntimeRecord,
   upsertAssistantCronCanonicalRuntimeRecord,
@@ -36,6 +37,7 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
+import { readAssistantDeviceActivityParentAutomationTag } from '../device-activity-cron-tags.js'
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
@@ -476,6 +478,12 @@ export async function executeClaimedAssistantCronJob(input: {
       }
 
       await writeAssistantCronStore(input.paths, store)
+      await persistDeviceActivityParentCronSession({
+        finishedAt,
+        job: finalizedJob,
+        paths: input.paths,
+        sessionId,
+      })
 
       return {
         job: finalizedJob,
@@ -839,6 +847,36 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
       (job.target.channel &&
         (job.target.participantId || job.target.threadId)),
   )
+}
+
+async function persistDeviceActivityParentCronSession(input: {
+  finishedAt: string
+  job: AssistantCronJob
+  paths: AssistantStatePaths
+  sessionId: string | null
+}): Promise<void> {
+  if (!input.sessionId) {
+    return
+  }
+
+  const parentAutomationId = readAssistantDeviceActivityParentAutomationTag(input.job.tags)
+  if (!parentAutomationId) {
+    return
+  }
+
+  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
+  const existing =
+    findAssistantCronCanonicalRuntimeRecord(runtimeStore, parentAutomationId) ??
+    createAssistantCronCanonicalRuntimeRecord({
+      jobId: parentAutomationId,
+      now: input.finishedAt,
+    })
+  upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, {
+    ...existing,
+    sessionId: input.sessionId,
+    updatedAt: input.finishedAt,
+  })
+  await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {

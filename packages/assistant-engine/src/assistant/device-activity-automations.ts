@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { patchAutomation } from '@murphai/core'
+import { advanceAutomationDeviceActivityCursor } from '@murphai/core'
 import {
   compareDeviceActivityCoverageKeys,
   deviceActivityCoverageKeyIsAfterCursor,
@@ -20,11 +20,15 @@ import { withAssistantCronWriteLock } from './cron/locking.js'
 import {
   ensureAssistantCronState,
   isAssistantCronJobDue,
-  readAssistantCronRuns,
   readAssistantCronStore,
   sortAssistantCronJobs,
   writeAssistantCronStore,
 } from './cron/store.js'
+import {
+  buildAssistantDeviceActivityOccurrenceTag,
+  buildAssistantDeviceActivityParentAutomationTag,
+  readAssistantDeviceActivityOccurrenceTag,
+} from './device-activity-cron-tags.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 
 const DEVICE_ACTIVITY_AUTOMATION_MAX_MATCHES_PER_PASS = 25
@@ -48,6 +52,11 @@ interface DeviceActivityCandidate {
 interface MatchedDeviceActivity extends DeviceActivityCandidate {
   summary: string
 }
+
+type DeviceActivityNotificationScheduleResult =
+  | 'alreadyQueued'
+  | 'blocked'
+  | 'queued'
 
 export interface ScheduleDeviceActivityTriggeredAutomationsInput {
   now?: () => string
@@ -127,8 +136,11 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
         nowIso: input.nowIso,
         vault: input.vault,
       })
+      if (enqueued === 'blocked') {
+        break
+      }
       processedActivities.push(activity)
-      if (enqueued) {
+      if (enqueued === 'queued') {
         scheduled += 1
       }
     }
@@ -410,46 +422,84 @@ async function scheduleDeviceActivityAutomationNotification(input: {
   automation: DeviceActivityAutomation
   nowIso: string
   vault: string
-}): Promise<boolean> {
+}): Promise<DeviceActivityNotificationScheduleResult> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
-  const job = buildDeviceActivityAutomationNotificationJob(input)
+  const jobId = buildDeviceActivityAutomationNotificationJobId(input)
+  const occurrenceKey = buildDeviceActivityAutomationNotificationOccurrenceKey(input)
 
   return await withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
-    if (store.jobs.some((existing) => existing.jobId === job.jobId)) {
-      return false
-    }
-    if (await assistantCronJobHasConsumedRun(paths, job.jobId)) {
-      return false
+    const existingIndex = store.jobs.findIndex((existing) => existing.jobId === jobId)
+    const existing = existingIndex === -1
+      ? null
+      : store.jobs[existingIndex] as AssistantCronJob
+    if (existing) {
+      const existingOccurrenceKey = readAssistantDeviceActivityOccurrenceTag(existing.tags)
+      if (existingOccurrenceKey === occurrenceKey) {
+        return 'alreadyQueued'
+      }
+      if (
+        existing.enabled ||
+        existing.state.nextRunAt !== null ||
+        existing.state.pendingDeliveryIntentId ||
+        existing.state.runningAt !== null
+      ) {
+        return 'blocked'
+      }
     }
 
-    store.jobs = sortAssistantCronJobs([...store.jobs, job])
+    const job = buildDeviceActivityAutomationNotificationJob({
+      ...input,
+      existingJob: existing,
+      jobId,
+      occurrenceKey,
+    })
+    if (existingIndex === -1) {
+      store.jobs = sortAssistantCronJobs([...store.jobs, job])
+    } else {
+      store.jobs[existingIndex] = job
+      store.jobs = sortAssistantCronJobs(store.jobs)
+    }
     await writeAssistantCronStore(paths, store)
-    return true
+    return 'queued'
   })
 }
 
 function buildDeviceActivityAutomationNotificationJob(input: {
   activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
+  existingJob: AssistantCronJob | null
+  jobId: string
   nowIso: string
+  occurrenceKey: string
 }): AssistantCronJob {
-  const jobId = buildDeviceActivityAutomationNotificationJobId(input)
   return assistantCronJobSchema.parse({
     schema: 'murph.assistant-cron-job.v1',
-    jobId,
-    name: buildDeviceActivityAutomationNotificationJobName(input, jobId),
+    jobId: input.jobId,
+    name: buildDeviceActivityAutomationNotificationJobName(input, input.jobId),
     enabled: true,
-    keepAfterRun: false,
+    keepAfterRun: true,
     prompt: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
     schedule: {
       kind: 'at',
       at: input.nowIso,
     },
-    tags: mergeAutomationTags(input.automation.tags, [ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG]),
-    target: buildDeviceActivityAutomationNotificationTarget(input.automation),
-    createdAt: input.nowIso,
+    tags: mergeAutomationTags(
+      input.automation.tags,
+      [
+        ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+        input.automation.continuityPolicy === 'preserve'
+          ? buildAssistantDeviceActivityParentAutomationTag(input.automation.automationId)
+          : null,
+        buildAssistantDeviceActivityOccurrenceTag(input.occurrenceKey),
+      ].filter((tag): tag is string => tag !== null),
+    ),
+    target: buildDeviceActivityAutomationNotificationTarget({
+      automation: input.automation,
+      existingJob: input.existingJob,
+    }),
+    createdAt: input.existingJob?.createdAt ?? input.nowIso,
     updatedAt: input.nowIso,
     state: {
       nextRunAt: input.nowIso,
@@ -465,10 +515,20 @@ function buildDeviceActivityAutomationNotificationJob(input: {
 }
 
 function buildDeviceActivityAutomationNotificationJobId(input: {
-  activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
 }): string {
   const digest = createHash('sha256')
+    .update(input.automation.automationId)
+    .digest('hex')
+    .slice(0, 40)
+  return `cron_device_activity_${digest}`
+}
+
+function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
+  activity: MatchedDeviceActivity
+  automation: DeviceActivityAutomation
+}): string {
+  return createHash('sha256')
     .update(input.automation.automationId)
     .update('\0')
     .update(input.activity.entityId)
@@ -476,7 +536,6 @@ function buildDeviceActivityAutomationNotificationJobId(input: {
     .update(input.activity.triggeredAt)
     .digest('hex')
     .slice(0, 40)
-  return `cron_device_activity_${digest}`
 }
 
 function buildDeviceActivityAutomationNotificationJobName(input: {
@@ -487,18 +546,26 @@ function buildDeviceActivityAutomationNotificationJobName(input: {
   return `${input.automation.title} (${input.activity.activityKind} at ${input.activity.occurredAt}, ${suffix})`
 }
 
-function buildDeviceActivityAutomationNotificationTarget(
-  automation: DeviceActivityAutomation,
-): AssistantCronJob['target'] {
+function buildDeviceActivityAutomationNotificationTarget(input: {
+  automation: DeviceActivityAutomation
+  existingJob: AssistantCronJob | null
+}): AssistantCronJob['target'] {
+  const preservedSessionId = input.automation.continuityPolicy === 'preserve'
+    ? input.existingJob?.target.sessionId ?? null
+    : null
+  const preservedAlias = input.automation.continuityPolicy === 'preserve'
+    ? input.existingJob?.target.alias ?? null
+    : null
+
   return assistantCronTargetSchema.parse({
-    sessionId: null,
-    alias: null,
-    channel: automation.route.channel,
-    deliverySource: automation.route.deliverySource,
-    deliveryTarget: automation.route.deliveryTarget,
-    identityId: automation.route.identityId,
-    participantId: automation.route.participantId,
-    threadId: automation.route.threadId,
+    sessionId: preservedSessionId,
+    alias: preservedAlias,
+    channel: input.automation.route.channel,
+    deliverySource: input.automation.route.deliverySource,
+    deliveryTarget: input.automation.route.deliveryTarget,
+    identityId: input.automation.route.identityId,
+    participantId: input.automation.route.participantId,
+    threadId: input.automation.route.threadId,
   })
 }
 
@@ -515,14 +582,13 @@ async function advanceDeviceActivityAutomationCursor(input: {
     return
   }
 
-  await patchAutomation({
+  await advanceAutomationDeviceActivityCursor({
     vaultRoot: input.vault,
     lookup: input.automation.automationId,
-    schedule: {
-      ...input.automation.schedule,
-      after: cursor.after,
-      afterEntityIds: cursor.afterEntityIds,
-    },
+    after: cursor.after,
+    afterEntityIds: cursor.afterEntityIds,
+    expectedActivityKind: input.automation.schedule.activityKind,
+    expectedSource: input.automation.schedule.source,
   })
 }
 
@@ -534,14 +600,6 @@ function resolveNextDeviceActivityCursor(input: {
     cursor: input.schedule,
     keys: input.activities,
   })
-}
-
-async function assistantCronJobHasConsumedRun(
-  paths: ReturnType<typeof resolveAssistantStatePaths>,
-  jobId: string,
-): Promise<boolean> {
-  const runs = await readAssistantCronRuns(paths, jobId)
-  return runs.some((run) => run.status === 'succeeded' || run.status === 'skipped')
 }
 
 function buildDeviceActivityAutomationInstructions(

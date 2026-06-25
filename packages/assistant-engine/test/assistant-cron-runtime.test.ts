@@ -144,6 +144,7 @@ import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
+import { buildAssistantDeviceActivityParentAutomationTag } from '../src/assistant/device-activity-cron-tags.ts'
 import {
   completeAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
@@ -1040,6 +1041,81 @@ describe('assistant cron runtime orchestration', () => {
       setAssistantCronJobEnabled(vaultRoot, localJob.jobId, true),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_INVALID_STATE',
+    })
+  })
+
+  it('mirrors a device activity local job session to the parent automation runtime state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-session-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-listener'
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener',
+      keepAfterRun: true,
+      name: 'Device activity listener',
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      tags: [
+        'system:assistant-require-send',
+        buildAssistantDeviceActivityParentAutomationTag(parentAutomationId),
+      ],
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      response: 'Completed device activity check-in.',
+      session: {
+        sessionId: 'session-device-activity',
+      },
+    })
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(runtimeStore.jobs.find((job) => job.jobId === parentAutomationId)).toMatchObject({
+      jobId: parentAutomationId,
+      sessionId: 'session-device-activity',
     })
   })
 

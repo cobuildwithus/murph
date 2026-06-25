@@ -116,6 +116,21 @@ export interface PatchAutomationInput {
   vaultRoot: string;
 }
 
+export interface AdvanceAutomationDeviceActivityCursorInput {
+  after: string;
+  afterEntityIds: string[];
+  expectedActivityKind?: AutomationDeviceActivityKind;
+  expectedSource?: AutomationDeviceActivitySource;
+  lookup: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface AdvanceAutomationDeviceActivityCursorResult {
+  advanced: boolean;
+  record: AutomationRecord;
+}
+
 export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
@@ -665,6 +680,71 @@ export async function patchAutomation(
   });
 }
 
+export async function advanceAutomationDeviceActivityCursor(
+  input: AdvanceAutomationDeviceActivityCursorInput,
+): Promise<AdvanceAutomationDeviceActivityCursorResult> {
+  const after = normalizeAutomationIsoTimestamp(input.after, "after");
+  const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(input.afterEntityIds) ?? [];
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+    if (
+      existingRecord.schedule.kind !== "deviceActivity" ||
+      existingRecord.schedule.activityKind !== input.expectedActivityKind ||
+      existingRecord.schedule.source !== input.expectedSource
+    ) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const cursor = resolveAdvancedDeviceActivityCursor({
+      currentAfter: existingRecord.schedule.after,
+      currentAfterEntityIds: existingRecord.schedule.afterEntityIds,
+      nextAfter: after,
+      nextAfterEntityIds: afterEntityIds,
+    });
+    if (!cursor) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const updated = await upsertAutomationWithLatestRegistry({
+      automationId: existingRecord.automationId,
+      continuityPolicy: existingRecord.continuityPolicy,
+      instructions: existingRecord.instructions,
+      now: input.now,
+      route: existingRecord.route,
+      schedule: {
+        ...existingRecord.schedule,
+        after: cursor.after,
+        afterEntityIds: cursor.afterEntityIds,
+      },
+      slug: existingRecord.slug,
+      status: existingRecord.status,
+      summary: existingRecord.summary,
+      tags: existingRecord.tags,
+      title: existingRecord.title,
+      vaultRoot: input.vaultRoot,
+    }, records);
+
+    return {
+      advanced: true,
+      record: updated.record,
+    };
+  });
+}
+
 function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
   const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
   if (Object.values(patch).some((value) => value !== undefined)) {
@@ -675,6 +755,45 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
     "VAULT_AUTOMATION_EMPTY_PATCH",
     "Automation edit requires at least one field to update.",
   );
+}
+
+function resolveAdvancedDeviceActivityCursor(input: {
+  currentAfter: string;
+  currentAfterEntityIds?: readonly string[];
+  nextAfter: string;
+  nextAfterEntityIds: readonly string[];
+}): { after: string; afterEntityIds: string[] } | null {
+  const comparison = compareIsoTimestamps(input.nextAfter, input.currentAfter);
+  if (comparison < 0) {
+    return null;
+  }
+
+  if (comparison > 0) {
+    return {
+      after: input.nextAfter,
+      afterEntityIds: [...new Set(input.nextAfterEntityIds)].sort(),
+    };
+  }
+
+  const afterEntityIds = [
+    ...new Set([...(input.currentAfterEntityIds ?? []), ...input.nextAfterEntityIds]),
+  ].sort();
+  if (arraysEqual(afterEntityIds, input.currentAfterEntityIds ?? [])) {
+    return null;
+  }
+
+  return {
+    after: input.nextAfter,
+    afterEntityIds,
+  };
+}
+
+function compareIsoTimestamps(left: string, right: string): number {
+  return Date.parse(left) - Date.parse(right);
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
 
 async function upsertAutomationWithLatestRegistry(
