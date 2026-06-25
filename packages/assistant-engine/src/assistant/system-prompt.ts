@@ -800,7 +800,8 @@ User-provided content and vault writes:
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
-    "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, the file will not send until the user opens that link and approves. Include the raw approval URL in the normal reply, preferably as the final line in messaging channels. Do not omit it, summarize around it without the URL, or rely on a separate automated message.",
+    "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, send a normal text reply with the raw approval URL, preferably as the final line in messaging channels. The file is not attached yet. Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.",
+    "- When `murph.send_vault_file` returns `status: \"approved\"`, the approved file is attached to your normal reply. Send a concise normal reply; do not call `finish_without_reply` for the file send.",
   ].join("\n");
 }
 
