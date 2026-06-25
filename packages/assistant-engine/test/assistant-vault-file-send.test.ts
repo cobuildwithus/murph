@@ -188,11 +188,6 @@ describe('assistant vault-file send', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      requiredUserMessageDeliveryAvailable: true,
-      sendRequiredUserMessage: vi.fn(async () => ({
-        kind: 'sent' as const,
-        source: 'model' as const,
-      })),
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/haa_test',
         filename: 'report.pdf',
@@ -214,7 +209,6 @@ describe('assistant vault-file send', () => {
       },
     })
 
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
     expect(result.finalActionPatch).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
