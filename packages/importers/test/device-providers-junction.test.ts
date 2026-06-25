@@ -3820,7 +3820,7 @@ test("Junction sleep-stage samples keep stable replay identity with parent offse
             type: "wearable",
           },
           start: "2026-06-25T02:30:00.000Z",
-          end: "2026-06-25T04:30:00.000Z",
+          end: "2026-06-25T03:45:00.000Z",
           timezone_offset: "-04:00",
           stages: [{
             start: "2026-06-25T02:30:00.000Z",
