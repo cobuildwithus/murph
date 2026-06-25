@@ -109,7 +109,7 @@ export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
   prisma?: HostedPhoneCallWebhookStore;
 }): Promise<void> {
-  logRetellStorageModeMismatch(input.call);
+  assertRetellStorageMode(input.call);
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
   const result = mapRetellCallAnalysis(input.call);
 
@@ -402,14 +402,21 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function logRetellStorageModeMismatch(call: RetellCallPayload): void {
-  const storageMode = call.data_storage_setting?.trim();
+function assertRetellStorageMode(call: RetellCallPayload): void {
+  const storageMode = call.data_storage_setting?.trim().toLowerCase();
   if (!storageMode || storageMode === "basic_attributes_only") {
     return;
   }
 
-  console.warn("Retell phone call storage mode mismatch.", {
-    dataStorageSetting: storageMode,
-    providerCallIdPresent: Boolean(call.call_id),
+  throw hostedOnboardingError({
+    code: "RETELL_STORAGE_MODE_MISMATCH",
+    details: {
+      code: "retell_storage_mode_mismatch",
+      operationName: "retell.webhook.call_analyzed",
+      type: storageMode,
+    },
+    httpStatus: 409,
+    message: "Retell phone call storage mode mismatch.",
+    retryable: true,
   });
 }

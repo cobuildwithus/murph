@@ -7,6 +7,7 @@ import type {
   PhoneCallRuntime,
   PhoneCallRuntimeStartResult,
 } from "./types";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 const RETELL_CREATE_PHONE_CALL_URL = "https://api.retellai.com/v2/create-phone-call";
 const RETELL_STOP_CALL_URL_BASE = "https://api.retellai.com/v2/stop-call";
@@ -23,7 +24,7 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
   constructor(private readonly fetchImpl: typeof fetch) {}
 
   async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
-    const response = await this.fetchImpl(readRetellCreatePhoneCallUrl(), {
+    const response = await this.fetchImpl(RETELL_CREATE_PHONE_CALL_URL, {
       body: JSON.stringify(buildRetellCreatePhoneCallRequest(call)),
       headers: {
         authorization: `Bearer ${requireEnv("RETELL_API_KEY")}`,
@@ -45,16 +46,18 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     }
     const storageSetting = readRetellDataStorageSetting(payload);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
-      await this.stopCallBestEffort(providerCallId);
-      throw new TypeError(
-        `Retell create phone call returned data_storage_setting ${formatRetellStorageSetting(storageSetting)}; expected ${RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING}.`,
-      );
+      throw buildRetellStorageModeMismatchError({
+        storageSetting,
+        stopFailure: await this.stopCallBestEffort(providerCallId),
+      });
     }
 
     return { providerCallId };
   }
 
-  private async stopCallBestEffort(providerCallId: string): Promise<void> {
+  private async stopCallBestEffort(
+    providerCallId: string,
+  ): Promise<RetellStopCallFailure | null> {
     try {
       const response = await this.fetchImpl(readRetellStopCallUrl(providerCallId), {
         headers: {
@@ -65,18 +68,51 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
         signal: AbortSignal.timeout(RETELL_START_TIMEOUT_MS),
       });
       if (!response.ok) {
-        console.warn("Retell phone call storage mismatch stop request failed.", {
-          providerCallIdPresent: true,
-          status: response.status,
-        });
+        return {
+          statusCode: response.status,
+          type: "retell_storage_mismatch_stop_http_failed",
+        };
       }
-    } catch (error) {
-      console.warn("Retell phone call storage mismatch stop request failed.", {
-        errorName: error instanceof Error ? error.name : "unknown",
-        providerCallIdPresent: true,
-      });
+      return null;
+    } catch {
+      return {
+        type: "retell_storage_mismatch_stop_fetch_failed",
+      };
     }
   }
+}
+
+interface RetellStopCallFailure {
+  statusCode?: number;
+  type: "retell_storage_mismatch_stop_fetch_failed" | "retell_storage_mismatch_stop_http_failed";
+}
+
+function buildRetellStorageModeMismatchError(input: {
+  stopFailure: RetellStopCallFailure | null;
+  storageSetting: string | null;
+}): Error {
+  return hostedOnboardingError({
+    cause: input.stopFailure
+      ? new Error(input.stopFailure.statusCode
+        ? `Retell stop call failed with HTTP ${input.stopFailure.statusCode}.`
+        : "Retell stop call request failed.")
+      : undefined,
+    code: "RETELL_STORAGE_MODE_MISMATCH",
+    details: {
+      code: "retell_storage_mode_mismatch",
+      operationName: "retell.create_phone_call",
+      ...(input.stopFailure?.statusCode
+        ? {
+          statusCode: input.stopFailure.statusCode,
+        }
+        : {}),
+      storageMode: formatRetellStorageSetting(input.storageSetting),
+      type: input.stopFailure?.type ?? formatRetellStorageSetting(input.storageSetting),
+    },
+    httpStatus: 502,
+    message: `Retell create phone call returned data_storage_setting ${formatRetellStorageSetting(input.storageSetting)}; expected ${RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING}.`,
+    retryable: false,
+  });
 }
 
 function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): Record<string, unknown> {
@@ -122,13 +158,8 @@ function renderOpeningLine(brief: HostedPhoneCallBrief): string {
   return `Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling ${target} to ${brief.goal}`;
 }
 
-function readRetellCreatePhoneCallUrl(): string {
-  return process.env.RETELL_CREATE_PHONE_CALL_URL?.trim() || RETELL_CREATE_PHONE_CALL_URL;
-}
-
 function readRetellStopCallUrl(providerCallId: string): string {
-  const base = process.env.RETELL_STOP_CALL_URL_BASE?.trim() || RETELL_STOP_CALL_URL_BASE;
-  return `${base.replace(/\/+$/u, "")}/${encodeURIComponent(providerCallId)}`;
+  return `${RETELL_STOP_CALL_URL_BASE}/${encodeURIComponent(providerCallId)}`;
 }
 
 function requireEnv(name: string): string {

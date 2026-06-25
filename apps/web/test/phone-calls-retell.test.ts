@@ -59,7 +59,6 @@ describe("Retell phone-call runtime", () => {
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
     vi.stubEnv("RETELL_AGENT_VERSION", "prod");
     vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-    vi.stubEnv("RETELL_CREATE_PHONE_CALL_URL", "https://retell.example.test/v2/create-phone-call");
     const fetchCalls: Array<{
       init?: RequestInit;
       url: RequestInfo | URL;
@@ -86,7 +85,7 @@ describe("Retell phone-call runtime", () => {
 
     expect(result).toEqual({ providerCallId: "retell_call_123" });
     expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]!.url).toBe("https://retell.example.test/v2/create-phone-call");
+    expect(fetchCalls[0]!.url).toBe("https://api.retellai.com/v2/create-phone-call");
     expect(fetchCalls[0]!.init?.method).toBe("POST");
     const headers = new Headers(fetchCalls[0]!.init?.headers);
     expect(headers.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
@@ -116,8 +115,6 @@ describe("Retell phone-call runtime", () => {
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
     vi.stubEnv("RETELL_AGENT_VERSION", "prod");
     vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-    vi.stubEnv("RETELL_CREATE_PHONE_CALL_URL", "https://retell.example.test/v2/create-phone-call");
-    vi.stubEnv("RETELL_STOP_CALL_URL_BASE", "https://retell.example.test/v2/stop-call");
     const fetchCalls: Array<{
       init?: RequestInit;
       url: RequestInfo | URL;
@@ -146,11 +143,51 @@ describe("Retell phone-call runtime", () => {
     })).rejects.toThrow("data_storage_setting everything");
 
     expect(fetchCalls).toHaveLength(2);
-    expect(fetchCalls[0]!.url).toBe("https://retell.example.test/v2/create-phone-call");
-    expect(fetchCalls[1]!.url).toBe("https://retell.example.test/v2/stop-call/retell_call_unsafe");
+    expect(fetchCalls[0]!.url).toBe("https://api.retellai.com/v2/create-phone-call");
+    expect(fetchCalls[1]!.url).toBe("https://api.retellai.com/v2/stop-call/retell_call_unsafe");
     expect(fetchCalls[1]!.init?.method).toBe("POST");
     const stopHeaders = new Headers(fetchCalls[1]!.init?.headers);
     expect(stopHeaders.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
+  });
+
+  it("surfaces structured diagnostics when storage mismatch stop fails", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url).includes("/stop-call/")) {
+        return new Response(null, { status: 500 });
+      }
+      return new Response(JSON.stringify({
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    };
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    })).rejects.toMatchObject({
+      code: "RETELL_STORAGE_MODE_MISMATCH",
+      details: {
+        code: "retell_storage_mode_mismatch",
+        operationName: "retell.create_phone_call",
+        statusCode: 500,
+        storageMode: "everything",
+        type: "retell_storage_mismatch_stop_http_failed",
+      },
+      httpStatus: 502,
+      retryable: false,
+    });
   });
 
   it("fails closed before Retell start when the agent storage mode is not configured as basic attributes only", async () => {
@@ -312,6 +349,39 @@ describe("Retell phone-call result handling", () => {
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
     ]);
+  });
+
+  it("rejects call_analyzed before persistence when Retell reports non-basic storage mode", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "everything",
+      },
+      prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "RETELL_STORAGE_MODE_MISMATCH",
+      details: {
+        code: "retell_storage_mode_mismatch",
+        operationName: "retell.webhook.call_analyzed",
+        type: "everything",
+      },
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(store.findUniqueCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
   });
 
   it("recovers call_analyzed by Murph metadata when the provider id write was lost", async () => {
