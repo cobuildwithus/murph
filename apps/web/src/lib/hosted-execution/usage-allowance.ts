@@ -32,7 +32,10 @@ import {
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
-import { readHostedFamilyAccessForMember } from "../hosted-onboarding/family-plan";
+import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
+  readHostedFamilyAccessForMember,
+} from "../hosted-onboarding/family-plan";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 
@@ -224,6 +227,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 
   const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: {
+      currentBillingPlanCode: true,
       currentBillingPhase: true,
       currentPeriodEnd: true,
       currentPeriodStart: true,
@@ -232,7 +236,10 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
       groupId: familyAccess.groupId,
     },
   });
-  if (billingRef?.currentBillingPhase !== "paid") {
+  if (
+    billingRef?.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE ||
+    billingRef.currentBillingPhase !== "paid"
+  ) {
     return null;
   }
 

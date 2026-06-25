@@ -1189,6 +1189,34 @@ describe("resolveHostedAiUsageGate", () => {
     }));
   });
 
+  it("does not treat non-Family group billing as sponsored access", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.canceled,
+      checkoutOffer: "pulse_trial_7d",
+      familyAccessActive: true,
+      familyBillingPlanCode: "launch_monthly",
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+      userNotice: null,
+    });
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       "unknown policy",
@@ -1912,6 +1940,7 @@ function createAllowanceTx(input: {
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
+  familyBillingPlanCode?: string | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitUsdMicros?: bigint;
@@ -1981,6 +2010,7 @@ function createAllowanceTx(input: {
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
             billedSeatCount: 2,
+            currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
             currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
             currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
@@ -2015,6 +2045,7 @@ function createGatePrisma(input: {
   checkoutOffer?: string | null;
   executeRaw?: ReturnType<typeof vi.fn>;
   familyAccessActive?: boolean;
+  familyBillingPlanCode?: string | null;
   findUniquePeriod?: {
     billingPlanCode: string;
     blockedAt?: Date | null;
@@ -2114,6 +2145,7 @@ function createGatePrisma(input: {
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
             billedSeatCount: 2,
+            currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
             currentPeriodEnd: periodEnd,
             currentPeriodStart: periodStart,
