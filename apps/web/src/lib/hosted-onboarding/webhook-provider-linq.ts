@@ -645,7 +645,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
-  if (!hasHostedMemberActiveAccess(input.route.container)) {
+  if (
+    !hasHostedMemberActiveAccess(input.route.container)
+    || !hasHostedMemberActiveAccess(input.route.owner)
+  ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {

@@ -120,18 +120,19 @@ describe("hosted thread route store", () => {
       suspendedAt: null,
       updatedAt: new Date("2026-06-24T00:00:00.000Z"),
     };
+    const owner = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
         channel: "linq",
         container: {
           member: container,
-          owner: {
-            billingStatus: "active",
-            createdAt: new Date("2026-06-24T00:00:00.000Z"),
-            id: "member_owner_123",
-            suspendedAt: null,
-            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
-          },
+          owner,
         },
         containerMemberId: "member_container_123",
       },
@@ -147,6 +148,7 @@ describe("hosted thread route store", () => {
       channel: "linq",
       container,
       containerMemberId: "member_container_123",
+      owner,
     });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
@@ -166,8 +168,15 @@ describe("hosted thread route store", () => {
     );
   });
 
-  it("fails closed when the route owner is inactive", async () => {
+  it("returns matched inactive route authority instead of collapsing it to missing", async () => {
     const prisma = createPrismaMock();
+    const owner = {
+      billingStatus: "paused",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
         channel: "linq",
@@ -179,13 +188,7 @@ describe("hosted thread route store", () => {
             suspendedAt: null,
             updatedAt: new Date("2026-06-24T00:00:00.000Z"),
           },
-          owner: {
-            billingStatus: "paused",
-            createdAt: new Date("2026-06-24T00:00:00.000Z"),
-            id: "member_owner_123",
-            suspendedAt: null,
-            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
-          },
+          owner,
         },
         containerMemberId: "member_container_123",
       },
@@ -197,6 +200,10 @@ describe("hosted thread route store", () => {
         prisma,
         threadId: "chat_group_abc",
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({
+      channel: "linq",
+      containerMemberId: "member_container_123",
+      owner,
+    });
   });
 });

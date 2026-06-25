@@ -11,9 +11,6 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
-import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import type {
@@ -35,6 +32,7 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
+  owner: HostedMemberCoreState;
 }
 
 export async function readHostedThreadRouteByExternalThread(input: {
@@ -115,17 +113,11 @@ export async function readHostedThreadRouteByExternalThread(input: {
     });
   }
 
-  if (
-    !hasHostedMemberActiveAccess(row.container.member)
-    || !hasHostedMemberActiveAccess(row.container.owner)
-  ) {
-    return null;
-  }
-
   return {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
+    owner: row.container.owner,
   };
 }
 

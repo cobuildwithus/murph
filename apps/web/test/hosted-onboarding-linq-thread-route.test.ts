@@ -287,7 +287,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -306,9 +306,32 @@ describe("Linq explicit external-thread routing", () => {
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an inactive routed direct thread instead of normal Linq routing", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: false,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        isGroup: false,
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
 
   it("dedupes routed thread webhooks against the container mailbox", async () => {
