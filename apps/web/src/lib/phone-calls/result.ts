@@ -117,7 +117,7 @@ export async function handleRetellCallAnalyzed(input: {
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
   const result = mapRetellCallAnalysis(input.call);
 
-  await prisma.$transaction(async (tx) => {
+  const callForNotification = await prisma.$transaction(async (tx) => {
     const target = await readRetellWebhookCallTarget({
       call: input.call,
       prisma: tx,
@@ -143,15 +143,26 @@ export async function handleRetellCallAnalyzed(input: {
     });
 
     if (updated.count === 0) {
-      return;
+      const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
+        where: {
+          id: target.call.id,
+        },
+      });
+      return stored.resultJson ? stored : null;
     }
 
-    const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
+    return tx.hostedPhoneCall.findUniqueOrThrow({
       where: {
         id: target.call.id,
       },
     });
-    await tx.appendResultNotification(stored);
+  });
+  if (!callForNotification) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.appendResultNotification(callForNotification);
   });
 }
 
