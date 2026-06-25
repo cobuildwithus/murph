@@ -248,7 +248,6 @@ async function startScenario(): Promise<void> {
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
     },
