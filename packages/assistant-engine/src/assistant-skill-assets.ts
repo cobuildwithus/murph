@@ -44,6 +44,12 @@ export const ASSISTANT_SKILLS = [
       'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
   },
   {
+    slug: 'strength-training',
+    name: 'strength-training',
+    triggerHint:
+      'Use for ordinary strength and resistance-training questions for generally healthy adults: beginner or experienced plans, general strength and function, hypertrophy, maximal strength, power, gym/home/calisthenics setup, progression, plateaus, competition preparation, and adherence coaching. Do not use for diagnosis, rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:
