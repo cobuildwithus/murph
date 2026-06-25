@@ -1681,9 +1681,7 @@ function pushSleepCycle(
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
       occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: resolveJunctionLocalDayKey(originEntry, startAtRaw, resolvedStartAt)
-        ?? intervalTimestamp.dayKey
-        ?? parentTimestamp.dayKey,
+      dayKey: intervalTimestamp.dayKey ?? parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });

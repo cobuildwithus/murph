@@ -3800,6 +3800,82 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
+test("Junction sleep-stage samples keep stable replay identity with parent offset metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cycle-parent-offset-1",
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          start: "2026-06-25T02:30:00.000Z",
+          end: "2026-06-25T04:30:00.000Z",
+          timezone_offset: "-04:00",
+          stages: [{
+            start: "2026-06-25T02:30:00.000Z",
+            end: "2026-06-25T03:00:00.000Z",
+            stage: "light",
+          }],
+        }],
+      },
+    };
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot,
+      snapshot,
+    });
+    const [sample] = payload.samples ?? [];
+
+    assert.ok(sample);
+    assert.equal(sample.stream, "sleep_stage");
+    assert.equal(sample.dayKey, "2026-06-25");
+
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: payload.provider,
+      accountId: payload.accountId,
+      importedAt: payload.importedAt,
+      samples: [{
+        ...sample,
+        dayKey: "2026-06-25",
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const [sampleShardPath] = legacyImport.sampleShardPaths;
+    assert.ok(sampleShardPath);
+    const sampleRecords = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: sampleShardPath,
+    });
+
+    assert.equal(replayImport.samples[0]?.id, legacyImport.samples[0]?.id);
+    assert.equal(sampleRecords.length, 1);
+    assert.equal(sampleRecords[0]?.dayKey, "2026-06-25");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction normalizer merges canonical and alias resource payloads before import", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
