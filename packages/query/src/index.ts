@@ -63,6 +63,15 @@ export type {
   CanonicalRecordClass,
 } from "./canonical-entities.ts";
 export {
+  compareDeviceActivityCoverageKeys,
+  deviceActivityCoverageKeyIsAfterCursor,
+  resolveNextDeviceActivityCoverageCursor,
+} from "./device-activity-coverage.ts";
+export type {
+  DeviceActivityCoverageCursor,
+  DeviceActivityCoverageKey,
+} from "./device-activity-coverage.ts";
+export {
   listAutomations,
   readAutomation,
   showAutomation,

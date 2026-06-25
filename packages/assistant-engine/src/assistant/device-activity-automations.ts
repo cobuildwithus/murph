@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 import { patchAutomation } from '@murphai/core'
 import {
+  compareDeviceActivityCoverageKeys,
+  deviceActivityCoverageKeyIsAfterCursor,
   listAutomations,
   readVaultRawTolerant,
+  resolveNextDeviceActivityCoverageCursor,
   type AutomationQueryRecord,
   type VaultReadModel,
 } from '@murphai/query'
@@ -17,11 +20,14 @@ import { withAssistantCronWriteLock } from './cron/locking.js'
 import {
   ensureAssistantCronState,
   isAssistantCronJobDue,
+  readAssistantCronRuns,
   readAssistantCronStore,
   sortAssistantCronJobs,
   writeAssistantCronStore,
 } from './cron/store.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
+
+const DEVICE_ACTIVITY_AUTOMATION_MAX_MATCHES_PER_PASS = 25
 
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
@@ -88,24 +94,29 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
   const vault = await readVaultRawTolerant(input.vault)
   const activityCandidates = listDeviceActivityCandidates(vault)
   let matched = 0
+  let moreMatchesRemain = false
   let scheduled = 0
 
   for (const automation of deviceActivityAutomations) {
-    if (input.signal?.aborted) {
+    const remainingBatchSize = DEVICE_ACTIVITY_AUTOMATION_MAX_MATCHES_PER_PASS - matched
+    if (input.signal?.aborted || remainingBatchSize <= 0) {
+      moreMatchesRemain ||= remainingBatchSize <= 0
       break
     }
 
-    const activities = listMatchingDeviceActivities({
+    const matchBatch = listMatchingDeviceActivities({
       automation,
       candidates: activityCandidates,
+      limit: remainingBatchSize,
     })
+    moreMatchesRemain ||= matchBatch.moreAvailable
 
-    if (activities.length === 0) {
+    if (matchBatch.activities.length === 0) {
       continue
     }
 
     const processedActivities: MatchedDeviceActivity[] = []
-    for (const activity of activities) {
+    for (const activity of matchBatch.activities) {
       if (input.signal?.aborted) {
         break
       }
@@ -136,7 +147,7 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
 
   return {
     matched,
-    nextWakeAt: scheduled > 0 || matched > 0 || hasDueScheduledActivityReminder
+    nextWakeAt: scheduled > 0 || matched > 0 || moreMatchesRemain || hasDueScheduledActivityReminder
       ? input.nowIso
       : null,
     scheduled,
@@ -206,39 +217,32 @@ function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCand
 function listMatchingDeviceActivities(input: {
   automation: DeviceActivityAutomation
   candidates: readonly DeviceActivityCandidate[]
-}): MatchedDeviceActivity[] {
-  return input.candidates
-    .filter((entry) => deviceActivityCandidateIsAfterCursor(entry, input.automation.schedule))
-    .filter((entry) => deviceActivitySourceMatches(entry, input.automation.schedule.source))
-    .filter((entry) => deviceActivityKindMatches(entry, input.automation.schedule.activityKind))
-    .sort(compareDeviceActivityCandidates)
-    .map((candidate) => buildMatchedDeviceActivity(input.automation, candidate))
-}
+  limit: number
+}): { activities: MatchedDeviceActivity[]; moreAvailable: boolean } {
+  const bounded: DeviceActivityCandidate[] = []
+  let moreAvailable = false
 
-function deviceActivityCandidateIsAfterCursor(
-  candidate: DeviceActivityCandidate,
-  schedule: DeviceActivitySchedule,
-): boolean {
-  const cursorMs = Date.parse(schedule.after)
-  const candidateMs = Date.parse(candidate.triggeredAt)
-  if (candidateMs > cursorMs) {
-    return true
+  for (const candidate of input.candidates) {
+    if (
+      !deviceActivityCoverageKeyIsAfterCursor(candidate, input.automation.schedule) ||
+      !deviceActivitySourceMatches(candidate, input.automation.schedule.source) ||
+      !deviceActivityKindMatches(candidate, input.automation.schedule.activityKind)
+    ) {
+      continue
+    }
+
+    bounded.push(candidate)
+    bounded.sort(compareDeviceActivityCoverageKeys)
+    if (bounded.length > input.limit) {
+      bounded.pop()
+      moreAvailable = true
+    }
   }
-  if (candidateMs < cursorMs) {
-    return false
+
+  return {
+    activities: bounded.map((candidate) => buildMatchedDeviceActivity(input.automation, candidate)),
+    moreAvailable,
   }
-
-  const processedEntityIds = schedule.afterEntityIds
-  return processedEntityIds !== undefined && !processedEntityIds.includes(candidate.entityId)
-}
-
-function compareDeviceActivityCandidates(
-  left: DeviceActivityCandidate,
-  right: DeviceActivityCandidate,
-): number {
-  return Date.parse(left.triggeredAt) - Date.parse(right.triggeredAt)
-    || Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
-    || left.entityId.localeCompare(right.entityId)
 }
 
 function buildMatchedDeviceActivity(
@@ -416,6 +420,9 @@ async function scheduleDeviceActivityAutomationNotification(input: {
     if (store.jobs.some((existing) => existing.jobId === job.jobId)) {
       return false
     }
+    if (await assistantCronJobHasConsumedRun(paths, job.jobId)) {
+      return false
+    }
 
     store.jobs = sortAssistantCronJobs([...store.jobs, job])
     await writeAssistantCronStore(paths, store)
@@ -523,39 +530,18 @@ function resolveNextDeviceActivityCursor(input: {
   activities: readonly MatchedDeviceActivity[]
   schedule: DeviceActivitySchedule
 }): { after: string; afterEntityIds: string[] } | null {
-  const latest = input.activities.reduce<string | null>((candidate, activity) => {
-    if (!candidate || Date.parse(activity.triggeredAt) > Date.parse(candidate)) {
-      return activity.triggeredAt
-    }
-    return candidate
-  }, null)
-  if (!latest) {
-    return null
-  }
-
-  const currentIds = latest === input.schedule.after
-    ? input.schedule.afterEntityIds ?? []
-    : []
-  const processedIds = input.activities
-    .filter((activity) => activity.triggeredAt === latest)
-    .map((activity) => activity.entityId)
-  const afterEntityIds = [...new Set([...currentIds, ...processedIds])].sort()
-
-  if (
-    latest === input.schedule.after &&
-    arraysEqual(afterEntityIds, input.schedule.afterEntityIds ?? [])
-  ) {
-    return null
-  }
-
-  return {
-    after: latest,
-    afterEntityIds,
-  }
+  return resolveNextDeviceActivityCoverageCursor({
+    cursor: input.schedule,
+    keys: input.activities,
+  })
 }
 
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((entry, index) => entry === right[index])
+async function assistantCronJobHasConsumedRun(
+  paths: ReturnType<typeof resolveAssistantStatePaths>,
+  jobId: string,
+): Promise<boolean> {
+  const runs = await readAssistantCronRuns(paths, jobId)
+  return runs.some((run) => run.status === 'succeeded' || run.status === 'skipped')
 }
 
 function buildDeviceActivityAutomationInstructions(

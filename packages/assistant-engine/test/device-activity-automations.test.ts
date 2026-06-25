@@ -49,7 +49,11 @@ vi.mock('@murphai/query', async (importOriginal) => {
 
 import { scheduleDeviceActivityTriggeredAutomations } from '../src/assistant/device-activity-automations.ts'
 import { listCanonicalAssistantCronRecords } from '../src/assistant/cron/canonical-jobs.ts'
-import { readAssistantCronStore } from '../src/assistant/cron/store.ts'
+import {
+  appendAssistantCronRun,
+  readAssistantCronStore,
+  writeAssistantCronStore,
+} from '../src/assistant/cron/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 describe('device activity triggered automations', () => {
@@ -459,6 +463,126 @@ describe('device activity triggered automations', () => {
         schedule: expect.objectContaining({
           after: '2026-06-07T12:05:00.000Z',
           afterEntityIds: ['evt_run_a', 'evt_run_b'],
+        }),
+      }),
+    )
+  })
+
+  it('does not recreate a consumed deterministic occurrence after a listener cursor patch failure', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_consumed',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          title: 'Consumed run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+    deviceActivityMocks.patchAutomation.mockRejectedValueOnce(new Error('cursor write failed'))
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow('cursor write failed')
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const [queued] = await readQueuedCronJobs(vaultRoot)
+    expect(queued?.prompt).toContain('Consumed run')
+    await appendAssistantCronRun(paths, {
+      schema: 'murph.assistant-cron-run.v1',
+      runId: 'cronrun_consumed_fixture',
+      jobId: queued?.jobId ?? '',
+      trigger: 'scheduled',
+      status: 'succeeded',
+      startedAt: '2026-06-07T12:06:00.000Z',
+      finishedAt: '2026-06-07T12:06:30.000Z',
+      sessionId: null,
+      response: 'sent',
+      responseLength: 4,
+      error: null,
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [],
+    })
+    deviceActivityMocks.patchAutomation.mockClear()
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:07:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:07:00.000Z',
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(0)
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_run',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T12:05:00.000Z',
+          afterEntityIds: ['evt_run_consumed'],
+        }),
+      }),
+    )
+  })
+
+  it('bounds activity handoff fanout and leaves an immediate wake for the next batch', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: Array.from({ length: 26 }, (_, index) =>
+        createActivityEntity({
+          entityId: `evt_run_${String(index).padStart(2, '0')}`,
+          occurredAt: `2026-06-07T12:${String(index + 1).padStart(2, '0')}:00.000Z`,
+          title: `Run ${index}`,
+          workoutType: 'Running',
+        })
+      ),
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:30:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 25,
+      nextWakeAt: '2026-06-07T12:30:00.000Z',
+      scheduled: 25,
+    })
+
+    const scheduled = await readQueuedCronJobs(vaultRoot)
+    expect(scheduled).toHaveLength(25)
+    expect(scheduled.some((job) => job.prompt.includes('Run 25'))).toBe(false)
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_run',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T12:25:00.000Z',
+          afterEntityIds: ['evt_run_24'],
         }),
       }),
     )
