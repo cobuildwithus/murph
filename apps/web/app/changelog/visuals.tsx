@@ -637,3 +637,300 @@ export function EmailMock({ from, subject, body }: EmailMockProps) {
     </div>
   );
 }
+
+export function SongBubble({
+  duration,
+  title,
+  artist = "Murph",
+  tone = "light",
+}: {
+  artist?: string;
+  duration: string;
+  title: string;
+  tone?: "light" | "dark";
+}) {
+  const isDark = tone === "dark";
+  return (
+    <div
+      className={`flex w-full max-w-[260px] flex-col gap-1.5 ${
+        isDark ? "text-[#f5f0e8]" : "text-[#2d3436]"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md ${
+            isDark
+              ? "bg-white/15 text-white"
+              : "bg-gradient-to-br from-[#3a4a1e] to-[#5a6e32] text-white"
+          }`}
+        >
+          <svg
+            viewBox="0 0 12 12"
+            className="size-3.5"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M10 1.8L5 3.1v5.6a1.5 1.5 0 1 1-1-1.4V4L10 2.4V1.8z" />
+            <ellipse cx="3.6" cy="9" rx="1.6" ry="1.2" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <p
+            className={`truncate text-[12.5px] font-semibold leading-tight ${
+              isDark ? "text-white" : "text-[#2d3436]"
+            }`}
+          >
+            {title}
+          </p>
+          <p
+            className={`mt-0.5 truncate font-mono text-[10px] tracking-[0.06em] ${
+              isDark ? "text-white/65" : "text-[#736a58]"
+            }`}
+          >
+            {artist} · {duration}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className={`inline-flex size-6 shrink-0 items-center justify-center rounded-full ${
+            isDark ? "bg-white/15 text-white" : "bg-[#2d3436]/10 text-[#2d3436]"
+          }`}
+        >
+          <svg
+            viewBox="0 0 12 12"
+            className="size-2.5"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M3 2.5v7l6-3.5z" />
+          </svg>
+        </span>
+        <div className="flex items-end gap-0.5" aria-hidden="true">
+          {[2, 4, 7, 9, 5, 8, 11, 6, 4, 7, 10, 5, 3, 6, 9, 4, 2].map((h, i) => (
+            <span
+              key={i}
+              style={{ height: `${h}px` }}
+              className={`w-0.5 rounded-full ${
+                isDark ? "bg-white/70" : "bg-[#2d3436]/55"
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ApprovalCard({
+  action,
+  detail,
+  cta = "Approve with passkey",
+}: {
+  action: string;
+  cta?: string;
+  detail?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>Approval requested</p>
+        <span className={HEADER_META}>expires in 5 min</span>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-[#3a4a1e]/15 bg-[#3a4a1e]/8 text-[#3a4a1e]"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              className="size-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M8 1.5l5 2v3.5c0 3-2 5.5-5 6.5-3-1-5-3.5-5-6.5V3.5l5-2z" />
+              <path d="M5.5 8l1.8 1.8L10.5 6.5" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-serif text-[14.5px] font-semibold leading-tight text-[#2d3436]">
+              {action}
+            </p>
+            {detail ? (
+              <p className="mt-1 text-[12px] leading-[1.5] text-[#736a58]">
+                {detail}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-[#3a4a1e] px-3 py-1.5 text-[12px] font-medium text-[#f5f0e8]">
+            <svg
+              viewBox="0 0 16 16"
+              className="size-3"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="6" r="3" />
+              <path d="M8 9.5c-2.6 0-4.5 1.5-4.5 3.5h9c0-2-1.9-3.5-4.5-3.5z" />
+            </svg>
+            {cta}
+          </span>
+          <span className="inline-flex items-center justify-center rounded-full border border-[#c4a882]/45 px-3 py-1.5 text-[12px] font-medium text-[#736a58]">
+            Deny
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PdfPreview({
+  title,
+  meta,
+  lines = 6,
+}: {
+  lines?: number;
+  meta?: string;
+  title: string;
+}) {
+  const lineWidths = ["100%", "94%", "88%", "97%", "82%", "92%", "90%", "75%"];
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>PDF document</p>
+        {meta ? <span className={HEADER_META}>{meta}</span> : null}
+      </div>
+      <div className="bg-[#ece6d6] p-4">
+        <div className="relative overflow-hidden rounded-md border border-[#2d3436]/10 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05),0_8px_16px_-12px_rgba(45,52,54,0.25)]">
+          <div className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-sm bg-[#a36b3f] px-1.5 py-0.5 font-mono text-[8px] font-semibold tracking-[0.12em] text-white uppercase">
+            PDF
+          </div>
+          <div className="flex flex-col gap-2 px-5 py-5">
+            <p className="font-serif text-[13px] font-semibold leading-tight text-[#2d3436]">
+              {title}
+            </p>
+            <span
+              aria-hidden="true"
+              className="h-px w-8 bg-[#3a4a1e]/40"
+            />
+            <div className="mt-1 flex flex-col gap-1.5" aria-hidden="true">
+              {Array.from({ length: lines }).map((_, i) => (
+                <span
+                  key={i}
+                  style={{ width: lineWidths[i % lineWidths.length] }}
+                  className="block h-1.5 rounded-sm bg-[#2d3436]/12"
+                />
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className="mt-3 grid grid-cols-3 gap-1.5"
+            >
+              <span className="h-6 rounded-sm bg-[#3a4a1e]/20" />
+              <span className="h-6 rounded-sm bg-[#c4a882]/35" />
+              <span className="h-6 rounded-sm bg-[#a36b3f]/25" />
+            </div>
+            <div className="mt-2 flex flex-col gap-1" aria-hidden="true">
+              <span className="block h-1.5 w-[80%] rounded-sm bg-[#2d3436]/12" />
+              <span className="block h-1.5 w-[60%] rounded-sm bg-[#2d3436]/12" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export type RetentionEvent = {
+  day: number;
+  label: string;
+  tone?: "neutral" | "warn" | "expire";
+};
+
+export function PrivacyTimeline({
+  events,
+  span = 14,
+  label = "Privacy retention",
+  caption,
+}: {
+  caption?: string;
+  events: readonly RetentionEvent[];
+  label?: string;
+  span?: number;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        <span className={HEADER_META}>{span}-day window</span>
+      </div>
+      <div className="flex flex-col gap-4 px-5 pt-5 pb-4">
+        <div className="relative" aria-hidden="true">
+          <div className="absolute inset-x-0 top-[7px] h-px bg-gradient-to-r from-[#3a4a1e]/45 via-[#c4a882]/45 to-[#a36b3f]/55" />
+          <div className="relative flex justify-between">
+            {events.map((event, i) => {
+              const isExpire = event.tone === "expire";
+              const isWarn = event.tone === "warn";
+              return (
+                <div key={i} className="flex flex-col items-center gap-2">
+                  <span
+                    className={`inline-flex size-[15px] items-center justify-center rounded-full border-2 ${
+                      isExpire
+                        ? "border-[#a36b3f] bg-[#a36b3f]/15"
+                        : isWarn
+                          ? "border-[#c4a882] bg-[#c4a882]/15"
+                          : "border-[#3a4a1e] bg-[#fffcf6]"
+                    }`}
+                  >
+                    {isExpire ? (
+                      <span className="size-[5px] rounded-full bg-[#a36b3f]" />
+                    ) : (
+                      <span className="size-[5px] rounded-full bg-[#3a4a1e]" />
+                    )}
+                  </span>
+                  <span className="font-mono text-[9.5px] tracking-[0.06em] text-[#736a58] tabular-nums uppercase">
+                    Day {event.day}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex flex-col divide-y divide-[#2d3436]/8">
+          {events.map((event, i) => (
+            <div
+              key={i}
+              className="flex items-baseline justify-between gap-3 py-1.5"
+            >
+              <span className="font-mono text-[10.5px] tracking-[0.06em] text-[#736a58] tabular-nums uppercase">
+                Day {event.day}
+              </span>
+              <span
+                className={`text-right text-[12px] leading-tight ${
+                  event.tone === "expire"
+                    ? "font-semibold text-[#8b4f2c]"
+                    : "text-[#2d3436]"
+                }`}
+              >
+                {event.label}
+              </span>
+            </div>
+          ))}
+        </div>
+        {caption ? (
+          <p className="font-mono text-[10.5px] tracking-[0.04em] text-[#736a58]">
+            {caption}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}

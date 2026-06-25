@@ -56,6 +56,225 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-24",
+    publishedOn: "2026-06-24",
+    title: "Songs, PDFs, and a tap to approve",
+    summary:
+      "Ask Murph for a song or a one-page PDF, approve sensitive actions with your passkey, and welcome Outlook and Zoho to connected apps. Inbox media now expires after 14 days, and long browser tasks stay snappy.",
+    items: [
+      {
+        id: "song-generation",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can write you a song",
+        summary:
+          "Ask for a quick song and Murph generates it with ElevenLabs music, then ships it as a voice memo right in iMessage or Telegram — no new attachment kind, no app switch.",
+        details:
+          "Lyrics, mood, instrumental, and length are all promptable. Cost rides on the existing voice-memo allowance at $0.15 per generated minute.",
+        relevanceTags: ["assistant", "voice", "telegram", "imessage", "media"],
+        sourcePullRequests: [279],
+        tryIt: {
+          label: "Ask for a song",
+          prompt:
+            "Write me a 30-second hype song for tonight's workout — upbeat, no lyrics.",
+        },
+      },
+      {
+        id: "sensitive-action-approval",
+        kind: "feature",
+        priority: 5,
+        title: "Approve big actions with your passkey",
+        summary:
+          "Before Murph runs a sensitive action on your behalf, you get a one-tap approval link. Sign with your passkey-protected wallet and the action goes through — deny it and nothing happens.",
+        details:
+          "Same rail powers Settings → Export vault and Delete account, so every irreversible move is gated by the same secure approval flow.",
+        relevanceTags: ["security", "auth", "passkeys", "approvals"],
+        sourcePullRequests: [283, 274],
+      },
+      {
+        id: "assistant-pdf-skill",
+        kind: "feature",
+        priority: 5,
+        title: "PDFs you can ask for in chat",
+        summary:
+          "Murph can author and send a clean, typeset PDF — a one-page summary, a workout plan, a lab-results recap — right back into the conversation.",
+        details:
+          "A pinned Typst 0.15 toolchain runs inside the hosted runner, so layout is deterministic and the output is the same PDF every time.",
+        relevanceTags: ["assistant", "documents", "pdf"],
+        sourcePullRequests: [272],
+        tryIt: {
+          label: "Ask for a PDF",
+          prompt:
+            "Make me a one-page PDF of my training week — sessions, totals, and one note per day.",
+        },
+      },
+      {
+        id: "connected-apps-outlook-zoho",
+        kind: "feature",
+        priority: 4,
+        title: "Outlook & Zoho Mail join your inbox apps",
+        summary:
+          "Connect Outlook or Zoho Mail once and Murph can read, draft, and send through them — same flow as Gmail, same in-chat experience.",
+        relevanceTags: ["integrations", "email", "outlook", "zoho"],
+        sourcePullRequests: [282],
+        tryIt: {
+          label: "Connect Outlook",
+          prompt: "Connect my Outlook so you can send and draft email for me.",
+        },
+      },
+      {
+        id: "connected-apps-files-tasks-notes",
+        kind: "feature",
+        priority: 4,
+        title: "Files, tasks, and notes — all reachable",
+        summary:
+          "Connect Google Drive, OneDrive, Dropbox, Notion, Todoist, or Google Tasks once. Murph can pull a doc, add a to-do, capture a note, or hand you a file without leaving chat.",
+        relevanceTags: ["integrations", "files", "tasks", "notes", "notion"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Connect Notion",
+          prompt:
+            "Connect my Notion so you can capture notes and pull pages when I ask.",
+        },
+      },
+      {
+        id: "connected-apps-calendar-events",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can put it on your calendar",
+        summary:
+          "Ask Murph to add an event and it actually writes to your Google Calendar or Outlook calendar — title, start, duration, location, notes — with a strict allowlist that keeps it scoped to what you said.",
+        details:
+          "No surprise invites, no online-meeting rooms by default. Just the event you described, on the calendar you connected.",
+        relevanceTags: ["integrations", "calendar", "outlook", "google"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Add an event",
+          prompt:
+            "Add a 45-minute call with Sam to my calendar tomorrow at 2pm, location: Zoom.",
+        },
+      },
+      {
+        id: "home-experiment-result-cards",
+        kind: "feature",
+        priority: 4,
+        title: "Home shows your experiment results",
+        summary:
+          "The home screen now leads with your own experiment results — the primary metric for finished runs, live progress for active ones — instead of generic protocol art.",
+        relevanceTags: ["experiments", "home", "dashboard"],
+        sourcePullRequests: [],
+        tryIt: {
+          href: "/home",
+          label: "Open home",
+        },
+      },
+      {
+        id: "computer-use-managed-auth",
+        kind: "feature",
+        priority: 4,
+        title: "Browser tasks can hand login pauses to managed auth",
+        summary:
+          "When a browser task pauses on a login, Murph can hand it off to Kernel's managed auth so you complete the sign-in in a guided flow, then resume the original task right where it stopped.",
+        relevanceTags: ["browser", "automation", "auth"],
+        sourcePullRequests: [278],
+      },
+      {
+        id: "finite-supply-reorder-check-in",
+        kind: "feature",
+        priority: 4,
+        title: "Reorder check-ins for finite supplies",
+        summary:
+          "After Murph completes a verified order for a finite consumable — a 30-day supplement supply, weekly meal boxes, contacts — it schedules one calm check-in around when you'll run out.",
+        details:
+          "No auto-reorder, no nagging. One reminder, framed around when supply is actually low, and only when the supply duration is clear.",
+        relevanceTags: ["assistant", "automations", "supplements"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "experiment-lifecycle-moments",
+        kind: "feature",
+        priority: 3,
+        title: "Experiments check in mid-run and morning-after",
+        summary:
+          "Active experiments now get a day-four progress nudge and a morning-after final review — both pinned to your local clock, both skippable if you've opted out.",
+        relevanceTags: ["experiments", "automations", "lifecycle"],
+        sourcePullRequests: [273],
+      },
+      {
+        id: "computer-use-auto-compact",
+        kind: "improvement",
+        priority: 5,
+        title: "Long browser tasks stay snappy",
+        summary:
+          "Murph now compacts its working memory partway through long browser sessions, instead of waiting until the end. Multi-step tasks stay quick and cost less, even when they grow.",
+        relevanceTags: ["browser", "performance", "assistant"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "foreground-wake-preemption-fix",
+        kind: "improvement",
+        priority: 5,
+        title: "Steadier wakes during long-running work",
+        summary:
+          "Closed a class of races where a long-running turn could overwrite its own next-wake while you sent a follow-up, so reminders, device-sync continuations, and retries no longer slip behind.",
+        relevanceTags: ["reliability", "reminders", "messaging"],
+        sourcePullRequests: [259],
+      },
+      {
+        id: "inbox-media-retention-window",
+        kind: "improvement",
+        priority: 4,
+        title: "Raw inbox media expires after 14 days",
+        summary:
+          "Photos, audio, and video you send Murph are now purged from the inbox after 14 days. Murph still remembers what they were — only the raw bytes go.",
+        details:
+          "Bytes are hash-verified before deletion, so nothing tampered with disappears silently, and anything Murph is still mid-reply about stays protected until the reply lands.",
+        relevanceTags: ["privacy", "inbox", "media", "data"],
+        sourcePullRequests: [240],
+      },
+      {
+        id: "hosted-egress-container-identity",
+        kind: "improvement",
+        priority: 4,
+        title: "Research and route tools work everywhere again",
+        summary:
+          "In-container tools that run during a turn — research scout, route estimates, supplement lookups — authorize through the same container-identity fence the rest of Murph uses, instead of failing with a silent 401.",
+        relevanceTags: ["reliability", "hosted", "assistant"],
+        sourcePullRequests: [275],
+      },
+      {
+        id: "telegram-image-response-fix",
+        kind: "improvement",
+        priority: 4,
+        title: "Image replies land on Telegram",
+        summary:
+          "Closed a delivery gap where Murph's generated and reference images would sometimes fail to attach on Telegram. They now come through cleanly the same way iMessage does.",
+        relevanceTags: ["telegram", "images", "messaging"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "messaging-italic-underline",
+        kind: "improvement",
+        priority: 3,
+        title: "Italic and underline on Linq & Telegram",
+        summary:
+          "Murph can now use italic and underline alongside bold and strikethrough on supported chat channels — emphasis renders natively, not as raw markdown.",
+        relevanceTags: ["messaging", "linq", "telegram", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "resume-checkout-from-join",
+        kind: "improvement",
+        priority: 3,
+        title: "Resume checkout from join",
+        summary:
+          "If you bounced out of checkout, signing back in through /join now drops you right back into the same checkout step instead of restarting the flow.",
+        relevanceTags: ["billing", "auth", "onboarding"],
+        sourcePullRequests: [280],
+      },
+    ],
+  },
+  {
     id: "2026-06-23",
     publishedOn: "2026-06-23",
     title: "Passkeys, and a handoff that fits your phone",

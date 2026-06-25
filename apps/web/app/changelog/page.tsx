@@ -23,6 +23,7 @@ import { TryItButton } from "./try-it-button";
 import {
   AppGrid,
   AppIconCard,
+  ApprovalCard,
   CalendarMock,
   ChecklistMock,
   DeviceList,
@@ -30,11 +31,208 @@ import {
   ImagePreview,
   MealCard,
   MetricCardMock,
+  PdfPreview,
+  PrivacyTimeline,
+  SongBubble,
   StatBlock,
   VoiceBubble,
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "song-generation": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Write me a 30-sec hype track for tonight's lift" },
+        {
+          from: "murph",
+          body: (
+            <SongBubble
+              title="Tonight's lift, 30 sec"
+              artist="Murph · ElevenLabs"
+              duration="0:30"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "sensitive-action-approval": (
+    <ApprovalCard
+      action="Export your vault as JSON"
+      detail="Murph needs a one-time signature from your passkey-protected wallet before the download starts."
+      cta="Approve with passkey"
+    />
+  ),
+  "assistant-pdf-skill": (
+    <PdfPreview
+      title="Training week — Jun 17–23"
+      meta="1 page · A4"
+      lines={5}
+    />
+  ),
+  "connected-apps-outlook-zoho": (
+    <AppGrid
+      apps={[
+        { name: "Gmail", color: "#ea4335" },
+        { name: "Outlook", color: "#0078d4" },
+        { name: "Zoho Mail", color: "#c8202f" },
+      ]}
+      caption="Connect once, draft and send in chat"
+    />
+  ),
+  "connected-apps-files-tasks-notes": (
+    <AppGrid
+      apps={[
+        { name: "Google Drive", color: "#1a73e8" },
+        { name: "OneDrive", color: "#0364b8" },
+        { name: "Dropbox", color: "#0061fe" },
+        { name: "Notion", color: "#1f1f1f" },
+        { name: "Todoist", color: "#e44232" },
+        { name: "Google Tasks", color: "#1967d2" },
+      ]}
+      caption="Six more apps Murph can reach"
+    />
+  ),
+  "connected-apps-calendar-events": (
+    <CalendarMock
+      label="New event on your calendar"
+      entries={[
+        { day: "Tue", time: "2:00 PM", what: "Call with Sam — Zoom (45m)" },
+        { day: "Wed", time: "9:00 AM", what: "Dentist follow-up — 12th & Pine" },
+      ]}
+    />
+  ),
+  "home-experiment-result-cards": (
+    <MetricCardMock
+      label="Your finished experiment"
+      title="Caffeine cutoff — 2 PM"
+      value="+38m"
+      delta={{ direction: "up", text: "sleep onset latency" }}
+      sparkline={[34, 30, 28, 24, 22, 18, 14, 11]}
+      caption="Home leads with your real results."
+    />
+  ),
+  "computer-use-managed-auth": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Book a haircut at Atlas Barbers for Tue 6pm" },
+        {
+          from: "murph",
+          body: "Paused on their login — I'll hand you to a managed sign-in so I can finish the booking after.",
+        },
+      ]}
+    />
+  ),
+  "finite-supply-reorder-check-in": (
+    <CalendarMock
+      label="One reminder, around when you run out"
+      entries={[
+        { day: "Now", time: "ordered", what: "Magnesium glycinate — 30 day" },
+        { day: "Jul 22", time: "9:00 AM", what: "Check in: reorder or skip?" },
+      ]}
+    />
+  ),
+  "experiment-lifecycle-moments": (
+    <CalendarMock
+      label="Experiment in flight"
+      entries={[
+        { day: "Day 1", time: "started", what: "Caffeine cutoff — 2 PM" },
+        { day: "Day 4", time: "9:00 AM", what: "Halfway nudge: how's it landing?" },
+        { day: "Day 15", time: "9:00 AM", what: "Morning-after final review" },
+      ]}
+    />
+  ),
+  "computer-use-auto-compact": (
+    <StatBlock
+      label="Long browser turn"
+      before="One big compact"
+      after="Quiet trims"
+      caption="memory compacts mid-task"
+    />
+  ),
+  "foreground-wake-preemption-fix": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Walk done — 4mi, easy pace 👌" },
+        {
+          from: "murph",
+          body: "Nice. I'll still ping you at 9 PM for the meditation prompt like we set up.",
+        },
+      ]}
+    />
+  ),
+  "inbox-media-retention-window": (
+    <PrivacyTimeline
+      events={[
+        { day: 0, label: "You send Murph a photo", tone: "neutral" },
+        { day: 14, label: "Raw bytes auto-expire", tone: "expire" },
+      ]}
+      caption="Murph remembers what it was — only the raw bytes go."
+    />
+  ),
+  "hosted-egress-container-identity": (
+    <ChecklistMock
+      label="Tools restored inside container turns"
+      items={[
+        { label: "Research scout", done: true },
+        { label: "Route estimates", done: true },
+        { label: "Supplement lookups", done: true },
+      ]}
+    />
+  ),
+  "telegram-image-response-fix": (
+    <PhoneMock
+      channel="Telegram"
+      messages={[
+        { from: "user", body: "Show me a glute bridge with a picture" },
+        {
+          from: "murph",
+          bare: true,
+          body: (
+            <ImagePreview
+              alt="Generated glute bridge demo"
+              caption="Delivered to Telegram"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "messaging-italic-underline": (
+    <PhoneMock
+      channel="Linq"
+      messages={[
+        { from: "user", body: "summarize my week with emphasis" },
+        {
+          from: "murph",
+          body: (
+            <div className="space-y-1">
+              <p>
+                You hit your <strong>protein floor</strong> 6 of 7 days —{" "}
+                <em>up from 3 last week</em>.
+              </p>
+              <p>
+                One watch-out: <span className="underline">sleep is trending shorter</span>.
+              </p>
+            </div>
+          ),
+        },
+      ]}
+    />
+  ),
+  "resume-checkout-from-join": (
+    <ChecklistMock
+      label="Picking back up"
+      items={[
+        { label: "You bounced from checkout", done: true },
+        { label: "Sign back in at /join", done: true },
+        { label: "Drop right back into checkout", done: true },
+      ]}
+    />
+  ),
   "passkey-mfa-setup": (
     <ChecklistMock
       label="Security"
