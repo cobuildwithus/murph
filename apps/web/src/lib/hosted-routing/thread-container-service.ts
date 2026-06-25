@@ -111,6 +111,23 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       retryable: false,
     });
   }
+  const ownerThreadContainer = await input.prisma.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+    },
+    where: {
+      memberId: input.ownerMemberId,
+    },
+  });
+
+  if (ownerThreadContainer) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER",
+      httpStatus: 403,
+      message: "Thread-container members cannot own thread containers.",
+      retryable: false,
+    });
+  }
 
   const threadLookupKey = createHostedExternalThreadLookupKey({
     accountLookupKey: input.accountLookupKey,

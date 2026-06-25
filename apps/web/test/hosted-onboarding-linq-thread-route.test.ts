@@ -238,6 +238,17 @@ function createStatefulThreadRoutePrisma() {
       });
       return data;
     }),
+    findUnique: vi.fn().mockImplementation(async ({ where }: {
+      where: {
+        memberId: string;
+      };
+    }) => {
+      return containers.has(where.memberId)
+        ? {
+            memberId: where.memberId,
+          }
+        : null;
+    }),
   };
   const hostedThreadRoute = {
     create: vi.fn().mockImplementation(async ({ data }: {
@@ -334,6 +345,15 @@ function createStatefulThreadRoutePrisma() {
         threadLookupKey: input.threadLookupKey,
       });
     },
+    seedThreadContainer(input: {
+      memberId: string;
+      ownerMemberId: string;
+    }) {
+      containers.set(input.memberId, {
+        monthlyUsageLimitUsdMicros: 4_500_000n,
+        ownerMemberId: input.ownerMemberId,
+      });
+    },
   };
 }
 
@@ -399,6 +419,39 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it("rejects thread containers as owners of nested thread containers", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedThreadContainer({
+      memberId: "member_thread_container_parent",
+      ownerMemberId: "member_owner_123",
+    });
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_thread_container_parent",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+        ownerMemberId: "member_thread_container_parent",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_nested_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER",
+    });
+
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
   it("reuses a prior lookup-key route during privacy key rotation", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
