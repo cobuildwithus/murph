@@ -301,6 +301,36 @@ describe("Retell phone-call result handling", () => {
     }]);
   });
 
+  it("persists ISO string Retell end timestamps as the real instant", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+
+    await handleRetellCallEnded({
+      call: {
+        call_id: "retell_call_123",
+        end_timestamp: "2026-06-25T12:34:56.000Z",
+      },
+      prisma: store.prisma,
+    });
+
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        endedAt: new Date("2026-06-25T12:34:56.000Z"),
+        status: "ended",
+      },
+      where: {
+        endedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: "retell_call_123",
+        status: {
+          in: ["starting", "calling", "ended"],
+        },
+      },
+    }]);
+  });
+
   it("handles call_analyzed idempotently and notifies only after the first update", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),

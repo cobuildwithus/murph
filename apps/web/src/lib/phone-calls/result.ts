@@ -377,12 +377,13 @@ function readRetellEndedAt(call: RetellCallPayload): Date | null {
     return null;
   }
 
-  const numeric = Number.parseInt(value, 10);
-  if (Number.isFinite(numeric)) {
+  const text = value.trim();
+  if (/^\d+$/u.test(text)) {
+    const numeric = Number.parseInt(text, 10);
     return new Date(numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric);
   }
 
-  const parsed = new Date(value);
+  const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 

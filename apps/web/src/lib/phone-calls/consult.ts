@@ -25,6 +25,20 @@ interface HostedPhoneCallConsultationStore {
         id: string;
       };
     }): Promise<HostedPhoneCall | null>;
+    updateMany(input: {
+      data: {
+        providerCallId: string;
+        status: HostedPhoneCall["status"];
+      };
+      where: {
+        analyzedAt: null;
+        endedAt: null;
+        id: string;
+        provider: "retell";
+        providerCallId: null;
+        status: { in: HostedPhoneCall["status"][] };
+      };
+    }): Promise<{ count: number }>;
   };
 }
 
@@ -34,7 +48,7 @@ export async function getHostedPhoneCallForConsultation(input: {
   prisma?: HostedPhoneCallConsultationStore;
 }): Promise<HostedPhoneCallForConsultation> {
   const prisma = input.prisma ?? getPrisma();
-  const call = await prisma.hostedPhoneCall.findUnique({
+  let call = await prisma.hostedPhoneCall.findUnique({
     where: {
       id: input.callId,
     },
@@ -45,6 +59,18 @@ export async function getHostedPhoneCallForConsultation(input: {
       code: "HOSTED_PHONE_CALL_NOT_FOUND",
       httpStatus: 404,
       message: "Murph phone call was not found.",
+    });
+  }
+
+  if (
+    call.provider === "retell"
+    && call.providerCallId === null
+    && isHostedPhoneCallLiveForConsultation(call.status)
+  ) {
+    call = await claimRetellProviderCallIdForConsultation({
+      call,
+      prisma,
+      providerCallId: input.providerCallId,
     });
   }
 
@@ -66,6 +92,46 @@ export async function getHostedPhoneCallForConsultation(input: {
     memberId: call.memberId,
     providerCallId: call.providerCallId,
     status: call.status,
+  };
+}
+
+async function claimRetellProviderCallIdForConsultation(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallConsultationStore;
+  providerCallId: string;
+}): Promise<HostedPhoneCall> {
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
+    data: {
+      providerCallId: input.providerCallId,
+      status: "calling",
+    },
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: {
+        in: ["starting", "calling"],
+      },
+    },
+  });
+  if (updated.count === 0) {
+    return await input.prisma.hostedPhoneCall.findUnique({
+      where: {
+        id: input.call.id,
+      },
+    }) ?? input.call;
+  }
+
+  return await input.prisma.hostedPhoneCall.findUnique({
+    where: {
+      id: input.call.id,
+    },
+  }) ?? {
+    ...input.call,
+    providerCallId: input.providerCallId,
+    status: "calling",
   };
 }
 

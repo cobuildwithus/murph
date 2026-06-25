@@ -7,12 +7,14 @@ import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls
 
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  updateMany: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     hostedPhoneCall: {
       findUnique: mocks.findUnique,
+      updateMany: mocks.updateMany,
     },
   }),
 }));
@@ -46,6 +48,7 @@ describe("Retell ask_murph route with real consultation", () => {
     vi.clearAllMocks();
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     mocks.findUnique.mockResolvedValue(buildHostedPhoneCall());
+    mocks.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it("can continue when the answer is already in the approved call brief", async () => {
@@ -64,6 +67,49 @@ describe("Retell ask_murph route with real consultation", () => {
     expect(mocks.findUnique).toHaveBeenCalledWith({
       where: {
         id: "hpc_123",
+      },
+    });
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("claims the Retell provider call id when the start path lost its post-start write", async () => {
+    mocks.findUnique
+      .mockResolvedValueOnce(buildHostedPhoneCall({
+        providerCallId: null,
+        status: "starting",
+      }))
+      .mockResolvedValueOnce(buildHostedPhoneCall({
+        providerCallId: "retell_call_123",
+        status: "calling",
+      }));
+    mocks.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const response = await askMurphRoute.POST(signedRetellRequest({
+      payload: buildAskMurphPayload({
+        question: "They asked for the callback phone number. What should I say?",
+      }),
+      url: "https://join.example.test/api/retell/functions/ask-murph",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      answer: "Use this approved call-brief fact when relevant: callback number: +12125550111",
+      directive: "continue",
+    });
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      data: {
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: null,
+        status: {
+          in: ["starting", "calling"],
+        },
       },
     });
   });
