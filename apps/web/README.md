@@ -73,7 +73,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
 - bounded hosted product-feedback rows for explicit structured product feedback
-- member-bound hosted phone-call attempt rows for web-owned Retell starts
+- member-bound hosted phone-call rows for web-owned Retell starts and signed
+  Retell function/webhook results
 - Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -131,9 +132,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
-- `HostedPhoneCall` owns member-bound Retell phone-call start attempts with a
-  bounded call brief, provider call id, status, and final analysis result;
-  Retell credentials stay in web env and raw transcripts/audio are not stored in Murph.
+- `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
+  with a bounded call brief, provider call id, status, and final analysis
+  result; Retell credentials stay in web env, transfer destinations are resolved
+  from verified member identity, and raw transcripts/audio are not stored in
+  Murph.
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -295,6 +298,11 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
+- `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`, and optional
+  `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
+  custom-function verification, and signed Retell lifecycle webhooks. Keep the
+  published Retell agent configured for basic-attributes-only storage and point
+  function/webhook URLs at the deployed `apps/web` routes.
 - `MURPH_TELEGRAM_USERNAME_OVERRIDE` optionally overrides user-facing Murph Telegram links. It is not a secret and is exposed to the browser bundle so local Vercel dev can point links at a development bot, for example `@murphdevelopment_bot`.
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`

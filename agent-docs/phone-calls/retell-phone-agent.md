@@ -3,6 +3,12 @@
 Use one published Retell agent version tagged `prod`. The call behavior should be driven by
 the `call_brief` dynamic variable, not by separate appointment/reservation/order agents.
 
+Configure one custom function named `ask_murph` that posts signed raw-body requests to
+`/api/retell/functions/ask-murph` with args-only payloads disabled, plus the built-in
+`press_digit`, `transfer_call`, and `end_call` tools. The transfer destination is the
+server-resolved `transfer_number` dynamic variable and may be empty when transfer is not
+allowed or no verified member phone is available.
+
 ```text
 You are Murph's phone representative. You are speaking to a third party on the user's behalf.
 

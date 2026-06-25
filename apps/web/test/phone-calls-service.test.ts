@@ -46,6 +46,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       requestKey: "phone_call_request_1",
       runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
     });
 
     expect(store.createCalls).toHaveLength(1);
@@ -66,6 +67,7 @@ describe("createHostedPhoneCall", () => {
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: "member_1",
+      transferNumber: "+12125550000",
     }]);
     expect(store.updateCalls).toEqual([{
       data: {
@@ -143,6 +145,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       requestKey: created.requestKey,
       runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
     })).rejects.toThrow("provider unavailable");
 
     const createdCallId = store.createCalls[0]!.data.id;
@@ -172,6 +175,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       requestKey: created.requestKey,
       runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
     })).rejects.toThrow("database unavailable");
 
     const createdCallId = store.createCalls[0]!.data.id;
@@ -179,6 +183,7 @@ describe("createHostedPhoneCall", () => {
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: created.memberId,
+      transferNumber: "+12125550000",
     }]);
     expect(store.updateCalls).toEqual([{
       data: {
@@ -186,6 +191,37 @@ describe("createHostedPhoneCall", () => {
         status: "calling",
       },
       where: { id: createdCallId },
+    }]);
+  });
+
+  it("does not resolve a transfer destination when the brief disallows transfer", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
+    let resolverCalls = 0;
+    const brief: HostedPhoneCallBrief = {
+      ...VALID_BRIEF,
+      allowTransferToUser: false,
+    };
+
+    await createHostedPhoneCall({
+      brief,
+      memberId: "member_1",
+      prisma: store.prisma,
+      requestKey: "phone_call_request_1",
+      runtime: runtime.runtime,
+      transferNumberResolver: async () => {
+        resolverCalls += 1;
+        return "+12125550000";
+      },
+    });
+
+    expect(resolverCalls).toBe(0);
+    expect(runtime.startCalls).toEqual([{
+      brief,
+      id: store.createCalls[0]!.data.id,
+      memberId: "member_1",
+      transferNumber: null,
     }]);
   });
 });
@@ -264,6 +300,10 @@ function createPhoneCallRuntime(input: {
     runtime,
     startCalls,
   };
+}
+
+function createTransferNumberResolver(value: string | null): NonNullable<CreateHostedPhoneCallInput["transferNumberResolver"]> {
+  return async () => value;
 }
 
 function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedPhoneCall {

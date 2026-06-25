@@ -56,18 +56,19 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
       metadata: {
         murph_phone_call_id: call.id,
       },
-      retell_llm_dynamic_variables: buildRetellDynamicVariables(call.brief),
+      retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
     },
   };
 }
 
-function buildRetellDynamicVariables(brief: HostedPhoneCallBrief): Record<string, string> {
+function buildRetellDynamicVariables(call: HostedPhoneCallRuntimeRecord): Record<string, string> {
+  const brief = call.brief;
   return {
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
     opening_line: renderOpeningLine(brief),
     transfer_number: brief.allowTransferToUser
-      ? process.env.RETELL_TRANSFER_NUMBER?.trim() ?? ""
+      ? call.transferNumber ?? ""
       : "",
   };
 }

@@ -29,11 +29,15 @@ the tool accepts only a compact call brief with an E.164 destination, explicit
 goal, timezone, success criteria, and user-approved shareable facts. Cloudflare
 may call only the signed `web-control.worker` callback for
 `POST /api/internal/phone-calls` with the active runtime write fence; Retell API
-keys, from numbers, agent ids/versions, and transfer numbers remain in
-`apps/web` env and never enter runner env, prompts, diagnostics, or workspace
-state. `apps/web` stores member-bound `HostedPhoneCall` rows for request-key
-idempotency, provider call id, status, bounded call brief, and final analysis;
-Murph does not persist raw Retell transcripts or call audio.
+keys, from numbers, and agent ids/versions remain in `apps/web` env and never
+enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
+resolved server-side from verified hosted member identity when the brief allows a
+live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
+call for request-key idempotency, provider call id, status, bounded call brief,
+and final analysis. Retell reaches `apps/web` only through signed raw-body
+function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
+Murph does not persist raw Retell transcripts, request bodies, recordings, or
+call audio.
 
 ## Module Map
 

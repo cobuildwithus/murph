@@ -10,6 +10,8 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getPrisma } from "../prisma";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import type { PhoneCallRuntime } from "./types";
@@ -50,9 +52,14 @@ export async function createHostedPhoneCall(input: {
   prisma?: HostedPhoneCallStore;
   requestKey: string;
   runtime?: PhoneCallRuntime;
+  transferNumberResolver?: (resolverInput: {
+    memberId: string;
+  }) => Promise<string | null>;
 }): Promise<HostedPhoneCallStartResponse> {
   const prisma = input.prisma ?? getPrisma();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
+  const resolveTransferNumber =
+    input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
 
   let call: HostedPhoneCall;
   try {
@@ -88,6 +95,11 @@ export async function createHostedPhoneCall(input: {
       brief: input.brief,
       id: call.id,
       memberId: input.memberId,
+      transferNumber: input.brief.allowTransferToUser
+        ? await resolveTransferNumber({
+            memberId: input.memberId,
+          })
+        : null,
     });
   } catch (error) {
     await prisma.hostedPhoneCall.update({
@@ -119,6 +131,20 @@ export async function createHostedPhoneCall(input: {
 
 function createHostedPhoneCallId(): string {
   return `hpc_${randomUUID().replaceAll("-", "")}`;
+}
+
+async function resolveVerifiedMemberTransferNumber(input: {
+  memberId: string;
+}): Promise<string | null> {
+  const identity = await readHostedMemberIdentity({
+    memberId: input.memberId,
+    prisma: getPrisma(),
+  });
+  if (!identity?.phoneNumberVerifiedAt) {
+    return null;
+  }
+
+  return normalizePhoneNumber(identity.phoneNumber);
 }
 
 function toStartResponseStatus(status: HostedPhoneCall["status"]): HostedPhoneCallStartResponse["status"] {

@@ -6,6 +6,7 @@ export interface HostedPhoneCallRuntimeRecord {
   brief: HostedPhoneCallBrief;
   id: string;
   memberId: string;
+  transferNumber: string | null;
 }
 
 export interface PhoneCallRuntimeStartResult {
