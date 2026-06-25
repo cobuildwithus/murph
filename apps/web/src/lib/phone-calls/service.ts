@@ -31,23 +31,29 @@ interface HostedPhoneCallStore {
       };
     }): Promise<HostedPhoneCall>;
     findUniqueOrThrow(input: {
-      where: {
-        memberId_requestKey: {
-          memberId: string;
-          requestKey: string;
-        };
-      };
+      where:
+        | { id: string }
+        | {
+            memberId_requestKey: {
+              memberId: string;
+              requestKey: string;
+            };
+          };
     }): Promise<HostedPhoneCall>;
-    update(input: {
+    updateMany(input: {
       data: {
         providerCallId?: string;
         resultJson?: HostedPhoneCallResult;
         status: HostedPhoneCall["status"];
       };
       where: {
+        analyzedAt?: null;
         id: string;
+        provider: "retell";
+        providerCallId: null;
+        status: "starting";
       };
-    }): Promise<HostedPhoneCall>;
+    }): Promise<{ count: number }>;
   };
 }
 
@@ -116,7 +122,7 @@ export async function createHostedPhoneCall(input: {
         : null,
     });
   } catch (error) {
-    await prisma.hostedPhoneCall.update({
+    const updated = await prisma.hostedPhoneCall.updateMany({
       data: {
         resultJson: {
           outcome: "not_completed",
@@ -124,18 +130,53 @@ export async function createHostedPhoneCall(input: {
         },
         status: "failed",
       },
-      where: { id: call.id },
+      where: {
+        analyzedAt: null,
+        id: call.id,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
     });
+
+    if (updated.count === 0) {
+      const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      if (hasPhoneCallAdvancedBeyondStart(current)) {
+        return {
+          phoneCallId: current.id,
+          status: toStartResponseStatus(current.status),
+        };
+      }
+    }
+
     throw error;
   }
 
-  await prisma.hostedPhoneCall.update({
+  const updated = await prisma.hostedPhoneCall.updateMany({
     data: {
       providerCallId: started.providerCallId,
       status: "calling",
     },
-    where: { id: call.id },
+    where: {
+      analyzedAt: null,
+      id: call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: "starting",
+    },
   });
+
+  if (updated.count === 0) {
+    const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: call.id },
+    });
+    return {
+      phoneCallId: current.id,
+      status: toStartResponseStatus(current.status),
+    };
+  }
 
   return {
     phoneCallId: call.id,
@@ -156,6 +197,13 @@ function toStartResponseStatus(status: HostedPhoneCall["status"]): HostedPhoneCa
     default:
       return "starting";
   }
+}
+
+function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
+  return call.status !== "starting"
+    || call.providerCallId !== null
+    || call.endedAt !== null
+    || call.analyzedAt !== null;
 }
 
 function isRequestKeyUniqueConstraintError(error: unknown): boolean {
