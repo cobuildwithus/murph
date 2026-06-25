@@ -138,6 +138,7 @@ export function expectAdvertisedMurphDynamicTools(
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     messageReactionsAvailable?: boolean;
+    vaultFileSendAvailable?: boolean;
   } = {},
 ): void {
   const lastResponsesRequest = [...requests]
@@ -162,6 +163,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.messageReactionsAvailable !== true
         && name === "murph.react_to_message"
+      ) {
+        return false;
+      }
+
+      if (
+        options.vaultFileSendAvailable !== true
+        && name === "murph.send_vault_file"
       ) {
         return false;
       }
