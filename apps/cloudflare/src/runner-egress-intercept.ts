@@ -79,6 +79,9 @@ import {
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
+import {
+  readHostedRunnerContainerIdentity,
+} from "./hosted-runner-container-identity.ts";
 
 type HostedRunnerOutboundHandler = (
   request: Request,
@@ -3351,9 +3354,10 @@ async function authorizeHostedProviderEgressActiveUserFence(input: {
   }
 
   const activeUserId = activeUser.userId;
+  const activeContainerIdentitySource = activeUser.activeContainerIdentitySource ?? null;
   if (input.userId && input.userId !== activeUserId) {
     return {
-      activeContainerIdentitySource: null,
+      activeContainerIdentitySource,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "active_user_fence",
@@ -3368,7 +3372,7 @@ async function authorizeHostedProviderEgressActiveUserFence(input: {
   const runner = input.env.USER_RUNNER.getByName(activeUserId);
   if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
     return {
-      activeContainerIdentitySource: null,
+      activeContainerIdentitySource,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "active_user_fence",
@@ -3388,7 +3392,7 @@ async function authorizeHostedProviderEgressActiveUserFence(input: {
   } catch (error) {
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
-      activeContainerIdentitySource: null,
+      activeContainerIdentitySource,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "active_user_fence",
@@ -3404,7 +3408,7 @@ async function authorizeHostedProviderEgressActiveUserFence(input: {
 
   const validation = normalizeActiveRuntimeWriteFenceValidationResult(rawValidation);
   return {
-    activeContainerIdentitySource: null,
+    activeContainerIdentitySource,
     authorized: validation.owns,
     durationMs: Date.now() - input.startedAt,
     mode: "active_user_fence",
@@ -3432,6 +3436,7 @@ async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
       validationErrorName?: string;
     }
   | {
+      activeContainerIdentitySource?: HostedProviderEgressActiveContainerIdentitySource;
       ok: true;
       userId: string;
     }
@@ -3444,7 +3449,8 @@ async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
     || typeof runnerContainerNamespace.idFromString !== "function"
     || typeof runnerContainerNamespace.get !== "function"
   ) {
-    return { ok: false, rejectReason: "active_user_context_missing" };
+    return readHostedProviderEgressActiveUserFromContainerName(input)
+      ?? { ok: false, rejectReason: "active_user_context_missing" };
   }
 
   try {
@@ -3457,8 +3463,13 @@ async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
     if (isHostedActiveRuntimeUserFenceResult(result) && result.active) {
       return { ok: true, userId: result.userId };
     }
-    return { ok: false, rejectReason: "active_user_context_missing" };
+    return readHostedProviderEgressActiveUserFromContainerName(input)
+      ?? { ok: false, rejectReason: "active_user_context_missing" };
   } catch (error) {
+    const containerNameIdentity = readHostedProviderEgressActiveUserFromContainerName(input);
+    if (containerNameIdentity) {
+      return containerNameIdentity;
+    }
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
       ok: false,
@@ -3467,6 +3478,34 @@ async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
       ...(validationErrorName ? { validationErrorName } : {}),
     };
   }
+}
+
+function readHostedProviderEgressActiveUserFromContainerName(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+}): {
+  activeContainerIdentitySource: HostedProviderEgressActiveContainerIdentitySource;
+  ok: true;
+  userId: string;
+} | null {
+  const containerId = input.ctx?.containerId?.trim();
+  if (!containerId || !containerId.includes("--v-")) {
+    return null;
+  }
+
+  const identity = readHostedRunnerContainerIdentity({
+    containerName: containerId,
+    source: input.env,
+  });
+  if (!identity || identity.runnerContainerName !== containerId) {
+    return null;
+  }
+
+  return {
+    activeContainerIdentitySource: "container_name",
+    ok: true,
+    userId: identity.userId,
+  };
 }
 
 function readHostedRunnerContainerNamespace(
