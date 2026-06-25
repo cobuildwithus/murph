@@ -32,6 +32,12 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
   {
+    slug: 'competition-training',
+    name: 'competition-training',
+    triggerHint:
+      'Use when a user is preparing for a fitness race or competition and needs feasibility, phase selection, competition-specific training structure, pacing, tapering, event rehearsal, execution, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events. Do not use for ordinary exercise without a target event or as the primary skill for a new pain or injury complaint.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
