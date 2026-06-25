@@ -123,6 +123,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli memory show --vault "$VAULT" --format json')
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
+    expect(raw).toContain('Finite-supply replenishment check-ins')
+    expect(raw).toContain('30-day supplement supply')
+    expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain('Do not auto-reorder.')
+    expect(raw).toContain(
+      'Treat this check-in as the one\nadjacent next step',
+    )
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
     )

@@ -445,6 +445,34 @@ It is not authorization for a purchase, booking, cancellation, submission, or
 other material action unless the user's later message also supplies that
 authorization.
 
+## Finite-supply replenishment check-ins
+
+After a verified order for a finite consumable health item, create exactly one
+bounded replenishment check-in when the order result or the user's request gives
+reliable supply-duration evidence. Examples include a 30-day supplement supply,
+90 contact lenses used one per day, or four weekly meal boxes.
+
+Use `vault-cli automation save` with:
+
+- `--schedule-kind at` and a single ISO timestamp near expected depletion
+- a stable slug that identifies the item and date
+- the current conversation route when it is deliverable
+- `--continuity-policy preserve`
+- instructions that ask whether the user wants Murph to reorder or adjust the
+  item
+
+Schedule around two days before the item likely runs out. For a 30-day supply,
+use about 28 days after the expected start or arrival date; if start/arrival is
+unknown, anchor to the order date and say the check-in is approximate.
+
+Do not auto-reorder. Do not create inferred refill reminders for prescription
+medications, clinician-directed supplies, or safety-sensitive items unless the
+user explicitly asked. If duration, delivery route, or user intent is unclear,
+offer the reminder instead of creating it. If an equivalent active reminder is
+already visible, do not create a duplicate. Treat this check-in as the one
+adjacent next step; do not also offer tracking, reminders, or other follow-ups
+unless the user asks.
+
 ## Learn from completed runs
 
 After a successful non-trivial browser run, save a memory only when the run
