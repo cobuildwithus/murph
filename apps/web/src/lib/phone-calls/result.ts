@@ -1,4 +1,5 @@
 import {
+  Prisma,
   type HostedPhoneCall,
   type HostedPhoneCallStatus,
 } from "@prisma/client";
@@ -21,30 +22,54 @@ import {
   resolveHostedMemberMessagingState,
 } from "../hosted-onboarding/messaging-state";
 import { getPrisma } from "../prisma";
-import type { RetellCallPayload } from "./retell-payloads";
+import {
+  readRetellMurphPhoneCallId,
+  type RetellCallPayload,
+} from "./retell-payloads";
 
-interface HostedPhoneCallWebhookStore {
+interface HostedPhoneCallWebhookTx {
+  notificationPrisma?: Prisma.TransactionClient;
   hostedPhoneCall: {
+    findUnique(input: {
+      where:
+        | { id: string }
+        | { providerCallId: string };
+    }): Promise<HostedPhoneCall | null>;
     findUniqueOrThrow(input: {
       where: {
-        providerCallId: string;
+        id: string;
       };
     }): Promise<HostedPhoneCall>;
     updateMany(input: {
       data: {
         analyzedAt?: Date;
         endedAt?: Date;
+        providerCallId?: string;
         resultJson?: HostedPhoneCallResult;
         status: HostedPhoneCallStatus;
       };
       where: {
         analyzedAt?: null;
         endedAt?: null;
+        id: string;
         provider: "retell";
-        providerCallId: string;
+        providerCallId?: string;
         status?: { in: HostedPhoneCallStatus[] };
       };
     }): Promise<{ count: number }>;
+  };
+}
+
+interface HostedPhoneCallWebhookStore {
+  $transaction<T>(
+    callback: (tx: HostedPhoneCallWebhookTx) => Promise<T>,
+  ): Promise<T>;
+}
+
+interface RetellWebhookCallTarget {
+  call: HostedPhoneCall;
+  providerCallIdData: {
+    providerCallId?: string;
   };
 }
 
@@ -52,20 +77,32 @@ export async function handleRetellCallEnded(input: {
   call: RetellCallPayload;
   prisma?: HostedPhoneCallWebhookStore;
 }): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-  await prisma.hostedPhoneCall.updateMany({
-    data: {
-      endedAt: readRetellEndedAt(input.call) ?? new Date(),
-      status: classifyEndedStatus(input.call.disconnection_reason),
-    },
-    where: {
-      endedAt: null,
-      provider: "retell",
-      providerCallId: input.call.call_id,
-      status: {
-        in: ["starting", "calling", "ended"],
+  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
+  await prisma.$transaction(async (tx) => {
+    const target = await readRetellWebhookCallTarget({
+      call: input.call,
+      prisma: tx,
+    });
+    if (!target) {
+      return;
+    }
+
+    await tx.hostedPhoneCall.updateMany({
+      data: {
+        ...target.providerCallIdData,
+        endedAt: readRetellEndedAt(input.call) ?? new Date(),
+        status: classifyEndedStatus(input.call.disconnection_reason),
       },
-    },
+      where: {
+        endedAt: null,
+        id: target.call.id,
+        provider: "retell",
+        ...(target.call.providerCallId ? { providerCallId: input.call.call_id } : {}),
+        status: {
+          in: ["starting", "calling", "ended"],
+        },
+      },
+    });
   });
 }
 
@@ -75,43 +112,81 @@ export async function handleRetellCallAnalyzed(input: {
   resultHandler?: (callId: string) => Promise<void>;
 }): Promise<void> {
   logRetellStorageModeMismatch(input.call);
-  const prisma = input.prisma ?? getPrisma();
+  const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
   const result = mapRetellCallAnalysis(input.call);
-  const updated = await prisma.hostedPhoneCall.updateMany({
-    data: {
-      analyzedAt: new Date(),
-      endedAt: readRetellEndedAt(input.call) ?? undefined,
-      resultJson: result,
-      status: mapPhoneCallStatus(result.outcome),
-    },
-    where: {
-      analyzedAt: null,
-      provider: "retell",
-      providerCallId: input.call.call_id,
-    },
-  });
 
-  if (updated.count === 0) {
-    return;
-  }
+  await prisma.$transaction(async (tx) => {
+    const target = await readRetellWebhookCallTarget({
+      call: input.call,
+      prisma: tx,
+    });
+    if (!target) {
+      return;
+    }
 
-  const stored = await prisma.hostedPhoneCall.findUniqueOrThrow({
-    where: {
-      providerCallId: input.call.call_id,
-    },
+    const updated = await tx.hostedPhoneCall.updateMany({
+      data: {
+        ...target.providerCallIdData,
+        analyzedAt: new Date(),
+        endedAt: readRetellEndedAt(input.call) ?? undefined,
+        resultJson: result,
+        status: mapPhoneCallStatus(result.outcome),
+      },
+      where: {
+        analyzedAt: null,
+        id: target.call.id,
+        provider: "retell",
+        ...(target.call.providerCallId ? { providerCallId: input.call.call_id } : {}),
+      },
+    });
+
+    if (updated.count === 0) {
+      return;
+    }
+
+    const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
+      where: {
+        id: target.call.id,
+      },
+    });
+    if (input.resultHandler) {
+      await input.resultHandler(stored.id);
+      return;
+    }
+
+    await appendPhoneCallResultNotificationTx({
+      call: stored,
+      prisma: requirePhoneCallNotificationTransaction(tx),
+    });
   });
-  await (input.resultHandler ?? ((callId) => handlePhoneCallResult({ callId })))(stored.id);
 }
 
 export async function handlePhoneCallResult(input: {
   callId: string;
 }): Promise<void> {
   const prisma = getPrisma();
-  const call = await prisma.hostedPhoneCall.findUnique({
-    where: {
-      id: input.callId,
-    },
+  await prisma.$transaction(async (tx) => {
+    const call = await tx.hostedPhoneCall.findUnique({
+      where: {
+        id: input.callId,
+      },
+    });
+    if (!call) {
+      return;
+    }
+
+    await appendPhoneCallResultNotificationTx({
+      call,
+      prisma: tx,
+    });
   });
+}
+
+async function appendPhoneCallResultNotificationTx(input: {
+  call: HostedPhoneCall;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const call = input.call;
   if (!call?.resultJson) {
     return;
   }
@@ -128,7 +203,7 @@ export async function handlePhoneCallResult(input: {
 
   const member = await readHostedMemberSnapshot({
     memberId: call.memberId,
-    prisma,
+    prisma: input.prisma,
   });
   if (!member) {
     return;
@@ -155,7 +230,7 @@ export async function handlePhoneCallResult(input: {
     result: result.data,
   });
   const notificationKey = `phone-call-result:${call.id}`;
-  await prisma.$transaction((tx) => appendHostedMailboxEnvelopeTx({
+  await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: `assistant.notification.requested:${notificationKey}`,
       memberId: call.memberId,
@@ -176,8 +251,91 @@ export async function handlePhoneCallResult(input: {
       },
       occurredAt: new Date().toISOString(),
     }),
-    tx,
-  }));
+    tx: input.prisma,
+  });
+}
+
+async function readRetellWebhookCallTarget(input: {
+  call: RetellCallPayload;
+  prisma: HostedPhoneCallWebhookTx;
+}): Promise<RetellWebhookCallTarget | null> {
+  const murphCallId = readRetellMurphPhoneCallId(input.call);
+  const call = murphCallId
+    ? await input.prisma.hostedPhoneCall.findUnique({
+      where: { id: murphCallId },
+    })
+    : await input.prisma.hostedPhoneCall.findUnique({
+      where: { providerCallId: input.call.call_id },
+    });
+
+  if (!call || call.provider !== "retell") {
+    return null;
+  }
+  if (call.providerCallId && call.providerCallId !== input.call.call_id) {
+    return null;
+  }
+
+  return {
+    call,
+    providerCallIdData: call.providerCallId
+      ? {}
+      : { providerCallId: input.call.call_id },
+  };
+}
+
+function resolveHostedPhoneCallWebhookStore(
+  store: HostedPhoneCallWebhookStore | undefined,
+): HostedPhoneCallWebhookStore {
+  if (store) {
+    return store;
+  }
+
+  const prisma = getPrisma();
+  return {
+    $transaction: async (callback) => prisma.$transaction(async (tx) => callback({
+      notificationPrisma: tx,
+      hostedPhoneCall: {
+        findUnique: async (args) => {
+          if ("id" in args.where) {
+            return tx.hostedPhoneCall.findUnique({
+              where: {
+                id: args.where.id,
+              },
+            });
+          }
+
+          return tx.hostedPhoneCall.findUnique({
+            where: {
+              providerCallId: args.where.providerCallId,
+            },
+          });
+        },
+        findUniqueOrThrow: async (args) => tx.hostedPhoneCall.findUniqueOrThrow({
+          where: {
+            id: args.where.id,
+          },
+        }),
+        updateMany: async (args) => tx.hostedPhoneCall.updateMany({
+          data: args.data,
+          where: {
+            analyzedAt: args.where.analyzedAt,
+            endedAt: args.where.endedAt,
+            id: args.where.id,
+            provider: args.where.provider,
+            providerCallId: args.where.providerCallId,
+            status: args.where.status,
+          },
+        }),
+      },
+    })),
+  };
+}
+
+function requirePhoneCallNotificationTransaction(tx: HostedPhoneCallWebhookTx): Prisma.TransactionClient {
+  if (!tx.notificationPrisma) {
+    throw new Error("Phone call notification transaction is unavailable.");
+  }
+  return tx.notificationPrisma;
 }
 
 export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallResult {

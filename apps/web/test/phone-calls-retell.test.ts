@@ -9,12 +9,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRetellPhoneCallRuntime,
 } from "@/src/lib/phone-calls/retell-runtime";
+import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
 import {
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
   mapRetellCallAnalysis,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
+
+type RetellWebhookStore = NonNullable<Parameters<typeof handleRetellCallAnalyzed>[0]["prisma"]>;
+type RetellWebhookTx = Parameters<RetellWebhookStore["$transaction"]>[0] extends (
+  tx: infer Tx,
+) => Promise<unknown>
+  ? Tx
+  : never;
+type RetellWebhookFindUniqueInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUnique"]>[0];
+type RetellWebhookFindUniqueOrThrowInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
+type RetellWebhookUpdateManyInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["updateMany"]>[0];
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -153,16 +164,9 @@ describe("Retell phone-call result handling", () => {
   });
 
   it("updates call_ended once with provider id and end timestamp", async () => {
-    const updateCalls: unknown[] = [];
-    const store = {
-      hostedPhoneCall: {
-        findUniqueOrThrow: async () => buildHostedPhoneCall(),
-        updateMany: async (input: unknown) => {
-          updateCalls.push(input);
-          return { count: 1 };
-        },
-      },
-    };
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
 
     await handleRetellCallEnded({
       call: {
@@ -170,16 +174,22 @@ describe("Retell phone-call result handling", () => {
         disconnection_reason: "dial_busy",
         end_timestamp: 1_782_345_600,
       },
-      prisma: store,
+      prisma: store.prisma,
     });
 
-    expect(updateCalls).toEqual([{
+    expect(store.findUniqueCalls).toEqual([{
+      where: {
+        providerCallId: "retell_call_123",
+      },
+    }]);
+    expect(store.updateManyCalls).toEqual([{
       data: {
         endedAt: new Date("2026-06-25T00:00:00.000Z"),
         status: "failed",
       },
       where: {
         endedAt: null,
+        id: "hpc_123",
         provider: "retell",
         providerCallId: "retell_call_123",
         status: {
@@ -190,21 +200,10 @@ describe("Retell phone-call result handling", () => {
   });
 
   it("handles call_analyzed idempotently and notifies only after the first update", async () => {
-    const updateCalls: unknown[] = [];
-    const findCalls: unknown[] = [];
     const resultHandler = vi.fn(async () => {});
-    const store = {
-      hostedPhoneCall: {
-        findUniqueOrThrow: async (input: unknown) => {
-          findCalls.push(input);
-          return buildHostedPhoneCall({ id: "hpc_123" });
-        },
-        updateMany: async (input: unknown) => {
-          updateCalls.push(input);
-          return { count: updateCalls.length === 1 ? 1 : 0 };
-        },
-      },
-    };
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
     const call = {
       call_analysis: {
         custom_analysis_data: {
@@ -218,17 +217,17 @@ describe("Retell phone-call result handling", () => {
 
     await handleRetellCallAnalyzed({
       call,
-      prisma: store,
+      prisma: store.prisma,
       resultHandler,
     });
     await handleRetellCallAnalyzed({
       call,
-      prisma: store,
+      prisma: store.prisma,
       resultHandler,
     });
 
-    expect(updateCalls).toHaveLength(2);
-    expect(updateCalls[0]).toMatchObject({
+    expect(store.updateManyCalls).toHaveLength(2);
+    expect(store.updateManyCalls[0]).toMatchObject({
       data: {
         resultJson: {
           outcome: "completed",
@@ -238,17 +237,161 @@ describe("Retell phone-call result handling", () => {
       },
       where: {
         analyzedAt: null,
+        id: "hpc_123",
         provider: "retell",
         providerCallId: "retell_call_123",
       },
     });
-    expect(findCalls).toEqual([{
+    expect(store.findUniqueOrThrowCalls).toEqual([{
       where: {
-        providerCallId: "retell_call_123",
+        id: "hpc_123",
       },
     }]);
     expect(resultHandler).toHaveBeenCalledTimes(1);
     expect(resultHandler).toHaveBeenCalledWith("hpc_123");
+  });
+
+  it("recovers call_analyzed by Murph metadata when the provider id write was lost", async () => {
+    const resultHandler = vi.fn(async () => {});
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        providerCallId: null,
+        status: "starting",
+      }),
+    });
+
+    await handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_started",
+        metadata: {
+          murph_phone_call_id: "hpc_123",
+        },
+      },
+      prisma: store.prisma,
+      resultHandler,
+    });
+
+    expect(store.findUniqueCalls[0]).toEqual({
+      where: {
+        id: "hpc_123",
+      },
+    });
+    expect(store.updateManyCalls[0]).toMatchObject({
+      data: {
+        providerCallId: "retell_started",
+        status: "completed",
+      },
+      where: {
+        analyzedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+      },
+    });
+    expect(store.updateManyCalls[0]!.where).not.toHaveProperty("providerCallId");
+    expect(resultHandler).toHaveBeenCalledWith("hpc_123");
+  });
+
+  it("rolls back call_analyzed when notification enqueue fails so Retell replay can notify", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+    const resultHandler = vi
+      .fn(async (_callId: string) => {})
+      .mockRejectedValueOnce(new Error("mailbox unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const call = {
+      call_analysis: {
+        custom_analysis_data: {
+          outcome: "completed",
+          result: "Booked.",
+        },
+      },
+      call_id: "retell_call_123",
+    };
+
+    await expect(handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+      resultHandler,
+    })).rejects.toThrow("mailbox unavailable");
+
+    expect(store.currentCall()?.analyzedAt).toBeNull();
+
+    await handleRetellCallAnalyzed({
+      call,
+      prisma: store.prisma,
+      resultHandler,
+    });
+
+    expect(resultHandler).toHaveBeenCalledTimes(2);
+    expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("consultPhoneCall", () => {
+  it("fails closed instead of transferring when the brief disallows transfer", async () => {
+    await expect(consultPhoneCall({
+      call: {
+        brief: {
+          ...VALID_BRIEF,
+          allowTransferToUser: false,
+        },
+        id: "hpc_123",
+        memberId: "member_123",
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      memberId: "member_123",
+      question: "They require identity verification. Should I transfer?",
+      transcript: "",
+      transferNumberResolver: async () => "+12125550000",
+    })).resolves.toEqual({
+      answer: "I cannot safely answer that from Murph during the live call. End the call and report what is needed.",
+      directive: "end_call",
+    });
+  });
+
+  it("fails closed instead of transferring when no verified transfer number exists", async () => {
+    await expect(consultPhoneCall({
+      call: {
+        brief: VALID_BRIEF,
+        id: "hpc_123",
+        memberId: "member_123",
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      memberId: "member_123",
+      question: "They require identity verification. Should I transfer?",
+      transcript: "",
+      transferNumberResolver: async () => null,
+    })).resolves.toMatchObject({
+      directive: "end_call",
+    });
+  });
+
+  it("allows transfer only when the brief and verified destination allow it", async () => {
+    await expect(consultPhoneCall({
+      call: {
+        brief: VALID_BRIEF,
+        id: "hpc_123",
+        memberId: "member_123",
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      memberId: "member_123",
+      question: "They require identity verification. Should I transfer?",
+      transcript: "",
+      transferNumberResolver: async () => "+12125550000",
+    })).resolves.toMatchObject({
+      directive: "transfer_to_user",
+    });
   });
 });
 
@@ -281,4 +424,108 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     updatedAt: now,
     ...overrides,
   };
+}
+
+function createWebhookStore(input: {
+  call: HostedPhoneCall;
+}) {
+  let currentCall: HostedPhoneCall | null = input.call;
+  const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
+  const findUniqueOrThrowCalls: RetellWebhookFindUniqueOrThrowInput[] = [];
+  const updateManyCalls: RetellWebhookUpdateManyInput[] = [];
+
+  const tx: RetellWebhookTx = {
+    hostedPhoneCall: {
+      findUnique: async (args) => {
+        findUniqueCalls.push(args);
+        return readCurrentCallByWhere(currentCall, args.where);
+      },
+      findUniqueOrThrow: async (args) => {
+        findUniqueOrThrowCalls.push(args);
+        const call = readCurrentCallByWhere(currentCall, args.where);
+        if (!call) {
+          throw new Error("HostedPhoneCall not found.");
+        }
+        return call;
+      },
+      updateMany: async (args) => {
+        updateManyCalls.push(args);
+        if (!currentCall || !matchesWebhookUpdateWhere(currentCall, args.where)) {
+          return { count: 0 };
+        }
+
+        currentCall = {
+          ...currentCall,
+          analyzedAt: "analyzedAt" in args.data
+            ? args.data.analyzedAt ?? currentCall.analyzedAt
+            : currentCall.analyzedAt,
+          endedAt: "endedAt" in args.data
+            ? args.data.endedAt ?? currentCall.endedAt
+            : currentCall.endedAt,
+          providerCallId: "providerCallId" in args.data
+            ? args.data.providerCallId ?? currentCall.providerCallId
+            : currentCall.providerCallId,
+          resultJson: "resultJson" in args.data
+            ? args.data.resultJson ?? currentCall.resultJson
+            : currentCall.resultJson,
+          status: args.data.status,
+        };
+        return { count: 1 };
+      },
+    },
+  };
+  const prisma: RetellWebhookStore = {
+    $transaction: async (callback) => {
+      const before = currentCall;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        currentCall = before;
+        throw error;
+      }
+    },
+  };
+
+  return {
+    currentCall: () => currentCall,
+    findUniqueCalls,
+    findUniqueOrThrowCalls,
+    prisma,
+    updateManyCalls,
+  };
+}
+
+function readCurrentCallByWhere(
+  call: HostedPhoneCall | null,
+  where: RetellWebhookFindUniqueInput["where"] | RetellWebhookFindUniqueOrThrowInput["where"],
+): HostedPhoneCall | null {
+  if (!call) {
+    return null;
+  }
+  if ("id" in where) {
+    return call.id === where.id ? call : null;
+  }
+  return call.providerCallId === where.providerCallId ? call : null;
+}
+
+function matchesWebhookUpdateWhere(
+  call: HostedPhoneCall,
+  where: RetellWebhookUpdateManyInput["where"],
+): boolean {
+  if (call.id !== where.id || call.provider !== where.provider) {
+    return false;
+  }
+  if (where.providerCallId !== undefined && call.providerCallId !== where.providerCallId) {
+    return false;
+  }
+  if (where.analyzedAt === null && call.analyzedAt !== null) {
+    return false;
+  }
+  if (where.endedAt === null && call.endedAt !== null) {
+    return false;
+  }
+  if (where.status && !where.status.in.includes(call.status)) {
+    return false;
+  }
+  return true;
 }

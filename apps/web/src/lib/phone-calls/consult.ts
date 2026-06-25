@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 
 import { getPrisma } from "../prisma";
+import { resolveVerifiedMemberTransferNumber } from "./transfer";
 
 export interface HostedPhoneCallForConsultation {
   brief: HostedPhoneCallBrief;
@@ -46,15 +47,24 @@ export async function getHostedPhoneCallForConsultation(input: {
   };
 }
 
-export async function consultPhoneCall(_input: {
+export async function consultPhoneCall(input: {
   call: HostedPhoneCallForConsultation;
   memberId: string;
   question: string;
   transcript: string;
+  transferNumberResolver?: (resolverInput: {
+    memberId: string;
+  }) => Promise<string | null>;
 }): Promise<HostedPhoneCallAdvice> {
+  const canTransfer = input.call.brief.allowTransferToUser
+    && Boolean(await (input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber)({
+      memberId: input.memberId,
+    }));
+
   return hostedPhoneCallAdviceSchema.parse({
-    answer:
-      "I cannot safely answer that from Murph during the live call. Transfer the call to the user if the brief allows it; otherwise end the call and report what is needed.",
-    directive: "transfer_to_user",
+    answer: canTransfer
+      ? "I cannot safely answer that from Murph during the live call. Transfer the call to the user."
+      : "I cannot safely answer that from Murph during the live call. End the call and report what is needed.",
+    directive: canTransfer ? "transfer_to_user" : "end_call",
   });
 }

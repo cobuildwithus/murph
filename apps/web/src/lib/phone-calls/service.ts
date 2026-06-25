@@ -10,10 +10,9 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getPrisma } from "../prisma";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
+import { resolveVerifiedMemberTransferNumber } from "./transfer";
 import type { PhoneCallRuntime } from "./types";
 
 interface HostedPhoneCallStore {
@@ -131,20 +130,6 @@ export async function createHostedPhoneCall(input: {
 
 function createHostedPhoneCallId(): string {
   return `hpc_${randomUUID().replaceAll("-", "")}`;
-}
-
-async function resolveVerifiedMemberTransferNumber(input: {
-  memberId: string;
-}): Promise<string | null> {
-  const identity = await readHostedMemberIdentity({
-    memberId: input.memberId,
-    prisma: getPrisma(),
-  });
-  if (!identity?.phoneNumberVerifiedAt) {
-    return null;
-  }
-
-  return normalizePhoneNumber(identity.phoneNumber);
 }
 
 function toStartResponseStatus(status: HostedPhoneCall["status"]): HostedPhoneCallStartResponse["status"] {

@@ -46,8 +46,8 @@ RULES
 5. Use press_digit when required to navigate a phone menu.
 6. Use transfer_call only when:
    - the brief allows transfer;
-   - Murph directs transfer_to_user; or
-   - live user identity verification is required.
+   - transfer_number is not empty; and
+   - Murph directs transfer_to_user or live user identity verification is required.
 7. Call ask_murph whenever:
    - information is missing;
    - a preference is unclear;
