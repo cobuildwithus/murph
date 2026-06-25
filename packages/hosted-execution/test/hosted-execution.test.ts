@@ -504,6 +504,7 @@ describe("hosted execution coverage gaps", () => {
 
     expect(exportKeys).toEqual([
       ".",
+      "./action-approval",
       "./assistant-capabilities",
       "./assistant-identifiers",
       "./assistant-usage",
@@ -617,6 +618,7 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
+      "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",

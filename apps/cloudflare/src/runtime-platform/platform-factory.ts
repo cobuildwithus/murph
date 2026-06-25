@@ -9,6 +9,7 @@ import type {
 } from "../workspace-snapshot-restore-preparation.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
+import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
@@ -115,6 +116,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
       : {}),
     ...(transport
       ? {
+          actionApprovalPort: createHostedWebActionApprovalPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
           connectedApps: createHostedWebConnectedAppsPort({
             boundUserId: input.boundUserId,
             fetchImpl,

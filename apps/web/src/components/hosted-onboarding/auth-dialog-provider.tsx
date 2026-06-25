@@ -17,6 +17,7 @@ import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
+const ACTION_APPROVAL_PATH_PATTERN = /^\/approve\/haa_[A-Za-z0-9_-]{32}$/u;
 const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 
@@ -83,7 +84,8 @@ export function AuthProvider({
 
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
-    shouldResumeCurrentDeviceConnectIntentUrl(payload)
+    shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
   );
@@ -91,6 +93,20 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
 
 function readCurrentBrowserPath(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function shouldResumeCurrentActionApprovalUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ACTION_APPROVAL_PATH_PATTERN.test(window.location.pathname);
 }
 
 function shouldResumeCurrentDeviceConnectIntentUrl(

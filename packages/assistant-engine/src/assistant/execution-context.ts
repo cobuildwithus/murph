@@ -6,6 +6,10 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedActionApprovalRequest,
+  HostedActionApprovalResult,
+} from '@murphai/hosted-execution/action-approval'
+import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
@@ -45,6 +49,10 @@ export interface AssistantHostedDeviceConnectRequest {
 
 export interface AssistantUsageRecorder {
   recordUsage(record: AssistantUsageRecord): Promise<void>
+}
+
+export interface AssistantHostedActionApprovalPort {
+  request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
 export interface AssistantHostedProductFeedbackRecorder {
@@ -89,6 +97,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
+  actionApprovalPort?: AssistantHostedActionApprovalPort | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -118,6 +127,9 @@ export function normalizeAssistantExecutionContext(
 ): AssistantExecutionContext {
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
+  const actionApprovalPort = normalizeAssistantActionApprovalPort(
+    hosted?.actionApprovalPort,
+  )
   const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
@@ -145,6 +157,7 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
+      ...(actionApprovalPort ? { actionApprovalPort } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
@@ -195,6 +208,18 @@ export function normalizeAssistantExecutionContext(
           .map((key) => normalizeNullableString(key))
           .filter((key): key is string => key !== null) ?? [],
     },
+  }
+}
+
+function normalizeAssistantActionApprovalPort(
+  input: AssistantHostedExecutionContext['actionApprovalPort'] | undefined,
+): AssistantHostedActionApprovalPort | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 

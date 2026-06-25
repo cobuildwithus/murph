@@ -12,6 +12,7 @@ import {
   type AssistantSession,
   type AssistantStatusOutboxSummary,
   type AssistantTurnTrigger,
+  type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
@@ -219,6 +220,36 @@ export type AssistantOutboxCreateIntentInput = {
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
 ): Promise<AssistantOutboxIntent> {
+  return createAssistantOutboxIntentWithInitialStatus(input, 'pending')
+}
+
+export async function createAssistantVaultFileSendOutboxIntent(
+  input: Omit<AssistantOutboxCreateIntentInput, 'media' | 'operation'> & {
+    file: AssistantVaultFileResponseMedia
+  },
+): Promise<AssistantOutboxIntent> {
+  if (normalizeNullableString(input.channel)?.toLowerCase() !== 'linq') {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
+      'Vault file delivery currently supports only the current iMessage conversation.',
+    )
+  }
+
+  const { file, ...outboxInput } = input
+  return createAssistantOutboxIntentWithInitialStatus(
+    {
+      ...outboxInput,
+      media: [file],
+      operation: null,
+    },
+    'awaiting_approval',
+  )
+}
+
+async function createAssistantOutboxIntentWithInitialStatus(
+  input: AssistantOutboxCreateIntentInput,
+  initialStatus: 'awaiting_approval' | 'pending',
+): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
@@ -336,7 +367,7 @@ export async function createAssistantOutboxIntent(
       nextAttemptAt: createdAt,
       sentAt: null,
       attemptCount: 0,
-      status: 'pending',
+      status: initialStatus,
       message,
       media,
       subject,
@@ -420,6 +451,69 @@ export async function saveAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
 ): Promise<AssistantOutboxIntent> {
   return saveAssistantOutboxIntentLocal(vault, intent)
+}
+
+/**
+ * Compare-and-set persistence for state derived from a remote approval check.
+ * A concurrent dispatcher or approval reconciliation always wins over a stale
+ * snapshot, while action identity reuse still fails closed.
+ */
+export async function saveAssistantOutboxIntentIfUnchanged(input: {
+  expectedDedupeKey: string
+  expectedStatus: AssistantOutboxIntent['status']
+  expectedUpdatedAt: string
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const intentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      input.intent.intentId,
+    )
+    const current = await readAssistantOutboxIntentAtPath(intentPath, {
+      vault: input.vault,
+    })
+    if (!current) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_INTENT_NOT_FOUND',
+        `Assistant outbox intent ${input.intent.intentId} was not found.`,
+      )
+    }
+    if (
+      current.dedupeKey !== input.expectedDedupeKey
+      || input.intent.dedupeKey !== input.expectedDedupeKey
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_IDENTITY_CONFLICT',
+        'Assistant outbox action identity changed during approval reconciliation.',
+      )
+    }
+    if (
+      current.status !== input.expectedStatus
+      || current.updatedAt !== input.expectedUpdatedAt
+    ) {
+      return current
+    }
+
+    const parsed = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence(input.intent),
+    )
+    if (parsed.intentId !== current.intentId) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_IDENTITY_CONFLICT',
+        'Assistant outbox intent id changed during approval reconciliation.',
+      )
+    }
+    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
+    await writeJsonFileAtomic(intentPath, persisted)
+    await repairAssistantOutboxReceiptForIntent({
+      at: parsed.updatedAt,
+      intent: parsed,
+      vault: input.vault,
+    })
+    return parsed
+  })
 }
 
 export async function listAssistantOutboxIntents(

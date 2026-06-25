@@ -20,6 +20,7 @@ import {
   type SensitiveActionAuthorization,
   type SensitiveActionChallengeResponse,
   type SensitiveActionKind,
+  type SettingsSensitiveActionKind,
 } from "./shared";
 
 const SENSITIVE_ACTION_BINDING_VERSION = "murph-sensitive-action-binding-v1";
@@ -40,12 +41,19 @@ export async function createSensitiveActionChallenge(input: {
   const origin = requireSensitiveActionOrigin();
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + SENSITIVE_ACTION_CHALLENGE_TTL_MS);
-  const token = `${SENSITIVE_ACTION_TOKEN_PREFIX}${randomBytes(SENSITIVE_ACTION_TOKEN_BYTES).toString("base64url")}`;
-  const tokenHash = sha256Hex(token);
+  const challenge = createSensitiveActionChallengeMaterial({
+    bindingHash: input.bindingHash,
+    expiresAt,
+    kind: input.kind,
+    origin,
+  });
 
   await input.prisma.$transaction(async (tx) => {
     await tx.hostedSensitiveActionChallenge.deleteMany({
-      where: { expiresAt: { lte: now } },
+      where: {
+        approvalKey: null,
+        expiresAt: { lte: now },
+      },
     });
     await tx.hostedSensitiveActionChallenge.create({
       data: {
@@ -54,21 +62,41 @@ export async function createSensitiveActionChallenge(input: {
         expiresAt,
         kind: input.kind,
         memberId: input.memberId,
-        tokenHash,
+        tokenHash: challenge.tokenHash,
       },
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
+  return challenge.response;
+}
+
+export interface SensitiveActionChallengeMaterial {
+  response: SensitiveActionChallengeResponse;
+  tokenHash: string;
+}
+
+export function createSensitiveActionChallengeMaterial(input: {
+  bindingHash: string;
+  expiresAt: Date;
+  kind: SensitiveActionKind;
+  origin?: string;
+}): SensitiveActionChallengeMaterial {
+  assertBindingHash(input.bindingHash);
+  const token = `${SENSITIVE_ACTION_TOKEN_PREFIX}${randomBytes(SENSITIVE_ACTION_TOKEN_BYTES).toString("base64url")}`;
+
   return {
-    expiresAt: expiresAt.toISOString(),
-    message: buildSensitiveActionMessage({
-      bindingHash: input.bindingHash,
-      expiresAt,
-      kind: input.kind,
-      origin,
+    response: {
+      expiresAt: input.expiresAt.toISOString(),
+      message: buildSensitiveActionMessage({
+        bindingHash: input.bindingHash,
+        expiresAt: input.expiresAt,
+        kind: input.kind,
+        origin: input.origin ?? requireSensitiveActionOrigin(),
+        token,
+      }),
       token,
-    }),
-    token,
+    },
+    tokenHash: sha256Hex(token),
   };
 }
 
@@ -164,7 +192,7 @@ export async function verifySensitiveActionChallenge(input: {
 export async function consumeSensitiveActionChallenge(input: {
   challenge: VerifiedSensitiveActionChallenge;
   now?: Date;
-  prisma: PrismaClient;
+  prisma: Pick<PrismaClient, "hostedSensitiveActionChallenge">;
 }): Promise<void> {
   const consumedAt = input.now ?? new Date();
   if (input.challenge.expiresAt <= consumedAt) {
@@ -204,7 +232,7 @@ export async function verifyAndConsumeSensitiveActionChallenge(input: {
 }
 
 export function buildSettingsSensitiveActionBinding(input: {
-  kind: Extract<SensitiveActionKind, "account.delete" | "vault.export">;
+  kind: SettingsSensitiveActionKind;
   memberId: string;
   sessionId: string;
 }): string {

@@ -16,13 +16,10 @@ export function useSensitiveActionAuthorization() {
   const { signMessage } = useSignMessage();
   const setup = usePasskeyWalletMfa();
 
-  async function authorize(kind: SensitiveActionKind): Promise<SensitiveActionAuthorization> {
+  async function signChallenge(
+    challenge: SensitiveActionChallengeResponse,
+  ): Promise<SensitiveActionAuthorization> {
     const wallet = await setup.ensureConfigured();
-    const challenge = await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
-      method: "POST",
-      payload: { kind },
-      url: "/api/settings/sensitive-action-challenge",
-    });
     const { signature } = await signMessage(
       { message: challenge.message },
       { address: wallet.address },
@@ -38,8 +35,18 @@ export function useSensitiveActionAuthorization() {
     };
   }
 
+  async function authorize(kind: SensitiveActionKind): Promise<SensitiveActionAuthorization> {
+    const challenge = await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
+      method: "POST",
+      payload: { kind },
+      url: "/api/settings/sensitive-action-challenge",
+    });
+    return signChallenge(challenge);
+  }
+
   return {
     authorize,
+    signChallenge,
     setup,
   };
 }

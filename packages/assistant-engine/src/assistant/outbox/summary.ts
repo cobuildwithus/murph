@@ -10,13 +10,22 @@ export async function buildAssistantOutboxSummary(
 
   for (const intent of intents) {
     if (
-      (intent.status === 'pending' || intent.status === 'retryable' || intent.status === 'sending') &&
+      (
+        intent.status === 'awaiting_approval' ||
+        intent.status === 'pending' ||
+        intent.status === 'retryable' ||
+        intent.status === 'sending'
+      ) &&
       (!oldestPendingAt || intent.createdAt < oldestPendingAt)
     ) {
       oldestPendingAt = intent.createdAt
     }
     if (
-      (intent.status === 'pending' || intent.status === 'retryable') &&
+      (
+        intent.status === 'awaiting_approval' ||
+        intent.status === 'pending' ||
+        intent.status === 'retryable'
+      ) &&
       intent.nextAttemptAt &&
       (!nextAttemptAt || intent.nextAttemptAt < nextAttemptAt)
     ) {
@@ -26,7 +35,9 @@ export async function buildAssistantOutboxSummary(
 
   return {
     total: intents.length,
-    pending: intents.filter((intent) => intent.status === 'pending').length,
+    pending: intents.filter(
+      (intent) => intent.status === 'awaiting_approval' || intent.status === 'pending',
+    ).length,
     sending: intents.filter((intent) => intent.status === 'sending').length,
     retryable: intents.filter((intent) => intent.status === 'retryable').length,
     sent: intents.filter((intent) => intent.status === 'sent').length,

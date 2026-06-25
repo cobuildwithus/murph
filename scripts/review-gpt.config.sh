@@ -2,23 +2,23 @@
 
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
-review_gpt_phlebas_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/phlebas/Phlebas.app"
+review_gpt_mountain_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/mountain/Mountain.app"
 
-if [[ ! -d "$review_gpt_phlebas_app" ]] && command -v mdfind >/dev/null 2>&1; then
-  review_gpt_phlebas_app="$(
-    mdfind "kMDItemDisplayName == 'Phlebas.app' || kMDItemFSName == 'Phlebas.app'" | head -n 1
+if [[ ! -d "$review_gpt_mountain_app" ]] && command -v mdfind >/dev/null 2>&1; then
+  review_gpt_mountain_app="$(
+    mdfind "kMDItemDisplayName == 'Mountain.app' || kMDItemFSName == 'Mountain.app'" | head -n 1
   )"
 fi
 
-review_gpt_phlebas_binary="$review_gpt_phlebas_app/Contents/MacOS/Brave Browser"
-if [[ -x "$review_gpt_phlebas_binary" ]]; then
-  browser_binary_path="${browser_binary_path:-$review_gpt_phlebas_binary}"
+review_gpt_mountain_binary="$review_gpt_mountain_app/Contents/MacOS/Brave Browser"
+if [[ -x "$review_gpt_mountain_binary" ]]; then
+  browser_binary_path="${browser_binary_path:-$review_gpt_mountain_binary}"
 else
   browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 fi
-managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Phlebas}"
+managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Mountain}"
 managed_browser_profile="${managed_browser_profile:-Default}"
-managed_browser_port="${managed_browser_port:-9442}"
+managed_browser_port="${managed_browser_port:-9450}"
 
 name_prefix="murph-chatgpt-audit"
 repo_context_url="https://github.com/cobuildwithus/murph"

@@ -294,6 +294,27 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_SEND_VAULT_FILE_TOOL = {
+  namespace: 'murph',
+  name: 'send_vault_file',
+  description:
+    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; it does not reveal file bytes to the model and does not support arbitrary recipients.",
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      ref: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          'Normalized vault-relative path, for example documents/report.pdf. Hidden paths, traversal, absolute paths, and unsupported file types are rejected.',
+      },
+    },
+    required: ['ref'],
+  },
+} as const
+
 export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   namespace: 'murph',
   name: 'finish_without_reply',
@@ -496,6 +517,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
+  MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
 ] as const
@@ -526,6 +548,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  vaultFileSendAvailable?: boolean | null
 }
 
 type AvailabilityPredicate = (
@@ -553,6 +576,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -596,6 +620,12 @@ const generateImageArgumentsSchema = z
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  })
+  .strict()
+
+const sendVaultFileArgumentsSchema = z
+  .object({
+    ref: z.string().trim().min(1).max(1024),
   })
   .strict()
 
@@ -903,6 +933,14 @@ export type MurphDynamicToolRequest =
       args: HostedComputerFinishRunRequest & { runId: string }
     }
   | {
+      kind: 'send-vault-file'
+      ref: string
+    }
+  | {
+      kind: 'invalid-send-vault-file-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-computer-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1064,6 +1102,19 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-song',
         args: parsed.args,
+      }
+    }
+    case MURPH_SEND_VAULT_FILE_TOOL.name: {
+      const parsed = parseSendVaultFileArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-send-vault-file-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'send-vault-file',
+        ref: parsed.ref,
       }
     }
     case MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name: {
@@ -1301,6 +1352,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
+    case 'invalid-send-vault-file-arguments':
+      return toolTextResult(false, 'invalid vault file arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media':
@@ -1321,6 +1374,40 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'send-vault-file': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const sendVaultFile = hostedToolContext?.sendVaultFile
+      if (
+        !hostedToolContext?.vaultFileSendAvailable
+        || typeof sendVaultFile !== 'function'
+      ) {
+        return toolTextResult(
+          false,
+          'secure vault-file sending is unavailable for this conversation',
+        )
+      }
+      try {
+        const result = await sendVaultFile(input.request.ref)
+        switch (result.status) {
+          case 'pending':
+            return {
+              ...toolTextResult(true, 'secure approval requested'),
+              finalActionPatch: { kind: 'none' },
+            }
+          case 'approved':
+            return {
+              ...toolTextResult(true, 'approved vault file queued for delivery'),
+              finalActionPatch: { kind: 'none' },
+            }
+          case 'denied':
+            return toolTextResult(false, 'vault-file delivery was denied')
+          case 'expired':
+            return toolTextResult(false, 'vault-file delivery approval expired')
+        }
+      } catch {
+        return toolTextResult(false, 'secure vault-file delivery could not be queued')
+      }
+    }
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
@@ -2037,6 +2124,30 @@ function parseDynamicToolCallRequest(
     arguments: params.arguments,
     namespace: normalizeNullableStringValue(params.namespace),
     tool: normalizeNullableStringValue(params.tool),
+  }
+}
+
+function parseSendVaultFileArguments(
+  value: unknown,
+):
+  | { ok: true; ref: string }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = sendVaultFileArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildSafeToolCallValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.send_vault_file.input',
+        schemaRootKeys: ['ref'],
+        toolName: 'murph.send_vault_file',
+      }),
+    }
+  }
+  return {
+    ok: true,
+    ref: parsed.data.ref,
   }
 }
 

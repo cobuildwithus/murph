@@ -74,7 +74,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_sensitive_action_challenge",
     label: "Short-lived sensitive-action challenges",
     deletion: "live-delete",
-    note: "Deletes short-lived hashed approval challenges. User exports omit challenge rows, token hashes, signatures, and wallet authorization material.",
+    note: "Deletes hashed sensitive-action challenges and durable Assistant approval decisions stored in the same member-scoped table. User exports omit these rows, token hashes, action hashes, signatures, and wallet authorization material.",
   },
   {
     slug: "prisma.hosted_member_identity",

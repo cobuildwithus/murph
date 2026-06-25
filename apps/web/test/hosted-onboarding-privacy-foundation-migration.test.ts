@@ -10,6 +10,14 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'bindingHash String @map("binding_hash")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'expiresAt DateTime @map("expires_at")',
+    'approvalKey String? @unique @map("approval_key")',
+    'actionId String? @map("action_id")',
+    'actionHash String? @map("action_hash")',
+    'presentationTitle String? @map("presentation_title")',
+    'presentationBody String? @map("presentation_body")',
+    'approvalStatus HostedSensitiveActionApprovalStatus? @map("approval_status")',
+    'decidedAt DateTime? @map("decided_at")',
+    'returnContactKind String? @map("return_contact_kind")',
   ],
   HostedConnectedAppConnectIntent: [
     'claimHash String @id @map("claim_hash")',
@@ -355,6 +363,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const sensitiveActionApprovalMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260624150000_hosted_sensitive_action_approval/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const actionApprovalReturnContactKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260624200000_hosted_action_approval_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -410,6 +432,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260623193000_hosted_product_feedback_summary",
       "20260624000000_clear_hosted_codex_auth_connected",
       "20260624090000_hosted_sensitive_action_challenge",
+      "20260624150000_hosted_sensitive_action_approval",
+      "20260624200000_hosted_action_approval_return_contact_kind",
       "20260624210000_family_invite_telegram_username_lookup",
       "20260624230000_family_invite_email_lookup",
       "migration_lock.toml",
@@ -446,6 +470,20 @@ describe("hosted Prisma baseline migration", () => {
     expect(sensitiveActionChallengeMigrationSql).not.toContain("signature");
     expect(sensitiveActionChallengeMigrationSql).not.toContain("wallet_address");
     expect(sensitiveActionChallengeMigrationSql).not.toContain("approved_at");
+    expect(sensitiveActionApprovalMigrationSql).toContain(
+      'ADD COLUMN "approval_key" TEXT',
+    );
+    expect(sensitiveActionApprovalMigrationSql).toContain(
+      'CREATE INDEX "hosted_sensitive_action_approval_member_status_due_idx"',
+    );
+    expect(sensitiveActionApprovalMigrationSql).toContain(
+      '"kind" = \'assistant.action.approve\'',
+    );
+    expect(sensitiveActionApprovalMigrationSql).not.toContain("signature");
+    expect(sensitiveActionApprovalMigrationSql).not.toContain("wallet_address");
+    expect(actionApprovalReturnContactKindMigrationSql).toContain(
+      'ADD COLUMN "return_contact_kind" TEXT',
+    );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

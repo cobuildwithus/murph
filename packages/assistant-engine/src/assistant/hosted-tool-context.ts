@@ -20,6 +20,11 @@ export interface AssistantHostedDeliveryContext {
   recipientKey: string | null
 }
 
+export interface AssistantHostedVaultFileSendResult {
+  filename: string
+  status: 'approved' | 'denied' | 'expired' | 'pending'
+}
+
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
@@ -27,7 +32,9 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly requiredUserMessageDeliveryAvailable: boolean
+  readonly vaultFileSendAvailable: boolean
   sendRequiredUserMessage(text: string): Promise<AssistantProgressDeliveryResult>
+  sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
 }
 
 type AssistantHostedToolDeliveryContext = {
@@ -43,6 +50,7 @@ export function createAssistantHostedToolContext(input: {
   messageInput: AssistantMessageInput
   requiredUserMessageDeliveryAvailable?: boolean
   sendRequiredUserMessage?: (text: string) => Promise<AssistantProgressDeliveryResult>
+  sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
@@ -74,5 +82,9 @@ export function createAssistantHostedToolContext(input: {
       kind: 'failed',
       source: 'model',
     })),
+    sendVaultFile: input.sendVaultFile ?? (async () => {
+      throw new Error('Vault-file sending is unavailable for this turn.')
+    }),
+    vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
   }
 }

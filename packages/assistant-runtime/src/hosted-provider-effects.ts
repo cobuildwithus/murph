@@ -8,6 +8,7 @@ import {
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import type {
   AssistantMessageReaction,
+  AssistantVaultFileResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   isLinqChatNotFoundSendMessageError,
@@ -43,6 +44,7 @@ import type {
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
+  loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   onProviderDispatchEntered?: (() => void) | null;
@@ -50,6 +52,7 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
+  loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   signal?: AbortSignal;
@@ -306,6 +309,7 @@ async function sendHostedProviderLinqMessageDirect(
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,
+    ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
   });
 }
 
@@ -313,7 +317,12 @@ function createHostedProviderEffectContext(
   dependencies: HostedProviderEffectDependencies,
   operation: string,
 ): HostedProviderEffectContext {
-  return requireHostedProviderFetchDependencies(dependencies, operation);
+  return {
+    ...requireHostedProviderFetchDependencies(dependencies, operation),
+    ...(dependencies.loadVaultFile
+      ? { loadVaultFile: dependencies.loadVaultFile }
+      : {}),
+  };
 }
 
 async function maybeRecoverHostedProviderMissingLinqThread(input: {

@@ -10,7 +10,7 @@ import {
   buildSettingsSensitiveActionBinding,
   createSensitiveActionChallenge,
 } from "@/src/lib/sensitive-actions/server";
-import { isSensitiveActionKind } from "@/src/lib/sensitive-actions/shared";
+import { isSettingsSensitiveActionKind } from "@/src/lib/sensitive-actions/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
 const SENSITIVE_ACTION_CHALLENGE_BODY_LIMIT_BYTES = 4 * 1024;
@@ -23,7 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
     limitBytes: SENSITIVE_ACTION_CHALLENGE_BODY_LIMIT_BYTES,
   });
 
-  if (!isSensitiveActionKind(body.kind)) {
+  if (!isSettingsSensitiveActionKind(body.kind)) {
     throw hostedOnboardingError({
       code: "SENSITIVE_ACTION_KIND_INVALID",
       httpStatus: 400,

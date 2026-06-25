@@ -388,7 +388,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent({ media }) {
     return !hasVoiceMemoMedia(media)
   },
-  supportedResponseMediaKinds: ['image', 'voice_memo'],
+  supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {

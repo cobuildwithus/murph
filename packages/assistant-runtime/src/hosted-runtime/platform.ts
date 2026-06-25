@@ -1,4 +1,8 @@
 import type {
+  HostedActionApprovalRequest,
+  HostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
+import type {
   HostedAssistantDeliveryRecord,
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -374,6 +378,12 @@ export interface HostedRuntimeLatencyTracePort {
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
+export interface HostedRuntimeActionApprovalPort {
+  request(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalResult>;
+}
+
 export interface HostedRuntimeVaultSharePort {
   deliver(
     request: HostedVaultShareDeliverRequest,
@@ -381,6 +391,7 @@ export interface HostedRuntimeVaultSharePort {
 }
 
 export interface HostedRuntimePlatform {
+  actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;

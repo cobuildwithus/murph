@@ -87,6 +87,11 @@ describe("assistant family plan tool", () => {
         kind: "failed",
         source: "model",
       }),
+      sendVaultFile: vi.fn(async () => ({
+        filename: "unused.pdf",
+        status: "pending" as const,
+      })),
+      vaultFileSendAvailable: false,
     };
 
     const result = await executeMurphDynamicToolRequest({
@@ -183,6 +188,11 @@ describe("assistant family plan tool", () => {
         kind: "failed",
         source: "model",
       }),
+      sendVaultFile: vi.fn(async () => ({
+        filename: "unused.pdf",
+        status: "pending" as const,
+      })),
+      vaultFileSendAvailable: false,
     };
 
     const result = await executeMurphDynamicToolRequest({
