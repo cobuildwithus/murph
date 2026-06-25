@@ -732,7 +732,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         parts: messageEvent.data.message.parts,
         service: messageEvent.data.service ?? null,
       }),
-      threadIsDirect: !isHostedLinqGroupChat(messageEvent),
+      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
       ...(messageEvent.data.message.reply_to?.message_id === undefined
         ? {}
         : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
