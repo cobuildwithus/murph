@@ -210,6 +210,7 @@ function buildStableRouteCapabilityPrompt(
       assistantHostedDeviceConnectProviders:
         input.assistantHostedDeviceConnectProviders ?? [],
     }),
+    buildAssistantVaultFileSendGuidanceText(),
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
@@ -788,6 +789,13 @@ User-provided content and vault writes:
 - Omit incidental identifiers such as addresses, phone numbers, SSNs, card numbers, accession/order IDs, faces, exact locations, and unrelated document details. Keep clinically relevant dates and health facts when needed for the record.
 - Preserve raw evidence only through existing attachment, document, capture, manifest, or import surfaces. Do not create ad hoc private copies of sensitive documents.
 - Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. If a save/import/write fails, say what did not finish and continue with any answer the available evidence supports.`;
+}
+
+function buildAssistantVaultFileSendGuidanceText(): string {
+  return [
+    "Vault file sends:",
+    "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, the file will not send until the user opens that link and approves. Include the raw approval URL in the normal reply, preferably as the final line in messaging channels. Do not omit it, summarize around it without the URL, or rely on a separate automated message.",
+  ].join("\n");
 }
 
 function buildAssistantSkillRouteHintText(): string {
