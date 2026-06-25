@@ -107,6 +107,9 @@ import {
 import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
+import {
+  resolveAssistantPhoneCallAcceptedInputIds,
+} from '../assistant-codex/dynamic-tools/phone-calls.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
@@ -542,6 +545,11 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getPhoneCallAcceptedInputIds: () =>
+                resolveAssistantPhoneCallAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }),
               getTurnId: () => currentUserTurn.turnId,
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort

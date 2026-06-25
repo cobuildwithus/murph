@@ -42,6 +42,7 @@ export interface AssistantHostedToolContext {
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
   currentHostedToolRequestKeyScope(): AssistantHostedToolRequestKeyScope
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
@@ -58,6 +59,7 @@ export function createAssistantHostedToolContext(input: {
   computerToolsAvailable?: boolean
   getAcceptedInputIds?: () => readonly string[]
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getPhoneCallAcceptedInputIds?: () => readonly string[]
   getTurnId?: () => string
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
@@ -67,6 +69,20 @@ export function createAssistantHostedToolContext(input: {
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
     messageInput: input.messageInput,
     session: input.session,
+  }
+  const buildRequestKeyScope = (
+    acceptedInputIds: readonly string[],
+  ): AssistantHostedToolRequestKeyScope => {
+    const deliveryContext = readDeliveryContext()
+    const context = deliveryContext.messageInput.hostedDeliveryIdempotency
+    return {
+      assistantTurnOrdinal: String(context?.assistantTurnOrdinal ?? 'unscoped'),
+      acceptedInputIds: [...acceptedInputIds],
+      conversationId: context?.conversationId ?? null,
+      inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],
+      recipientKey: context?.recipientKey ?? null,
+      turnId: input.getTurnId?.() ?? 'unscoped',
+    }
   }
 
   return {
@@ -87,17 +103,13 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
-    currentHostedToolRequestKeyScope: () => {
-      const deliveryContext = readDeliveryContext()
-      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
-      return {
-        assistantTurnOrdinal: String(context?.assistantTurnOrdinal ?? 'unscoped'),
-        acceptedInputIds: [...(input.getAcceptedInputIds?.() ?? [])],
-        conversationId: context?.conversationId ?? null,
-        inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],
-        recipientKey: context?.recipientKey ?? null,
-        turnId: input.getTurnId?.() ?? 'unscoped',
-      }
+    currentHostedToolRequestKeyScope: () =>
+      buildRequestKeyScope(input.getAcceptedInputIds?.() ?? []),
+    currentPhoneCallToolRequestKeyScope: () => {
+      const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
+      return acceptedInputIds.length > 0
+        ? buildRequestKeyScope(acceptedInputIds)
+        : null
     },
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

@@ -1329,12 +1329,21 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
+      const requestKeyScope =
+        hostedToolContext.currentPhoneCallToolRequestKeyScope?.() ?? null
+      if (!requestKeyScope) {
+        return toolTextResult(
+          false,
+          'phone calling requires user-approved manual input for this turn',
+        )
+      }
+
       try {
         const result = await phoneCalls.start({
           brief: input.request.brief,
           requestKey: createPhoneCallRequestKey({
             brief: input.request.brief,
-            scope: hostedToolContext.currentHostedToolRequestKeyScope(),
+            scope: requestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,

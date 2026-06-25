@@ -335,6 +335,30 @@ describe("Retell phone-call result handling", () => {
 });
 
 describe("consultPhoneCall", () => {
+  it("continues with information explicitly approved in shareable facts", async () => {
+    const transferNumberResolver = vi.fn(async () => {
+      throw new Error("transfer lookup should not be needed for approved facts");
+    });
+
+    await expect(consultPhoneCall({
+      call: {
+        brief: VALID_BRIEF,
+        id: "hpc_123",
+        memberId: "member_123",
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      memberId: "member_123",
+      question: "They asked for the callback phone number. What should I say?",
+      transcript: "",
+      transferNumberResolver,
+    })).resolves.toEqual({
+      answer: "Use this approved call-brief fact when relevant: callback number: +12125550111",
+      directive: "continue",
+    });
+    expect(transferNumberResolver).not.toHaveBeenCalled();
+  });
+
   it("fails closed instead of transferring when the brief disallows transfer", async () => {
     await expect(consultPhoneCall({
       call: {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   HostedPhoneCallBrief,
@@ -10,9 +10,12 @@ import {
   resolveAssistantPhoneCallAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
+  executeMurphDynamicToolRequest,
+  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
+  AssistantHostedToolContext,
   AssistantHostedToolRequestKeyScope,
 } from "../src/assistant/hosted-tool-context.js";
 
@@ -126,4 +129,120 @@ describe("assistant phone calls", () => {
       },
     })).toThrow("accepted user input");
   });
+
+  it("fails closed when a hidden phone-call request has transport but no execution authority", async () => {
+    const start = vi.fn();
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentPhoneCallToolRequestKeyScope: () => null,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(result.rpcResult).toMatchObject({
+      success: false,
+    });
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "user-approved manual input",
+    );
+  });
+
+  it("derives phone-call request keys from the eligible phone-call input set", async () => {
+    const broadScope: AssistantHostedToolRequestKeyScope = {
+      ...BASE_SCOPE,
+      acceptedInputIds: ["system_input"],
+    };
+    const phoneCallScope: AssistantHostedToolRequestKeyScope = {
+      ...BASE_SCOPE,
+      acceptedInputIds: ["manual_phone_call_input"],
+    };
+    const expectedRequestKey = createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: phoneCallScope,
+    });
+    const start = vi.fn(async (input) => {
+      expect(input).toEqual({
+        brief: BASE_BRIEF,
+        requestKey: expectedRequestKey,
+      });
+      return {
+        phoneCallId: "hpc_123",
+        status: "calling" as const,
+      };
+    });
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentHostedToolRequestKeyScope: () => broadScope,
+        currentPhoneCallToolRequestKeyScope: () => phoneCallScope,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult).toMatchObject({
+      success: true,
+    });
+    expect(result.rpcResult.contentItems[0]?.text).toContain("phone call calling: hpc_123");
+  });
 });
+
+function dynamicToolCall(input: {
+  argumentsValue: unknown;
+  tool: string;
+}): Record<string, unknown> {
+  return {
+    method: "item/tool/call",
+    params: {
+      arguments: input.argumentsValue,
+      namespace: "murph",
+      tool: input.tool,
+    },
+  };
+}
+
+function createHostedToolContext(input: {
+  currentHostedToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope;
+  currentPhoneCallToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
+  phoneCalls?: AssistantHostedToolContext["phoneCalls"];
+}): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentHostedToolRequestKeyScope:
+      input.currentHostedToolRequestKeyScope ?? (() => BASE_SCOPE),
+    currentPhoneCallToolRequestKeyScope: input.currentPhoneCallToolRequestKeyScope,
+    phoneCalls: input.phoneCalls ?? null,
+    sendVaultFile: vi.fn(async () => {
+      throw new Error("Vault-file sending is unavailable for this turn.");
+    }),
+    vaultFileSendAvailable: false,
+  };
+}
