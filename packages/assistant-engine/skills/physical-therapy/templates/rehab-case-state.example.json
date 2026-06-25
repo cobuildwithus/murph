@@ -1,0 +1,102 @@
+{
+  "schema_version": "1.1.0",
+  "episode_id": "example-episode-001",
+  "status": "intake",
+  "opened_at": "2026-06-25",
+  "last_reviewed_at": "2026-06-25",
+  "scope": {
+    "population": "adult with a stable non-postoperative musculoskeletal complaint",
+    "pathway": "undetermined",
+    "out_of_scope_reasons": []
+  },
+  "context_reuse": {
+    "retrieved_at": "2026-06-25T12:00:00Z",
+    "related_episode_ids": [
+      "example-prior-episode-001"
+    ],
+    "facts_used": [
+      {
+        "statement": "The user previously chose a 30-minute walking goal.",
+        "source": "vault-user",
+        "recorded_at": "2026-06-10T15:00:00Z",
+        "freshness": "historical-stable",
+        "decision_use": "reuse the goal without asking again"
+      }
+    ],
+    "conflicts": [],
+    "decision_changing_unknowns": [
+      "whether the current episode followed a new injury or is the same gradual pattern"
+    ],
+    "last_question_asked": "Did this begin after a new injury, or is it the same gradual pattern?"
+  },
+  "goal": {
+    "target_activity": "walk for 30 minutes at a normal pace",
+    "desired_outcome": "complete the walk without changing gait and be no worse the next morning",
+    "priority": "primary",
+    "time_constraint": null
+  },
+  "presentation": {
+    "user_label": null,
+    "primary_location": "user-described painful area",
+    "side": "unknown",
+    "distribution": "not yet clarified",
+    "qualities": [],
+    "onset": "not yet clarified",
+    "mechanism": "not yet clarified",
+    "time_course": "unknown",
+    "stability": "unknown",
+    "irritability": "unknown",
+    "aggravating_factors": [],
+    "easing_factors": [],
+    "dose_threshold": null,
+    "later_day_response": null,
+    "next_morning_response": null,
+    "associated_features": [],
+    "load_context_changes": [],
+    "health_context": []
+  },
+  "safety": {
+    "care_level": "undetermined",
+    "positive_findings": [],
+    "relevant_negative_findings": [],
+    "reasoning_summary": "No positive urgent cue is present in current context; one pattern-changing onset detail remains unknown.",
+    "instructions_given": "Comfortable daily movement may continue; no specific loading plan until the onset detail is clarified.",
+    "last_screened_at": "2026-06-25T12:00:00Z"
+  },
+  "baselines": [
+    {
+      "id": "target-task-ability",
+      "domain": "function",
+      "measure": "ability to complete the target walk",
+      "value": null,
+      "unit_or_scale": "0-10 ability rating",
+      "conditions": "normal footwear and usual route",
+      "source": "user-reported"
+    }
+  ],
+  "working_hypotheses": [],
+  "plan": {
+    "education_summary": "Pending safety screen and symptom clarification.",
+    "load_decision": "No change prescribed yet.",
+    "items": [],
+    "traffic_light_rules": {
+      "green": [],
+      "yellow": [],
+      "red": []
+    },
+    "review_trigger": "After minimum intake is complete.",
+    "off_ramp": [],
+    "catalog_gaps": []
+  },
+  "follow_ups": [],
+  "external_clinician_context": {
+    "diagnoses": [],
+    "restrictions_or_protocols": []
+  },
+  "privacy": {
+    "classification": "private-health",
+    "minimum_necessary": true,
+    "media_consent": "not-requested",
+    "retention_note": "Store only plan-relevant health information under product retention controls."
+  }
+}
