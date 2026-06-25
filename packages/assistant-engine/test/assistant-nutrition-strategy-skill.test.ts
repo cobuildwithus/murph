@@ -49,6 +49,12 @@ describe('assistant nutrition strategy skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md',
     )
     expect(prompt).toContain(
+      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+    )
+    expect(prompt).toContain(
+      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
+    )
+    expect(prompt).toContain(
       'food-journal: Use when the user logs meals or asks Murph to notice patterns',
     )
   })
