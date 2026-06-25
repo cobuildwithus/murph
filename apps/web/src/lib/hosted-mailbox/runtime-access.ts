@@ -1,3 +1,8 @@
+import type {
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
+
 import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
@@ -6,20 +11,23 @@ import {
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 
-interface HostedRuntimeMailboxActiveAccessOptions {
+type HostedRuntimeActiveAccessClient = PrismaClient | Prisma.TransactionClient;
+
+interface HostedRuntimeActiveAccessOptions {
   code?: string;
   message?: string;
+  prisma?: HostedRuntimeActiveAccessClient;
 }
 
-// Shared fail-closed gate for the internal hosted-mailbox runtime routes
-// (fetch, payload fetch, and consume): only members with active hosted access
-// and, for thread containers, active owner authority may touch mailbox runtime
-// surfaces.
-export async function requireHostedRuntimeMailboxActiveAccess(
+// Shared fail-closed gate for runtime surfaces: only members with active hosted
+// access and, for thread containers, active owner authority may wake or touch
+// runtime state.
+export async function requireHostedRuntimeActiveAccess(
   userId: string,
-  options: HostedRuntimeMailboxActiveAccessOptions = {},
+  options: HostedRuntimeActiveAccessOptions = {},
 ): Promise<void> {
-  const member = await getPrisma().hostedMember.findUnique({
+  const prisma = options.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
     where: {
       id: userId,
     },
@@ -55,4 +63,11 @@ export async function requireHostedRuntimeMailboxActiveAccess(
     httpStatus: 403,
     message: options.message ?? "Hosted runtime mailbox access is not active.",
   });
+}
+
+export async function requireHostedRuntimeMailboxActiveAccess(
+  userId: string,
+  options: HostedRuntimeActiveAccessOptions = {},
+): Promise<void> {
+  await requireHostedRuntimeActiveAccess(userId, options);
 }

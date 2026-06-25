@@ -93,6 +93,8 @@ type HostedLinqExistingMemberMatch =
   | "pending-contact"
   | "phone-identity"
   | "verified-email";
+type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInboundDailyState>>;
+type HostedLinqUsageGate = Awaited<ReturnType<typeof checkHostedAiUsageGate>>;
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
@@ -358,115 +360,28 @@ export async function planHostedOnboardingLinqWebhook(input: {
       prisma: input.prisma,
     });
 
-    const buildUsageGateDeniedPlan = async (
-      deniedUsageGate: Extract<typeof usageGate, { allowed: false }>,
-    ) => {
-      if (!deniedUsageGate.userNotice) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-          buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            existingMemberActive: true,
-            existingMemberMatch,
-            reason: "ai-usage-gate-denied",
-            routeStage: "active-member-ai-usage-denied",
-          }),
-        );
-      }
-
-      let usageLimitNoticeClaim: {
-        periodStart: Date;
-        sentAt: Date;
-      } | null = null;
-      if (deniedUsageGate.reason === "ai_usage_limit_exceeded") {
-        const usageLimitNoticeClaimSentAt = new Date();
-        const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
-          memberId: existingMember.id,
-          periodStart: deniedUsageGate.periodStart,
-          prisma: input.prisma,
-          sentAt: usageLimitNoticeClaimSentAt,
-        });
-
-        if (!claimedUsageLimitNotice) {
-          return logHostedLinqWebhookPlannerDecisionAndReturn(
-            buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-            buildHostedLinqWebhookPlannerDetails(input.event, context, {
-              existingMemberActive: true,
-              existingMemberMatch,
-              reason: "ai-usage-gate-denied",
-              routeStage: "active-member-ai-usage-denied",
-            }),
-          );
-        }
-
-        usageLimitNoticeClaim = {
-          periodStart: deniedUsageGate.periodStart,
-          sentAt: usageLimitNoticeClaimSentAt,
-        };
-      }
-
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildAiUsageQuotaReplyResponse({
-          chatId: summary.chatId,
-          claimToken: usageLimitNoticeClaim
-            ? {
-                periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
-                sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
-              }
-            : null,
-          memberId: existingMember.id,
-          message: deniedUsageGate.userNotice.message,
-          messageId: summary.messageId,
-          noticeCode: deniedUsageGate.userNotice.code,
-          occurredAt,
-          sourceEventId: input.event.event_id,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
-          existingMemberMatch,
-          reason: "sent-ai-usage-quota-reply",
-          routeStage: "active-member-ai-usage-reply",
-        }),
-      );
-    };
-
-    if (!usageGate.allowed && usageGate.reason === "ai_usage_limit_exceeded") {
-      return buildUsageGateDeniedPlan(usageGate);
-    }
-
-    if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
-      if (dailyState.quotaReplySentAt) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildIgnoredLinqWebhookPlan("daily-quota-reached"),
-          buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            dailyInboundCount: dailyState.inboundCount,
-            existingMemberActive: true,
-            existingMemberMatch,
-            reason: "daily-quota-reached",
-            routeStage: "active-member-daily-quota-reached",
-          }),
-        );
-      }
-
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildQuotaReplyResponse({
-          chatId: summary.chatId,
-          memberId: existingMember.id,
-          messageId: summary.messageId,
-          occurredAt,
-          sourceEventId: input.event.event_id,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          dailyInboundCount: dailyState.inboundCount,
-          existingMemberActive: true,
-          existingMemberMatch,
-          reason: "sent-daily-quota-reply",
-          routeStage: "active-member-daily-quota-reply",
-        }),
-      );
-    }
-
-    if (!usageGate.allowed) {
-      return buildUsageGateDeniedPlan(usageGate);
+    const admissionPlan = await planHostedLinqInboundAdmissionDenied({
+      context,
+      dailyState,
+      event: input.event,
+      logDetails: {
+        existingMemberActive: true,
+        existingMemberMatch,
+        homeRoutePresent: Boolean(homeRoute?.linqChatId),
+        routeDecision: routeDecision.kind,
+      },
+      memberId: existingMember.id,
+      prisma: input.prisma,
+      routeStages: {
+        aiUsageDenied: "active-member-ai-usage-denied",
+        aiUsageReply: "active-member-ai-usage-reply",
+        dailyQuotaReached: "active-member-daily-quota-reached",
+        dailyQuotaReply: "active-member-daily-quota-reply",
+      },
+      usageGate,
+    });
+    if (admissionPlan) {
+      return admissionPlan;
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
@@ -756,17 +671,26 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     prisma: input.prisma,
   });
 
-  if (!usageGate.allowed) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: true,
-        existingMemberMatch: "none",
-        reason: "ai-usage-gate-denied",
-        routeStage: "thread-route-ai-usage-denied",
-      }),
-    );
+  const admissionPlan = await planHostedLinqInboundAdmissionDenied({
+    context: input.context,
+    dailyState,
+    event: input.event,
+    logDetails: {
+      existingMemberActive: true,
+      existingMemberMatch: "none",
+    },
+    memberId: input.route.containerMemberId,
+    prisma: input.prisma,
+    routeStages: {
+      aiUsageDenied: "thread-route-ai-usage-denied",
+      aiUsageReply: "thread-route-ai-usage-reply",
+      dailyQuotaReached: "thread-route-daily-quota-reached",
+      dailyQuotaReply: "thread-route-daily-quota-reply",
+    },
+    usageGate,
+  });
+  if (admissionPlan) {
+    return admissionPlan;
   }
 
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
@@ -820,6 +744,133 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       routeStage: "thread-route-appended",
     }),
   );
+}
+
+async function planHostedLinqInboundAdmissionDenied(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  dailyState: HostedLinqDailyState;
+  event: HostedLinqWebhookEvent;
+  logDetails: HostedOnboardingStructuredLogDetails;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  routeStages: {
+    aiUsageDenied: string;
+    aiUsageReply: string;
+    dailyQuotaReached: string;
+    dailyQuotaReply: string;
+  };
+  usageGate: HostedLinqUsageGate;
+}): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const buildUsageGateDeniedPlan = async (
+    deniedUsageGate: Extract<HostedLinqUsageGate, { allowed: false }>,
+  ) => {
+    if (!deniedUsageGate.userNotice) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          ...input.logDetails,
+          reason: "ai-usage-gate-denied",
+          routeStage: input.routeStages.aiUsageDenied,
+        }),
+      );
+    }
+
+    let usageLimitNoticeClaim: {
+      periodStart: Date;
+      sentAt: Date;
+    } | null = null;
+    if (deniedUsageGate.reason === "ai_usage_limit_exceeded") {
+      const usageLimitNoticeClaimSentAt = new Date();
+      const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
+        memberId: input.memberId,
+        periodStart: deniedUsageGate.periodStart,
+        prisma: input.prisma,
+        sentAt: usageLimitNoticeClaimSentAt,
+      });
+
+      if (!claimedUsageLimitNotice) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+            ...input.logDetails,
+            reason: "ai-usage-gate-denied",
+            routeStage: input.routeStages.aiUsageDenied,
+          }),
+        );
+      }
+
+      usageLimitNoticeClaim = {
+        periodStart: deniedUsageGate.periodStart,
+        sentAt: usageLimitNoticeClaimSentAt,
+      };
+    }
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildAiUsageQuotaReplyResponse({
+        chatId: input.context.summary.chatId,
+        claimToken: usageLimitNoticeClaim
+          ? {
+              periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
+              sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
+            }
+          : null,
+        memberId: input.memberId,
+        message: deniedUsageGate.userNotice.message,
+        messageId: input.context.summary.messageId,
+        noticeCode: deniedUsageGate.userNotice.code,
+        occurredAt: input.context.occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        ...input.logDetails,
+        reason: "sent-ai-usage-quota-reply",
+        routeStage: input.routeStages.aiUsageReply,
+      }),
+    );
+  };
+
+  if (
+    !input.usageGate.allowed
+    && input.usageGate.reason === "ai_usage_limit_exceeded"
+  ) {
+    return buildUsageGateDeniedPlan(input.usageGate);
+  }
+
+  if (input.dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+    if (input.dailyState.quotaReplySentAt) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("daily-quota-reached"),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          ...input.logDetails,
+          dailyInboundCount: input.dailyState.inboundCount,
+          reason: "daily-quota-reached",
+          routeStage: input.routeStages.dailyQuotaReached,
+        }),
+      );
+    }
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildQuotaReplyResponse({
+        chatId: input.context.summary.chatId,
+        memberId: input.memberId,
+        messageId: input.context.summary.messageId,
+        occurredAt: input.context.occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        ...input.logDetails,
+        dailyInboundCount: input.dailyState.inboundCount,
+        reason: "sent-daily-quota-reply",
+        routeStage: input.routeStages.dailyQuotaReply,
+      }),
+    );
+  }
+
+  if (!input.usageGate.allowed) {
+    return buildUsageGateDeniedPlan(input.usageGate);
+  }
+
+  return null;
 }
 
 function resolveHostedLinqExistingMemberMatch(input: {

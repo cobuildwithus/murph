@@ -21,14 +21,11 @@ import {
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  requireHostedRuntimeActiveAccess,
+} from "../hosted-mailbox/runtime-access";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
-import {
-  readHostedMemberCoreState,
-} from "../hosted-onboarding/hosted-member-store";
 import {
   ensureHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -441,14 +438,11 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
   userId: string,
   prisma = getPrisma(),
 ): Promise<HostedWorkspaceRecord> {
-  const member = await readHostedMemberCoreState({
-    memberId: userId,
+  await requireHostedRuntimeActiveAccess(userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
     prisma,
   });
-
-  if (!member || !hasHostedMemberActiveAccess(member)) {
-    throw new Error("Hosted runtime user is not active.");
-  }
 
   return await ensureHostedWorkspace({
     prisma,

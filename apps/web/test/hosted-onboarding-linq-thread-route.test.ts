@@ -23,6 +23,7 @@ vi.mock("../src/lib/hosted-execution/usage-allowance", async (importOriginal) =>
   return {
     ...actual,
     checkHostedAiUsageGate: vi.fn(),
+    claimHostedAiUsageLimitNotice: vi.fn(),
   };
 });
 
@@ -255,6 +256,104 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("uses the existing Linq daily quota gate for routed thread traffic", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: linqDailyState.HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-daily-quota-reply",
+    });
+    expect(plan.desiredSideEffects).toHaveLength(1);
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      chatId: "chat_group_123",
+      memberId: "member_thread_container_123",
+      template: "daily_quota",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("uses the existing AI usage notice behavior for routed thread traffic", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const periodStart = new Date("2026-06-01T00:00:00.000Z");
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: false,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart,
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      retryAfter: new Date("2026-07-01T00:00:00.000Z"),
+      spentUsdMicros: 4_500_000n,
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "Usage limit reached.",
+      },
+    });
+    vi.mocked(usageAllowance.claimHostedAiUsageLimitNotice).mockResolvedValueOnce(true);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-ai-usage-quota-reply",
+    });
+    expect(plan.desiredSideEffects).toHaveLength(1);
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      chatId: "chat_group_123",
+      memberId: "member_thread_container_123",
+      message: "Usage limit reached.",
+      noticeCode: "edge_usage_limit_reached",
+      template: "ai_usage_quota",
+    });
+    expect(usageAllowance.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_thread_container_123",
+      periodStart,
+      prisma,
+      sentAt: expect.any(Date),
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("still ignores unbound Linq group threads", async () => {
