@@ -149,7 +149,6 @@ function createHostedToolContext(input: {
     currentHostedMailboxItemIds: () => [],
     currentHostedToolRequestKeyScope: () => ({
       acceptedInputIds: ['input_test'],
-      assistantTurnOrdinal: '1',
       conversationId: null,
       inboundMailboxItemIds: [],
       recipientKey: null,

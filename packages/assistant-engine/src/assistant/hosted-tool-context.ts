@@ -18,7 +18,6 @@ export interface AssistantHostedDeliveryContext {
 }
 
 export interface AssistantHostedToolRequestKeyScope {
-  assistantTurnOrdinal: string
   acceptedInputIds: readonly string[]
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
@@ -74,7 +73,6 @@ export function createAssistantHostedToolContext(input: {
     const deliveryContext = readDeliveryContext()
     const context = deliveryContext.messageInput.hostedDeliveryIdempotency
     return {
-      assistantTurnOrdinal: String(context?.assistantTurnOrdinal ?? 'unscoped'),
       acceptedInputIds: [...acceptedInputIds],
       conversationId: context?.conversationId ?? null,
       inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],

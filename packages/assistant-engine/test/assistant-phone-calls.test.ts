@@ -39,7 +39,6 @@ const BASE_BRIEF: HostedPhoneCallBrief = {
 
 const BASE_SCOPE: AssistantHostedToolRequestKeyScope = {
   acceptedInputIds: ["assistant_input_1"],
-  assistantTurnOrdinal: "7",
   conversationId: "conversation_1",
   inboundMailboxItemIds: ["mailbox_item_1"],
   recipientKey: "recipient_1",
@@ -119,6 +118,12 @@ describe("assistant phone calls", () => {
       ...BASE_SCOPE,
       turnId: "runtime_turn_retry",
     };
+    const runtimeOrdinalOnlyScope: AssistantHostedToolRequestKeyScope & {
+      assistantTurnOrdinal: string;
+    } = {
+      ...BASE_SCOPE,
+      assistantTurnOrdinal: "runtime_turn_retry_ordinal",
+    };
 
     expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
     expect(reworded).not.toBe(first);
@@ -127,6 +132,10 @@ describe("assistant phone calls", () => {
     expect(createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: runtimeTurnOnlyScope,
+    })).toBe(first);
+    expect(createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: runtimeOrdinalOnlyScope,
     })).toBe(first);
     expect(() => createPhoneCallRequestKey({
       brief: BASE_BRIEF,

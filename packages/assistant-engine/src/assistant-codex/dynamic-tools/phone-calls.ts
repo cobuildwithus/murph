@@ -82,7 +82,6 @@ export function createPhoneCallRequestKey(input: {
   const digest = createHash('sha256')
     .update(stableJson({
       acceptedInputIds: [...input.scope.acceptedInputIds],
-      assistantTurnOrdinal: input.scope.assistantTurnOrdinal,
       brief: input.brief,
       conversationId: input.scope.conversationId,
       inboundMailboxItemIds: [...input.scope.inboundMailboxItemIds],

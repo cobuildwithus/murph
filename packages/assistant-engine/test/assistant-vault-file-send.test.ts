@@ -190,7 +190,6 @@ describe('assistant vault-file send', () => {
       currentHostedMailboxItemIds: () => [],
       currentHostedToolRequestKeyScope: () => ({
         acceptedInputIds: ['input_test'],
-        assistantTurnOrdinal: '1',
         conversationId: null,
         inboundMailboxItemIds: [],
         recipientKey: null,
