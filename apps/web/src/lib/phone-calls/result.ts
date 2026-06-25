@@ -405,7 +405,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function assertRetellStorageMode(call: RetellCallPayload): void {
   const storageMode = call.data_storage_setting?.trim().toLowerCase();
-  if (!storageMode || storageMode === "basic_attributes_only") {
+  if (storageMode === "basic_attributes_only") {
     return;
   }
 
@@ -414,10 +414,12 @@ function assertRetellStorageMode(call: RetellCallPayload): void {
     details: {
       code: "retell_storage_mode_mismatch",
       operationName: "retell.webhook.call_analyzed",
-      type: storageMode,
+      type: storageMode || "missing",
     },
     httpStatus: 409,
-    message: "Retell phone call storage mode mismatch.",
+    message: storageMode
+      ? "Retell phone call storage mode mismatch."
+      : "Retell phone call storage mode is required.",
     retryable: true,
   });
 }

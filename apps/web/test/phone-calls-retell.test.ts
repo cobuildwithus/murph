@@ -414,6 +414,38 @@ describe("Retell phone-call result handling", () => {
     expect(store.appendResultNotificationCalls).toEqual([]);
   });
 
+  it("rejects call_analyzed before persistence when Retell omits storage mode", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+      },
+      prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "RETELL_STORAGE_MODE_MISMATCH",
+      details: {
+        code: "retell_storage_mode_mismatch",
+        operationName: "retell.webhook.call_analyzed",
+        type: "missing",
+      },
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(store.findUniqueCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+  });
+
   it("recovers call_analyzed by Murph metadata when the provider id write was lost", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
@@ -432,6 +464,7 @@ describe("Retell phone-call result handling", () => {
           },
         },
         call_id: "retell_started",
+        data_storage_setting: "basic_attributes_only",
         metadata: {
           murph_phone_call_id: "hpc_123",
         },
@@ -477,6 +510,7 @@ describe("Retell phone-call result handling", () => {
         },
       },
       call_id: "retell_call_123",
+      data_storage_setting: "basic_attributes_only",
     };
 
     await expect(handleRetellCallAnalyzed({
@@ -515,6 +549,7 @@ describe("Retell phone-call result handling", () => {
           },
         },
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
       },
       prisma: store.prisma,
     })).rejects.toThrow("result notification route unavailable");
