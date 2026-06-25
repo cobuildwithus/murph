@@ -1707,6 +1707,10 @@ function createHostedToolContext(): AssistantHostedToolContext {
       kind: 'sent' as const,
       source: 'model' as const,
     })),
+    sendVaultFile: vi.fn(async () => {
+      throw new Error('Vault-file sending is unavailable for this turn.')
+    }),
+    vaultFileSendAvailable: false,
   }
 }
 

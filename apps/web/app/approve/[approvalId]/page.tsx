@@ -21,6 +21,10 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
 import { cn } from "@/src/lib/utils";
 
+type TerminalActionApprovalView = HostedActionApprovalView & {
+  status: Exclude<HostedActionApprovalStatus, "pending">;
+};
+
 export default async function ActionApprovalPage({
   params,
 }: {
@@ -31,23 +35,14 @@ export default async function ActionApprovalPage({
     return <ActionApprovalAuthRequiredState />;
   }
 
+  const { approvalId: rawApprovalId } = await params;
+  let approval: HostedActionApprovalView;
   try {
-    const { approvalId: rawApprovalId } = await params;
-    const approval = await readHostedActionApproval({
+    approval = await readHostedActionApproval({
       approvalId: requireHostedActionApprovalId(rawApprovalId),
       memberId: session.member.id,
       prisma: getPrisma(),
     });
-
-    if (approval.status === "pending") {
-      return (
-        <HostedPrivyBoundary>
-          <ActionApprovalCard approval={approval} />
-        </HostedPrivyBoundary>
-      );
-    }
-
-    return <ActionApprovalTerminalState approval={approval} />;
   } catch (error) {
     if (
       isHostedOnboardingError(error)
@@ -57,14 +52,22 @@ export default async function ActionApprovalPage({
     }
     throw error;
   }
+
+  if (!isTerminalActionApproval(approval)) {
+    return (
+      <HostedPrivyBoundary>
+        <ActionApprovalCard approval={approval} />
+      </HostedPrivyBoundary>
+    );
+  }
+
+  return <ActionApprovalTerminalState approval={approval} />;
 }
 
 async function ActionApprovalTerminalState({
   approval,
 }: {
-  approval: HostedActionApprovalView & {
-    status: Exclude<HostedActionApprovalStatus, "pending">;
-  };
+  approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
   const contactOptions = await resolveHostedMurphContactOptions({
@@ -157,6 +160,12 @@ function terminalContent(
         title: "This request expired",
       };
   }
+}
+
+function isTerminalActionApproval(
+  approval: HostedActionApprovalView,
+): approval is TerminalActionApprovalView {
+  return approval.status !== "pending";
 }
 
 async function readApprovalSessionOrAuthState() {

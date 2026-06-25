@@ -425,7 +425,7 @@ model HostedSensitiveActionChallenge {
 
   @@index([memberId, expiresAt])
   @@index([expiresAt])
-  @@index([memberId, approvalStatus, expiresAt], map: "hosted_sensitive_action_challenge_member_id_approval_status_expires_at_idx")
+  @@index([memberId, approvalStatus, expiresAt], map: "hosted_sensitive_action_approval_member_status_due_idx")
   @@map("hosted_sensitive_action_challenge")
 }
 

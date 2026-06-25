@@ -15,7 +15,7 @@ ALTER TABLE "hosted_sensitive_action_challenge"
 
 CREATE UNIQUE INDEX "hosted_sensitive_action_challenge_approval_key_key"
   ON "hosted_sensitive_action_challenge"("approval_key");
-CREATE INDEX "hosted_sensitive_action_challenge_member_id_approval_status_expires_at_idx"
+CREATE INDEX "hosted_sensitive_action_approval_member_status_due_idx"
   ON "hosted_sensitive_action_challenge"("member_id", "approval_status", "expires_at");
 
 ALTER TABLE "hosted_sensitive_action_challenge"
