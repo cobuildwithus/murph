@@ -50,6 +50,12 @@ export const ASSISTANT_SKILLS = [
       'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
   },
   {
+    slug: 'sleep-recovery-readiness',
+    name: 'sleep-recovery-readiness',
+    triggerHint:
+      'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:
