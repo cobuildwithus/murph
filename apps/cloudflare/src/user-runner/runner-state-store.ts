@@ -115,6 +115,14 @@ export type RunnerProviderEgressCredentialValidationResult =
       workspaceVersion: string | null;
     };
 
+const RUNNER_PROVIDER_EGRESS_CREDENTIAL_PROVIDER_KINDS = new Set<string>([
+  "exa",
+  "mapbox",
+  "murph_data_api",
+  "openai",
+  "workers_ai_transcribe",
+]);
+
 export class RunnerStateStore {
   private userId: string | null = null;
 
@@ -558,7 +566,10 @@ export class RunnerStateStore {
     userId: string;
   }): Promise<RunnerProviderEgressCredentialValidationResult> {
     const providerKind = normalizeProviderKindOrNull(input.providerKind);
-    if (!providerKind || providerKind !== "openai") {
+    if (
+      !providerKind ||
+      !RUNNER_PROVIDER_EGRESS_CREDENTIAL_PROVIDER_KINDS.has(providerKind)
+    ) {
       return {
         owns: false,
         reason: "provider_egress_not_allowed",

@@ -333,31 +333,10 @@ const HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS = [
   "write_fence_mismatch",
 ] as const;
 
-// Provider kinds whose tokenless authorization may fall back to the
-// container-identity active-user fence. Membership requires the upstream
-// operation to be either read-only/lookup (no third-party side effect) or
-// already gated by a Worker-owned bounded request shape that cannot be
-// steered into delivery state.
-//
-// Delivery providers (Linq, Telegram, WhatsApp) and ElevenLabs are
-// deliberately excluded: their authorized request matrices mutate
-// third-party messaging state or burn provider credit on caller-supplied
-// payloads, so they must continue to require either exact write-fence
-// headers or a provider-egress token. Those are attached only by the
-// runtime's wrapped fetch, which routes through the outbound-intent
-// journal that owns recipient binding and idempotency.
-//
-// The injected-credential sentinel is a known literal that any
-// in-container child process can reproduce; it is a "this header was set
-// by code that knew the convention" marker, not a capability proof. So
-// membership in this set is the only thing preventing a child process
-// from authorizing side-effecting calls by spoofing the sentinel during a
-// legitimate active turn.
+// Legacy tokenless provider egress through ctx.containerId is intentionally
+// empty. Child/provider calls must carry an explicit provider credential,
+// exact write-fence headers, or a provider-egress token.
 const HOSTED_PROVIDER_KINDS_WITH_ACTIVE_USER_FENCE_FALLBACK = new Set<string>([
-  "murph_data_api",
-  "workers_ai_transcribe",
-  "exa",
-  "mapbox",
 ]);
 type HostedActiveWriteFenceRejectReason =
   typeof HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS[number];
@@ -736,12 +715,21 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (!upstreamBaseUrl) {
     return new Response("Hosted data API upstream is not configured.", { status: 500 });
   }
+  const bearerCredential = readBearerCredential(input.request.headers);
+  if (!bearerCredential) {
+    return disallowedProviderEgress();
+  }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: bearerCredential,
+    env: input.env,
     providerKind: "murph_data_api",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -921,10 +909,21 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
-    providerKind: "workers_ai_transcribe",
-  });
+  const providerCredential = readBearerCredential(input.request.headers) ?? "";
+  const authorization = providerCredential
+    ? await authorizeNativeHostedProviderCredential({
+        credential: providerCredential,
+        env: input.env,
+        providerKind: "workers_ai_transcribe",
+        request: input.request,
+      })
+    : await authorizeHostedProviderEgress({
+        ...input,
+        providerKind: "workers_ai_transcribe",
+      });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2562,7 +2561,8 @@ async function maybeHandleExaRequest(input: {
   if (!isAllowedExaRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  if (!hasHeaderCredentialSentinel(input.request.headers, "x-api-key")) {
+  const providerCredential = input.request.headers.get("x-api-key")?.trim() ?? "";
+  if (!providerCredential) {
     return disallowedProviderEgress();
   }
   if (input.url.search || input.url.hash) {
@@ -2570,10 +2570,15 @@ async function maybeHandleExaRequest(input: {
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
     providerKind: "exa",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2675,15 +2680,21 @@ async function maybeHandleMapboxRequest(input: {
   if (!isAllowedMapboxRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  if (!hasQueryCredentialSentinel(input.url, "access_token")) {
+  const providerCredential = input.url.searchParams.get("access_token")?.trim() ?? "";
+  if (!providerCredential) {
     return disallowedProviderEgress();
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
     providerKind: "mapbox",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -3006,10 +3017,6 @@ function readBearerCredential(headers: Headers): string | null {
 
 function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-}
-
-function hasQueryCredentialSentinel(url: URL, name: string): boolean {
-  return url.searchParams.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
 function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
@@ -4435,4 +4442,23 @@ function uniqueProviderHosts(...hosts: string[]): string[] {
 
 function normalizeProviderHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.+$/u, "");
+}
+async function authorizeNativeHostedProviderCredential(input: {
+  credential: string;
+  env: RunnerOutboundEnvironmentSource;
+  providerKind: string;
+  request: Request;
+}): Promise<HostedProviderEgressAuthorization | null> {
+  if (isHostedProviderEgressCredential(input.credential)) {
+    return await authorizeHostedProviderEgressCredential(input);
+  }
+  if (input.credential !== HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
+    return null;
+  }
+  return await authorizeHostedProviderEgress({
+    env: input.env,
+    providerKind: input.providerKind,
+    request: input.request,
+    userId: readHostedRunnerBoundUserId(input.request),
+  });
 }
