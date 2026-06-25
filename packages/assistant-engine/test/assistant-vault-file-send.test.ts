@@ -142,6 +142,76 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('keeps the approved action request stable when a pending file-send intent resolves its target', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-approved-target-',
+    )
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'approved content')
+
+    const requests: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>[] = []
+    const approvalPort = {
+      request: vi.fn(async (request: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>) => {
+        requests.push(request)
+        if (requests.length === 1) {
+          return {
+            approvalId: `haa_${'d'.repeat(32)}`,
+            approvalUrl: 'https://murph.test/approve/haa_test',
+            expiresAt: '2026-06-24T12:15:00.000Z',
+            status: 'pending' as const,
+          }
+        }
+        if (requests[0] && request.actionFingerprint !== requests[0].actionFingerprint) {
+          throw Object.assign(
+            new Error('This action id is already bound to a different sensitive action.'),
+            { code: 'ACTION_APPROVAL_IDENTITY_CONFLICT' },
+          )
+        }
+        return {
+          approvalId: `haa_${'d'.repeat(32)}`,
+          status: 'approved' as const,
+        }
+      }),
+    }
+    const baseRequest = {
+      actionApprovalPort: approvalPort,
+      channel: 'linq',
+      deliveryIdempotencyKey: 'hosted-turn-delivery-target-stable',
+      identityId: 'member_123',
+      ref: 'documents/report.pdf',
+      sessionId: 'session_123',
+      threadId: 'chat_123',
+      threadIsDirect: true,
+      turnId: 'turn_123',
+      vault: vaultRoot,
+    }
+
+    const first = await requestAssistantVaultFileSend(baseRequest)
+    const [queuedIntent] = await listAssistantOutboxIntents(vaultRoot)
+    expect(queuedIntent).toMatchObject({
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      intentId: first.intentId,
+      status: 'awaiting_approval',
+    })
+    const approved = await requestAssistantVaultFileSend(baseRequest)
+    await expect(requestAssistantVaultFileSend({
+      ...baseRequest,
+      bindingDelivery: { kind: 'thread' as const, target: 'chat_123' },
+    })).resolves.toMatchObject({
+      intentId: first.intentId,
+      status: 'approved',
+    })
+
+    expect(approved).toMatchObject({
+      intentId: first.intentId,
+      status: 'approved',
+    })
+    expect(requests).toHaveLength(3)
+    expect(requests[1]).toEqual(requests[0])
+    expect(requests[2]).toEqual(requests[0])
+  })
+
   it('never dispatches an awaiting-approval intent even when forced', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-blocked-',

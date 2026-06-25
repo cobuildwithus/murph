@@ -82,7 +82,7 @@ export async function requestAssistantVaultFileSend(input: {
   })
   const intent = await createAssistantVaultFileSendOutboxIntent({
     actorId: input.actorId ?? null,
-    bindingDelivery: input.bindingDelivery ?? null,
+    bindingDelivery: input.bindingDelivery,
     channel: input.channel ?? null,
     dedupeToken: deliveryIdempotencyKey,
     deliveryIdempotencyKey,
