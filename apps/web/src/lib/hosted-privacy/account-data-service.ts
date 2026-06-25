@@ -208,6 +208,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed; export includes share rows where the member is grantor or destination.",
   },
   {
+    slug: "prisma.hosted_thread_container",
+    label: "Hosted external-thread container marker",
+    deletion: "live-delete",
+    note: "Deletes the marker and monthly usage allowance cap that allow a hosted runtime to receive explicit external-thread routes.",
+  },
+  {
+    slug: "prisma.hosted_thread_route",
+    label: "Hosted external-thread routes",
+    deletion: "live-delete",
+    note: "Deletes channel/thread blind-index routes for thread-container runtimes. Export reports counts and omits raw external thread ids.",
+  },
+  {
     slug: "prisma.device_connection",
     label: "Device provider connections and tokens",
     deletion: "live-delete",
@@ -784,6 +796,8 @@ async function countHostedAccountData(input: {
     hostedConsentEvent,
     hostedConsentGrant,
     hostedVaultShare,
+    hostedThreadContainer,
+    hostedThreadRoute,
     hostedAiUsage,
     hostedAiUsagePeriod,
     hostedProductFeedback,
@@ -822,6 +836,8 @@ async function countHostedAccountData(input: {
     input.prisma.hostedVaultShare.count({
       where: { OR: [{ grantorMemberId: memberId }, { destinationMemberId: memberId }] },
     }),
+    input.prisma.hostedThreadContainer.count({ where: { memberId } }),
+    input.prisma.hostedThreadRoute.count({ where: { containerMemberId: memberId } }),
     input.prisma.hostedAiUsage.count({ where: { memberId } }),
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId } }),
     input.prisma.hostedProductFeedback.count({ where: { memberId } }),
@@ -869,6 +885,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
     "prisma.hosted_member_routing": hostedMemberRouting,
+    "prisma.hosted_thread_container": hostedThreadContainer,
+    "prisma.hosted_thread_route": hostedThreadRoute,
     "prisma.hosted_user_crypto_audit": hostedUserCryptoAudit,
     "prisma.hosted_user_crypto_envelope": hostedUserCryptoEnvelope,
     "prisma.hosted_vault_share": hostedVaultShare,
@@ -912,6 +930,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_thread_route", await input.prisma.hostedThreadRoute.deleteMany({ where: { containerMemberId: memberId } }));
+  record("prisma.hosted_thread_container", await input.prisma.hostedThreadContainer.deleteMany({ where: { memberId } }));
   record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId } }));
   record("prisma.hosted_connected_apps_session", await input.prisma.hostedConnectedAppsSession.deleteMany({ where: { memberId } }));
 

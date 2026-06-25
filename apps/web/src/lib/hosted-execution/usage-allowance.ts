@@ -163,6 +163,10 @@ interface HostedAiUsageAllowanceBillingRef {
   pulseTrialRedeemedAt: Date | null;
 }
 
+interface HostedAiUsageAllowanceThreadContainerRef {
+  monthlyUsageLimitUsdMicros: bigint;
+}
+
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-05-05-openai-flex";
@@ -514,6 +518,11 @@ export async function resolveHostedAiUsageGate(input: {
             pulseTrialRedeemedAt: true,
           },
         },
+        threadContainer: {
+          select: {
+            monthlyUsageLimitUsdMicros: true,
+          },
+        },
         billingStatus: true,
         suspendedAt: true,
       },
@@ -531,6 +540,7 @@ export async function resolveHostedAiUsageGate(input: {
         at: now,
         billingRef: memberState.billingRef,
         memberId: input.memberId,
+        threadContainer: memberState.threadContainer,
       });
     }
 
@@ -581,6 +591,11 @@ export async function readHostedAiUsageGate(input: {
             pulseTrialRedeemedAt: true,
           },
         },
+        threadContainer: {
+          select: {
+            monthlyUsageLimitUsdMicros: true,
+          },
+        },
         billingStatus: true,
         suspendedAt: true,
       },
@@ -598,6 +613,7 @@ export async function readHostedAiUsageGate(input: {
         at: now,
         billingRef: memberState.billingRef,
         memberId: input.memberId,
+        threadContainer: memberState.threadContainer,
       });
     }
 
@@ -605,6 +621,7 @@ export async function readHostedAiUsageGate(input: {
       at: now,
       billingRef: memberState.billingRef,
       memberId: input.memberId,
+      threadContainer: memberState.threadContainer,
       tx,
     });
 
@@ -714,10 +731,12 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
+  threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
 }): HostedAiUsageGateDecision {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
+    threadContainer: input.threadContainer ?? null,
   });
   const period = resolved.kind === "denied"
     ? resolved
@@ -826,6 +845,11 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
           pulseTrialRedeemedAt: true,
         },
       },
+      threadContainer: {
+        select: {
+          monthlyUsageLimitUsdMicros: true,
+        },
+      },
       id: true,
     },
   });
@@ -837,6 +861,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: member.billingRef,
+    threadContainer: member.threadContainer,
   });
   if (resolved.kind === "denied") {
     return {
@@ -980,11 +1005,13 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
+  threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
+    threadContainer: input.threadContainer ?? null,
   });
   if (resolved.kind === "denied") {
     return {
@@ -1079,12 +1106,30 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 function resolveHostedAiUsageAllowancePeriod(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
+  threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
 }): HostedAiUsageAllowancePeriodResolution {
   const billingPlanCode =
     parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode)
     ?? getHostedDefaultBillingPlanCode();
   const billingPhase = parseHostedBillingPhase(input.billingRef?.currentBillingPhase);
   const checkoutOffer = parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer);
+  const threadContainerLimitUsdMicros =
+    normalizeHostedThreadContainerUsageLimitUsdMicros(input.threadContainer);
+
+  if (threadContainerLimitUsdMicros !== null) {
+    const period = resolveHostedAiUsageBillingOrCalendarPeriod({
+      at: input.at,
+      billingRef: input.billingRef,
+    });
+    return {
+      billingPlanCode,
+      kind: "period",
+      limitUsdMicros: threadContainerLimitUsdMicros,
+      periodEnd: period.periodEnd,
+      periodStart: period.periodStart,
+      source: period.source,
+    };
+  }
 
   if (
     billingPhase !== "paid" &&
@@ -1108,23 +1153,10 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     });
   }
 
-  const currentPeriodStart = input.billingRef?.currentPeriodStart ?? null;
-  const currentPeriodEnd = input.billingRef?.currentPeriodEnd ?? null;
-  const period =
-    currentPeriodStart
-    && currentPeriodEnd
-    && currentPeriodStart.getTime() < currentPeriodEnd.getTime()
-    && input.at.getTime() >= currentPeriodStart.getTime()
-    && input.at.getTime() < currentPeriodEnd.getTime()
-      ? {
-          periodEnd: currentPeriodEnd,
-          periodStart: currentPeriodStart,
-          source: "billing" as const,
-        }
-      : {
-          ...buildUtcCalendarMonthPeriod(input.at),
-          source: "calendar" as const,
-        };
+  const period = resolveHostedAiUsageBillingOrCalendarPeriod({
+    at: input.at,
+    billingRef: input.billingRef,
+  });
 
   return {
     billingPlanCode,
@@ -1134,6 +1166,40 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     periodStart: period.periodStart,
     source: period.source,
   };
+}
+
+function normalizeHostedThreadContainerUsageLimitUsdMicros(
+  threadContainer: HostedAiUsageAllowanceThreadContainerRef | null | undefined,
+): bigint | null {
+  const limit = threadContainer?.monthlyUsageLimitUsdMicros ?? null;
+  return typeof limit === "bigint" && limit > 0n ? limit : null;
+}
+
+function resolveHostedAiUsageBillingOrCalendarPeriod(input: {
+  at: Date;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+}): {
+  periodEnd: Date;
+  periodStart: Date;
+  source: "billing" | "calendar";
+} {
+  const currentPeriodStart = input.billingRef?.currentPeriodStart ?? null;
+  const currentPeriodEnd = input.billingRef?.currentPeriodEnd ?? null;
+
+  return currentPeriodStart
+    && currentPeriodEnd
+    && currentPeriodStart.getTime() < currentPeriodEnd.getTime()
+    && input.at.getTime() >= currentPeriodStart.getTime()
+    && input.at.getTime() < currentPeriodEnd.getTime()
+    ? {
+        periodEnd: currentPeriodEnd,
+        periodStart: currentPeriodStart,
+        source: "billing",
+      }
+    : {
+        ...buildUtcCalendarMonthPeriod(input.at),
+        source: "calendar",
+      };
 }
 
 function resolveHostedPulseTrialAllowancePeriod(input: {

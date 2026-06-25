@@ -370,6 +370,9 @@ type PrismaFixtureBase = {
   hostedMemberEmailAuthorization?: HostedMemberEmailAuthorizationFixture;
   hostedMemberIdentity?: HostedMemberIdentityFixture;
   hostedMemberRouting?: HostedMemberRoutingFixture;
+  hostedThreadRoute?: {
+    findMany?: MockedFunction;
+  };
   hostedWebhookReceipt?: HostedWebhookReceiptFixture;
   hostedWebhookReceiptSideEffect?: HostedWebhookReceiptSideEffectFixture;
 };
@@ -4357,6 +4360,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
         input,
       });
       return record ? [record] : [];
+    });
+  }
+
+  if (!prisma.hostedThreadRoute?.findMany) {
+    Object.defineProperty(prisma, "hostedThreadRoute", {
+      configurable: true,
+      value: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     });
   }
 

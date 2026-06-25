@@ -11,6 +11,7 @@ const HOSTED_BLIND_INDEX_PATTERN =
 
 export type HostedBlindIndexKind =
   | "email"
+  | "external-thread"
   | "linq-chat"
   | "phone"
   | "privy-user"
@@ -82,6 +83,41 @@ export function createHostedLinqChatLookupKeyReadCandidates(
   value: string | number | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("linq-chat", normalizeHostedOpaqueInput(value));
+}
+
+export const HOSTED_EXTERNAL_THREAD_CHANNELS = [
+  "email",
+  "linq",
+  "telegram",
+] as const;
+
+export type HostedExternalThreadChannel =
+  (typeof HOSTED_EXTERNAL_THREAD_CHANNELS)[number];
+
+export function createHostedExternalThreadLookupKey(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string | null {
+  return createHostedLookupKey(
+    "external-thread",
+    normalizeHostedExternalThreadLookupInput(input),
+  );
+}
+
+export function createHostedExternalThreadLookupKeyReadCandidates(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "external-thread",
+    normalizeHostedExternalThreadLookupInput(input),
+  );
+}
+
+export function isHostedExternalThreadChannel(
+  value: string | null | undefined,
+): value is HostedExternalThreadChannel {
+  return normalizeHostedExternalThreadChannel(value) !== null;
 }
 
 export function createHostedStripeCustomerLookupKey(value: string | null | undefined): string | null {
@@ -236,6 +272,31 @@ export function normalizeHostedOpaqueInput(
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeHostedExternalThreadLookupInput(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string | null {
+  const channel = normalizeHostedExternalThreadChannel(input.channel);
+  const threadId = normalizeHostedOpaqueInput(input.threadId);
+
+  return channel && threadId ? `${channel}:${threadId}` : null;
+}
+
+function normalizeHostedExternalThreadChannel(
+  value: string | null | undefined,
+): HostedExternalThreadChannel | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+
+  switch (normalized) {
+    case "email":
+    case "linq":
+    case "telegram":
+      return normalized;
+    default:
+      return null;
+  }
 }
 
 export function normalizeHostedEmailAddress(value: string | null | undefined): string | null {
