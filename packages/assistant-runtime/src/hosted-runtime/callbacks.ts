@@ -83,6 +83,7 @@ import {
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
+  resolveHostedAssistantLinqReactionDeliveryContextForRequest,
   resolveHostedAssistantLinqDeliveryContextForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -1457,11 +1458,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
+          const routeScopedContext = input.wake
+            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+            : null;
           await assertHostedAssistantLinqRouteAuthorityForDelivery({
-            deliveryContext: input.wake
-              ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-              : null,
+            deliveryContext: resolveHostedAssistantLinqReactionDeliveryContextForRequest({
+              context: routeScopedContext,
+              target: request.target,
+              targetMessageId: request.targetMessageId,
+            }),
             effectsPort: input.effectsPort,
+            routeScopedContext,
             signal: input.signal,
           });
           let reactionProviderDispatchEntered = false;

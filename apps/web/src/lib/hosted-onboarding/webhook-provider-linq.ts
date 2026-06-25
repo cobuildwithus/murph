@@ -128,30 +128,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,
   );
-  if (threadRouteAccountLookupKeys.length === 0) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("missing-recipient-line"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberMatch: "none",
-        reason: "missing-recipient-line",
-        routeStage: "ignored-missing-recipient-line",
-      }),
-    );
-  }
-
-  const explicitThreadRoute = await readHostedThreadRouteByExternalThread({
-    accountLookupKeys: threadRouteAccountLookupKeys,
-    channel: "linq",
-    prisma: input.prisma,
-    threadId: summary.chatId,
-  });
-  if (explicitThreadRoute) {
-    return planHostedLinqExplicitThreadRouteWebhook({
-      context,
-      event: input.event,
+  if (threadRouteAccountLookupKeys.length > 0) {
+    const explicitThreadRoute = await readHostedThreadRouteByExternalThread({
+      accountLookupKeys: threadRouteAccountLookupKeys,
+      channel: "linq",
       prisma: input.prisma,
-      route: explicitThreadRoute,
+      threadId: summary.chatId,
     });
+    if (explicitThreadRoute) {
+      return planHostedLinqExplicitThreadRouteWebhook({
+        context,
+        event: input.event,
+        prisma: input.prisma,
+        route: explicitThreadRoute,
+      });
+    }
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {

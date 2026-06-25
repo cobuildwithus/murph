@@ -48,9 +48,35 @@ export function resolveHostedAssistantLinqDeliveryContextForRequest(input: {
     return input.context;
   }
 
+  if (input.context.routeAuthority) {
+    return null;
+  }
+
   const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
   return replyToMessageId && replyToMessageId === input.context.replyToMessageId
     ? input.context
+    : null;
+}
+
+export function resolveHostedAssistantLinqReactionDeliveryContextForRequest(input: {
+  context: HostedAssistantLinqDeliveryContext | null;
+  target: string;
+  targetMessageId: string;
+}): HostedAssistantLinqDeliveryContext | null {
+  const context = resolveHostedAssistantLinqDeliveryContextForRequest({
+    context: input.context,
+    replyToMessageId: input.targetMessageId,
+    target: input.target,
+    targetKind: "thread",
+  });
+
+  if (!context?.routeAuthority) {
+    return context;
+  }
+
+  const targetMessageId = normalizeHostedLinqDeliveryContextText(input.targetMessageId);
+  return targetMessageId && targetMessageId === context.replyToMessageId
+    ? context
     : null;
 }
 
