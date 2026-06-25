@@ -90,6 +90,7 @@ export interface SignalHostedManualRunInput {
 export interface SignalHostedRuntimeRecheckInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
+  prisma?: PrismaClient;
   userId: string;
 }
 
@@ -203,10 +204,18 @@ export async function signalHostedManualRunRuntime(
 export async function signalHostedRuntimeRecheckRuntime(
   input: SignalHostedRuntimeRecheckInput,
 ): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
     ensureWorkspace: false,
+    prisma,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
     }),
