@@ -634,6 +634,7 @@ interface JunctionDailyTimeseriesAggregate {
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
+  legacyDayKeys: Set<string>;
   maxValue: number;
   minValue: number;
   evidencePartRole: string;
@@ -1101,6 +1102,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+    const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(timestamp, sampleAt);
 
     if (value === undefined || !sampleAt || !dayKey) {
       continue;
@@ -1123,6 +1125,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
+        legacyDayKeys: legacyDayKey && legacyDayKey !== dayKey ? new Set([legacyDayKey]) : new Set<string>(),
         maxValue: value,
         minValue: value,
         evidencePartRole,
@@ -1137,6 +1140,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
+    if (legacyDayKey && legacyDayKey !== existing.dayKey) {
+      existing.legacyDayKeys.add(legacyDayKey);
+    }
+
     if (sampleAt < existing.firstSampleAt) {
       existing.firstSampleAt = sampleAt;
     }
@@ -1287,6 +1294,19 @@ function pushJunctionDailyTimeseriesObservation(
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
   });
+  const legacyExternalRefs = [...aggregate.legacyDayKeys]
+    .filter((legacyDayKey) => legacyDayKey !== aggregate.dayKey)
+    .map((legacyDayKey) =>
+      makeJunctionExternalRef(
+        aggregate.resourceContext,
+        aggregate.entry,
+        withTimestampOverride(aggregate.timestamp, {
+          dayKey: legacyDayKey,
+          observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
+        }),
+        observation.metric,
+      )
+    );
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -1298,6 +1318,7 @@ function pushJunctionDailyTimeseriesObservation(
     title: observation.title,
     evidenceRoles: [aggregate.evidencePartRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
       metric: observation.metric,
@@ -3644,6 +3665,13 @@ function resolveJunctionTimeseriesAggregateDayKey(
   }
 
   return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+function resolveLegacyJunctionTimeseriesAggregateDayKey(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string | undefined,
+): string | undefined {
+  return extractIsoDatePrefix(timestamp.observedAtRaw) ?? extractIsoDatePrefix(sampleAt) ?? undefined;
 }
 
 function isDateOnlyJunctionTimestamp(value: string): boolean {

@@ -184,7 +184,7 @@ function millisecondsToMinutes(value: unknown): number | undefined {
   return numeric / 60000;
 }
 
-function firstBodyMeasurementRecordedAt(bodyMeasurement: PlainObject | undefined): string | undefined {
+function firstBodyMeasurementMeasuredAt(bodyMeasurement: PlainObject | undefined): string | undefined {
   if (!bodyMeasurement) {
     return undefined;
   }
@@ -194,6 +194,15 @@ function firstBodyMeasurementRecordedAt(bodyMeasurement: PlainObject | undefined
     toIso(bodyMeasurement.measuredAt),
     toIso(bodyMeasurement.recorded_at),
     toIso(bodyMeasurement.recordedAt),
+  );
+}
+
+function firstBodyMeasurementUpdatedAt(bodyMeasurement: PlainObject | undefined): string | undefined {
+  if (!bodyMeasurement) {
+    return undefined;
+  }
+
+  return cycleOrFallbackTimestamp(
     toIso(bodyMeasurement.updated_at),
     toIso(bodyMeasurement.updatedAt),
   );
@@ -499,12 +508,18 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     }
   }
 
-  const bodyMeasurementObservedAt = bodyMeasurement
-    ? firstBodyMeasurementRecordedAt(bodyMeasurement)
-    : undefined;
   const bodyMeasurementExplicitDayKey = bodyMeasurement
     ? firstBodyMeasurementExplicitDayKey(bodyMeasurement)
     : undefined;
+  const bodyMeasurementMeasuredAt = bodyMeasurement
+    ? firstBodyMeasurementMeasuredAt(bodyMeasurement)
+    : undefined;
+  const bodyMeasurementUpdatedAt = bodyMeasurement
+    ? firstBodyMeasurementUpdatedAt(bodyMeasurement)
+    : undefined;
+  const bodyMeasurementObservedAt = bodyMeasurementExplicitDayKey
+    ? bodyMeasurementMeasuredAt
+    : bodyMeasurementMeasuredAt ?? bodyMeasurementUpdatedAt;
   const bodyMeasurementRecordedAt = bodyMeasurement
     ? bodyMeasurementObservedAt ?? importedAt
     : undefined;
@@ -520,6 +535,17 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     bodyMeasurementExplicitDayKey ??
     firstDayKey(bodyMeasurementRecordedAt) ??
     "current";
+  const bodyMeasurementLegacyResourceIds = [
+    firstDayKey(bodyMeasurementUpdatedAt),
+    firstDayKey(importedAt),
+  ].filter((candidate): candidate is string =>
+    Boolean(
+      bodyMeasurementExplicitDayKey
+        && !bodyMeasurementMeasuredAt
+        && candidate
+        && candidate !== bodyMeasurementResourceId,
+    )
+  );
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
@@ -539,6 +565,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         observationGrain: "summary",
         evidenceRoles: ["body-measurement"],
         externalRef: (facet) => makeExternalRef("body-measurement", bodyMeasurementResourceId, undefined, facet),
+        legacyExternalRefs: (facet) => [...new Set(bodyMeasurementLegacyResourceIds)]
+          .map((resourceId) => makeExternalRef("body-measurement", resourceId, undefined, facet)),
       },
       WHOOP_BODY_OBSERVATION_METRICS,
     );

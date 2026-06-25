@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { workoutSessionSchema } from "@murphai/contracts";
+import {
+  eventRevisionFromLifecycle,
+  isDeletedEventLifecycle,
+  workoutSessionSchema,
+} from "@murphai/contracts";
 import * as coreRuntime from "@murphai/core";
 import { test } from "vitest";
 
@@ -21,6 +25,8 @@ import {
   type DeviceBatchImportPayload,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
+
+type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
   for (const event of events) {
@@ -53,6 +59,32 @@ function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): vo
 
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+function latestLiveRecords(records: readonly StoredJsonlRecord[]): StoredJsonlRecord[] {
+  const latestById = new Map<string, StoredJsonlRecord>();
+
+  for (const record of records) {
+    if (typeof record.id !== "string") {
+      continue;
+    }
+
+    const existing = latestById.get(record.id);
+    if (!existing || eventRevisionFromLifecycle(record.lifecycle) > eventRevisionFromLifecycle(existing.lifecycle)) {
+      latestById.set(record.id, record);
+    }
+  }
+
+  return [...latestById.values()].filter((record) => !isDeletedEventLifecycle(record.lifecycle));
+}
+
+function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
 }
 
 function assertCompactSummaryObservationFields(fields: Record<string, unknown> | undefined): void {
@@ -488,6 +520,102 @@ test("Junction stress level aggregates pass the canonical device import contract
     assertEventRawArtifactRolesExist(payload);
     assert.ok(result.evidencePartCount >= 1);
     assert.notEqual(result.ingestShardPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregates supersede legacy raw-UTC day refs on replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-legacy-ref");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      timeseries: {
+        stress_level: {
+          groups: {
+            garmin: [{
+              data: [
+                {
+                  timestamp: "2026-06-25T03:45:00.000Z",
+                  timezone_offset: "-04:00",
+                  value: 52,
+                },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    };
+    const correctedPayload = normalizeJunctionSnapshot(snapshot);
+    const correctedStress = correctedPayload.events?.find(
+      (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+    );
+    const legacyRef = correctedStress?.legacyExternalRefs?.[0];
+    assert.equal(correctedStress?.dayKey, "2026-06-24");
+    assert.ok(legacyRef);
+    assert.notEqual(legacyRef.resourceId, correctedStress?.externalRef?.resourceId);
+
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-25T03:45:00.000Z",
+        recordedAt: "2026-06-25T03:45:00.000Z",
+        dayKey: "2026-06-25",
+        title: "Junction stress level",
+        externalRef: legacyRef,
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 52,
+          unit: "score",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const legacyStress = legacyImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+    const replayStress = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "stress-level",
+    );
+
+    assert.equal(replayStress?.id, legacyStress?.id);
+    assert.equal(replayStress?.dayKey, "2026-06-24");
+    assert.equal(replayStress?.externalRef?.resourceId, correctedStress?.externalRef?.resourceId);
+    assert.equal(liveStressRecords.length, 1);
+    assert.equal(liveStressRecords[0]?.id, legacyStress?.id);
+    assert.equal(liveStressRecords[0]?.dayKey, "2026-06-24");
+    assert.equal(storedExternalRefResourceId(liveStressRecords[0]), correctedStress?.externalRef?.resourceId);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
