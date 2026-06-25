@@ -28,6 +28,7 @@ import {
   type ComputerRunCheckpointContext,
   type ComputerRunRecord,
   type ComputerUseStore,
+  type PersistedComputerHandoffPurpose,
 } from "./store";
 import type { ComputerBrowserViewportPreset } from "./viewport";
 
@@ -699,6 +700,19 @@ export class ComputerUseService {
       };
     }
 
+    if (isRetiredStaticPreviewHandoff(handoff)) {
+      const expired = await this.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: handoff.updatedAt,
+        handoffId: handoff.id,
+        now,
+      });
+      return {
+        kind: "expired",
+        suggestedReply: expired.suggestedReply,
+      };
+    }
+
     if (handoff.purpose === "managed_login") {
       return {
         kind: "managed_login",
@@ -728,7 +742,7 @@ export class ComputerUseService {
       interaction: "takeover",
       kind: "open",
       liveViewUrl,
-      purpose: handoff.purpose,
+      purpose: requireSupportedPersistedHandoffPurpose(handoff.purpose),
       suggestedReply: handoff.suggestedReply,
     };
   }
@@ -1519,9 +1533,11 @@ export class ComputerUseService {
     // links are non-interactive, so they can be replaced by the purpose
     // requested by the latest pause.
     const replacementPurpose =
-      existing.purpose === "managed_login"
+      isRetiredStaticPreviewHandoff(existing)
         ? input.handoffPurpose
-        : existing.purpose;
+        : existing.purpose === "managed_login"
+          ? input.handoffPurpose
+          : requireSupportedPersistedHandoffPurpose(existing.purpose);
     if (
       !run.kernelSessionId &&
       existing.purpose === "managed_login" &&
@@ -1971,6 +1987,7 @@ export class ComputerUseService {
       });
     }
     const pausedAt = run.pausedAt;
+    let retiredStaticPreviewHandoff: ComputerHandoffRecord | null = null;
 
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
@@ -2027,35 +2044,39 @@ export class ComputerUseService {
               message: "Computer run expired.",
             });
           }
-          if (isExpiredHandoff(pendingHandoff, input.now)) {
-            if (pendingHandoff.status !== "expired") {
+          if (isRetiredStaticPreviewHandoff(pendingHandoff)) {
+            retiredStaticPreviewHandoff = pendingHandoff;
+          } else {
+            if (isExpiredHandoff(pendingHandoff, input.now)) {
+              if (pendingHandoff.status !== "expired") {
+                await store.markHandoffExpired({
+                  expectedStatus: pendingHandoff.status === "checkpointing"
+                    ? "checkpointing"
+                    : "open",
+                  expectedUpdatedAt: pendingHandoff.updatedAt,
+                  handoffId: pendingHandoff.id,
+                  now: input.now,
+                });
+              }
+              throw computerUseConflictError({
+                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+                message: "Computer handoff expired.",
+              });
+            }
+            if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
               await store.markHandoffExpired({
-                expectedStatus: pendingHandoff.status === "checkpointing"
-                  ? "checkpointing"
-                  : "open",
+                expectedStatus: "checkpointing",
                 expectedUpdatedAt: pendingHandoff.updatedAt,
                 handoffId: pendingHandoff.id,
                 now: input.now,
               });
+              throw computerUseConflictError({
+                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+                message: "Computer handoff expired.",
+              });
             }
-            throw computerUseConflictError({
-              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-              message: "Computer handoff expired.",
-            });
+            return runHandle(run, true);
           }
-          if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
-            await store.markHandoffExpired({
-              expectedStatus: "checkpointing",
-              expectedUpdatedAt: pendingHandoff.updatedAt,
-              handoffId: pendingHandoff.id,
-              now: input.now,
-            });
-            throw computerUseConflictError({
-              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-              message: "Computer handoff expired.",
-            });
-          }
-          return runHandle(run, true);
         }
       } else if (!run.kernelSessionId) {
         if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -2092,11 +2113,23 @@ export class ComputerUseService {
     });
     const resumed = await store.markRunRunning({
       awaitingReason: run.awaitingReason,
+      expectedHandoffStatus: retiredStaticPreviewHandoff?.status ?? null,
+      expectedHandoffUpdatedAt: retiredStaticPreviewHandoff?.updatedAt ?? null,
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,
       now: input.now,
       runId: run.id,
     });
+    if (retiredStaticPreviewHandoff?.status === "open") {
+      await store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: retiredStaticPreviewHandoff.updatedAt,
+        handoffId: retiredStaticPreviewHandoff.id,
+        now: input.now,
+      }).catch(() => {
+        // The run is no longer awaiting this retired legacy link.
+      });
+    }
     return runHandle(resumed, true);
   }
 
@@ -3278,6 +3311,21 @@ function isExpiredHandoff(
   now: Date,
 ): boolean {
   return handoff.status === "expired" || handoff.expiresAt <= now;
+}
+
+function isRetiredStaticPreviewHandoff(
+  handoff: { purpose: PersistedComputerHandoffPurpose },
+): handoff is { purpose: "screen_inspection" } {
+  return handoff.purpose === "screen_inspection";
+}
+
+function requireSupportedPersistedHandoffPurpose(
+  purpose: PersistedComputerHandoffPurpose,
+): HostedComputerHandoffPurpose {
+  if (purpose === "screen_inspection") {
+    throw new TypeError("Retired static-preview handoff purpose is unsupported here.");
+  }
+  return purpose;
 }
 
 function isStaleCheckpointingHandoff(

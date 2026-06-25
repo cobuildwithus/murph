@@ -488,6 +488,72 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("replaces a legacy stored static-preview handoff with manual browser help", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      id: "hch_handoff123",
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Should I book this appointment?",
+        awaitingReason: "final_confirmation",
+        checkpointContext: {
+          conversationId: "conversation-a",
+          recipientKey: "recipient-a",
+        },
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+        suggestedReply: "yes",
+      }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      pauseDeliveryContext: {
+        conversationId: "conversation-a",
+        recipientKey: "recipient-a",
+      },
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      suggestedReply: "yes",
+    });
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
+  });
+
   it("mints a replacement handoff after a final-confirmation handoff was completed too early", async () => {
     const now = new Date("2026-06-17T12:07:00.000Z");
     const oldHandoff = createHandoffRecord({
@@ -1284,6 +1350,60 @@ describe("ComputerUseService", () => {
       status: "awaiting_user",
     });
     expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("resumes over a legacy stored static-preview handoff after user reply proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+    });
+    const run = createRunRecord({
+      awaitingReason: "final_confirmation",
+      pausedAt: new Date("2026-06-17T12:02:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      suggestedReply: "yes",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: null,
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
   it("expires an open handoff without deleting the awaiting browser run", async () => {
@@ -2947,6 +3067,47 @@ describe("ComputerUseService", () => {
     });
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-1",
+      status: "awaiting_user",
+    });
+  });
+
+  it("expires legacy stored static-preview handoff pages", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      }),
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "expired",
+      suggestedReply: "yes",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: handoff.id,
       status: "awaiting_user",
     });
   });
