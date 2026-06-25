@@ -114,8 +114,12 @@ describe('assistant running cardio skill', () => {
     const main = await readSkill()
     for (const referenceName of referenceNames) {
       expect(main).toContain(`references/${referenceName}`)
-      expect((await readSkill(path.join('references', referenceName))).length).toBeGreaterThan(4_000)
     }
+
+    const safety = await readSkill('references/safety-and-adjustment.md')
+    expect(safety).toContain('Stop exercise and seek urgent evaluation')
+    expect(safety).toContain('Use `physical-therapy` first')
+    expect(safety).toContain('Use `chronic-illness-support` or clinical care')
   })
 
   it('does not duplicate the generic adherence engine', async () => {

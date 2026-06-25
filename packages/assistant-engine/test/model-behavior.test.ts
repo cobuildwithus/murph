@@ -1149,7 +1149,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
+      '90987a9ee5e6a6d036fba56832ba710b4fdc06f723c65549e36cb66d92e49e6c',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1407,6 +1407,23 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('routes general running and cardio planning through the Murph running-cardio skill', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'For general running, walking, cycling, aerobic-base, Zone 2, cardio conditioning, or non-event speed-development requests',
+    )
+    expect(prompt).toContain(
+      'read the running-cardio skill before planning, ramping, adjusting intensity, or choosing modalities.',
+    )
+    expect(prompt).toContain(
+      'Keep pain and return-to-run clearance in physical-therapy first',
+    )
+    expect(prompt).toContain(
+      'use a dedicated competition-training owner for event or benchmark-specific work when one is registered.',
+    )
+  })
+
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
@@ -1426,6 +1443,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('ignored reminders')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
+    expect(prompt).toContain('running-cardio')
+    expect(prompt).toContain('general running and cardiovascular fitness')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
     )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
