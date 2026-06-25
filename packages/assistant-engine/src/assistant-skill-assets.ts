@@ -44,6 +44,12 @@ export const ASSISTANT_SKILLS = [
       'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
   },
   {
+    slug: 'stress-regulation',
+    name: 'stress-regulation',
+    triggerHint:
+      'Use when stress or overload is the immediate bottleneck: acute activation, trouble winding down, possible occupational burnout, symptom or pain fear, stress-linked eating or training avoidance, or stress-driven low motivation on a hard day. Offer one brief state- or load-shifting action, then hand off recurring, domain-specific, clinical, urgent, or crisis work.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
