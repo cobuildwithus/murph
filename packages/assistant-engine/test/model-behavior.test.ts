@@ -134,8 +134,9 @@ describe('assistant execution prompt contract', () => {
       'capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and any relevant changelog item ids',
+      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )
+    expect(prompt).toContain('Changelog ids are optional metadata')
     expect(prompt).toContain('Start inferred summaries with `Speculative:`')
     expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
     expect(prompt).toContain('Do not log vague low-confidence guesses')

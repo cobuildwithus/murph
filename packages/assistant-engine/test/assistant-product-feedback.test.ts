@@ -83,12 +83,13 @@ describe("assistant product feedback", () => {
     expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
   });
 
-  it("advertises the shipped-interest changelog id requirement in the tool schema", () => {
+  it("advertises optional changelog metadata in the tool schema", () => {
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
-    expect(schema).toContain('"minItems":1');
+    expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
+    expect(schema).toContain('Optional metadata');
     expect(schema).toContain('Speculative:');
     expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
@@ -162,6 +163,25 @@ describe("assistant product feedback", () => {
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "feature_interest",
+          summary: "Interested in generated song reminders.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    })).toEqual({
+      feedback: {
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      },
+      kind: "submit-product-feedback",
+    });
+
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -184,19 +204,29 @@ describe("assistant product feedback", () => {
     });
   });
 
-  it("rejects malformed generalized feedback tool arguments", () => {
+  it("redacts sensitive-looking summary spans before recording", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
-          kind: "feature_interest",
-          summary: "Interested in native message formatting.",
+          kind: "feature_request",
+          summary:
+            "Email user@example.com, call 415-555-1212, token sk_test_abcdefghijklmnopqrstuvwxyz.",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
       },
-    })?.kind).toBe("invalid-product-feedback-arguments");
+    })).toEqual({
+      feedback: {
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Email [redacted], call [redacted], token [redacted].",
+      },
+      kind: "submit-product-feedback",
+    });
+  });
 
+  it("rejects malformed generalized feedback tool arguments", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
