@@ -1434,7 +1434,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(
       prompt.slice(healthReasoningStart, chronicSupportStart),
     ).not.toContain('running-cardio')
-    expect(prompt).not.toContain('- competition-training:')
+    expect(prompt).toContain('- competition-training: Use when a user is preparing')
   })
 
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
