@@ -40,6 +40,7 @@ Always read these before repo code/docs/test/config work:
 5. `agent-docs/operations/agent-workflow-routing.md`
 6. `agent-docs/PRODUCT_SENSE.md`
 7. `agent-docs/PRODUCT_CONSTITUTION.md`
+8. `agent-docs/operations/imessage-deliverability.md`
 
 ## Task Router
 

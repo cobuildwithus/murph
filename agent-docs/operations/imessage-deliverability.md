@@ -4,7 +4,7 @@ Last verified: 2026-06-25
 
 ## Purpose
 
-This is the mandatory guide for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
+This is required reading for agent work in this repository, and it is mandatory guidance for any Murph change that can affect text-message or iMessage behavior. Read it especially carefully before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
 The core rule is simple: design Murph messaging like a real reciprocal conversation, not a broadcast system. The highest-risk pattern is many outbound messages from one line with little or no recipient response.
 
@@ -114,3 +114,65 @@ A complete review should inspect:
 - tests or fixtures that prove the guardrail
 
 If a path lacks line-level pacing, recipient reply tracking, or delivery-health suppression, treat that as a deliverability risk even if the copy itself looks fine.
+
+## PDF-derived source document
+
+Source converted from `iMessage Best Practices Guide Technical 041426.pdf`.
+The source PDF is two pages and was rendered from a document titled
+`iMessage Best Practices Guide 041426.docx`. The text below preserves the
+full guidance in Markdown form while normalizing bullets, apostrophes, and
+spacing for repo readability.
+
+### iMessage Best Practices for Linq Partners
+
+#### Reciprocity Is Everything
+
+Design your messaging flows to get a reply within the first 3 messages. Apple's TrustKit skips all spam checks once a chat has 3 or more replies from the recipient. This is the single most important thing you can do.
+
+- Ask questions. "Hey, is this still a good number for you?" beats "Here's your update." Questions get replies. Replies build trust.
+- Avoid one-way broadcast patterns. If you are sending 50 messages and getting 0 replies, Apple's ML is scoring every one of those as spam-like. Even 1 reply per 10 outbound messages changes the math.
+- If your use case is inherently one-way, such as notifications or alerts, have the recipient reply once to establish the thread. A simple "Reply YES to confirm" at onboarding is enough.
+
+#### Volume and Pacing
+
+- Stay under 50 net new conversations per day per line. This is the safe zone. Above this, Apple starts paying closer attention.
+- Do not burst. 20 messages in 1 minute looks different than 20 messages over 1 hour, even though the daily total is the same. Spread sends across the day.
+- If you need higher volume, use multiple lines and distribute conversations across them. Do not stack everything on one number.
+- Ramp new lines gradually. Do not go from 0 to 200 messages on day one. Start with 10-20 per day for the first week, then increase.
+
+#### Content
+
+- Vary your message content. 20 identical messages to 20 different people is a spam signal. Even small variations, such as using the recipient's name or changing phrasing, help.
+- Avoid shortened URLs, such as bit.ly or tinyurl. Apple flags these. Use full URLs or your own domain.
+- Do not pad messages with random text to fake variation. Apple's ML detects this pattern. Artificial variation is worse than no variation.
+- Keep messages conversational. The more your messages read like a human texting a friend, the less likely they are to trigger detection.
+
+#### New Lines and Onboarding
+
+- New lines have low trust with Apple. Treat the first 2 weeks as a warmup period: lower volume, higher-quality conversations.
+- The worst thing you can do with a new line is send a burst of messages and then go silent. Apple interprets "activity then silence" as a spam account that got caught. Consistent, low-volume usage is better.
+- If possible, have real inbound conversations on new lines early. A line that receives messages before it sends them builds trust faster.
+- Set up a contact card with `POST /v3/contact_card` on every line. When recipients save your contact, Apple bypasses spam checks for that sender permanently.
+
+#### What to Avoid
+
+- Never send to purchased or scraped contact lists. A single spam report from a recipient can trigger an account block.
+- Do not use the same line for both automated and manual messaging without rate awareness. Automated systems can easily exceed safe thresholds.
+- Do not re-engage cold contacts who have not replied in 30 or more days with bulk messages. Apple tracks recipient engagement per chat: a thread with 50 sent and 0 replies is a red flag.
+- Do not send late at night, from 11pm to 5am recipient local time, unless your use case requires it. Off-hours sending is a minor signal, but it compounds with other factors.
+
+#### Monitoring Your Line Health
+
+- Watch your delivery receipts. If messages show as "sent" but never "delivered," Apple may be silently dropping them. This is the first sign of trouble.
+- If you see delivery failures spike on a line, reduce volume immediately. Do not keep sending; you are making it worse.
+- If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.
+- Contact the provider if you suspect a line is flagged. They can check the line health status and help with recovery before it becomes permanent.
+
+#### The 3-Reply Rule
+
+Apple's internal spam engine, TrustKit, has a hardcoded check: if a conversation has 3 or more replies from the recipient, spam evaluation is skipped entirely.
+
+- A conversation with 100 outbound and 3 inbound replies is trusted.
+- A conversation with 5 outbound and 0 replies is evaluated for spam.
+
+Design every conversation flow to earn those 3 replies as early as possible.
