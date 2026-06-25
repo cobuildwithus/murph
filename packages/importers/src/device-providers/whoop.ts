@@ -598,13 +598,18 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const recoveryRole = `recovery:${recoveryResourceId}`;
     const version = toIso(recovery.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(recovery.updated_at), importedAt);
-    const occurredAt = recordedAt;
     const recoveryCycle = cycleId ? cyclesById.get(cycleId) : undefined;
     const recoverySleep = sleepId ? sleepsById.get(sleepId) : undefined;
     const recoveryCycleEndAt = toIso(recoveryCycle?.end);
     const recoveryCycleStartAt = toIso(recoveryCycle?.start);
     const recoverySleepEndAt = toIso(recoverySleep?.end);
     const recoverySleepStartAt = toIso(recoverySleep?.start);
+    const occurredAt =
+      recoveryCycleEndAt
+      ?? recoveryCycleStartAt
+      ?? recoverySleepEndAt
+      ?? recoverySleepStartAt
+      ?? recordedAt;
     const dayKey =
       firstWhoopLocalDayKey(recoveryCycle, recoveryCycleEndAt, recoveryCycleStartAt) ??
       firstWhoopLocalDayKey(recoverySleep, recoverySleepEndAt, recoverySleepStartAt) ??

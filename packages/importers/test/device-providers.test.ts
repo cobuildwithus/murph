@@ -549,6 +549,14 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
                 recovery_score: 72,
               },
             },
+            {
+              sleep_id: "sleep-no-offset-local-24",
+              cycle_id: "cycle-no-offset-local-24",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                recovery_score: 63,
+              },
+            },
           ],
           workouts: [
             {
@@ -611,7 +619,16 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
         && event.externalRef?.resourceId === "sleep-no-offset-local-24",
     );
     const recoveryEvent = result.events.find(
-      (event) => event.kind === "observation" && event.metric === "recovery-score",
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "recovery-score"
+        && event.externalRef?.resourceId === "sleep-recovery-local-24",
+    );
+    const noOffsetRecoveryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "recovery-score"
+        && event.externalRef?.resourceId === "sleep-no-offset-local-24",
     );
 
     assert.equal(workoutEvent?.dayKey, "2026-06-24");
@@ -621,6 +638,7 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     assert.equal(noOffsetDayStrainEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetRespiratoryEvent?.dayKey, "2026-06-24");
     assert.equal(recoveryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetRecoveryEvent?.dayKey, "2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
