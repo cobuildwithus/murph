@@ -404,6 +404,21 @@ describe('assistant execution prompt contract', () => {
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
     )
   })
+
+  it('warns before creating off-hours Linq/iMessage reminder automations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Linq/iMessage off-hours reminder guard')
+    expect(prompt).toContain('23:00 through 04:59')
+    expect(prompt).toContain("recipient's local timezone")
+    expect(prompt).toContain('channel=linq')
+    expect(prompt).toContain(
+      'A clear user confirmation for that exact off-hours time is enough to proceed',
+    )
+    expect(prompt).toContain(
+      'Do not add this extra confirmation for non-Linq channels',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
