@@ -6,9 +6,6 @@ import type {
   AssistantMessageInput,
 } from './service-contracts.js'
 import type {
-  AssistantProgressDeliveryResult,
-} from './turn-progress.js'
-import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
 
@@ -17,19 +14,23 @@ export interface AssistantHostedDeliveryContext {
   recipientKey: string | null
 }
 
-export interface AssistantHostedVaultFileSendResult {
-  filename: string
-  status: 'approved' | 'denied' | 'expired' | 'pending'
-}
+export type AssistantHostedVaultFileSendResult =
+  | {
+      approvalUrl: string
+      filename: string
+      status: 'pending'
+    }
+  | {
+      filename: string
+      status: 'approved' | 'denied' | 'expired'
+    }
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
   readonly computerToolsAvailable: boolean
-  readonly requiredUserMessageDeliveryAvailable: boolean
   readonly vaultFileSendAvailable: boolean
-  sendRequiredUserMessage(text: string): Promise<AssistantProgressDeliveryResult>
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
 }
 
@@ -43,8 +44,6 @@ export function createAssistantHostedToolContext(input: {
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   messageInput: AssistantMessageInput
-  requiredUserMessageDeliveryAvailable?: boolean
-  sendRequiredUserMessage?: (text: string) => Promise<AssistantProgressDeliveryResult>
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -70,12 +69,6 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
-    requiredUserMessageDeliveryAvailable:
-      input.requiredUserMessageDeliveryAvailable ?? true,
-    sendRequiredUserMessage: input.sendRequiredUserMessage ?? (async () => ({
-      kind: 'failed',
-      source: 'model',
-    })),
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

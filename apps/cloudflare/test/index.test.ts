@@ -2902,6 +2902,8 @@ function createRuntimeControlRunnerHarness(input: {
     createBucketStore().api,
     {
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       OPENAI_API_KEY: "test-openai-key",
     },
     namespace,

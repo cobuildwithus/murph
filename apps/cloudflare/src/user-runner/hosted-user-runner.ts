@@ -23,6 +23,7 @@ import type { HostedExecutionEnvironment } from "../env.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
   WorkerActiveRuntimeWriteFenceValidationResult,
+  WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
 import {
@@ -267,6 +268,44 @@ export class HostedUserRunner {
         },
         level: "warn",
         message: "Hosted runner provider egress token validation rejected.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+      return {
+        owns: false,
+        reason: validation.reason,
+      };
+    }
+    return {
+      attemptId: validation.attemptId,
+      leaseGeneration: validation.leaseGeneration,
+      owns: true,
+      userId: validation.userId,
+      workspaceVersion: validation.workspaceVersion,
+    };
+  }
+
+  async validateRuntimeProviderEgressCredential(input: {
+    providerKind: string;
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<WorkerProviderEgressCredentialValidationResult> {
+    const validation = await this.stateStore.validateProviderEgressCredential(input);
+    if (!validation.owns) {
+      const record = validation.record ?? null;
+      const writeFence = record?.writeFence ?? null;
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeRunnerContainerMatches:
+            writeFence?.runnerContainerName === input.runnerContainerName,
+          activeWriteFencePresent: writeFence !== null,
+          providerEgressCredentialProviderKind: input.providerKind,
+          providerEgressCredentialRejectReason: validation.reason,
+          activeWriteFenceUserMatches: record?.userId === input.userId,
+        },
+        level: "warn",
+        message: "Hosted runner provider egress credential validation rejected.",
         phase: "wake.running",
         userId: input.userId,
       });

@@ -24,21 +24,74 @@ import {
   AppGrid,
   AppIconCard,
   ApprovalCard,
+  AssessmentCard,
   CalendarMock,
   ChecklistMock,
   DeviceList,
   EmailMock,
+  ExerciseGrid,
+  GoalsRegimenCard,
   ImagePreview,
   MealCard,
   MetricCardMock,
   PdfPreview,
   PrivacyTimeline,
+  ReasoningSteps,
   SongBubble,
   StatBlock,
   VoiceBubble,
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "proactive-chronic-support": (
+    <AssessmentCard
+      topic="Lower-back tightness"
+      meta="day 9"
+      assessment="Pattern reads mechanical, not inflammatory — symptoms ease when you move and don't wake you at night."
+      nextAction="Try 90/90 breathing — 5 min before bed for 5 nights."
+      rationale="Low-risk; we'll review Monday and adjust from there."
+    />
+  ),
+  "physical-therapy-skill": (
+    <ReasoningSteps
+      meta="for this strain"
+      steps={[
+        {
+          label: "Triage & red flags",
+          state: "done",
+          note: "Cleared — no neuro signs, no night pain",
+        },
+        {
+          label: "Exercise selection & dose",
+          state: "active",
+          note: "2 moves, 3×/week — start light",
+        },
+        {
+          label: "Follow-up & progression",
+          state: "pending",
+        },
+      ]}
+    />
+  ),
+  "active-plan-context": (
+    <GoalsRegimenCard
+      entries={[
+        { kind: "goal", text: "Protein floor — 140g per day" },
+        { kind: "habit", text: "Lift, mornings only" },
+        { kind: "ramp", text: "Zone 2 → 90 min/wk by Aug" },
+      ]}
+    />
+  ),
+  "exercise-image-walkthroughs": (
+    <ExerciseGrid
+      tiles={[
+        { name: "90/90 breathing", reps: "4 min", hue: 78 },
+        { name: "Glute bridge", reps: "10 reps", hue: 32 },
+        { name: "Standing reach", reps: "8 / side", hue: 20 },
+      ]}
+      caption="Want me to walk you through these?"
+    />
+  ),
   "song-generation": (
     <PhoneMock
       channel="iMessage"

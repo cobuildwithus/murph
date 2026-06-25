@@ -51,6 +51,26 @@ export type WorkerProviderEgressTokenValidationResult =
       workspaceVersion: string | null;
     };
 
+export type WorkerProviderEgressCredentialValidationRejectReason =
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "provider_egress_not_allowed"
+  | "runner_container_mismatch"
+  | "write_fence_mismatch";
+
+export type WorkerProviderEgressCredentialValidationResult =
+  | {
+      owns: false;
+      reason?: WorkerProviderEgressCredentialValidationRejectReason;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
+      userId: string;
+      workspaceVersion: string | null;
+    };
+
 /**
  * Snapshot of the RunnerContainer DO's in-memory active workspace-invocation
  * operation. "Active" spans the whole DO-side invoke, including its
@@ -124,6 +144,11 @@ export interface WorkerUserRunnerStubLike {
     providerEgressToken: string;
     userId: string;
   }): Promise<WorkerProviderEgressTokenValidationResult>;
+  validateRuntimeProviderEgressCredential?(input: {
+    providerKind: string;
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<WorkerProviderEgressCredentialValidationResult>;
 }
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
@@ -159,6 +184,7 @@ export interface WorkerEnvironmentContract<
   CLOUDFLARE_IMAGES_VARIANT?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
   HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;

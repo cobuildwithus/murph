@@ -50,6 +50,9 @@ import {
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  verifyHostedProviderEgressCredential,
+} from "../src/hosted-provider-egress-credential.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import {
   createTestHostedRuntimeCryptoContext,
@@ -92,6 +95,8 @@ const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:00.000Z";
 const TEST_USER_ID = "member_123";
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
+  HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+    "provider-egress-signing-secret",
   OPENAI_API_KEY: "test-openai-key",
 } as const;
 
@@ -176,6 +181,50 @@ describe("HostedUserRunner execution coordination", () => {
     expect(scheduledAlarms).toEqual([]);
     expect(alarms).toContain("deleted");
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
+  });
+
+  it("passes a runner-scoped OpenAI provider credential to hosted runtime jobs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const job = invoke.mock.calls[0]?.[0].job;
+    const credential = job?.runtime?.forwardedEnv?.OPENAI_API_KEY;
+    expect(typeof credential).toBe("string");
+    expect(credential).not.toBe(TEST_RUNNER_RUNTIME_ENV_SOURCE.OPENAI_API_KEY);
+    expect(JSON.stringify(job)).not.toContain(
+      TEST_RUNNER_RUNTIME_ENV_SOURCE.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    );
+    const verified = await verifyHostedProviderEgressCredential({
+      credential: String(credential),
+      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    expect(verified).toEqual({
+      claims: {
+        providerKind: "openai",
+        runnerContainerName: TEST_USER_ID,
+        schema: "murph.hosted-provider-egress-credential.v1",
+        scope: "hosted_runner_provider_egress",
+        userId: TEST_USER_ID,
+      },
+      ok: true,
+    });
   });
 
   it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {

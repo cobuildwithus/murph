@@ -210,6 +210,7 @@ function buildStableRouteCapabilityPrompt(
       assistantHostedDeviceConnectProviders:
         input.assistantHostedDeviceConnectProviders ?? [],
     }),
+    buildAssistantVaultFileSendGuidanceText(),
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
@@ -256,8 +257,12 @@ function buildAssistantConnectedAppsGuidanceText(): string {
   return [
     "Connected-app tools:",
     "- When `murph.connected_apps_*` tools are available, use them for standalone reads and to ground browser work. Connected email accounts (Gmail, Microsoft Outlook, Zoho Mail) can recover recent provider or practice names, official sender domains, portal or confirmation links, prior appointment or order facts, and billing relationships. Connected calendars (Google Calendar, Microsoft Outlook) can corroborate prior events and identify conflicts in a requested scheduling window.",
-    "- Before asking the user to repeat task-relevant information that a connected email, calendar, or built-in service may answer, use `connected_apps_manage` to list accounts when account choice is unclear, `connected_apps_search` to discover the exact current tool and schema, then `connected_apps_execute` with the exact returned account selector for connected-account tools or no account for built-in service tools. Narrow search to `gmail`, `googlecalendar`, `outlook`, `zoho_mail`, `composio_search`, `instacart`, or `openweather_api` when useful.",
-    "- Use OpenWeather for current or next-five-day weather only when it materially affects time- and location-specific outdoor advice. Do not change future scheduling because weather is unknown; say it can be checked closer to the date and adjusted if conditions change.",
+    "- Before asking the user to repeat task-relevant information that a connected email, calendar, document, note, task, or built-in service may answer, use `connected_apps_manage` to list accounts when account choice is unclear, `connected_apps_search` to discover the exact current tool and schema, then `connected_apps_execute` with the exact returned account selector for connected-account tools or no account for built-in service tools. Narrow search to `gmail`, `googlecalendar`, `outlook`, `zoho_mail`, `googledrive`, `one_drive`, `dropbox`, `googletasks`, `todoist`, `notion`, `composio_search`, `instacart`, or `openweather_api` when useful.",
+    "- Built-in service tools are useful accountless lookups before asking the user or falling back to browser work. Use Google Maps for health-relevant place discovery such as providers, clinics, labs, pharmacies, gyms, grocery stores, and restaurants; keep Mapbox as Murph's geocoding, distance, and routing layer. Use NPPES/NPI lookup for provider or practice registry identity, NPI numbers, taxonomy, and official practice metadata, but do not treat it as proof of availability, insurance participation, quality, or current booking status.",
+    "- Use Amazon and Walmart search only for health-relevant product discovery such as OTC items, supplements, home health equipment, groceries, meal-prep products, and replacement supplies. These tools only search products; use browser/computer-use for purchasing or ordering, and only after the user's authorization bounds are clear.",
+    "- Use Instacart for grocery and meal-prep workflows when it can find nearby retailers or create shopping-list or recipe handoff pages. Instacart handoffs do not place or pay for orders.",
+    "- Connected document, storage, note, and task tools (Google Drive, Microsoft OneDrive, Dropbox, Google Tasks, Todoist, Notion) can recover health-relevant files, notes, lab PDFs, discharge instructions, insurance or billing documents, product or supplement receipts, routines, todos, and follow-up commitments. Treat them as read and context surfaces unless a server-owned policy explicitly enables a write.",
+    "- Use OpenWeather for current or next-five-day weather only when it materially affects time- and location-specific outdoor advice. Use a known activity location when available; otherwise ask for the city or region needed for the weather check, not an exact address. Do not change future scheduling because weather is unknown; say it can be checked closer to the date and adjusted if conditions change. Do not claim unsupported UV, air-quality, or official-alert data.",
     "- For requests such as \"book another dentist appointment,\" use the smallest useful evidence to identify the practice, such as recent direct dentist confirmations or a prior matching calendar event; use both only when one source is ambiguous. Inspect calendar conflicts in the user's timezone only when scheduling availability would change the action before asking for the dentist name or offering browser slots. Proceed without a question when one clear relationship is corroborated; ask one narrow question when multiple accounts, providers, visit types, or locations remain plausible.",
     "- Search narrowly by task and date range. Prefer direct confirmations, receipts, and provider messages over newsletters or marketing; retrieve only enough results to resolve the task, and do not expose unrelated messages, attendees, or event details.",
     "- Multiple accounts for one toolkit are supported. Never guess which account the user means or scan all accounts by default; list accounts or ask one narrow question when the choice is ambiguous.",
@@ -270,7 +275,7 @@ function buildAssistantConnectedAppsGuidanceText(): string {
 function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
-    "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and any relevant changelog item ids, then continue helping. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+    "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
   ].join("\n");
 }
 
@@ -788,6 +793,13 @@ User-provided content and vault writes:
 - Omit incidental identifiers such as addresses, phone numbers, SSNs, card numbers, accession/order IDs, faces, exact locations, and unrelated document details. Keep clinically relevant dates and health facts when needed for the record.
 - Preserve raw evidence only through existing attachment, document, capture, manifest, or import surfaces. Do not create ad hoc private copies of sensitive documents.
 - Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. If a save/import/write fails, say what did not finish and continue with any answer the available evidence supports.`;
+}
+
+function buildAssistantVaultFileSendGuidanceText(): string {
+  return [
+    "Vault file sends:",
+    "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, the file will not send until the user opens that link and approves. Include the raw approval URL in the normal reply, preferably as the final line in messaging channels. Do not omit it, summarize around it without the URL, or rely on a separate automated message.",
+  ].join("\n");
 }
 
 function buildAssistantSkillRouteHintText(): string {

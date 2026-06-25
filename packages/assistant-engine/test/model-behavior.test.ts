@@ -109,6 +109,21 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('requires pending vault-file approvals to include the returned handoff link', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Vault file sends:')
+    expect(prompt).toContain(
+      'the file will not send until the user opens that link and approves',
+    )
+    expect(prompt).toContain(
+      'Include the raw approval URL in the normal reply',
+    )
+    expect(prompt).toContain(
+      'Do not omit it, summarize around it without the URL, or rely on a separate automated message.',
+    )
+  })
+
   it('routes accepted habit plans through canonical health surfaces', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -134,8 +149,9 @@ describe('assistant execution prompt contract', () => {
       'capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and any relevant changelog item ids',
+      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )
+    expect(prompt).toContain('Changelog ids are optional metadata')
     expect(prompt).toContain('Start inferred summaries with `Speculative:`')
     expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
     expect(prompt).toContain('Do not log vague low-confidence guesses')
@@ -1411,6 +1427,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(prompt).toContain('strength-training')
+    expect(prompt).toContain('strength or resistance training plans')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
     )
@@ -1428,6 +1449,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
     )
+    expect(prompt).not.toContain('One composable engine')
     expect(prompt).not.toContain('/tmp/')
     expect(prompt).not.toContain('.codex-hosted')
   })

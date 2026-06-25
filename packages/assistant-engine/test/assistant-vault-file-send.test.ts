@@ -3,9 +3,12 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
+  saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
   applyAssistantVaultFileSendApprovalResult,
@@ -140,6 +143,134 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('keeps the approved action request stable when a pending file-send intent resolves its target', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-approved-target-',
+    )
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'approved content')
+
+    const requests: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>[] = []
+    const approvalPort = {
+      request: vi.fn(async (request: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>) => {
+        requests.push(request)
+        if (requests.length === 1) {
+          return {
+            approvalId: `haa_${'d'.repeat(32)}`,
+            approvalUrl: 'https://murph.test/approve/haa_test',
+            expiresAt: '2026-06-24T12:15:00.000Z',
+            status: 'pending' as const,
+          }
+        }
+        if (requests[0] && request.actionFingerprint !== requests[0].actionFingerprint) {
+          throw Object.assign(
+            new Error('This action id is already bound to a different sensitive action.'),
+            { code: 'ACTION_APPROVAL_IDENTITY_CONFLICT' },
+          )
+        }
+        return {
+          approvalId: `haa_${'d'.repeat(32)}`,
+          status: 'approved' as const,
+        }
+      }),
+    }
+    const baseRequest = {
+      actionApprovalPort: approvalPort,
+      channel: 'linq',
+      deliveryIdempotencyKey: 'hosted-turn-delivery-target-stable',
+      identityId: 'member_123',
+      ref: 'documents/report.pdf',
+      sessionId: 'session_123',
+      threadId: 'chat_123',
+      threadIsDirect: true,
+      turnId: 'turn_123',
+      vault: vaultRoot,
+    }
+
+    const first = await requestAssistantVaultFileSend(baseRequest)
+    const [queuedIntent] = await listAssistantOutboxIntents(vaultRoot)
+    expect(queuedIntent).toMatchObject({
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      intentId: first.intentId,
+      status: 'awaiting_approval',
+    })
+    const approved = await requestAssistantVaultFileSend(baseRequest)
+    await expect(requestAssistantVaultFileSend({
+      ...baseRequest,
+      bindingDelivery: { kind: 'thread' as const, target: 'chat_123' },
+    })).resolves.toMatchObject({
+      intentId: first.intentId,
+      status: 'approved',
+    })
+
+    expect(approved).toMatchObject({
+      intentId: first.intentId,
+      status: 'approved',
+    })
+    expect(requests).toHaveLength(3)
+    expect(requests[1]).toEqual(requests[0])
+    expect(requests[2]).toEqual(requests[0])
+  })
+
+  it('repairs approved legacy targetless intents without changing approval identity', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-approved-legacy-target-',
+    )
+    tempRoots.push(parentRoot)
+    const now = new Date('2026-06-24T12:00:00.000Z')
+    const legacy = {
+      ...createVaultFileIntent(),
+      bindingDelivery: null,
+      explicitTarget: null,
+      targetFingerprint: 'legacy-targetless-fingerprint',
+    }
+    const approvedRequest = buildAssistantVaultFileSendApprovalRequest(legacy)
+
+    const approved = applyAssistantVaultFileSendApprovalResult({
+      approval: {
+        approvalId: `haa_${'e'.repeat(32)}`,
+        status: 'approved',
+      },
+      intent: legacy,
+      now,
+    })
+
+    expect(approved).toMatchObject({
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      nextAttemptAt: now.toISOString(),
+      status: 'pending',
+      targetFingerprint: legacy.targetFingerprint,
+    })
+    expect(buildAssistantVaultFileSendApprovalRequest(approved)).toEqual(
+      approvedRequest,
+    )
+
+    await saveAssistantOutboxIntent(vaultRoot, approved)
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'chat_123',
+      target: 'chat_123',
+      targetKind: 'thread',
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: approved.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: approved.deliveryIdempotencyKey,
+      media: [expect.objectContaining({ kind: 'vault_file', ref: 'documents/report.pdf' })],
+      target: 'chat_123',
+      targetKind: 'thread',
+    }))
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+  })
+
   it('never dispatches an awaiting-approval intent even when forced', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-blocked-',
@@ -179,6 +310,41 @@ describe('assistant vault-file send', () => {
 
     expect(result.intent.status).toBe('awaiting_approval')
     expect(sendLinq).not.toHaveBeenCalled()
+  })
+
+  it('hands the approval link back to the normal assistant reply path', async () => {
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(async () => ({
+        approvalUrl: 'https://murph.test/approve/haa_test',
+        filename: 'report.pdf',
+        status: 'pending' as const,
+      })),
+      vaultFileSendAvailable: true,
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      publicFetchImpl: fetch,
+      request: {
+        kind: 'send-vault-file',
+        ref: 'documents/report.pdf',
+      },
+    })
+
+    expect(result.finalActionPatch).toBeUndefined()
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
+      approvalUrl: 'https://murph.test/approve/haa_test',
+      filename: 'report.pdf',
+      status: 'pending',
+    }))
   })
 })
 

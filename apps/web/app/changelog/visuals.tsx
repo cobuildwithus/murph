@@ -855,6 +855,320 @@ export type RetentionEvent = {
   tone?: "neutral" | "warn" | "expire";
 };
 
+export function AssessmentCard({
+  topic,
+  assessment,
+  nextAction,
+  rationale,
+  meta,
+}: {
+  assessment: string;
+  meta?: string;
+  nextAction: string;
+  rationale?: string;
+  topic: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{topic}</p>
+        {meta ? <span className={HEADER_META}>{meta}</span> : null}
+      </div>
+      <div className="flex flex-col">
+        <div className="flex flex-col gap-1.5 border-b border-[#2d3436]/8 px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full bg-[#736a58]"
+            />
+            <p className="font-mono text-[9.5px] font-medium tracking-[0.14em] text-[#736a58] uppercase">
+              Best read
+            </p>
+          </div>
+          <p className="text-[12.5px] leading-[1.55] text-[#2d3436]">
+            {assessment}
+          </p>
+        </div>
+        <div className="relative flex flex-col gap-1.5 bg-[#3a4a1e]/[0.05] px-4 py-3.5">
+          <span
+            aria-hidden="true"
+            className="absolute left-0 top-3 h-[calc(100%-1.5rem)] w-[2px] rounded-r-full bg-[#3a4a1e]"
+          />
+          <div className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full bg-[#3a4a1e]"
+            />
+            <p className="font-mono text-[9.5px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
+              Recommended next
+            </p>
+          </div>
+          <p className="font-serif text-[13.5px] font-semibold leading-snug text-[#2d3436]">
+            {nextAction}
+          </p>
+          {rationale ? (
+            <p className="text-[11.5px] leading-[1.45] text-[#736a58]">
+              {rationale}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export type ReasoningStep = {
+  label: string;
+  note?: string;
+  state: "done" | "active" | "pending";
+};
+
+export function ReasoningSteps({
+  steps,
+  label = "Clinical-style reasoning",
+  meta,
+}: {
+  label?: string;
+  meta?: string;
+  steps: readonly ReasoningStep[];
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        {meta ? <span className={HEADER_META}>{meta}</span> : null}
+      </div>
+      <div className="flex flex-col px-4 py-3.5">
+        {steps.map((step, i) => {
+          const isLast = i === steps.length - 1;
+          const isDone = step.state === "done";
+          const isActive = step.state === "active";
+          return (
+            <div key={i} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  aria-hidden="true"
+                  className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[9.5px] font-semibold tabular-nums ${
+                    isDone
+                      ? "bg-[#3a4a1e] text-[#f5f0e8]"
+                      : isActive
+                        ? "border-2 border-[#3a4a1e] bg-[#fffcf6] text-[#3a4a1e]"
+                        : "border border-[#c4a882]/55 bg-transparent text-[#a39684]"
+                  }`}
+                >
+                  {isDone ? (
+                    <svg
+                      viewBox="0 0 12 12"
+                      className="size-2.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M2.5 6.5l2.5 2.5L9.5 4" />
+                    </svg>
+                  ) : (
+                    i + 1
+                  )}
+                </span>
+                {!isLast ? (
+                  <span
+                    aria-hidden="true"
+                    style={{ minHeight: step.note ? "28px" : "16px" }}
+                    className={`mt-0.5 w-px flex-1 ${
+                      isDone ? "bg-[#3a4a1e]/35" : "bg-[#c4a882]/45"
+                    }`}
+                  />
+                ) : null}
+              </div>
+              <div
+                className={`flex flex-col gap-0.5 ${isLast ? "pb-0" : "pb-3"}`}
+              >
+                <p
+                  className={`text-[12.5px] leading-tight ${
+                    isActive
+                      ? "font-semibold text-[#2d3436]"
+                      : isDone
+                        ? "text-[#736a58]"
+                        : "text-[#a39684]"
+                  }`}
+                >
+                  {step.label}
+                </p>
+                {step.note ? (
+                  <p className="text-[11px] leading-[1.45] text-[#736a58]">
+                    {step.note}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export type RegimenEntry = {
+  kind: "goal" | "habit" | "ramp";
+  text: string;
+};
+
+export function GoalsRegimenCard({
+  entries,
+  label = "Pinned for this thread",
+  meta = "read each turn",
+}: {
+  entries: readonly RegimenEntry[];
+  label?: string;
+  meta?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <div className="flex items-center gap-1.5">
+          <svg
+            viewBox="0 0 12 12"
+            className="size-2.5 text-[#a36b3f]"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M5.6 1.6l1.4 2.7 3 .4-2.2 2.1.6 3-2.8-1.4-2.8 1.4.6-3L1.2 4.7l3-.4z" />
+          </svg>
+          <p className={HEADER_LABEL}>{label}</p>
+        </div>
+        {meta ? <span className={HEADER_META}>{meta}</span> : null}
+      </div>
+      <div className="flex flex-col divide-y divide-[#2d3436]/8">
+        {entries.map((entry, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3 px-4 py-2.5 text-[12.5px]"
+          >
+            <span
+              className={`inline-flex w-12 shrink-0 justify-center rounded-full px-1.5 py-0.5 font-mono text-[9px] font-medium tracking-[0.1em] uppercase ${
+                entry.kind === "goal"
+                  ? "bg-[#3a4a1e]/12 text-[#3a4a1e]"
+                  : entry.kind === "habit"
+                    ? "bg-[#c4a882]/25 text-[#736a58]"
+                    : "bg-[#a36b3f]/15 text-[#8b4f2c]"
+              }`}
+            >
+              {entry.kind}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[#2d3436]">
+              {entry.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export type ExerciseTile = {
+  hue: number;
+  name: string;
+  reps?: string;
+};
+
+export function ExerciseGrid({
+  tiles,
+  caption,
+}: {
+  caption?: string;
+  tiles: readonly ExerciseTile[];
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>A few to start with</p>
+        <span className={HEADER_META}>
+          {tiles.length} {tiles.length === 1 ? "movement" : "movements"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 p-3.5">
+        {tiles.map((tile, i) => (
+          <div key={i} className="flex flex-col gap-1.5">
+            <div
+              aria-hidden="true"
+              className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-[#2d3436]/10 shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+              style={{
+                background: `linear-gradient(155deg, hsl(${tile.hue} 26% 32%) 0%, hsl(${tile.hue} 32% 56%) 65%, hsl(${tile.hue} 35% 78%) 100%)`,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 bg-[radial-gradient(circle_at_28%_22%,rgba(255,255,255,0.32),transparent_58%)]"
+              />
+              <ExerciseGlyph index={i} />
+              <span
+                aria-hidden="true"
+                className="absolute left-1.5 top-1.5 inline-flex size-[15px] items-center justify-center rounded-full bg-black/25 font-mono text-[8.5px] font-semibold text-white tabular-nums backdrop-blur-[2px]"
+              >
+                {i + 1}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0">
+              <p className="truncate text-[11px] font-semibold leading-tight text-[#2d3436]">
+                {tile.name}
+              </p>
+              {tile.reps ? (
+                <p className="truncate font-mono text-[9.5px] tracking-[0.04em] text-[#736a58] tabular-nums">
+                  {tile.reps}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+      {caption ? (
+        <div className="border-t border-[#2d3436]/8 px-4 py-2.5">
+          <p className="text-center text-[11.5px] italic leading-tight text-[#4d453b]">
+            &ldquo;{caption}&rdquo;
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ExerciseGlyph({ index }: { index: number }) {
+  const glyphs = [
+    <g key="breath">
+      <circle cx="50" cy="44" r="13" fill="none" stroke="currentColor" strokeWidth="1.4" opacity="0.55" />
+      <circle cx="50" cy="44" r="20" fill="none" stroke="currentColor" strokeWidth="1.1" opacity="0.35" />
+      <circle cx="50" cy="44" r="27" fill="none" stroke="currentColor" strokeWidth="0.9" opacity="0.22" />
+      <circle cx="50" cy="44" r="3" fill="currentColor" />
+    </g>,
+    <g key="bridge">
+      <path d="M20 56 Q50 24 80 56" fill="none" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <line x1="20" y1="56" x2="20" y2="64" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <line x1="80" y1="56" x2="80" y2="64" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <circle cx="50" cy="36" r="2" fill="currentColor" opacity="0.85" />
+    </g>,
+    <g key="reach">
+      <line x1="50" y1="22" x2="50" y2="58" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <line x1="50" y1="32" x2="70" y2="20" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <line x1="50" y1="32" x2="34" y2="42" stroke="currentColor" strokeWidth="1.4" opacity="0.5" strokeLinecap="round" />
+      <line x1="50" y1="58" x2="42" y2="72" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <line x1="50" y1="58" x2="58" y2="72" stroke="currentColor" strokeWidth="1.6" opacity="0.7" strokeLinecap="round" />
+      <circle cx="50" cy="18" r="3" fill="currentColor" opacity="0.85" />
+    </g>,
+  ];
+  return (
+    <svg
+      viewBox="0 0 100 80"
+      className="absolute inset-x-0 bottom-0 h-full w-full text-white"
+      aria-hidden="true"
+    >
+      {glyphs[index % glyphs.length]}
+    </svg>
+  );
+}
+
 export function PrivacyTimeline({
   events,
   span = 14,

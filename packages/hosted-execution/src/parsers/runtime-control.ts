@@ -28,6 +28,7 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
@@ -652,12 +653,6 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       maxLength: 120,
     },
   );
-  if (kind === "feature_interest" && relatedChangelogItemIds.length === 0) {
-    throw new TypeError(
-      "Hosted runtime product feedback feature interest must reference at least one changelog item.",
-    );
-  }
-
   return {
     feedback: {
       idempotencyKey,
@@ -797,9 +792,9 @@ function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKi
 }
 
 function parseHostedProductFeedbackSummary(value: unknown): string {
-  const summary = requireString(value, "Hosted runtime product feedback summary")
-    .trim()
-    .replace(/\s+/gu, " ");
+  const summary = sanitizeHostedProductFeedbackSummary(
+    requireString(value, "Hosted runtime product feedback summary"),
+  );
   if (
     summary.length === 0 ||
     summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH

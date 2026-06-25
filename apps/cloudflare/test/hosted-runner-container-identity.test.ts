@@ -222,6 +222,8 @@ describe("hosted runner container identity", () => {
         id: "version_1",
       },
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       OPENAI_API_KEY: "test-openai-key",
     };
     const service = createRuntimeInvocationService({
@@ -307,6 +309,8 @@ describe("hosted runner container identity", () => {
           id: "version_1",
         },
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,

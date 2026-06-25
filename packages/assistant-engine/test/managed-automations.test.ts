@@ -294,8 +294,11 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(seed.schedule.expression).toBe('30 11 * * 4')
-    expect(seed.instructions).toContain('/api/changelog?days=7')
-    expect(seed.instructions).toContain('murph.attach_response_media')
+    expect(seed.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
+    expect(seed.instructions).toContain('scheduled announcement text-only')
+    expect(seed.instructions).not.toContain('murph.attach_response_media')
+    expect(seed.instructions).not.toContain('visual digest')
+    expect(seed.instructions).not.toContain('links.digestCardTemplate')
     expect(seed.instructions).toContain('murph.submit_product_feedback')
     expect(seed.instructions).toContain('another feature in mind')
     expect(seed.instructions).toContain('clear inferred workflow friction')
