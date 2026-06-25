@@ -215,6 +215,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && name !== "murph.react_to_message"
+      && name !== "murph.send_vault_file"
     );
     expect(allToolNames).toContain("murph.react_to_message");
     expect(allToolNames).toContain("murph.computer_start_run");
@@ -230,6 +231,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
         messageReactionsAvailable: true,
+        vaultFileSendAvailable: true,
       },
     );
   });

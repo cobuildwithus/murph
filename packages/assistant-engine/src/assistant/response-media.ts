@@ -40,6 +40,10 @@ function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string 
     return `image:${media.url}`
   }
 
+  if (media.kind === 'vault_file') {
+    return `vault_file:${media.ref}:${media.sha256}`
+  }
+
   switch (media.transport.kind) {
     case 'linq_attachment':
       return `voice_memo:linq:${media.transport.attachmentId}`

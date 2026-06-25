@@ -1,8 +1,15 @@
-export const SENSITIVE_ACTION_KINDS = [
+export const SETTINGS_SENSITIVE_ACTION_KINDS = [
   "vault.export",
   "account.delete",
 ] as const;
 
+export const SENSITIVE_ACTION_KINDS = [
+  ...SETTINGS_SENSITIVE_ACTION_KINDS,
+  "assistant.action.approve",
+] as const;
+
+export type SettingsSensitiveActionKind =
+  typeof SETTINGS_SENSITIVE_ACTION_KINDS[number];
 export type SensitiveActionKind = typeof SENSITIVE_ACTION_KINDS[number];
 
 export interface SensitiveActionChallengeResponse {
@@ -22,6 +29,13 @@ const SENSITIVE_ACTION_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/u;
 export function isSensitiveActionKind(value: unknown): value is SensitiveActionKind {
   return typeof value === "string"
     && (SENSITIVE_ACTION_KINDS as readonly string[]).includes(value);
+}
+
+export function isSettingsSensitiveActionKind(
+  value: unknown,
+): value is SettingsSensitiveActionKind {
+  return typeof value === "string"
+    && (SETTINGS_SENSITIVE_ACTION_KINDS as readonly string[]).includes(value);
 }
 
 export function isSensitiveActionToken(value: unknown): value is string {

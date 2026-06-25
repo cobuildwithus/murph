@@ -29,6 +29,7 @@ export type {
   HostedRuntimeLinqSendResponse,
   HostedRuntimeLatencyTracePort,
   HostedRuntimeLatencyTraceRecordResponse,
+  HostedRuntimeActionApprovalPort,
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,

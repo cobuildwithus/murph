@@ -198,6 +198,7 @@ export async function runHostedWorkspaceAssistantPhase(
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
+        actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
@@ -437,6 +438,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const terminalLinqCleanupDue = providerCleanupPhase.terminalLinqCleanupDue;
     const deferredProviderCleanupWakeAt = providerCleanupPhase.deferredProviderCleanupWakeAt;
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
+      actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents: true,
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
@@ -2157,6 +2159,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       shouldYieldAfterSystemMailboxPreparation,
     })
       ? await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: true,
         preferredIntentIds: [],
         vaultRoot: phaseInput.restored.vaultRoot,
@@ -2701,10 +2704,12 @@ async function runProviderCleanupPhase(input: {
 }
 
 async function collectForegroundDeliveryEffects(input: {
+  actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
+    actionApprovalPort: input.actionApprovalPort ?? null,
     includeBackgroundDueIntents: false,
     preferredIntentIds: input.preferredIntentIds,
     vaultRoot: input.vaultRoot,
@@ -2731,6 +2736,7 @@ async function runForegroundAssistantReplyPhase(input: {
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
   const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
+    actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
   });

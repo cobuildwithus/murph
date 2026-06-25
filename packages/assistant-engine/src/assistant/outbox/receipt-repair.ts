@@ -103,12 +103,15 @@ function buildAssistantOutboxReceiptRepair(
   const at = atOverride ?? intent.updatedAt
   const channel = intent.channel ?? 'unknown'
 
-  if (intent.status === 'pending') {
+  if (intent.status === 'awaiting_approval' || intent.status === 'pending') {
     return {
       at,
       completedAt: null,
       deliveryDisposition: 'queued',
-      detail: 'outbound delivery queued',
+      detail:
+        intent.status === 'awaiting_approval'
+          ? 'outbound delivery awaiting secure approval'
+          : 'outbound delivery queued',
       eventKind: 'delivery.queued',
       lastError: null,
       metadata: {

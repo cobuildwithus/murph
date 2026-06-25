@@ -11,6 +11,7 @@ import {
   isHostedComputerWebControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -40,6 +41,7 @@ const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/connect-targets\/[^/]+\/connect-link$/u;
 
 export type HostedRunnerWebControlOperation =
+  | "action_approval_request"
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
   | "codex_auth_update"
@@ -69,6 +71,7 @@ export interface HostedRunnerWebControlPolicy {
 }
 
 const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebControlOperation>([
+  [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],

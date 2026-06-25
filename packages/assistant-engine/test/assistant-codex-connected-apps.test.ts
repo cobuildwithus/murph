@@ -321,6 +321,10 @@ function createHostedToolContext(
       kind: "failed",
       source: "model",
     }),
+    sendVaultFile: async () => {
+      throw new Error("Vault-file sending is unavailable for this turn.");
+    },
+    vaultFileSendAvailable: false,
   };
 }
 

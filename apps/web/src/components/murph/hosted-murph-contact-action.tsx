@@ -5,15 +5,20 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-contact-context";
 import {
   resolveMurphContactOptions,
+  type MurphContactKind,
   type MurphContactMessage,
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
+interface ResolveHostedMurphContactOptionsInput {
+  message?: MurphContactMessage | null;
+  preferredKind?: MurphContactKind | null;
+}
+
 export async function resolveHostedMurphContactOptions({
   message = null,
-}: {
-  message?: MurphContactMessage | null;
-} = {}): Promise<MurphContactOption[]> {
+  preferredKind = null,
+}: ResolveHostedMurphContactOptionsInput = {}): Promise<MurphContactOption[]> {
   const { initialContactChannels, murphEmailAddress, murphPhoneNumber, userEmailAddress } =
     await getHostedMurphContactContext();
 
@@ -22,15 +27,15 @@ export async function resolveHostedMurphContactOptions({
     message,
     murphEmailAddress,
     murphPhoneNumber,
+    preferredKind,
     userEmailAddress,
   });
 }
 
 export async function resolveHostedMurphContactOption({
   message = null,
-}: {
-  message?: MurphContactMessage | null;
-} = {}): Promise<MurphContactOption | null> {
-  const options = await resolveHostedMurphContactOptions({ message });
+  preferredKind = null,
+}: ResolveHostedMurphContactOptionsInput = {}): Promise<MurphContactOption | null> {
+  const options = await resolveHostedMurphContactOptions({ message, preferredKind });
   return options[0] ?? null;
 }

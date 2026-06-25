@@ -83,9 +83,19 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
   transport: HostedAssistantDeliveryVoiceMemoTransport;
 }
 
+export interface HostedAssistantDeliveryVaultFileMedia {
+  contentType: string;
+  filename: string;
+  kind: "vault_file";
+  ref: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
 export type HostedAssistantDeliveryMedia =
   | HostedAssistantDeliveryImageMedia
-  | HostedAssistantDeliveryVoiceMemoMedia;
+  | HostedAssistantDeliveryVoiceMemoMedia
+  | HostedAssistantDeliveryVaultFileMedia;
 
 export type HostedAssistantMessageReaction =
   | "heart"
@@ -708,8 +718,71 @@ function parseHostedAssistantDeliveryMedia(
   if (kind === "voice_memo") {
     return parseHostedAssistantDeliveryVoiceMemoMedia(record, label);
   }
+  if (kind === "vault_file") {
+    return parseHostedAssistantDeliveryVaultFileMedia(record, label);
+  }
 
-  throw new TypeError(`${label}.kind must be image or voice_memo.`);
+  throw new TypeError(`${label}.kind must be image, voice_memo, or vault_file.`);
+}
+
+function parseHostedAssistantDeliveryVaultFileMedia(
+  record: Record<string, unknown>,
+  label: string,
+): HostedAssistantDeliveryVaultFileMedia {
+  requireExactObjectKeys(
+    record,
+    {
+      required: ["contentType", "filename", "kind", "ref", "sha256", "sizeBytes"],
+    },
+    label,
+  );
+  const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
+  if (
+    ref.startsWith("/")
+    || /^[A-Za-z]:/u.test(ref)
+    || ref.includes("\\")
+    || /[\u0000-\u001F\u007F]/u.test(ref)
+    || ref.split("/").some((segment) => (
+      segment.length === 0
+      || segment === "."
+      || segment === ".."
+      || segment.startsWith(".")
+    ))
+  ) {
+    throw new TypeError(`${label}.ref must be a normalized, non-hidden vault-relative path.`);
+  }
+  const sha256 = requireString(record.sha256, `${label}.sha256`);
+  if (!/^[0-9a-f]{64}$/u.test(sha256)) {
+    throw new TypeError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
+  }
+  const contentType = requireBoundedTrimmedString(
+    record.contentType,
+    `${label}.contentType`,
+    200,
+  );
+  if (!/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u.test(contentType)) {
+    throw new TypeError(`${label}.contentType must be a MIME type.`);
+  }
+  const filename = requireBoundedTrimmedString(
+    record.filename,
+    `${label}.filename`,
+    255,
+  );
+  if (/[\\/\u0000-\u001F\u007F]/u.test(filename)) {
+    throw new TypeError(`${label}.filename must not contain path separators or control characters.`);
+  }
+  return {
+    contentType,
+    filename,
+    kind: "vault_file",
+    ref,
+    sha256,
+    sizeBytes: requirePositiveIntegerAtMost(
+      record.sizeBytes,
+      `${label}.sizeBytes`,
+      100 * 1024 * 1024,
+    ),
+  };
 }
 
 function parseHostedAssistantDeliveryVoiceMemoMedia(
