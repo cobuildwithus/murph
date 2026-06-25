@@ -50,6 +50,12 @@ export const ASSISTANT_SKILLS = [
       'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
   },
   {
+    slug: 'nutrition-strategy',
+    name: 'nutrition-strategy',
+    triggerHint:
+      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, body composition, training fuel and recovery, hydration, appetite or under-fueling, GI comfort, and real-life constraints. Use food-journal for meal capture or retrospective pattern finding.',
+  },
+  {
     slug: 'sleep-recovery-readiness',
     name: 'sleep-recovery-readiness',
     triggerHint:

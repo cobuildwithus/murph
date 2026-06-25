@@ -621,6 +621,12 @@ describe('assistant consumption lookup guidance', () => {
       'When meal logging or food-pattern context is central, follow the food-journal skill',
     )
     expect(prompt).toContain(
+      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+    )
+    expect(prompt).toContain(
+      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
+    )
+    expect(prompt).toContain(
       'Ask one targeted follow-up only when missing detail materially changes the user\'s chosen focus, safety, or whether the record will be useful',
     )
     expect(prompt).toContain(
@@ -1149,7 +1155,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
+      '0cd3fb397e9e25fa72400a898c333906ebc476c9dc90689c688465b702e8e01e',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
