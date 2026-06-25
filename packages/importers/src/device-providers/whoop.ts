@@ -499,13 +499,22 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     }
   }
 
+  const bodyMeasurementObservedAt = bodyMeasurement
+    ? firstBodyMeasurementRecordedAt(bodyMeasurement)
+    : undefined;
+  const bodyMeasurementExplicitDayKey = bodyMeasurement
+    ? firstBodyMeasurementExplicitDayKey(bodyMeasurement)
+    : undefined;
   const bodyMeasurementRecordedAt = bodyMeasurement
-    ? firstBodyMeasurementRecordedAt(bodyMeasurement) ?? importedAt
+    ? bodyMeasurementObservedAt ?? importedAt
     : undefined;
   const bodyMeasurementDayKey = bodyMeasurement
-    ? firstBodyMeasurementExplicitDayKey(bodyMeasurement) ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
+    ? bodyMeasurementExplicitDayKey ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
     : undefined;
-  const bodyMeasurementResourceId = firstDayKey(bodyMeasurementRecordedAt) ?? "current";
+  const bodyMeasurementResourceId = firstDayKey(bodyMeasurementObservedAt) ??
+    bodyMeasurementExplicitDayKey ??
+    firstDayKey(bodyMeasurementRecordedAt) ??
+    "current";
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
@@ -536,8 +545,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const endAt = toIso(sleep.end);
     const version = toIso(sleep.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(sleep.updated_at), endAt, startAt, importedAt);
-    const occurredAt = startAt ?? recordedAt;
     const dayKey = firstWhoopLocalDayKey(sleep, endAt, startAt, recordedAt);
+    const occurredAt = dayKey ? startAt ?? recordedAt : endAt ?? startAt ?? recordedAt;
     const durationMinutes = minutesBetween(startAt, endAt);
     const sleepRole = `sleep:${sleepId}`;
     const sleepRef = makeExternalRef("sleep", sleepId, version);

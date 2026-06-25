@@ -736,6 +736,54 @@ test("Junction workout summaries without provider offset defer canonical day to 
   }
 });
 
+test("Junction sleep summaries without provider offset derive canonical day from sleep end", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-local-day-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep: [{
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          id: "junction-whoop-sleep-no-offset-overnight-24",
+          start: "2026-06-24T02:30:00.000Z",
+          end: "2026-06-24T11:00:00.000Z",
+          updated_at: "2026-06-24T11:30:00.000Z",
+          sleep_score: 82,
+        }],
+      },
+    };
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const sleepSession = result.events.find((event) => event.kind === "sleep_session");
+    const sleepScore = result.events.find(
+      (event) => event.kind === "observation" && event.metric === "sleep-score",
+    );
+
+    assert.equal(sleepSession?.dayKey, "2026-06-24");
+    assert.equal(sleepScore?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction snapshot adapter fails closed on glucose values outside the mmol/L window", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -2810,7 +2858,7 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "garmin");
   assert.equal(stepEvent?.dataOrigin?.sourceType, "watch");
   assert.equal(sleepSession?.fields?.durationMinutes, 480);
-  assert.equal(sleepSession?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSession?.occurredAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepScore?.fields?.value, 82);
   assert.equal(respiratoryRate?.fields?.value, 14.8);
   assert.equal(respiratoryRate?.dayKey, "2026-05-20");
@@ -4098,7 +4146,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
 
   const sleepSessions = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
   assert.equal(sleepSessions.length, 1);
-  assert.equal(sleepSessions[0]?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSessions[0]?.occurredAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.startAt, "2026-05-20T02:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.endAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.durationMinutes, 480);

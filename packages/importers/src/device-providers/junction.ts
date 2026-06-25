@@ -1615,20 +1615,25 @@ function pushSleepSummary(
       millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
     ) ??
     normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+  const sleepTimestamp = timestamp.dayKey
+    ? timestamp
+    : withTimestampOverride(timestamp, {
+      occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
+    });
 
   if (startAt && endAt && durationMinutes !== undefined) {
-    const occurredAt = startAt;
+    const occurredAt = sleepTimestamp.occurredAt ?? startAt;
     context.events.push(stripUndefined({
       kind: "sleep_session",
       occurredAt,
-      recordedAt: timestamp.recordedAt,
-      dayKey: timestamp.dayKey,
+      recordedAt: sleepTimestamp.recordedAt,
+      dayKey: sleepTimestamp.dayKey,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
       title: "Junction sleep",
       evidenceRoles: resourceContext.evidenceRoles,
-      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      externalRef: makeJunctionExternalRef(resourceContext, entry, sleepTimestamp, "session"),
+      dataOrigin: buildDataOrigin(entry, resourceContext, sleepTimestamp),
       fields: {
         startAt,
         endAt,
@@ -1637,8 +1642,8 @@ function pushSleepSummary(
     }));
   }
 
-  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS);
-  pushJunctionRecoveryReadinessScore(entry, resourceContext, context, timestamp);
+  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS, sleepTimestamp);
+  pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
 }
 
 function pushSleepCycle(

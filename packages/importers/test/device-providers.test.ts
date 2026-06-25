@@ -515,6 +515,16 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
                 respiratory_rate: 13.9,
               },
             },
+            {
+              id: "sleep-no-offset-overnight-24",
+              cycle_id: "cycle-no-offset-local-24",
+              start: "2026-06-24T02:30:00.000Z",
+              end: "2026-06-24T11:00:00.000Z",
+              updated_at: "2026-06-24T11:30:00.000Z",
+              score: {
+                respiratory_rate: 13.7,
+              },
+            },
           ],
           cycles: [
             {
@@ -622,6 +632,17 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
         && event.metric === "respiratory-rate"
         && event.externalRef?.resourceId === "sleep-no-offset-local-24",
     );
+    const overnightNoOffsetSleepEvent = result.events.find(
+      (event) =>
+        event.kind === "sleep_session"
+        && event.externalRef?.resourceId === "sleep-no-offset-overnight-24",
+    );
+    const overnightNoOffsetRespiratoryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-no-offset-overnight-24",
+    );
     const recoveryEvent = result.events.find(
       (event) =>
         event.kind === "observation"
@@ -647,6 +668,8 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetDayStrainEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetRespiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(overnightNoOffsetSleepEvent?.dayKey, "2026-06-24");
+    assert.equal(overnightNoOffsetRespiratoryEvent?.dayKey, "2026-06-24");
     assert.equal(recoveryEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetRecoveryEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetBodyWeightEvent?.dayKey, "2026-06-24");
@@ -1972,6 +1995,38 @@ test("prepareDeviceProviderSnapshotImport preserves WHOOP body measurement offse
   assert.equal(weightEvent?.dayKey, "2026-06-24");
   assert.equal(weightEvent?.externalRef?.resourceId, "2026-06-25");
   assert.equal(payload.provenance?.bodyMeasurementDay, "2026-06-24");
+});
+
+test("prepareDeviceProviderSnapshotImport keeps date-only WHOOP body measurement identity stable", async () => {
+  const firstPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      bodyMeasurements: {
+        date: "2026-06-24",
+        weight_kilogram: 78.2,
+      },
+    },
+  });
+  const secondPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-26T12:00:00.000Z",
+      bodyMeasurements: {
+        date: "2026-06-24",
+        weight_kilogram: 78.2,
+      },
+    },
+  });
+  const firstWeightEvent = firstPayload.events?.find((event) => event.fields?.metric === "weight");
+  const secondWeightEvent = secondPayload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(firstWeightEvent?.dayKey, "2026-06-24");
+  assert.equal(secondWeightEvent?.dayKey, "2026-06-24");
+  assert.equal(firstWeightEvent?.externalRef?.resourceId, "2026-06-24");
+  assert.equal(secondWeightEvent?.externalRef?.resourceId, firstWeightEvent?.externalRef?.resourceId);
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {
