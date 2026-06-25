@@ -9,11 +9,13 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
+  createLinqAttachmentUpload: vi.fn(),
   createLinqChat: vi.fn(),
   probeLinqApi: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
+  uploadLinqAttachmentBytes: vi.fn(),
 }))
 
 const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
@@ -32,11 +34,13 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
     await importOriginal<typeof import('@murphai/operator-config/linq-runtime')>()
   return {
     ...actual,
+    createLinqAttachmentUpload: runtimeMocks.createLinqAttachmentUpload,
     createLinqChat: runtimeMocks.createLinqChat,
     probeLinqApi: runtimeMocks.probeLinqApi,
     sendLinqChatMessage: runtimeMocks.sendLinqChatMessage,
     startLinqChatTypingIndicator: runtimeMocks.startLinqChatTypingIndicator,
     stopLinqChatTypingIndicator: runtimeMocks.stopLinqChatTypingIndicator,
+    uploadLinqAttachmentBytes: runtimeMocks.uploadLinqAttachmentBytes,
   }
 })
 
@@ -63,11 +67,13 @@ beforeEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   runtimeMocks.createAgentmailApiClient.mockReset()
+  runtimeMocks.createLinqAttachmentUpload.mockReset()
   runtimeMocks.createLinqChat.mockReset()
   runtimeMocks.probeLinqApi.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
+  runtimeMocks.uploadLinqAttachmentBytes.mockReset()
 })
 
 afterEach(() => {
@@ -1119,6 +1125,68 @@ describe('assistant channels runtime seam', () => {
         },
         fetchImplementation: undefined,
       },
+    )
+  })
+
+  it('uploads trusted vault-file bytes and sends the resulting Linq attachment id', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    const loadVaultFile = vi.fn().mockResolvedValue(bytes)
+    runtimeMocks.createLinqAttachmentUpload.mockResolvedValue({
+      attachmentId: 'attachment_123',
+      downloadUrl: null,
+      expiresAt: '2026-06-24T12:15:00.000Z',
+      requiredHeaders: {
+        'content-type': 'application/pdf',
+      },
+      uploadUrl: 'https://upload.linq.test/attachment_123',
+    })
+    runtimeMocks.uploadLinqAttachmentBytes.mockResolvedValue(undefined)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_123' },
+    })
+
+    await expect(sendLinqMessage({
+      idempotencyKey: 'delivery_123',
+      media: [{
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+        kind: 'vault_file',
+        ref: 'documents/report.pdf',
+        sha256: 'a'.repeat(64),
+        sizeBytes: bytes.byteLength,
+      }],
+      message: 'Attached: report.pdf',
+      target: 'chat_123',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      loadVaultFile,
+    })).resolves.toMatchObject({
+      providerMessageId: 'message_123',
+      target: 'chat_123',
+    })
+
+    expect(loadVaultFile).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.createLinqAttachmentUpload).toHaveBeenCalledWith({
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      sizeBytes: bytes.byteLength,
+    }, expect.objectContaining({
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    }))
+    expect(runtimeMocks.uploadLinqAttachmentBytes).toHaveBeenCalledWith({
+      bytes,
+      requiredHeaders: { 'content-type': 'application/pdf' },
+      uploadUrl: 'https://upload.linq.test/attachment_123',
+    }, expect.any(Object))
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'chat_123',
+      idempotencyKey: 'delivery_123',
+      media: [{ attachmentId: 'attachment_123' }],
+      message: 'Attached: report.pdf',
+      replyToMessageId: null,
+    }, expect.any(Object))
+    expect(loadVaultFile.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeMocks.createLinqAttachmentUpload.mock.invocationCallOrder[0]!,
     )
   })
 

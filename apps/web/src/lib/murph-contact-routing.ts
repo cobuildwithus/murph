@@ -53,6 +53,7 @@ export function resolveMurphContactOptions(input: {
   message?: MurphContactMessage | null;
   murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
+  preferredKind?: MurphContactKind | null;
   userEmailAddress?: string | null;
 }): MurphContactOption[] {
   const contactChannels = normalizeMurphContactChannels(input.contactChannels);
@@ -60,26 +61,48 @@ export function resolveMurphContactOptions(input: {
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
   const options: MurphContactOption[] = [];
 
-  if (murphPhoneNumber && contactChannels.text) {
-    options.push(buildMurphTextContactOption({
-      message,
-      murphPhoneNumber,
-    }));
-  }
-
-  if (contactChannels.telegram) {
-    options.push(buildMurphTelegramContactOption({ message }));
-  }
-
-  if (contactChannels.email) {
-    options.push(buildMurphEmailContactOption({
-      message,
-      murphEmailAddress: input.murphEmailAddress ?? null,
-      userEmailAddress: input.userEmailAddress ?? null,
-    }));
+  const builders: Record<MurphContactKind, () => MurphContactOption | null> = {
+    text: () => murphPhoneNumber && contactChannels.text
+      ? buildMurphTextContactOption({ message, murphPhoneNumber })
+      : null,
+    telegram: () => contactChannels.telegram
+      ? buildMurphTelegramContactOption({ message })
+      : null,
+    email: () => contactChannels.email
+      ? buildMurphEmailContactOption({
+          message,
+          murphEmailAddress: input.murphEmailAddress ?? null,
+          userEmailAddress: input.userEmailAddress ?? null,
+        })
+      : null,
+  };
+  const order = orderMurphContactKinds(input.preferredKind ?? null);
+  for (const kind of order) {
+    const option = builders[kind]();
+    if (option) {
+      options.push(option);
+    }
   }
 
   return options;
+}
+
+const DEFAULT_MURPH_CONTACT_KIND_ORDER: readonly MurphContactKind[] = [
+  "text",
+  "telegram",
+  "email",
+];
+
+function orderMurphContactKinds(
+  preferredKind: MurphContactKind | null,
+): readonly MurphContactKind[] {
+  if (!preferredKind || !DEFAULT_MURPH_CONTACT_KIND_ORDER.includes(preferredKind)) {
+    return DEFAULT_MURPH_CONTACT_KIND_ORDER;
+  }
+  return [
+    preferredKind,
+    ...DEFAULT_MURPH_CONTACT_KIND_ORDER.filter((kind) => kind !== preferredKind),
+  ];
 }
 
 export function resolveMurphContactChannels(input: {

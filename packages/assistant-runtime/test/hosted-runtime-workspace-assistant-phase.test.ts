@@ -4742,6 +4742,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
     }));
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -4877,6 +4878,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -4956,6 +4958,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -5055,6 +5058,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
@@ -5293,6 +5297,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       preferredIntentIds: ["intent_fresh"],
       vaultRoot: expect.any(String),
@@ -5421,6 +5426,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       preferredIntentIds: [],
       vaultRoot: expect.any(String),

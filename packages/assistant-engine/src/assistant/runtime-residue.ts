@@ -411,6 +411,7 @@ function isPrunableTerminalAssistantTurnReceipt(
 function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
   return (
     intent.deliveryConfirmationPending ||
+    intent.status === 'awaiting_approval' ||
     intent.status === 'pending' ||
     intent.status === 'sending' ||
     intent.status === 'retryable'

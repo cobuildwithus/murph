@@ -551,6 +551,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
     voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+    vaultFileSendAvailable:
+      input.hostedToolContext?.vaultFileSendAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

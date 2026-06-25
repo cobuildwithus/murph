@@ -72,7 +72,7 @@ The Settings vault export does not include:
 | --- | --- | --- | --- |
 | `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
 | `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes. |
-| `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes short-lived hashed authorization challenges. Raw tokens, signatures, and wallet authorization material are never persisted or exported. |
+| `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and wallet authorization material are never exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |

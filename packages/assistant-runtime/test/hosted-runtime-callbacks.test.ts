@@ -22,8 +22,11 @@ import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
+  applyAssistantVaultFileSendApprovalResult: vi.fn(),
   beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
+  buildAssistantVaultFileSendApprovalRequest: vi.fn(),
+  deferAssistantVaultFileApprovalCheck: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
@@ -32,8 +35,12 @@ const mocks = vi.hoisted(() => ({
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantAutomationState: vi.fn(),
+  readAssistantOutboxIntent: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
+  readAssistantVaultFileMedia: vi.fn(),
+  readVerifiedAssistantVaultFileBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  saveAssistantOutboxIntentIfUnchanged: vi.fn(),
   setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
@@ -55,10 +62,16 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
+  applyAssistantVaultFileSendApprovalResult:
+    mocks.applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorDispatch:
     mocks.beginAssistantOutboxIntentMirrorDispatch,
   beginAssistantOutboxIntentMirrorPreparedDispatch:
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+  buildAssistantVaultFileSendApprovalRequest:
+    mocks.buildAssistantVaultFileSendApprovalRequest,
+  deferAssistantVaultFileApprovalCheck:
+    mocks.deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds:
     mocks.findAssistantAutoReplyDeliveryIntentIds,
@@ -68,10 +81,16 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
+  readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
+  readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
+  readVerifiedAssistantVaultFileBytes:
+    mocks.readVerifiedAssistantVaultFileBytes,
   resetAssistantOutboxPreparedDispatchById:
     mocks.resetAssistantOutboxPreparedDispatchById,
+  saveAssistantOutboxIntentIfUnchanged:
+    mocks.saveAssistantOutboxIntentIfUnchanged,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
   sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
@@ -242,6 +261,21 @@ function createPreparedPreviousDispatchState(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(
+    ({ intent }) => intent,
+  );
+  mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValue({
+    actionFingerprint: "a".repeat(64),
+    actionId: "intent_123",
+    actionKind: "vault.file.send.v1",
+    presentation: {
+      body: "Send a vault file.",
+      title: "Send a file?",
+    },
+  });
+  mocks.deferAssistantVaultFileApprovalCheck.mockImplementation(
+    ({ intent }) => intent,
+  );
   mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
     createDispatchResult({
       delivery: createDelivery(),
@@ -265,6 +299,14 @@ beforeEach(() => {
       lastError: null,
       status: "pending",
     }),
+  );
+  mocks.readAssistantOutboxIntent.mockResolvedValue(null);
+  mocks.readAssistantVaultFileMedia.mockReturnValue(null);
+  mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
+    new Uint8Array([1, 2, 3]),
+  );
+  mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
+    async ({ intent }) => intent,
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);

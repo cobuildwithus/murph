@@ -34,6 +34,10 @@
       "types": "./dist/assistant-capabilities.d.ts",
       "default": "./dist/assistant-capabilities.js"
     },
+    "./action-approval": {
+      "types": "./dist/action-approval.d.ts",
+      "default": "./dist/action-approval.js"
+    },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"

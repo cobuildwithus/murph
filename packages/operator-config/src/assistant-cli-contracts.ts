@@ -130,6 +130,7 @@ export const assistantOnboardingCompletionReasonValues = [
   'manual',
 ] as const
 export const assistantOutboxStatusValues = [
+  'awaiting_approval',
   'pending',
   'sending',
   'retryable',
@@ -169,7 +170,12 @@ export const assistantQuarantineArtifactKindValues = [
   'cron-run',
 ] as const
 
-export const assistantResponseMediaKindValues = ['image', 'voice_memo'] as const
+export const assistantResponseMediaKindValues = [
+  'image',
+  'voice_memo',
+  'vault_file',
+] as const
+export const assistantVaultFileMaxBytes = 100 * 1024 * 1024
 export const assistantVoiceMemoSpeechOutputFormat = 'mp3_44100_128' as const
 export const assistantVoiceMemoMusicModelId = 'music_v2' as const
 export const assistantVoiceMemoMusicOutputFormat = 'mp3_48000_192' as const
@@ -370,10 +376,62 @@ const assistantVoiceMemoResponseMediaSchema = z
   })
   .strict()
 
+const assistantVaultFileResponseMediaSchema = z
+  .object({
+    kind: z.literal('vault_file'),
+    ref: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1024)
+      .refine(
+        (value) => isSafeAssistantVaultFileRef(value),
+        'Assistant vault file refs must be normalized vault-relative paths.',
+      ),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    filename: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .refine(
+        (value) => !/[\\/\u0000-\u001F\u007F]/u.test(value),
+        'Assistant vault file names must not contain path separators or control characters.',
+      ),
+    contentType: z
+      .string()
+      .trim()
+      .min(3)
+      .max(200)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u),
+    sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
+  })
+  .strict()
+
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
   assistantVoiceMemoResponseMediaSchema,
+  assistantVaultFileResponseMediaSchema,
 ])
+
+function isSafeAssistantVaultFileRef(value: string): boolean {
+  if (
+    value.startsWith('/')
+    || /^[A-Za-z]:/u.test(value)
+    || value.includes('\\')
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    return false
+  }
+
+  const segments = value.split('/')
+  return segments.every((segment) => (
+    segment.length > 0
+    && segment !== '.'
+    && segment !== '..'
+    && !segment.startsWith('.')
+  ))
+}
 
 export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
 
@@ -1367,6 +1425,10 @@ export type AssistantVoiceMemoTransport = z.infer<
 >
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
+>
+export type AssistantVaultFileResponseMedia = Extract<
+  AssistantResponseMedia,
+  { kind: 'vault_file' }
 >
 export type AssistantResponseMediaKind = typeof assistantResponseMediaKindValues[number]
 export type AssistantMessageReaction = z.infer<
