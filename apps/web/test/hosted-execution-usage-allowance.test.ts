@@ -1625,6 +1625,33 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
+  it("uses Family-sponsored allowance when stale direct paid phase is not active", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingPlanCode: "launch_edge_monthly",
+      billingStatus: HostedBillingStatus.canceled,
+      familyAccessActive: true,
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-20T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
+    });
+  });
+
   it("reads gate state without creating or updating usage-period rows", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -2033,6 +2060,7 @@ function createAllowanceTx(input: {
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
           pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
         },
+        billingStatus: HostedBillingStatus.active,
         id: "member_123",
         suspendedAt: null,
       })),

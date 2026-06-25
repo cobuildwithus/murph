@@ -53,6 +53,11 @@ CREATE TABLE "hosted_account_group_billing_ref" (
     "stripe_subscription_id_encrypted" TEXT,
     "stripe_subscription_item_lookup_key" TEXT,
     "stripe_subscription_item_id_encrypted" TEXT,
+    "stripe_checkout_session_lookup_key" TEXT,
+    "stripe_checkout_session_id_encrypted" TEXT,
+    "checkout_attempt_id" TEXT,
+    "checkout_seat_count" INTEGER,
+    "checkout_created_at" TIMESTAMP(3),
     "billed_seat_count" INTEGER,
     "current_billing_plan_code" TEXT,
     "current_billing_phase" TEXT,
@@ -69,6 +74,7 @@ CREATE UNIQUE INDEX "hosted_account_group_billing_ref_group_id_key" ON "hosted_a
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_customer_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_customer_lookup_key");
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_subscription_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_subscription_lookup_key");
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_subscription_item_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_subscription_item_lookup_key");
+CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_checkout_session_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_checkout_session_lookup_key");
 CREATE UNIQUE INDEX "hosted_account_group_owner_member_id_key" ON "hosted_account_group"("owner_member_id");
 
 CREATE INDEX "hosted_account_group_billing_status_idx" ON "hosted_account_group"("billing_status");
@@ -89,4 +95,8 @@ ALTER TABLE "hosted_account_group_billing_ref" ADD CONSTRAINT "hosted_account_gr
 ALTER TABLE "hosted_account_group_billing_ref" ADD CONSTRAINT "hosted_account_group_billing_ref_billed_seat_count_check" CHECK (
     "billed_seat_count" IS NULL
     OR ("billed_seat_count" >= 2 AND "billed_seat_count" <= 6)
+);
+ALTER TABLE "hosted_account_group_billing_ref" ADD CONSTRAINT "hosted_account_group_billing_ref_checkout_seat_count_check" CHECK (
+    "checkout_seat_count" IS NULL
+    OR ("checkout_seat_count" >= 2 AND "checkout_seat_count" <= 6)
 );

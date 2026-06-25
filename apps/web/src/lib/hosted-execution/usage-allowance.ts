@@ -181,13 +181,17 @@ interface HostedAiUsageAllowanceBillingRef {
 async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
+  billingStatus: HostedBillingStatus;
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<{
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   familyAccessActive: boolean;
 }> {
-  if (parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid") {
+  if (
+    input.billingStatus === HostedBillingStatus.active &&
+    parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid"
+  ) {
     return {
       billingRef: input.billingRef,
       familyAccessActive: false,
@@ -531,6 +535,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
           pulseTrialRedeemedAt: true,
         },
       },
+      billingStatus: true,
       suspendedAt: true,
     },
   });
@@ -541,6 +546,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     ? await resolveHostedAiUsageAllowanceBillingRefForMember({
         at,
         billingRef: memberState.billingRef,
+        billingStatus: memberState.billingStatus,
         memberId: input.memberId,
         tx: input.tx,
       })
@@ -672,6 +678,7 @@ export async function resolveHostedAiUsageGate(input: {
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
           at: now,
           billingRef: memberState.billingRef,
+          billingStatus: memberState.billingStatus,
           memberId: input.memberId,
           tx,
         })
@@ -757,6 +764,7 @@ export async function readHostedAiUsageGate(input: {
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
           at: now,
           billingRef: memberState.billingRef,
+          billingStatus: memberState.billingStatus,
           memberId: input.memberId,
           tx,
         })

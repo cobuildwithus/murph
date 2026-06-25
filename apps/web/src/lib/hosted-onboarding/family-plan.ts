@@ -21,6 +21,7 @@ import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
+  createHostedStripeCheckoutSessionLookupKey,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
@@ -49,6 +50,7 @@ import {
   generateHostedAccountGroupId,
   generateHostedAccountGroupInviteId,
   generateHostedAccountGroupMembershipId,
+  generateHostedFamilyCheckoutAttemptId,
   generateHostedMemberId,
   generateHostedInviteCode,
   inviteExpiresAt,
@@ -143,6 +145,8 @@ const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-id";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_ITEM_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-item-id";
+const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
+  "hosted-account-group-billing-ref.stripe-checkout-session-id";
 
 const hostedAccountGroupAccessSelect =
   Prisma.validator<Prisma.HostedAccountGroupSelect>()({
@@ -191,6 +195,9 @@ const hostedAccountGroupInviteSelect =
 const hostedAccountGroupBillingRefSelect =
   Prisma.validator<Prisma.HostedAccountGroupBillingRefSelect>()({
     billedSeatCount: true,
+    checkoutAttemptId: true,
+    checkoutCreatedAt: true,
+    checkoutSeatCount: true,
     currentBillingPhase: true,
     currentBillingPlanCode: true,
     currentPeriodEnd: true,
@@ -200,6 +207,7 @@ const hostedAccountGroupBillingRefSelect =
     },
     groupId: true,
     lastStripeEventCreatedAt: true,
+    stripeCheckoutSessionIdEncrypted: true,
     stripeCustomerIdEncrypted: true,
     stripeSubscriptionItemIdEncrypted: true,
     stripeSubscriptionIdEncrypted: true,
@@ -227,10 +235,12 @@ export type HostedAccountGroupBillingRefRecord =
 
 export interface HostedAccountGroupBillingRefSnapshot
   extends Omit<HostedAccountGroupBillingRefRecord,
+    | "stripeCheckoutSessionIdEncrypted"
     | "stripeCustomerIdEncrypted"
     | "stripeSubscriptionItemIdEncrypted"
     | "stripeSubscriptionIdEncrypted"
   > {
+  stripeCheckoutSessionId: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionItemId: string | null;
   stripeSubscriptionId: string | null;
@@ -240,6 +250,11 @@ export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
   group: HostedAccountGroupAccessSnapshot;
   matchedBy: "stripeCustomerId" | "stripeSubscriptionId" | "stripeSubscriptionItemId";
+}
+
+interface HostedAccountGroupStripeObjectMatch {
+  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  group: HostedAccountGroupAccessSnapshot;
 }
 
 export type HostedFamilyStripeSubscriptionResult = {
@@ -332,7 +347,10 @@ type HostedFamilyBillingCheckoutInput =
     }
   | {
       alreadyActive: false;
+      checkoutAttemptId: string;
       group: HostedAccountGroupAccessSnapshot;
+      priceId: string;
+      publicBaseUrl: string;
       seatCount: number;
       stripeCustomerId: string | null;
     };
@@ -900,6 +918,9 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     create: {
       ...privateColumns,
       billedSeatCount,
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutSeatCount: null,
       currentBillingPhase: input.currentBillingPhase ?? null,
       currentBillingPlanCode: input.currentBillingPlanCode ?? HOSTED_FAMILY_BILLING_PLAN_CODE,
       currentPeriodEnd: input.currentPeriodEnd ?? null,
@@ -908,6 +929,8 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
       lastStripeEventCreatedAt: input.preserveLastStripeEventCreatedAt
         ? null
         : input.stripeEventCreatedAt ?? null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
       stripeCustomerLookupKey,
       stripeSubscriptionItemLookupKey,
       stripeSubscriptionLookupKey,
@@ -917,16 +940,26 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
       ? {
           stripeCustomerIdEncrypted: privateColumns.stripeCustomerIdEncrypted,
           stripeCustomerLookupKey,
+          checkoutAttemptId: null,
+          checkoutCreatedAt: null,
+          checkoutSeatCount: null,
+          stripeCheckoutSessionIdEncrypted: null,
+          stripeCheckoutSessionLookupKey: null,
           stripeSubscriptionIdEncrypted: privateColumns.stripeSubscriptionIdEncrypted,
           stripeSubscriptionLookupKey,
         }
       : {
           ...privateColumns,
+          checkoutAttemptId: null,
+          checkoutCreatedAt: null,
+          checkoutSeatCount: null,
           currentBillingPhase: input.currentBillingPhase ?? null,
           currentBillingPlanCode: input.currentBillingPlanCode ?? HOSTED_FAMILY_BILLING_PLAN_CODE,
           currentPeriodEnd: input.currentPeriodEnd ?? null,
           currentPeriodStart: input.currentPeriodStart ?? null,
           billedSeatCount,
+          stripeCheckoutSessionIdEncrypted: null,
+          stripeCheckoutSessionLookupKey: null,
           ...(input.preserveLastStripeEventCreatedAt
             ? {}
             : {
@@ -957,26 +990,31 @@ export async function findHostedAccountGroupForStripeCheckoutSession(input: {
   prisma: HostedOnboardingReadClient;
   session: Stripe.Checkout.Session;
 }): Promise<HostedAccountGroupAccessSnapshot | null> {
-  return findHostedAccountGroupForStripeObject({
+  const match = await findHostedAccountGroupForStripeObject({
     accountGroupId: normalizeNullableString(input.session.metadata?.accountGroupId),
+    checkoutAttemptId: normalizeNullableString(input.session.metadata?.checkoutAttemptId),
+    checkoutSessionId: input.session.id,
     customerId: coerceStripeObjectId(input.session.customer),
     customerLookupAllowed: true,
     prisma: input.prisma,
     subscriptionId: coerceStripeSubscriptionId(input.session.subscription),
   });
+  return match?.group ?? null;
 }
 
 export async function findHostedAccountGroupForStripeSubscription(input: {
   prisma: HostedOnboardingReadClient;
   subscription: Stripe.Subscription;
 }): Promise<HostedAccountGroupAccessSnapshot | null> {
-  return findHostedAccountGroupForStripeObject({
+  const match = await findHostedAccountGroupForStripeObject({
     accountGroupId: normalizeNullableString(input.subscription.metadata?.accountGroupId),
+    checkoutAttemptId: normalizeNullableString(input.subscription.metadata?.checkoutAttemptId),
     customerId: coerceStripeObjectId(input.subscription.customer),
     customerLookupAllowed: false,
     prisma: input.prisma,
     subscriptionId: input.subscription.id,
   });
+  return match?.group ?? null;
 }
 
 export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
@@ -1020,12 +1058,27 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
-  const group = await findHostedAccountGroupForStripeSubscription({
+  const match = await findHostedAccountGroupForStripeObject({
+    accountGroupId: normalizeNullableString(input.subscription.metadata?.accountGroupId),
+    checkoutAttemptId: normalizeNullableString(input.subscription.metadata?.checkoutAttemptId),
+    customerId: coerceStripeObjectId(input.subscription.customer),
+    customerLookupAllowed: false,
     prisma: input.tx,
-    subscription: input.subscription,
+    subscriptionId: input.subscription.id,
   });
-  if (!group) {
+  if (!match) {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
+  }
+  const { billingRef: matchedBillingRef, group } = match;
+  const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
+  if (isHostedFamilyStripeEventStale({
+    billingRef: matchedBillingRef,
+    eventCreatedAt,
+  })) {
+    return {
+      activations: [],
+      groupId: group.id,
+    };
   }
 
   const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
@@ -1044,7 +1097,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       billedSeatCount: null,
       groupId: group.id,
       stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
-      stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
+      stripeEventCreatedAt: eventCreatedAt,
       stripeSubscriptionItemId: null,
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
@@ -1076,12 +1129,11 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     billedSeatCount: familySeatItem.billedSeatCount,
     groupId: group.id,
     stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
-    stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
+    stripeEventCreatedAt: eventCreatedAt,
     stripeSubscriptionItemId: familySeatItem.stripeSubscriptionItemId,
     stripeSubscriptionId: input.subscription.id,
     tx: input.tx,
   });
-  const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
   if (
     eventCreatedAt &&
     billingRef?.lastStripeEventCreatedAt &&
@@ -1128,6 +1180,7 @@ export async function createHostedFamilyBillingCheckout(input: {
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
+  let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
 
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
     const group = await tx.hostedAccountGroup.findUnique({
@@ -1161,10 +1214,43 @@ export async function createHostedFamilyBillingCheckout(input: {
       groupId: group.id,
       prisma: tx,
     });
+    if (currentBillingRef?.stripeSubscriptionId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_BILLING_SYNCING",
+        httpStatus: 409,
+        message: "Family billing is still syncing. Try again after payment is confirmed.",
+      });
+    }
+    const checkoutAttemptId =
+      currentBillingRef?.checkoutAttemptId
+        ? currentBillingRef.checkoutAttemptId
+        : generateHostedFamilyCheckoutAttemptId();
+    if (
+      currentBillingRef?.checkoutAttemptId &&
+      currentBillingRef.checkoutSeatCount !== seatCount
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
+        httpStatus: 409,
+        message: "Family checkout is already in progress. Finish or restart checkout before changing seats.",
+      });
+    }
+    const priceId = requireHostedFamilyStripePriceId();
+    const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+    stripeApi = requireHostedStripeApi();
+    await writeHostedFamilyCheckoutAttemptTx({
+      attemptId: checkoutAttemptId,
+      group,
+      seatCount,
+      tx,
+    });
 
     return {
       alreadyActive: false,
+      checkoutAttemptId,
       group,
+      priceId,
+      publicBaseUrl,
       seatCount,
       stripeCustomerId: currentBillingRef?.stripeCustomerId ?? null,
     };
@@ -1177,18 +1263,19 @@ export async function createHostedFamilyBillingCheckout(input: {
     };
   }
 
-  const priceId = requireHostedFamilyStripePriceId();
-  const stripe = requireHostedStripeApi();
-  const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-  const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
+  const stripe = stripeApi ?? requireHostedStripeApi();
+  const metadata = {
+    ...buildHostedFamilyStripeMetadata(checkoutInput.group),
+    checkoutAttemptId: checkoutInput.checkoutAttemptId,
+  };
   const checkoutSession = await stripe.checkout.sessions.create({
-    cancel_url: `${publicBaseUrl}/settings`,
+    cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
     client_reference_id: checkoutInput.group.id,
     ...(checkoutInput.stripeCustomerId
       ? { customer: checkoutInput.stripeCustomerId }
       : {}),
     line_items: [{
-      price: priceId,
+      price: checkoutInput.priceId,
       quantity: checkoutInput.seatCount,
     }],
     metadata,
@@ -1197,7 +1284,15 @@ export async function createHostedFamilyBillingCheckout(input: {
     subscription_data: {
       metadata,
     },
-    success_url: `${publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    success_url: `${checkoutInput.publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+  }, {
+    idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
+      attemptId: checkoutInput.checkoutAttemptId,
+      groupId: checkoutInput.group.id,
+      priceId: checkoutInput.priceId,
+      seatCount: checkoutInput.seatCount,
+      stripeCustomerId: checkoutInput.stripeCustomerId,
+    }),
   });
 
   if (!checkoutSession.url) {
@@ -1207,6 +1302,14 @@ export async function createHostedFamilyBillingCheckout(input: {
       message: "Stripe Checkout did not return a redirect URL.",
     });
   }
+  await prisma.$transaction(async (tx) => {
+    await bindHostedFamilyCheckoutSessionTx({
+      attemptId: checkoutInput.checkoutAttemptId,
+      group: checkoutInput.group,
+      sessionId: checkoutSession.id,
+      tx,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return {
     alreadyActive: false,
@@ -1339,6 +1442,69 @@ export async function updateHostedFamilySeatCount(input: {
   return snapshot;
 }
 
+async function writeHostedFamilyCheckoutAttemptTx(input: {
+  attemptId: string;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id">;
+  seatCount: number;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const now = new Date();
+  await input.tx.hostedAccountGroupBillingRef.upsert({
+    create: {
+      checkoutAttemptId: input.attemptId,
+      checkoutCreatedAt: now,
+      checkoutSeatCount: input.seatCount,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      groupId: input.group.id,
+    },
+    update: {
+      checkoutAttemptId: input.attemptId,
+      checkoutCreatedAt: now,
+      checkoutSeatCount: input.seatCount,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      groupId: input.group.id,
+    },
+  });
+}
+
+async function bindHostedFamilyCheckoutSessionTx(input: {
+  attemptId: string;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
+    input.sessionId,
+  );
+  const stripeCheckoutSessionIdEncrypted = await encryptHostedWebNullableString({
+    field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+    memberId: input.group.ownerMemberId,
+    prisma: input.tx,
+    value: input.sessionId,
+  });
+  const updated = await input.tx.hostedAccountGroupBillingRef.updateMany({
+    data: {
+      stripeCheckoutSessionIdEncrypted,
+      stripeCheckoutSessionLookupKey,
+    },
+    where: {
+      checkoutAttemptId: input.attemptId,
+      groupId: input.group.id,
+    },
+  });
+  if (updated.count !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message: "Family checkout changed before Stripe returned a session. Start Family checkout again.",
+    });
+  }
+}
+
 export function readHostedFamilyCheckoutSessionIdFromUrl(
   value: string | null | undefined,
 ): string | null {
@@ -1416,6 +1582,11 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
 
   const checkoutUrl = normalizeNullableString(session.url);
   if (!checkoutUrl) {
+    await clearHostedFamilyCheckoutAttemptForSession({
+      groupId: group.id,
+      prisma,
+      sessionId,
+    });
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
       httpStatus: 410,
@@ -1424,6 +1595,33 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
   }
 
   return checkoutUrl;
+}
+
+async function clearHostedFamilyCheckoutAttemptForSession(input: {
+  groupId: string;
+  prisma: HostedOnboardingReadClient;
+  sessionId: string;
+}): Promise<void> {
+  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
+    input.sessionId,
+  );
+  if (!stripeCheckoutSessionLookupKey) {
+    return;
+  }
+
+  await input.prisma.hostedAccountGroupBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutSeatCount: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      groupId: input.groupId,
+      stripeCheckoutSessionLookupKey,
+    },
+  });
 }
 
 export async function createHostedAccountGroupForOwner(input: {
@@ -1986,6 +2184,22 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     return null;
   }
   const now = input.now ?? new Date();
+  const invite = await input.tx.hostedAccountGroupInvite.findUnique({
+    select: {
+      expiresAt: true,
+      status: true,
+      targetPhoneLookupKey: true,
+    },
+    where: {
+      inviteCode,
+    },
+  });
+  if (!invite || invite.status !== "pending" || invite.expiresAt <= now) {
+    return null;
+  }
+  if (!invite.targetPhoneLookupKey) {
+    return null;
+  }
 
   const member = await ensureHostedMemberForPhoneTx({
     phoneNumber: input.phoneNumber,
@@ -1999,6 +2213,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     now,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     phoneNumber: input.phoneNumber,
+    requirePhoneBinding: true,
     tx: input.tx,
   });
 }
@@ -2013,6 +2228,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     invite: HostedAccountGroupInviteSnapshot;
   }) => Promise<void>;
   phoneNumber?: string | null;
+  requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
   telegramUsername?: string | null;
   tx: Prisma.TransactionClient;
@@ -2042,6 +2258,14 @@ export async function acceptHostedFamilyInviteTx(input: {
       code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
       httpStatus: 409,
       message: "Open this invite from Telegram or WhatsApp to join.",
+    });
+  }
+
+  if (input.requirePhoneBinding && !invite.targetPhoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_REQUIRED",
+      httpStatus: 403,
+      message: "Open this invite from the invited phone number to join.",
     });
   }
 
@@ -2710,7 +2934,18 @@ async function projectHostedAccountGroupBillingRefSnapshot(
   billingRef: HostedAccountGroupBillingRefRecord,
   prisma: HostedOnboardingReadClient,
 ): Promise<HostedAccountGroupBillingRefSnapshot> {
-  const [stripeCustomerId, stripeSubscriptionItemId, stripeSubscriptionId] = await Promise.all([
+  const [
+    stripeCheckoutSessionId,
+    stripeCustomerId,
+    stripeSubscriptionItemId,
+    stripeSubscriptionId,
+  ] = await Promise.all([
+    decryptHostedWebNullableString({
+      field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+      memberId: billingRef.group.ownerMemberId,
+      prisma,
+      value: billingRef.stripeCheckoutSessionIdEncrypted,
+    }),
     decryptHostedWebNullableString({
       field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: billingRef.group.ownerMemberId,
@@ -2733,6 +2968,9 @@ async function projectHostedAccountGroupBillingRefSnapshot(
 
   return {
     billedSeatCount: billingRef.billedSeatCount,
+    checkoutAttemptId: billingRef.checkoutAttemptId,
+    checkoutCreatedAt: billingRef.checkoutCreatedAt,
+    checkoutSeatCount: billingRef.checkoutSeatCount,
     currentBillingPhase: billingRef.currentBillingPhase,
     currentBillingPlanCode: billingRef.currentBillingPlanCode,
     currentPeriodEnd: billingRef.currentPeriodEnd,
@@ -2740,6 +2978,7 @@ async function projectHostedAccountGroupBillingRefSnapshot(
     group: billingRef.group,
     groupId: billingRef.groupId,
     lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
+    stripeCheckoutSessionId,
     stripeCustomerId,
     stripeSubscriptionItemId,
     stripeSubscriptionId,
@@ -2855,11 +3094,29 @@ async function buildHostedAccountGroupBillingPrivateColumns(input: {
 
 async function findHostedAccountGroupForStripeObject(input: {
   accountGroupId: string | null;
+  checkoutAttemptId?: string | null;
+  checkoutSessionId?: string | null;
   customerId: string | null;
   customerLookupAllowed: boolean;
   prisma: HostedOnboardingReadClient;
   subscriptionId: string | null;
-}): Promise<HostedAccountGroupAccessSnapshot | null> {
+}): Promise<HostedAccountGroupStripeObjectMatch | null> {
+  if (input.subscriptionId) {
+    const lookup = await lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId({
+      prisma: input.prisma,
+      stripeSubscriptionId: input.subscriptionId,
+    });
+    if (lookup) {
+      if (input.accountGroupId && lookup.group.id !== input.accountGroupId) {
+        return null;
+      }
+      return {
+        billingRef: lookup.billingRef,
+        group: lookup.group,
+      };
+    }
+  }
+
   if (input.accountGroupId) {
     const group = await input.prisma.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
@@ -2868,17 +3125,47 @@ async function findHostedAccountGroupForStripeObject(input: {
       },
     });
     if (group) {
-      return group;
-    }
-  }
-
-  if (input.subscriptionId) {
-    const lookup = await lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId({
-      prisma: input.prisma,
-      stripeSubscriptionId: input.subscriptionId,
-    });
-    if (lookup) {
-      return lookup.group;
+      const billingRef = await readHostedAccountGroupStripeBillingRef({
+        groupId: group.id,
+        prisma: input.prisma,
+      });
+      if (billingRef?.stripeSubscriptionId) {
+        return billingRef.stripeSubscriptionId === input.subscriptionId
+          ? { billingRef, group }
+          : null;
+      }
+      if (
+        billingRef?.stripeCustomerId &&
+        input.customerId &&
+        billingRef.stripeCustomerId !== input.customerId
+      ) {
+        return null;
+      }
+      if (
+        billingRef?.checkoutAttemptId &&
+        input.checkoutAttemptId &&
+        billingRef.checkoutAttemptId !== input.checkoutAttemptId
+      ) {
+        return null;
+      }
+      if (
+        billingRef?.checkoutAttemptId &&
+        !input.checkoutAttemptId &&
+        (input.subscriptionId || input.checkoutSessionId)
+      ) {
+        return null;
+      }
+      if (
+        billingRef?.stripeCheckoutSessionId &&
+        input.checkoutSessionId &&
+        billingRef.stripeCheckoutSessionId !== input.checkoutSessionId
+      ) {
+        return null;
+      }
+      return {
+        billingRef,
+        group,
+      };
     }
   }
 
@@ -2888,11 +3175,25 @@ async function findHostedAccountGroupForStripeObject(input: {
       stripeCustomerId: input.customerId,
     });
     if (lookup) {
-      return lookup.group;
+      return {
+        billingRef: lookup.billingRef,
+        group: lookup.group,
+      };
     }
   }
 
   return null;
+}
+
+function isHostedFamilyStripeEventStale(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  eventCreatedAt: Date | null;
+}): boolean {
+  return Boolean(
+    input.eventCreatedAt &&
+      input.billingRef?.lastStripeEventCreatedAt &&
+      input.billingRef.lastStripeEventCreatedAt.getTime() > input.eventCreatedAt.getTime(),
+  );
 }
 
 function buildHostedFamilyStripeSubscriptionPeriodSnapshot(
@@ -3041,4 +3342,21 @@ function buildHostedFamilyStripeMetadata(
     kind: HOSTED_FAMILY_STRIPE_METADATA_KIND,
     ownerMemberId: group.ownerMemberId,
   };
+}
+
+function buildHostedFamilyCheckoutIdempotencyKey(input: {
+  attemptId: string;
+  groupId: string;
+  priceId: string;
+  seatCount: number;
+  stripeCustomerId: string | null;
+}): string {
+  return [
+    "hosted-family-checkout",
+    input.groupId,
+    input.attemptId,
+    input.priceId,
+    `seats-${input.seatCount}`,
+    input.stripeCustomerId ?? "new-customer",
+  ].join(":");
 }
