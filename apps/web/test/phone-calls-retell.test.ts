@@ -4,6 +4,9 @@ import type { HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
+import {
+  hostedPhoneCallBriefSchema,
+} from "@murphai/hosted-execution/phone-calls";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -382,6 +385,34 @@ describe("consultPhoneCall", () => {
           ...VALID_BRIEF,
           allowTransferToUser: false,
         },
+        id: "hpc_123",
+        memberId: "member_123",
+        providerCallId: "retell_call_123",
+        status: "calling",
+      },
+      memberId: "member_123",
+      question: "They require identity verification. Should I transfer?",
+      transcript: "",
+      transferNumberResolver: async () => "+12125550000",
+    })).resolves.toEqual({
+      answer: "I cannot safely answer that from Murph during the live call. End the call and report what is needed.",
+      directive: "end_call",
+    });
+  });
+
+  it("fails closed instead of transferring when transfer permission is omitted", async () => {
+    const brief = hostedPhoneCallBriefSchema.parse({
+      goal: VALID_BRIEF.goal,
+      instructions: VALID_BRIEF.instructions,
+      shareableFacts: VALID_BRIEF.shareableFacts,
+      successCriteria: VALID_BRIEF.successCriteria,
+      timeZone: VALID_BRIEF.timeZone,
+      to: VALID_BRIEF.to,
+    });
+
+    await expect(consultPhoneCall({
+      call: {
+        brief,
         id: "hpc_123",
         memberId: "member_123",
         providerCallId: "retell_call_123",

@@ -14,7 +14,7 @@ const hostedPhoneCallBriefFactKeySchema = z
 
 export const hostedPhoneCallBriefSchema = z
   .object({
-    allowTransferToUser: z.boolean().default(true),
+    allowTransferToUser: z.boolean().default(false),
     goal: z.string().trim().min(1).max(1_000),
     instructions: z.array(z.string().trim().min(1).max(300)).max(30).default([]),
     shareableFacts: z

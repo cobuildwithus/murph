@@ -5,6 +5,9 @@ import {
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
+import {
+  hostedPhoneCallBriefSchema,
+} from "@murphai/hosted-execution/phone-calls";
 import { describe, expect, it } from "vitest";
 
 import { createHostedPhoneCall } from "@/src/lib/phone-calls/service";
@@ -341,6 +344,41 @@ describe("createHostedPhoneCall", () => {
       ...VALID_BRIEF,
       allowTransferToUser: false,
     };
+
+    await createHostedPhoneCall({
+      brief,
+      memberId: "member_1",
+      prisma: store.prisma,
+      requestKey: "phone_call_request_1",
+      runtime: runtime.runtime,
+      transferNumberResolver: async () => {
+        resolverCalls += 1;
+        return "+12125550000";
+      },
+    });
+
+    expect(resolverCalls).toBe(0);
+    expect(runtime.startCalls).toEqual([{
+      brief,
+      id: store.createCalls[0]!.data.id,
+      memberId: "member_1",
+      transferNumber: null,
+    }]);
+  });
+
+  it("does not resolve a transfer destination when transfer permission is omitted", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
+    let resolverCalls = 0;
+    const brief = hostedPhoneCallBriefSchema.parse({
+      goal: VALID_BRIEF.goal,
+      instructions: VALID_BRIEF.instructions,
+      shareableFacts: VALID_BRIEF.shareableFacts,
+      successCriteria: VALID_BRIEF.successCriteria,
+      timeZone: VALID_BRIEF.timeZone,
+      to: VALID_BRIEF.to,
+    });
 
     await createHostedPhoneCall({
       brief,

@@ -30,7 +30,7 @@ describe("hosted phone call contracts", () => {
     expect(hostedPhoneCallBriefSchema.parse(VALID_BRIEF)).toEqual(VALID_BRIEF);
   });
 
-  it("defaults optional disclosure containers without broadening authority", () => {
+  it("defaults optional disclosure and transfer authority without broadening authority", () => {
     const parsed = hostedPhoneCallBriefSchema.parse({
       to: {
         phoneNumber: "+12125550123",
@@ -40,7 +40,7 @@ describe("hosted phone call contracts", () => {
       successCriteria: "The office gives availability for the requested day.",
     });
 
-    expect(parsed.allowTransferToUser).toBe(true);
+    expect(parsed.allowTransferToUser).toBe(false);
     expect(parsed.instructions).toEqual([]);
     expect(parsed.shareableFacts).toEqual({});
   });
