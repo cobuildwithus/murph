@@ -51,6 +51,7 @@ A request contains:
 4. Later calls return `approved`, `denied`, or derived `expired`.
 
 The caller owns action execution, retries, and completion. It must recompute the fingerprint and call `request` again at the final effect boundary. Approval has no claimed, executing, completed, or provider-error state.
+When `pending` is returned, the approval URL is handed to the normal assistant reply path; the approval system must not send a separate hard-coded user message.
 
 ## Browser decision flow
 

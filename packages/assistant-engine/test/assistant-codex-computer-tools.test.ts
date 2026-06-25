@@ -822,7 +822,6 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
       handoffCreated: true,
@@ -863,7 +862,6 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "login_needed",
@@ -880,7 +878,6 @@ describe("murph computer dynamic tools", () => {
     );
     const hostedToolContext = createHostedToolContext({
       computerToolsAvailable: false,
-      requiredUserMessageDeliveryAvailable: false,
     });
 
     const result = await executeMurphDynamicToolRequest({
@@ -906,7 +903,6 @@ describe("murph computer dynamic tools", () => {
       "computer tools are unavailable without hosted computer-use transport",
     );
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
   });
 
   it("preserves the run if pause transport outcome is unknown before user delivery", async () => {
@@ -950,11 +946,10 @@ describe("murph computer dynamic tools", () => {
       "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step",
     );
     expect(result.computerRunPausedForUser).toBe(true);
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("pauses even when required user-message delivery is unavailable", async () => {
+  it("returns hosted pause handoff data through the tool result", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
     ): Promise<Response> => {
@@ -972,9 +967,7 @@ describe("murph computer dynamic tools", () => {
 
       throw new Error("unexpected finish call");
     });
-    const hostedToolContext = createHostedToolContext({
-      requiredUserMessageDeliveryAvailable: false,
-    });
+    const hostedToolContext = createHostedToolContext();
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -1003,7 +996,6 @@ describe("murph computer dynamic tools", () => {
       runId: "run_123",
       status: "awaiting_user",
     });
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
@@ -1029,18 +1021,11 @@ function createHostedToolContext(input: {
     recipientKey: string | null;
   };
   hostedMailboxItemIds?: string[];
-  requiredUserMessageDeliveryAvailable?: boolean;
-  sendResult?: Awaited<ReturnType<AssistantHostedToolContext["sendRequiredUserMessage"]>>;
 } = {}): AssistantHostedToolContext {
   return {
     currentHostedDeliveryContext: () => input.deliveryContext ?? null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
     computerToolsAvailable: input.computerToolsAvailable ?? true,
-    requiredUserMessageDeliveryAvailable:
-      input.requiredUserMessageDeliveryAvailable ?? true,
-    sendRequiredUserMessage: vi.fn(async () =>
-      input.sendResult ?? { kind: "sent" as const, source: "model" as const }
-    ),
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     }),

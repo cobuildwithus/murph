@@ -3,6 +3,8 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
@@ -179,6 +181,41 @@ describe('assistant vault-file send', () => {
 
     expect(result.intent.status).toBe('awaiting_approval')
     expect(sendLinq).not.toHaveBeenCalled()
+  })
+
+  it('hands the approval link back to the normal assistant reply path', async () => {
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(async () => ({
+        approvalUrl: 'https://murph.test/approve/haa_test',
+        filename: 'report.pdf',
+        status: 'pending' as const,
+      })),
+      vaultFileSendAvailable: true,
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      publicFetchImpl: fetch,
+      request: {
+        kind: 'send-vault-file',
+        ref: 'documents/report.pdf',
+      },
+    })
+
+    expect(result.finalActionPatch).toBeUndefined()
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
+      approvalUrl: 'https://murph.test/approve/haa_test',
+      filename: 'report.pdf',
+      status: 'pending',
+    }))
   })
 })
 

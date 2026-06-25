@@ -246,7 +246,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; it does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; when approval is pending, include the returned approval link in your normal reply. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1276,8 +1276,14 @@ export async function executeMurphDynamicToolRequest(input: {
         switch (result.status) {
           case 'pending':
             return {
-              ...toolTextResult(true, 'secure approval requested'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  approvalUrl: result.approvalUrl,
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
             }
           case 'approved':
             return {

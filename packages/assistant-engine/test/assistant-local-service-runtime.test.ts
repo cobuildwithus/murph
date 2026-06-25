@@ -4811,7 +4811,6 @@ test('sendAssistantMessageLocal exposes hosted progress and computer context for
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
   await progressDelivery.send('Checking the iMessage thread.')
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
@@ -4859,7 +4858,6 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
@@ -4915,7 +4913,6 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
@@ -4962,7 +4959,6 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
   await progressDelivery.send('Checking the Telegram thread.')
 
@@ -5018,7 +5014,6 @@ test('sendAssistantMessageLocal does not expose hosted progress or computer deli
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendTelegram.mock.calls.length, 0)
@@ -5242,7 +5237,6 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
@@ -5297,25 +5291,8 @@ test('sendAssistantMessageLocal does not expose optional progress delivery for h
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  const result = await hostedToolContext.sendRequiredUserMessage(
-    'Open this handoff link?',
-  )
-
-  assert.deepEqual(result, {
-    kind: 'sent',
-    source: 'model',
-  })
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
-  assert.equal(
-    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
-    progressDeliveryDependencies,
-  )
-  assert.equal(
-    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
-    'Open this handoff link?',
-  )
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {

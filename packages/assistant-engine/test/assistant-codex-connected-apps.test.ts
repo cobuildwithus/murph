@@ -316,11 +316,6 @@ function createHostedToolContext(
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    requiredUserMessageDeliveryAvailable: false,
-    sendRequiredUserMessage: async () => ({
-      kind: "failed",
-      source: "model",
-    }),
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     },
