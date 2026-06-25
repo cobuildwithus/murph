@@ -79,7 +79,7 @@ describe("hosted-local E2E suite preparation", () => {
     const vitestCalls = runForegroundCommand.mock.calls
       .map(([call]) => call)
       .filter((call) => call.args.includes("vitest"));
-    expect(vitestCalls).toHaveLength(5);
+    expect(vitestCalls).toHaveLength(12);
     expect(vitestCalls[0]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
@@ -99,24 +99,25 @@ describe("hosted-local E2E suite preparation", () => {
         NEXT_DIST_DIR_SUFFIX: expect.stringMatching(/^e2e-hosted-local-e2e-/u),
         TEMPORAL_DEV_HEADLESS: "1",
       }),
-      label: "Hosted local full-stack e2e suite 1/5",
+      label: "Hosted local full-stack e2e suite 1/12",
     }));
+    expect(vitestCalls[0]?.args).not.toContain(
+      "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
+    );
     expect(vitestCalls[0]?.args).not.toContain(
       "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     );
     expect(vitestCalls[1]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
-        "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
       ]),
       command: "pnpm",
-      label: "Hosted local full-stack e2e scenario 2/5 linq-onboarding-followup",
+      label: "Hosted local full-stack e2e scenario 2/12 idle-checkpoint-deferred-progress",
     }));
     expect(vitestCalls[1]?.args).not.toContain("--bail");
-    expect(vitestCalls[1]?.args).not.toContain(
-      "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
-    );
     expect(vitestCalls[1]?.env).toEqual(expect.objectContaining({
       MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS: "1",
       MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
         expect.stringMatching(/^hosted-local-e2e-/u),
@@ -127,38 +128,29 @@ describe("hosted-local E2E suite preparation", () => {
       .toBeUndefined();
     expect(vitestCalls[2]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
-        "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
       ]),
       command: "pnpm",
-      label: "Hosted local full-stack e2e scenario 3/5 linq-scheduled-reminder",
+      env: expect.objectContaining({
+        MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE: "1",
+      }),
+      label: "Hosted local full-stack e2e suite 3/12",
     }));
-    expect(vitestCalls[2]?.args).not.toContain("--bail");
     expect(vitestCalls[2]?.args).not.toContain(
-      "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
+      "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     );
-    expect(vitestCalls[2]?.env).toEqual(expect.objectContaining({
-      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
-      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
-      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
-        expect.stringMatching(/^hosted-local-e2e-/u),
-    }));
-    expect(vitestCalls[2]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
-      .toBeUndefined();
-    expect(vitestCalls[2]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
-      .toBeUndefined();
     expect(vitestCalls[3]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
-        "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
       ]),
       command: "pnpm",
-      label: "Hosted local full-stack e2e scenario 4/5 telegram-scheduled-reminder",
+      label: "Hosted local full-stack e2e scenario 4/12 linq-first-contact-test-controls",
     }));
     expect(vitestCalls[3]?.args).not.toContain("--bail");
-    expect(vitestCalls[3]?.args).not.toContain(
-      "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
-    );
     expect(vitestCalls[3]?.env).toEqual(expect.objectContaining({
       MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS: "1",
       MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
         expect.stringMatching(/^hosted-local-e2e-/u),
@@ -169,6 +161,126 @@ describe("hosted-local E2E suite preparation", () => {
       .toBeUndefined();
     expect(vitestCalls[4]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 5/12 linq-onboarding-followup",
+    }));
+    expect(vitestCalls[4]?.args).not.toContain("--bail");
+    expect(vitestCalls[4]?.args).not.toContain(
+      "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+    );
+    expect(vitestCalls[4]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
+    expect(vitestCalls[4]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[4]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(vitestCalls[5]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-openai-egress-authority-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 6/12 openai-egress-authority",
+    }));
+    expect(vitestCalls[5]?.args).not.toContain("--bail");
+    expect(vitestCalls[5]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
+    expect(vitestCalls[5]?.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS)
+      .toBeUndefined();
+    expect(vitestCalls[5]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[5]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(vitestCalls[6]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-provider-egress-token-bridge-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 7/12 provider-egress-token-bridge",
+    }));
+    expect(vitestCalls[6]?.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS)
+      .toBeUndefined();
+    expect(vitestCalls[7]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-warm-reuse-egress-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 8/12 warm-reuse-egress",
+    }));
+    expect(vitestCalls[7]?.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS)
+      .toBeUndefined();
+    expect(vitestCalls[8]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 9/12 linq-scheduled-reminder",
+    }));
+    expect(vitestCalls[8]?.args).not.toContain("--bail");
+    expect(vitestCalls[8]?.args).not.toContain(
+      "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
+    );
+    expect(vitestCalls[8]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
+    expect(vitestCalls[8]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[8]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(vitestCalls[9]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 10/12 telegram-scheduled-reminder",
+    }));
+    expect(vitestCalls[9]?.args).not.toContain("--bail");
+    expect(vitestCalls[9]?.args).not.toContain(
+      "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
+    );
+    expect(vitestCalls[9]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
+    expect(vitestCalls[9]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[9]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(vitestCalls[10]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
+        "apps/cloudflare/test/hosted-local-linq-webhook-audio-e2e.test.ts",
+      ]),
+      command: "pnpm",
+      label: "Hosted local full-stack e2e scenario 11/12 linq-webhook-audio",
+    }));
+    expect(vitestCalls[10]?.args).not.toContain("--bail");
+    expect(vitestCalls[10]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
+    expect(vitestCalls[10]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[10]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(vitestCalls[11]).toEqual(expect.objectContaining({
+      args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
         "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
       ]),
@@ -176,9 +288,9 @@ describe("hosted-local E2E suite preparation", () => {
       env: expect.objectContaining({
         MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE: "1",
       }),
-      label: "Hosted local full-stack e2e suite 5/5",
+      label: "Hosted local full-stack e2e suite 12/12",
     }));
-    expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(7);
+    expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(14);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
       ignoreErrors: false,
       scope: "current-build",

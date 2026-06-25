@@ -76,6 +76,9 @@ const localRunnerIdleTtlMs = "300000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
+const testControlsEnabled = process.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1";
+const productionDescribe = testControlsEnabled ? describe.skip : describe;
+const testControlsDescribe = testControlsEnabled ? describe : describe.skip;
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const itOutsideFastDeployGate = fastDeployGate ? it.skip : it;
@@ -119,7 +122,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
   );
 });
 
-describe("hosted local Linq first-contact e2e", () => {
+productionDescribe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
     await ensureLinqScenario();
   }, 300_000);
@@ -693,6 +696,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
+      connectedAppsAvailable: true,
       vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
@@ -711,7 +715,7 @@ describe("hosted local Linq first-contact e2e", () => {
 
 });
 
-describe("hosted local Linq checkpoint replay e2e", () => {
+testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
   beforeAll(async () => {
     await ensureLinqScenario();
   }, 300_000);
@@ -819,7 +823,7 @@ describe("hosted local Linq checkpoint replay e2e", () => {
   );
 });
 
-describe("hosted local Linq stale scheduled wake e2e", () => {
+testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
@@ -1233,7 +1237,6 @@ async function startLinqScenario(
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,
     },
