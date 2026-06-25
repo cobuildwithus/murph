@@ -148,6 +148,7 @@ describe("hosted mailbox conversation import adapter", () => {
       directRecipientPhoneNumber: "redacted-contact-sentinel",
       fromPhoneNumber: null,
       replyToMessageId: "msg_synthetic_projection_failure",
+      routeAuthority: null,
       target: "chat_synthetic",
     });
 
