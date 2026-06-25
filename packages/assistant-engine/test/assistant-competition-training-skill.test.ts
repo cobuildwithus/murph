@@ -10,13 +10,17 @@ import {
 
 const skillsRoot = resolveAssistantSkillsRoot()
 const skillRoot = path.join(skillsRoot, 'competition-training')
+const scenariosFixturePath = new URL(
+  './fixtures/competition-training/scenarios.jsonl',
+  import.meta.url,
+)
 
 async function readSkillFile(relativePath: string): Promise<string> {
   return readFile(path.join(skillRoot, relativePath), 'utf8')
 }
 
 async function parseScenarios(): Promise<Array<Record<string, unknown>>> {
-  const raw = await readSkillFile('evals/scenarios.jsonl')
+  const raw = await readFile(scenariosFixturePath, 'utf8')
   return raw
     .trim()
     .split('\n')
@@ -53,13 +57,12 @@ describe('assistant competition-training skill', () => {
   })
 
   it('ships one core, five references, and no template or event catalog', async () => {
-    const [rootEntries, references, evals] = await Promise.all([
+    const [rootEntries, references] = await Promise.all([
       readdir(skillRoot),
       readdir(path.join(skillRoot, 'references')),
-      readdir(path.join(skillRoot, 'evals')),
     ])
 
-    expect(rootEntries.sort()).toEqual(['SKILL.md', 'evals', 'references'])
+    expect(rootEntries.sort()).toEqual(['SKILL.md', 'references'])
     expect(references.sort()).toEqual([
       'demand-overlays.md',
       'evidence-register.md',
@@ -67,7 +70,7 @@ describe('assistant competition-training skill', () => {
       'performance-psychology.md',
       'planning-kernel.md',
     ])
-    expect(evals.sort()).toEqual(['README.md', 'scenarios.jsonl'])
+    expect(rootEntries).not.toContain('evals')
     expect(rootEntries).not.toContain('templates')
     expect(references).not.toContain('event-adapters.md')
   })
