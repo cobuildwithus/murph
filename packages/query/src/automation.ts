@@ -92,6 +92,20 @@ function requireStringValue(value: unknown, fieldName: string): string {
   return normalized;
 }
 
+function normalizeDeviceActivityCursorEntityIds(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("schedule.afterEntityIds must be an array.");
+  }
+
+  const entityIds = [...new Set(value.map((entry) =>
+    requireStringValue(entry, "schedule.afterEntityIds[]")
+  ))].sort();
+  return entityIds.length > 0 ? entityIds : undefined;
+}
+
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
   if (Object.hasOwn(object, "timeZone")) {
     throw new Error("schedule.timeZone is not supported for canonical automation schedules.");
@@ -207,9 +221,11 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       }
       const source = normalizeDeviceActivitySource(object.source);
       const activityKind = normalizeDeviceActivityKind(object.activityKind);
+      const afterEntityIds = normalizeDeviceActivityCursorEntityIds(object.afterEntityIds);
       return {
         kind,
         after,
+        ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };

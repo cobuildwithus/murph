@@ -95,6 +95,7 @@ export const automationScheduleDeviceActivitySchema = z
   .object({
     kind: z.literal("deviceActivity"),
     after: isoTimestampSchema(),
+    afterEntityIds: z.array(z.string().min(1)).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
     activityKind: automationDeviceActivityKindSchema.optional(),
   })

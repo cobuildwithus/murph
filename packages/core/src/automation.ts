@@ -187,6 +187,19 @@ function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDevice
   return parsed.data;
 }
 
+function normalizeAutomationDeviceActivityCursorEntityIds(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", "schedule.afterEntityIds must be an array.");
+  }
+
+  const entityIds = [...new Set(value.map((entry) => requireString(entry, "schedule.afterEntityIds[]")))]
+    .sort();
+  return entityIds.length > 0 ? entityIds : undefined;
+}
+
 function normalizeDeviceActivityKindToken(value: string): string {
   return value
     .trim()
@@ -264,10 +277,12 @@ function normalizeAutomationSchedule(
     case "deviceActivity": {
       const source = normalizeAutomationDeviceActivitySource(object.source);
       const activityKind = normalizeAutomationDeviceActivityKind(object.activityKind);
+      const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(object.afterEntityIds);
 
       return {
         kind,
         after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
+        ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -392,6 +407,7 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         after: schedule.after,
+        ...(schedule.afterEntityIds ? { afterEntityIds: schedule.afterEntityIds } : {}),
         ...(schedule.source ? { source: schedule.source } : {}),
         ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
       };

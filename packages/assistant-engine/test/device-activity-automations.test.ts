@@ -366,6 +366,104 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('queues later same-trigger activity ids without duplicating already advanced cursor ids', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_a',
+          occurredAt: '2026-06-07T12:01:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'First imported run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:06:00.000Z',
+      scheduled: 1,
+    })
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_run',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T12:05:00.000Z',
+          afterEntityIds: ['evt_run_a'],
+        }),
+      }),
+    )
+
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:05:00.000Z',
+        afterEntityIds: ['evt_run_a'],
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_a',
+          occurredAt: '2026-06-07T12:01:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'First imported run',
+          workoutType: 'Running',
+        }),
+        createActivityEntity({
+          entityId: 'evt_run_b',
+          occurredAt: '2026-06-07T12:03:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'Second imported run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+    deviceActivityMocks.patchAutomation.mockClear()
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:07:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:07:00.000Z',
+      scheduled: 1,
+    })
+
+    const scheduled = await readQueuedCronJobs(vaultRoot)
+    expect(scheduled).toHaveLength(2)
+    expect(scheduled.filter((job) => job.prompt.includes('First imported run'))).toHaveLength(1)
+    expect(scheduled.filter((job) => job.prompt.includes('Second imported run'))).toHaveLength(1)
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_run',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T12:05:00.000Z',
+          afterEntityIds: ['evt_run_a', 'evt_run_b'],
+        }),
+      }),
+    )
+  })
+
   it('returns an assistant wake for an already due activity reminder handoff', async () => {
     deviceActivityMocks.automations = [
       createDueRequireSendAutomation({
@@ -501,6 +599,7 @@ function createDueRequireSendAutomation(input: {
 function createDeviceActivityAutomation(input: {
   activityKind?: string
   after: string
+  afterEntityIds?: string[]
   automationId?: string
   instructions?: string
   source?: 'whoop' | 'whoop_v2'
@@ -525,6 +624,7 @@ function createDeviceActivityAutomation(input: {
     schedule: {
       kind: 'deviceActivity',
       after: input.after,
+      ...(input.afterEntityIds ? { afterEntityIds: input.afterEntityIds } : {}),
       ...(input.source ? { source: input.source } : {}),
       ...(input.activityKind ? { activityKind: input.activityKind } : {}),
     },

@@ -208,11 +208,28 @@ function listMatchingDeviceActivities(input: {
   candidates: readonly DeviceActivityCandidate[]
 }): MatchedDeviceActivity[] {
   return input.candidates
-    .filter((entry) => Date.parse(entry.triggeredAt) > Date.parse(input.automation.schedule.after))
+    .filter((entry) => deviceActivityCandidateIsAfterCursor(entry, input.automation.schedule))
     .filter((entry) => deviceActivitySourceMatches(entry, input.automation.schedule.source))
     .filter((entry) => deviceActivityKindMatches(entry, input.automation.schedule.activityKind))
     .sort(compareDeviceActivityCandidates)
     .map((candidate) => buildMatchedDeviceActivity(input.automation, candidate))
+}
+
+function deviceActivityCandidateIsAfterCursor(
+  candidate: DeviceActivityCandidate,
+  schedule: DeviceActivitySchedule,
+): boolean {
+  const cursorMs = Date.parse(schedule.after)
+  const candidateMs = Date.parse(candidate.triggeredAt)
+  if (candidateMs > cursorMs) {
+    return true
+  }
+  if (candidateMs < cursorMs) {
+    return false
+  }
+
+  const processedEntityIds = schedule.afterEntityIds
+  return processedEntityIds !== undefined && !processedEntityIds.includes(candidate.entityId)
 }
 
 function compareDeviceActivityCandidates(
@@ -483,8 +500,11 @@ async function advanceDeviceActivityAutomationCursor(input: {
   automation: DeviceActivityAutomation
   vault: string
 }): Promise<void> {
-  const after = resolveLatestDeviceActivityTriggeredAt(input.activities)
-  if (!after || after === input.automation.schedule.after) {
+  const cursor = resolveNextDeviceActivityCursor({
+    activities: input.activities,
+    schedule: input.automation.schedule,
+  })
+  if (!cursor) {
     return
   }
 
@@ -493,20 +513,49 @@ async function advanceDeviceActivityAutomationCursor(input: {
     lookup: input.automation.automationId,
     schedule: {
       ...input.automation.schedule,
-      after,
+      after: cursor.after,
+      afterEntityIds: cursor.afterEntityIds,
     },
   })
 }
 
-function resolveLatestDeviceActivityTriggeredAt(
-  activities: readonly MatchedDeviceActivity[],
-): string | null {
-  return activities.reduce<string | null>((latest, activity) => {
-    if (!latest || Date.parse(activity.triggeredAt) > Date.parse(latest)) {
+function resolveNextDeviceActivityCursor(input: {
+  activities: readonly MatchedDeviceActivity[]
+  schedule: DeviceActivitySchedule
+}): { after: string; afterEntityIds: string[] } | null {
+  const latest = input.activities.reduce<string | null>((candidate, activity) => {
+    if (!candidate || Date.parse(activity.triggeredAt) > Date.parse(candidate)) {
       return activity.triggeredAt
     }
-    return latest
+    return candidate
   }, null)
+  if (!latest) {
+    return null
+  }
+
+  const currentIds = latest === input.schedule.after
+    ? input.schedule.afterEntityIds ?? []
+    : []
+  const processedIds = input.activities
+    .filter((activity) => activity.triggeredAt === latest)
+    .map((activity) => activity.entityId)
+  const afterEntityIds = [...new Set([...currentIds, ...processedIds])].sort()
+
+  if (
+    latest === input.schedule.after &&
+    arraysEqual(afterEntityIds, input.schedule.afterEntityIds ?? [])
+  ) {
+    return null
+  }
+
+  return {
+    after: latest,
+    afterEntityIds,
+  }
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index])
 }
 
 function buildDeviceActivityAutomationInstructions(
