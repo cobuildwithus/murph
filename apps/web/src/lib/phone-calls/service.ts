@@ -32,7 +32,10 @@ interface HostedPhoneCallStore {
     }): Promise<HostedPhoneCall>;
     findUniqueOrThrow(input: {
       where: {
-        requestKey: string;
+        memberId_requestKey: {
+          memberId: string;
+          requestKey: string;
+        };
       };
     }): Promise<HostedPhoneCall>;
     update(input: {
@@ -80,7 +83,12 @@ export async function createHostedPhoneCall(input: {
       throw error;
     }
     const existing = await prisma.hostedPhoneCall.findUniqueOrThrow({
-      where: { requestKey: input.requestKey },
+      where: {
+        memberId_requestKey: {
+          memberId: input.memberId,
+          requestKey: input.requestKey,
+        },
+      },
     });
     if (existing.memberId !== input.memberId) {
       throw new Error("Hosted phone call request key collision.");

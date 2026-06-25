@@ -527,7 +527,7 @@ model HostedComputerHandoff {
 model HostedPhoneCall {
   id             String                @id
   memberId       String                @map("member_id")
-  requestKey     String                @unique @map("request_key")
+  requestKey     String                @map("request_key")
   provider       String                @default("retell")
   providerCallId String?               @unique @map("provider_call_id")
   status         HostedPhoneCallStatus @default(starting)
@@ -539,6 +539,7 @@ model HostedPhoneCall {
   updatedAt      DateTime              @updatedAt @map("updated_at")
   member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
+  @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
   @@index([status, updatedAt])
   @@map("hosted_phone_call")

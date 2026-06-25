@@ -20,7 +20,7 @@ CREATE TABLE "hosted_phone_call" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_phone_call_request_key_key" ON "hosted_phone_call"("request_key");
+CREATE UNIQUE INDEX "hosted_phone_call_member_id_request_key_key" ON "hosted_phone_call"("member_id", "request_key");
 CREATE UNIQUE INDEX "hosted_phone_call_provider_call_id_key" ON "hosted_phone_call"("provider_call_id");
 CREATE INDEX "hosted_phone_call_member_id_created_at_idx" ON "hosted_phone_call"("member_id", "created_at");
 CREATE INDEX "hosted_phone_call_status_updated_at_idx" ON "hosted_phone_call"("status", "updated_at");

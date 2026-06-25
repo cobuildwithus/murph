@@ -102,7 +102,14 @@ describe("createHostedPhoneCall", () => {
       phoneCallId: "hpc_existing",
       status: "calling",
     });
-    expect(store.findCalls).toEqual([{ where: { requestKey: existing.requestKey } }]);
+    expect(store.findCalls).toEqual([{
+      where: {
+        memberId_requestKey: {
+          memberId: existing.memberId,
+          requestKey: existing.requestKey,
+        },
+      },
+    }]);
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateCalls).toEqual([]);
   });
@@ -135,28 +142,30 @@ describe("createHostedPhoneCall", () => {
     expect(store.updateCalls).toEqual([]);
   });
 
-  it("fails closed when a duplicate request key belongs to another member", async () => {
-    const existing = buildHostedPhoneCall({
+  it("allows distinct members to use the same stable request key", async () => {
+    const created = buildHostedPhoneCall({
       memberId: "member_2",
       requestKey: "phone_call_request_1",
-      status: "calling",
     });
-    const store = createPhoneCallStore({
-      createError: createUniqueRequestKeyError(["request_key"]),
-      existing,
-    });
-    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
 
     await expect(createHostedPhoneCall({
       brief: VALID_BRIEF,
-      memberId: "member_1",
+      memberId: "member_2",
       prisma: store.prisma,
-      requestKey: existing.requestKey,
+      requestKey: "phone_call_request_1",
       runtime: runtime.runtime,
-    })).rejects.toThrow("request key collision");
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).resolves.toMatchObject({
+      status: "calling",
+    });
 
-    expect(runtime.startCalls).toEqual([]);
-    expect(store.updateCalls).toEqual([]);
+    expect(store.createCalls[0]!.data).toMatchObject({
+      memberId: "member_2",
+      requestKey: "phone_call_request_1",
+    });
+    expect(runtime.startCalls).toHaveLength(1);
   });
 
   it("marks the call failed when the provider start fails", async () => {

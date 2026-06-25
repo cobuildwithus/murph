@@ -10,6 +10,7 @@ import type {
 
 const RETELL_CREATE_PHONE_CALL_URL = "https://api.retellai.com/v2/create-phone-call";
 const RETELL_START_TIMEOUT_MS = 15_000;
+const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 
 export function createRetellPhoneCallRuntime(input: {
   fetchImpl?: typeof fetch;
@@ -47,6 +48,8 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
 }
 
 function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): Record<string, unknown> {
+  assertRetellAgentDataStorageSetting();
+
   return {
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
@@ -59,6 +62,15 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
       retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
     },
   };
+}
+
+function assertRetellAgentDataStorageSetting(): void {
+  const value = process.env.RETELL_AGENT_DATA_STORAGE_SETTING?.trim().toLowerCase();
+  if (value !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
+    throw new TypeError(
+      `RETELL_AGENT_DATA_STORAGE_SETTING must be ${RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING} for Retell phone calls.`,
+    );
+  }
 }
 
 function buildRetellDynamicVariables(call: HostedPhoneCallRuntimeRecord): Record<string, string> {

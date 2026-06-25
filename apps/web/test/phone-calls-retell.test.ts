@@ -55,6 +55,7 @@ describe("Retell phone-call runtime", () => {
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
     vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
     vi.stubEnv("RETELL_CREATE_PHONE_CALL_URL", "https://retell.example.test/v2/create-phone-call");
     const fetchCalls: Array<{
       init?: RequestInit;
@@ -101,6 +102,21 @@ describe("Retell phone-call runtime", () => {
       override_agent_version: "prod",
       to_number: "+12125550123",
     });
+  });
+
+  it("fails closed before Retell start when the agent storage mode is not configured as basic attributes only", async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new Error("Retell create call should not be requested");
+    };
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    })).rejects.toThrow(
+      "RETELL_AGENT_DATA_STORAGE_SETTING must be basic_attributes_only",
+    );
   });
 });
 
