@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -38,9 +38,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 type BillingPortalRouteModule = typeof import("../app/api/settings/billing/portal/route");
 
 let billingPortalRoute: BillingPortalRouteModule;
+const originalFamilyPortalConfigurationId =
+  process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
@@ -74,6 +77,15 @@ beforeEach(async () => {
   });
 
   billingPortalRoute = await import("../app/api/settings/billing/portal/route");
+});
+
+afterEach(() => {
+  if (originalFamilyPortalConfigurationId === undefined) {
+    delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
+  } else {
+    process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID =
+      originalFamilyPortalConfigurationId;
+  }
 });
 
 test("creates a Stripe billing portal session for an authenticated hosted member", async () => {
@@ -126,6 +138,30 @@ test("creates a Stripe billing portal session for a Family owner group", async (
   });
   expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
+    customer: "cus_family_123",
+    return_url: "https://join.example.test/settings",
+  });
+});
+
+test("uses the dedicated Family portal configuration when configured", async () => {
+  process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID = "bpc_family";
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      body: JSON.stringify({
+        billingScope: "family",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
+    configuration: "bpc_family",
     customer: "cus_family_123",
     return_url: "https://join.example.test/settings",
   });

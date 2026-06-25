@@ -1,19 +1,15 @@
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import {
-  createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess,
+  updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "@/src/lib/hosted-onboarding/shared";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
-export const POST = withJsonError(async (request: Request) => {
+export const PATCH = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
@@ -22,29 +18,20 @@ export const POST = withJsonError(async (request: Request) => {
     limitBytes: 1_024,
   });
 
-  if (await hasActiveHostedFamilyAccess({
-    memberId: auth.member.id,
-    prisma,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
-      httpStatus: 409,
-      message: "You already have sponsored Family access. Leave that Family plan before starting your own.",
-    });
-  }
-
   const group = await prisma.$transaction((tx) =>
     ensureHostedAccountGroupForOwnerTx({
       ownerMemberId: auth.member.id,
       tx,
     }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  const checkout = await createHostedFamilyBillingCheckout({
+  const snapshot = await updateHostedFamilySeatCount({
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
-    seatCount: body.seatCount,
+    targetSeatCount: body.seatCount,
   });
 
-  return jsonOk(checkout);
+  return jsonOk({
+    seats: snapshot.seats,
+  });
 });

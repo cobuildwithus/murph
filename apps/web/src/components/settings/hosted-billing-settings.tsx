@@ -35,8 +35,8 @@ const EDGE_FEATURES = [
 ];
 
 const FAMILY_FEATURES = [
-  "Up to 4 people, one bill",
-  "Everyone gets full Pulse",
+  "2 to 6 people, one bill",
+  "Everyone gets Pulse-level usage",
   "Each person keeps a private Murph",
   "You can't see members' chats or health data",
 ];
@@ -159,7 +159,7 @@ export function HostedBillingSettings(props: {
       key: "family",
       name: "Family",
       note: familyState === "sponsored" ? "Paid by your family plan owner." : null,
-      price: formatMonthlyPrice(HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCents),
+      price: `${formatMonthlyPrice(HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat)}/person`,
     },
   ];
 

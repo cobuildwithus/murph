@@ -1,22 +1,27 @@
 # Hosted Family Plan
 
-Last verified: 2026-06-18
+Last verified: 2026-06-24
 
 ## Purpose
 
-Hosted Family is the fixed-seat billing and access layer for inviting close
+Hosted Family is the reserved-seat billing and access layer for inviting close
 family members into Murph without making them manage Stripe checkout. It should
 feel like Spotify Family for access, but keep Signal-style privacy for health
 data and conversations.
 
-The MVP supports one owner plus up to three invited family members, for four
-people total.
+Family supports 2-6 sponsored people. The owner counts as one sponsored person.
+Family billing is per sponsored seat at $7/person/month. Each sponsored person
+receives an individual Pulse-equivalent monthly usage cap.
 
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
+- The owner buys 2-6 reserved sponsored seats. Active members and pending
+  invites consume those seats.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
+- Every sponsored member gets their own member-level Pulse-equivalent usage
+  allowance. There is no shared Family usage pool in v1.
 - Every family member remains a separate `HostedMember` with their own routing,
   mailbox, workspace/runtime state, legal consent, export, and deletion rights.
 - The owner can see seat and setup status, such as invited, joined, messaging
@@ -36,29 +41,38 @@ Do not add in the MVP:
 - shared family health dashboard
 - family-owner access to raw or summarized health data
 - child/minor accounts or parental health-data authority
-- variable seat quantities, per-seat billing, proration, or mid-cycle billing
-  schedules
 - family-level mailbox, shared assistant runtime, or shared vault
 - automatic challenge sharing
+- usage top-ups, owner approvals, or shared allowance transfers
+- self-paid Family hybrid membership in v1
 
 Sharing health data belongs to future scoped challenge consent. Family plan
 membership alone must not grant health-data sharing.
 
 ## Seats And Billing
 
-The MVP Family plan is fixed at four people total:
+The MVP Family plan is per sponsored seat:
 
-- one owner
-- up to three active or invited family members
+- minimum 2 sponsored people
+- maximum 6 sponsored people
+- the owner counts as one sponsored person
+- active memberships plus pending invites must not exceed paid seats
 
-The hosted billing plan registry should add a Family plan code for the fixed
-plan. Stripe owns the subscription, invoices, payment method, and renewal
-state. Murph stores only the hosted read model needed for entitlement,
-settings display, and reconciliation.
+Stripe owns the subscription, invoices, payment method, renewal state, and seat
+quantity. Murph stores only the hosted read model needed for entitlement,
+settings display, and reconciliation: customer id, subscription id,
+subscription item id, current billing phase/period, and billed seat count.
 
-The first version should not introduce generic plan-transition machinery. Family
-checkout activates or reconciles the owner's family group; direct Pulse and Edge
-billing continue to use the existing member billing path.
+The first version should not introduce generic plan-transition machinery or
+invite-side billing mutation. Family checkout and explicit seat-count changes
+update Stripe billing; invite creation only consumes already-paid seats. Direct
+Pulse and Edge billing continue to use the existing member billing path.
+
+Core invariant:
+
+```ts
+activeMembershipCount + pendingInviteCount <= billedSeatCount
+```
 
 ## Data Ownership
 
@@ -90,7 +104,7 @@ Sponsored access must fail closed when:
 - the family subscription is canceled, unpaid, paused, suspended, or otherwise
   inactive,
 - the member is removed from the group,
-- the group is over the fixed-seat limit,
+- active memberships exceed the billed seat count,
 - the membership is not accepted/active, or
 - required launch/legal consent is missing at the boundary that requires it.
 
@@ -108,7 +122,8 @@ invite my mom, her phone number is +48..., her Telegram is @...
 
 The assistant should resolve the request into a bounded invite command owned by
 hosted web. The command should create or reuse a scoped family invite while
-respecting the four-person seat cap.
+respecting the paid-seat invariant. If no paid seats are open, the owner must
+add a Family seat before issuing another invite.
 
 Accepted invite targets:
 
@@ -171,8 +186,8 @@ Invite acceptance must explicitly state:
 Keep the copy plain and non-promotional. Example:
 
 ```text
-Wojtek invited you to Murph Family. Wojtek pays for access, but your Murph
-messages and health data stay private to you. Join?
+Your family plan owner invited you to Murph Family. They pay for access, but
+your Murph messages and health data stay private to you. Join?
 ```
 
 The implementation should render the inviter name from stored display context
@@ -236,7 +251,7 @@ access.
 ## Implementation Phases
 
 1. Add the spec, data model, store helpers, and entitlement tests.
-2. Add fixed Family billing plan checkout/reconciliation for the owner group.
+2. Add per-seat Family billing checkout/reconciliation for the owner group.
 3. Add invite issuance and acceptance primitives for web/assistant-owned
    commands.
 4. Add Telegram deep-link and WhatsApp/phone pre-bound acceptance flows.
@@ -244,5 +259,5 @@ access.
 6. Add export/delete coverage and direct privacy proof.
 
 Each phase should preserve the existing HostedMember boundary and avoid adding
-generic account-management abstractions before the fixed four-person plan proves
-insufficient.
+generic account-management abstractions before the reserved sponsored-seat model
+proves insufficient.

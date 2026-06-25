@@ -374,9 +374,11 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     ownerMemberId: "member_123",
     seats: {
       active: 1,
+      billed: 2,
       invited: 0,
-      max: 4,
-      remaining: 3,
+      max: 6,
+      min: 2,
+      remaining: 1,
       used: 1,
     },
     suspendedAt: null,

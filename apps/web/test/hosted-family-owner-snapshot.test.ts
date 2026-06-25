@@ -56,6 +56,9 @@ function ownerSnapshotPrisma() {
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
         where.status === "accepted"
@@ -96,7 +99,15 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
 
   expect(snapshot).not.toBeNull();
   expect(snapshot?.billingActive).toBe(true);
-  expect(snapshot?.seats).toEqual({ active: 2, invited: 1, max: 4, remaining: 1, used: 3 });
+  expect(snapshot?.seats).toEqual({
+    active: 2,
+    billed: 4,
+    invited: 1,
+    max: 6,
+    min: 2,
+    remaining: 1,
+    used: 3,
+  });
 
   const owner = snapshot?.members.find((member) => member.memberId === "m_owner");
   expect(owner).toMatchObject({ isOwner: true, label: null });
@@ -117,6 +128,9 @@ test("active member identity falls back to the invited email when there is no la
   );
   const prisma = {
     hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
         where.status === "accepted"
@@ -194,6 +208,9 @@ function acceptanceViewPrisma(input: {
     },
     hostedAccountGroupMembership: {
       count: vi.fn().mockResolvedValue(input.activeMemberships),
+    },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
   };
 }

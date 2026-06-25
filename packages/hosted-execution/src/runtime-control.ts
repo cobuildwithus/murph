@@ -763,8 +763,10 @@ export type HostedRuntimeFamilyPlanToolRequest =
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
   active: number;
+  billed: number;
   invited: number;
   max: number;
+  min: number;
   remaining: number;
   used: number;
 }

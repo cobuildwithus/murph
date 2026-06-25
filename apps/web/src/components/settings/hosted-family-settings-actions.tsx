@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -112,7 +112,15 @@ export function HostedFamilyManager(props: {
   billingActive: boolean;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
-  seats: { max: number; remaining: number; used: number };
+  seats: {
+    active: number;
+    billed: number;
+    invited: number;
+    max: number;
+    min: number;
+    remaining: number;
+    used: number;
+  };
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -126,8 +134,11 @@ export function HostedFamilyManager(props: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isAddingSeat, setIsAddingSeat] = useState(false);
+  const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
+  const canAddSeat = props.billingActive && props.seats.billed < props.seats.max;
 
   function resetInviteForm() {
     setLabel("");
@@ -193,6 +204,28 @@ export function HostedFamilyManager(props: {
     }
   }
 
+  async function addPaidSeat() {
+    if (!canAddSeat) {
+      return;
+    }
+    setSeatError(null);
+    setIsAddingSeat(true);
+    try {
+      await requestHostedOnboardingJson({
+        method: "PATCH",
+        payload: {
+          seatCount: props.seats.billed + 1,
+        },
+        url: "/api/settings/billing/family/seats",
+      });
+      router.refresh();
+    } catch (error) {
+      setSeatError(toErrorMessage(error, "Could not add a Family seat right now."));
+    } finally {
+      setIsAddingSeat(false);
+    }
+  }
+
   async function copyInviteLink(invite: FamilyManagerInvite) {
     const link = invite.acceptUrl ?? invite.telegramInviteUrl;
     if (!link) {
@@ -213,26 +246,53 @@ export function HostedFamilyManager(props: {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2.5">
             <span className="text-sm font-medium text-foreground">
-              {props.seats.used} of {props.seats.max} seats
+              {props.seats.used} of {props.seats.billed} paid seats
             </span>
-            <SeatPips max={props.seats.max} used={props.seats.used} />
+            <SeatPips max={props.seats.billed} used={props.seats.used} />
           </div>
           <p className="text-xs text-muted-foreground">
             {seatsFull
-              ? "Plan full — cancel an invite or remove a member to free a seat."
-              : `${props.seats.remaining} ${props.seats.remaining === 1 ? "seat" : "seats"} left`}
+              ? canAddSeat
+                ? "No open paid seats. Add a paid seat before inviting another person."
+                : "No open seats. Cancel an invite or remove a member to free one."
+              : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}
           </p>
+          <p className="text-xs text-muted-foreground">
+            Family supports {props.seats.min} to {props.seats.max} people.
+          </p>
+          {seatError ? (
+            <p role="alert" className="max-w-sm text-xs leading-tight text-destructive">
+              {seatError}
+            </p>
+          ) : null}
         </div>
-        <Button
-          type="button"
-          onClick={() => {
-            resetInviteForm();
-            setInviteOpen(true);
-          }}
-          disabled={seatsFull}
-        >
-          Invite member
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {canAddSeat ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void addPaidSeat()}
+              disabled={isAddingSeat}
+            >
+              {isAddingSeat ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plus className="size-4" aria-hidden="true" />
+              )}
+              Add paid seat
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            onClick={() => {
+              resetInviteForm();
+              setInviteOpen(true);
+            }}
+            disabled={seatsFull}
+          >
+            Invite member
+          </Button>
+        </div>
       </div>
 
       <table className="w-full text-sm">

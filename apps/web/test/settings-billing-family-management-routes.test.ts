@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   removeHostedFamilyMemberTx: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
+  updateHostedFamilySeatCount: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -36,11 +37,13 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
+  updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
 }));
 
 let inviteRoute: typeof import("../app/api/settings/billing/family/invite/route");
 let inviteCancelRoute: typeof import("../app/api/settings/billing/family/invite/[inviteId]/route");
 let memberRemoveRoute: typeof import("../app/api/settings/billing/family/members/[memberId]/route");
+let seatsRoute: typeof import("../app/api/settings/billing/family/seats/route");
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -83,10 +86,22 @@ beforeEach(async () => {
   );
   mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
+  mocks.updateHostedFamilySeatCount.mockResolvedValue({
+    seats: {
+      active: 1,
+      billed: 3,
+      invited: 1,
+      max: 6,
+      min: 2,
+      remaining: 1,
+      used: 2,
+    },
+  });
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
   inviteCancelRoute = await import("../app/api/settings/billing/family/invite/[inviteId]/route");
   memberRemoveRoute = await import("../app/api/settings/billing/family/members/[memberId]/route");
+  seatsRoute = await import("../app/api/settings/billing/family/seats/route");
 });
 
 function inviteRequest(body: Record<string, unknown>) {
@@ -123,6 +138,35 @@ test("issues a family invite and returns safe share links", async () => {
       targetPhoneNumber: "+48600000000",
     }),
   );
+});
+
+test("updates paid Family seat count explicitly", async () => {
+  const response = await seatsRoute.PATCH(
+    new Request("https://join.example.test/api/settings/billing/family/seats", {
+      body: JSON.stringify({ seatCount: 3 }),
+      headers: { "content-type": "application/json", origin: "https://join.example.test" },
+      method: "PATCH",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    seats: {
+      active: 1,
+      billed: 3,
+      invited: 1,
+      max: 6,
+      min: 2,
+      remaining: 1,
+      used: 2,
+    },
+  });
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith({
+    groupId: "hbag_family",
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+    targetSeatCount: 3,
+  });
 });
 
 test("rejects an empty invite target", async () => {

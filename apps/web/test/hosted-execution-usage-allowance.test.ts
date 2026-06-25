@@ -1977,6 +1977,16 @@ function createAllowanceTx(input: {
           }
         : null),
     },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn(async () => input.familyAccessActive
+        ? {
+            billedSeatCount: 2,
+            currentBillingPhase: "paid",
+            currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+            currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+          }
+        : null),
+    },
     hostedMember: {
       findUnique: vi.fn(async () => ({
         billingRef: {
@@ -1991,6 +2001,7 @@ function createAllowanceTx(input: {
           pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
         },
         id: "member_123",
+        suspendedAt: null,
       })),
     },
   };
@@ -2099,6 +2110,16 @@ function createGatePrisma(input: {
           }
         : null),
     },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn(async () => input.familyAccessActive
+        ? {
+            billedSeatCount: 2,
+            currentBillingPhase: "paid",
+            currentPeriodEnd: periodEnd,
+            currentPeriodStart: periodStart,
+          }
+        : null),
+    },
     hostedMember: {
       findUnique: vi.fn()
         .mockResolvedValueOnce({
@@ -2132,7 +2153,9 @@ function createGatePrisma(input: {
             scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
             scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
           },
+          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
           id: "member_123",
+          suspendedAt: input.suspendedAt ?? null,
         }),
     },
   };

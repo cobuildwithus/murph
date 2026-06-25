@@ -1,6 +1,7 @@
 export const HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS = [
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+  "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
 ] as const;
 
 const FLAT_PRICE_PLAN_KEYS = [
@@ -13,6 +14,11 @@ const FLAT_PRICE_PLAN_KEYS = [
     code: "launch_edge_monthly",
     label: "edge",
     priceKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+  },
+  {
+    code: "launch_family_seat_monthly",
+    label: "family",
+    priceKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
   },
 ] as const;
 

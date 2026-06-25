@@ -9,6 +9,7 @@ import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/ho
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { requireHostedStripeApi } from "@/src/lib/hosted-onboarding/runtime";
+import { normalizeNullableString } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -41,7 +42,13 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const stripe = requireHostedStripeApi();
+  const familyPortalConfigurationId = normalizeNullableString(
+    process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID,
+  );
   const session = await stripe.billingPortal.sessions.create({
+    ...(billingScope === "family" && familyPortalConfigurationId
+      ? { configuration: familyPortalConfigurationId }
+      : {}),
     customer: stripeCustomerId,
     return_url: new URL("/settings", request.url).toString(),
   });

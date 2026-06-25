@@ -37,11 +37,7 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
         billingActive={snapshot.billingActive}
         invites={invites}
         members={members}
-        seats={{
-          max: snapshot.seats.max,
-          remaining: snapshot.seats.remaining,
-          used: snapshot.seats.used,
-        }}
+        seats={snapshot.seats}
       />
     </div>
   );

@@ -13,12 +13,15 @@ import type {
 import {
   createHostedFamilyBillingCheckout,
   type HostedFamilyChatInviteResult,
-  HOSTED_FAMILY_MAX_SEATS,
   ensureHostedAccountGroupForOwnerTx,
   hasActiveHostedFamilyAccess,
   issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  HOSTED_FAMILY_MAX_SEATS,
+  HOSTED_FAMILY_MIN_SEATS,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
@@ -274,9 +277,11 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
 function emptyHostedRuntimeFamilyPlanSeatStatus(): HostedRuntimeFamilyPlanToolSeatStatus {
   return {
     active: 0,
+    billed: HOSTED_FAMILY_MIN_SEATS,
     invited: 0,
     max: HOSTED_FAMILY_MAX_SEATS,
-    remaining: HOSTED_FAMILY_MAX_SEATS,
+    min: HOSTED_FAMILY_MIN_SEATS,
+    remaining: HOSTED_FAMILY_MIN_SEATS,
     used: 0,
   };
 }

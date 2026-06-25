@@ -16,6 +16,8 @@ export {
   createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
+  createHostedStripeSubscriptionItemLookupKey,
+  createHostedStripeSubscriptionItemLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionLookupKeyReadCandidates,
   createHostedStripeSubscriptionScheduleLookupKey,

@@ -1416,6 +1416,11 @@ describe("completeHostedPrivyVerification", () => {
     });
     const invite = makeInvite(sponsoredMember);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedAccountGroupBillingRef: {
+        findUnique: vi.fn(async () => ({
+          billedSeatCount: 2,
+        })),
+      },
       hostedAccountGroupMembership: {
         count: vi.fn(async () => 2),
         findFirst: vi.fn(async () => ({

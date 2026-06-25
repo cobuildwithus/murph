@@ -89,6 +89,28 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
+    seatCount: undefined,
+  });
+});
+
+test("starts Family checkout with an explicit paid seat count", async () => {
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ seatCount: 3 }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    groupId: "hbag_family",
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+    seatCount: 3,
   });
 });
 

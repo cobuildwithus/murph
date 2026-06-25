@@ -103,7 +103,8 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Pulse/);
     assert.match(markup, /Edge/);
     assert.match(markup, /Family/);
-    assert.match(markup, /\$25/);
+    assert.match(markup, /\$7\/person/);
+    assert.match(markup, /\$20/);
     assert.match(markup, /Current plan/);
     assert.match(markup, /Choose Edge/);
     assert.match(markup, /Manage billing/);

@@ -1105,14 +1105,16 @@ function parseHostedRuntimeFamilyPlanSeatStatus(value: unknown) {
   const record = requireObject(value, "Hosted runtime family plan seat status");
   assertAllowedObjectKeys(
     record,
-    new Set(["active", "invited", "max", "remaining", "used"]),
+    new Set(["active", "billed", "invited", "max", "min", "remaining", "used"]),
     "Hosted runtime family plan seat status",
   );
 
   return {
     active: requireNumber(record.active, "Hosted runtime family plan seats active"),
+    billed: requireNumber(record.billed, "Hosted runtime family plan seats billed"),
     invited: requireNumber(record.invited, "Hosted runtime family plan seats invited"),
     max: requireNumber(record.max, "Hosted runtime family plan seats max"),
+    min: requireNumber(record.min, "Hosted runtime family plan seats min"),
     remaining: requireNumber(
       record.remaining,
       "Hosted runtime family plan seats remaining",

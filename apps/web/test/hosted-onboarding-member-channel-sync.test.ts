@@ -249,6 +249,11 @@ describe("hosted onboarding member channel sync", () => {
 
   it("derives channel snapshots for sponsored Family members", async () => {
     const tx = {
+      hostedAccountGroupBillingRef: {
+        findUnique: vi.fn(async () => ({
+          billedSeatCount: 2,
+        })),
+      },
       hostedAccountGroupMembership: {
         count: vi.fn(async () => 2),
         findFirst: vi.fn(async () => ({

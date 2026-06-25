@@ -51,6 +51,9 @@ CREATE TABLE "hosted_account_group_billing_ref" (
     "stripe_customer_id_encrypted" TEXT,
     "stripe_subscription_lookup_key" TEXT,
     "stripe_subscription_id_encrypted" TEXT,
+    "stripe_subscription_item_lookup_key" TEXT,
+    "stripe_subscription_item_id_encrypted" TEXT,
+    "billed_seat_count" INTEGER,
     "current_billing_plan_code" TEXT,
     "current_billing_phase" TEXT,
     "current_period_start" TIMESTAMP(3),
@@ -65,6 +68,7 @@ CREATE UNIQUE INDEX "hosted_account_group_invite_invite_code_key" ON "hosted_acc
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_group_id_key" ON "hosted_account_group_billing_ref"("group_id");
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_customer_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_customer_lookup_key");
 CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_subscription_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_subscription_lookup_key");
+CREATE UNIQUE INDEX "hosted_account_group_billing_ref_stripe_subscription_item_lookup_key_key" ON "hosted_account_group_billing_ref"("stripe_subscription_item_lookup_key");
 CREATE UNIQUE INDEX "hosted_account_group_owner_member_id_key" ON "hosted_account_group"("owner_member_id");
 
 CREATE INDEX "hosted_account_group_billing_status_idx" ON "hosted_account_group"("billing_status");
@@ -82,3 +86,7 @@ ALTER TABLE "hosted_account_group_invite" ADD CONSTRAINT "hosted_account_group_i
 ALTER TABLE "hosted_account_group_invite" ADD CONSTRAINT "hosted_account_group_invite_invited_by_member_id_fkey" FOREIGN KEY ("invited_by_member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "hosted_account_group_invite" ADD CONSTRAINT "hosted_account_group_invite_accepted_by_member_id_fkey" FOREIGN KEY ("accepted_by_member_id") REFERENCES "hosted_member"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "hosted_account_group_billing_ref" ADD CONSTRAINT "hosted_account_group_billing_ref_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "hosted_account_group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_account_group_billing_ref" ADD CONSTRAINT "hosted_account_group_billing_ref_billed_seat_count_check" CHECK (
+    "billed_seat_count" IS NULL
+    OR ("billed_seat_count" >= 2 AND "billed_seat_count" <= 6)
+);

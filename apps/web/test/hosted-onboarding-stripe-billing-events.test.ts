@@ -611,10 +611,14 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
     )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
       },
+      welcomeEmailMemberId: null,
     });
 
     expect(mocks.prepareHostedMemberStripeBillingWrite).toHaveBeenCalledWith({
@@ -649,10 +653,14 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
     )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
       },
+      welcomeEmailMemberId: null,
     });
 
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
@@ -678,7 +686,11 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
     )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
       subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
     });
 
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(canceledMember);
@@ -700,7 +712,11 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
     )).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
       subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
     });
   });
 

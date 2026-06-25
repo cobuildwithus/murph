@@ -335,6 +335,9 @@ describe("hosted execution email callback routes", () => {
       status: "active",
     });
     prismaClient.hostedAccountGroupMembership.count.mockResolvedValueOnce(2);
+    prismaClient.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      billedSeatCount: 2,
+    });
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
@@ -590,6 +593,9 @@ function createPrismaMock() {
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async (): Promise<unknown | null> => null),
+    },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn(async (): Promise<unknown | null> => null),
     },
     transactionClient,
   };

@@ -18,6 +18,7 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
+  parseHostedBillingPhase,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   readHostedFamilyAccessForMember,
@@ -71,10 +72,14 @@ export default async function SettingsPage() {
       : [null, null, null, null, null, null];
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
+  const directPaidMember =
+    authenticatedMember?.billingStatus === "active" &&
+    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid";
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
     !sponsoredMember &&
+    !directPaidMember &&
     !authenticatedMember.suspendedAt;
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;

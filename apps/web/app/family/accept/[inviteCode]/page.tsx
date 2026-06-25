@@ -91,7 +91,7 @@ function renderInvite(input: {
     return (
       <InviteMessage
         title="This family plan is full"
-        body="The plan already has four people. Ask the owner to free up a seat."
+        body="The plan has no open paid seats. Ask the owner to add a Family seat."
       />
     );
   }
