@@ -74,8 +74,9 @@ export const hostedConnectedAppsSearchInputSchema = z
 
 export const hostedConnectedAppsExecuteInputSchema = z
   .object({
-    account: hostedConnectedAppsAccountSelectorSchema,
+    account: hostedConnectedAppsAccountSelectorSchema.optional(),
     arguments: z.record(z.string(), z.unknown()).default({}),
+    agentApproved: z.literal(true).optional(),
     toolSlug: hostedConnectedAppsToolSlugSchema,
   })
   .strict();

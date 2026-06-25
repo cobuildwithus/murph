@@ -385,10 +385,11 @@ describe("hosted workspace runtime entrypoint", () => {
         spy: consoleInfo,
       });
 
-      assert.deepEqual(phaseLogs.map((entry) => [
+      const phaseStatusPairs = phaseLogs.map((entry) => [
         entry.details.runtimePhase,
         entry.details.runtimePhaseStatus,
-      ]), [
+      ]);
+      const expectedPhaseStatusPairs = [
         ["workspace.read", "start"],
         ["workspace.read", "done"],
         ["workspace.restore", "start"],
@@ -404,7 +405,48 @@ describe("hosted workspace runtime entrypoint", () => {
         ["foreground.pass", "start"],
         ["foreground.pass", "done"],
         ["runtime.return", "done"],
-      ]);
+      ];
+      expect(phaseStatusPairs).toEqual(expect.arrayContaining(expectedPhaseStatusPairs));
+      expect(phaseStatusPairs).toHaveLength(expectedPhaseStatusPairs.length);
+
+      const phaseStatusIndex = (phase: string, status: string) => {
+        const index = phaseStatusPairs.findIndex(([entryPhase, entryStatus]) =>
+          entryPhase === phase && entryStatus === status
+        );
+        assert.notEqual(index, -1, `Missing phase log for ${phase}:${status}`);
+        return index;
+      };
+      const workspaceReadStart = phaseStatusIndex("workspace.read", "start");
+      const workspaceReadDone = phaseStatusIndex("workspace.read", "done");
+      const workspaceRestoreStart = phaseStatusIndex("workspace.restore", "start");
+      const workspaceRestoreDone = phaseStatusIndex("workspace.restore", "done");
+      const cliBridgeStart = phaseStatusIndex("cli.bridge", "start");
+      const cliBridgeDone = phaseStatusIndex("cli.bridge", "done");
+      const codexPrepareStart = phaseStatusIndex("codex.prepare", "start");
+      const codexPrepareDone = phaseStatusIndex("codex.prepare", "done");
+      const mailboxImportStart = phaseStatusIndex("mailbox.import.initial", "start");
+      const mailboxImportDone = phaseStatusIndex("mailbox.import.initial", "done");
+      const inboxSidecarStart = phaseStatusIndex("inbox.sidecar", "start");
+      const inboxSidecarDone = phaseStatusIndex("inbox.sidecar", "done");
+      const foregroundPassStart = phaseStatusIndex("foreground.pass", "start");
+      const foregroundPassDone = phaseStatusIndex("foreground.pass", "done");
+      const runtimeReturnDone = phaseStatusIndex("runtime.return", "done");
+
+      expect(workspaceReadStart).toBeLessThan(workspaceReadDone);
+      expect(workspaceReadDone).toBeLessThan(workspaceRestoreStart);
+      expect(workspaceRestoreStart).toBeLessThan(workspaceRestoreDone);
+      expect(workspaceRestoreDone).toBeLessThan(mailboxImportStart);
+      expect(workspaceRestoreDone).toBeLessThan(cliBridgeStart);
+      expect(mailboxImportStart).toBeLessThan(mailboxImportDone);
+      expect(cliBridgeStart).toBeLessThan(cliBridgeDone);
+      expect(cliBridgeDone).toBeLessThan(codexPrepareStart);
+      expect(codexPrepareStart).toBeLessThan(codexPrepareDone);
+      expect(mailboxImportDone).toBeLessThan(inboxSidecarStart);
+      expect(codexPrepareDone).toBeLessThan(inboxSidecarStart);
+      expect(inboxSidecarStart).toBeLessThan(inboxSidecarDone);
+      expect(inboxSidecarDone).toBeLessThan(foregroundPassStart);
+      expect(foregroundPassStart).toBeLessThan(foregroundPassDone);
+      expect(foregroundPassDone).toBeLessThan(runtimeReturnDone);
       expect(phaseLogs.map((entry) => entry.details.runtimePhaseOrdinal)).toEqual(
         Array.from({ length: phaseLogs.length }, (_value, index) => index + 1),
       );

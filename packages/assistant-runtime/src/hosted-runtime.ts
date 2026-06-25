@@ -1007,126 +1007,153 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: restored.vaultRoot,
       workspace: workspaceRead.workspace,
     };
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "cli.bridge",
-      status: "start",
-    });
-    const hostedCliBridge = await raceHostedRuntimeCancellation(
-      getOrCreateHostedCliRuntimeBridge(),
-      runtimeAbortController.signal,
-    );
-    emitPhaseLog({
-      details: {
-        bridgeStarted: true,
-      },
-      input,
-      requestId,
-      stage: "cli.bridge",
-      status: "done",
-    });
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
-    const baseRuntimeEnv = {
-      ...projectHostedRuntimeTrustStoreEnv(process.env),
-      ...guardedRuntime.forwardedEnv,
-      ...guardedRuntime.userEnv,
-      ...hostedCliBridge.env,
-      ...(imageCodexModelCatalogJson
-        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
-        : {}),
-    };
-    emitPhaseLog({
-      details: {
-        runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
-        voiceMemoElevenLabsApiKeyConfigured:
-          hasHostedRuntimeEnvValue(baseRuntimeEnv, "ELEVENLABS_API_KEY"),
-        voiceMemoElevenLabsModelConfigured:
-          hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
-        voiceMemoElevenLabsVoiceConfigured:
-          hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
-      },
-      input,
-      requestId,
-      stage: "codex.prepare",
-      status: "start",
-    });
-    const hostedCodexRuntime = await raceHostedRuntimeCancellation(
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
-      }),
-      runtimeAbortController.signal,
-    );
-    emitPhaseLog({
-      details: {
-        runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
-        voiceMemoElevenLabsApiKeyConfigured:
-          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
-        voiceMemoElevenLabsModelConfigured:
-          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
-        voiceMemoElevenLabsVoiceConfigured:
-          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
-      },
-      input,
-      requestId,
-      stage: "codex.prepare",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
-    const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
-      vaultRoot: restored.vaultRoot,
-    });
-    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-      mergeHostedRuntimeWakeLatencySeeds(
-        invocationOrchestrationLatencySeed,
-        consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
-      ),
-    );
-    emitPhaseLog({
-      details: {
-        foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
-        initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
-        mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
-      },
-      input,
-      requestId,
-      stage: "mailbox.import.initial",
-      status: "start",
-    });
-    const initialMailboxImportResult = await raceHostedRuntimeCancellation(
-      importHostedInitialMailboxForWorkspaceRunner({
-        checkpointRequestBuilder,
-        importItemContext: initialMailboxImportContext,
-        runnerInput: baseRunnerInput,
+    const prepareTurnRuntime = async () => {
+      emitPhaseLog({
+        input,
         requestId,
-      }),
-      runtimeAbortController.signal,
-    );
+        stage: "cli.bridge",
+        status: "start",
+      });
+      const hostedCliBridge = await raceHostedRuntimeCancellation(
+        getOrCreateHostedCliRuntimeBridge(),
+        runtimeAbortController.signal,
+      );
+      emitPhaseLog({
+        details: {
+          bridgeStarted: true,
+        },
+        input,
+        requestId,
+        stage: "cli.bridge",
+        status: "done",
+      });
+      const imageCodexModelCatalogJson =
+        process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+      const baseRuntimeEnv = {
+        ...projectHostedRuntimeTrustStoreEnv(process.env),
+        ...guardedRuntime.forwardedEnv,
+        ...guardedRuntime.userEnv,
+        ...hostedCliBridge.env,
+        ...(imageCodexModelCatalogJson
+          ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+          : {}),
+      };
+      emitPhaseLog({
+        details: {
+          runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
+          voiceMemoElevenLabsApiKeyConfigured:
+            hasHostedRuntimeEnvValue(baseRuntimeEnv, "ELEVENLABS_API_KEY"),
+          voiceMemoElevenLabsModelConfigured:
+            hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+          voiceMemoElevenLabsVoiceConfigured:
+            hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
+        },
+        input,
+        requestId,
+        stage: "codex.prepare",
+        status: "start",
+      });
+      const hostedCodexRuntime = await raceHostedRuntimeCancellation(
+        prepareHostedCodexRuntimeEnvironment({
+          operatorHomeRoot: restored.operatorHomeRoot,
+          runtimeEnv: baseRuntimeEnv,
+        }),
+        runtimeAbortController.signal,
+      );
+      emitPhaseLog({
+        details: {
+          runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
+          voiceMemoElevenLabsApiKeyConfigured:
+            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
+          voiceMemoElevenLabsModelConfigured:
+            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+          voiceMemoElevenLabsVoiceConfigured:
+            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
+        },
+        input,
+        requestId,
+        stage: "codex.prepare",
+        status: "done",
+      });
+      assertRuntimeNotAborted();
+      return {
+        hostedCliBridge,
+        hostedCodexRuntime,
+      };
+    };
+    const importInitialMailbox = async () => {
+      const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
+        vaultRoot: restored.vaultRoot,
+      });
+      const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+        mergeHostedRuntimeWakeLatencySeeds(
+          invocationOrchestrationLatencySeed,
+          consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
+        ),
+      );
+      emitPhaseLog({
+        details: {
+          foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
+          initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
+          mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
+        },
+        input,
+        requestId,
+        stage: "mailbox.import.initial",
+        status: "start",
+      });
+      const initialMailboxImportResult = await raceHostedRuntimeCancellation(
+        importHostedInitialMailboxForWorkspaceRunner({
+          checkpointRequestBuilder,
+          importItemContext: initialMailboxImportContext,
+          runnerInput: baseRunnerInput,
+          requestId,
+        }),
+        runtimeAbortController.signal,
+      );
+      const initialMailboxImport = initialMailboxImportResult.result;
+      const mailboxImportDoneAt = new Date().toISOString();
+      emitPhaseLog({
+        details: {
+          bootstrapPending: initialMailboxImportResult.bootstrapPending,
+          checkpointDeferred: initialMailboxImport.checkpointDeferred,
+          checkpointed: initialMailboxImport.checkpoint?.checkpointed ?? false,
+          fetchedCount: initialMailboxImport.importResult.fetchedCount,
+          importedCount: initialMailboxImport.importResult.importedCount,
+          stateChanged: initialMailboxImport.stateChanged,
+        },
+        input,
+        requestId,
+        stage: "mailbox.import.initial",
+        status: "done",
+      });
+      recordHostedRuntimeLatencyMilestoneBestEffort({
+        at: mailboxImportDoneAt,
+        latencyTracePort: guardedRuntime.platform.latencyTracePort ?? null,
+        milestone: "mailbox_import_done",
+        runtimeAttemptId: input.request.attemptId,
+      });
+      assertRuntimeNotAborted();
+      return initialMailboxImportResult;
+    };
+
+    // Assistant admission requires both independent prerequisites. Wait for
+    // both branches to settle so one failure cannot race sibling startup/import work.
+    const [initialMailboxImportSettled, turnRuntimeSettled] =
+      await Promise.allSettled([
+        importInitialMailbox(),
+        prepareTurnRuntime(),
+      ]);
+    // Preserve the former serial path's error precedence.
+    if (turnRuntimeSettled.status === "rejected") {
+      throw turnRuntimeSettled.reason;
+    }
+    if (initialMailboxImportSettled.status === "rejected") {
+      throw initialMailboxImportSettled.reason;
+    }
+    const { hostedCliBridge, hostedCodexRuntime } = turnRuntimeSettled.value;
+    const initialMailboxImportResult = initialMailboxImportSettled.value;
     const initialMailboxImport = initialMailboxImportResult.result;
-    const mailboxImportDoneAt = new Date().toISOString();
-    emitPhaseLog({
-      details: {
-        bootstrapPending: initialMailboxImportResult.bootstrapPending,
-        checkpointDeferred: initialMailboxImport.checkpointDeferred,
-        checkpointed: initialMailboxImport.checkpoint?.checkpointed ?? false,
-        fetchedCount: initialMailboxImport.importResult.fetchedCount,
-        importedCount: initialMailboxImport.importResult.importedCount,
-        stateChanged: initialMailboxImport.stateChanged,
-      },
-      input,
-      requestId,
-      stage: "mailbox.import.initial",
-      status: "done",
-    });
-    recordHostedRuntimeLatencyMilestoneBestEffort({
-      at: mailboxImportDoneAt,
-      latencyTracePort: guardedRuntime.platform.latencyTracePort ?? null,
-      milestone: "mailbox_import_done",
-      runtimeAttemptId: input.request.attemptId,
-    });
-    assertRuntimeNotAborted();
     const returnInitialMailboxImportBeforeForeground = async () => {
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,

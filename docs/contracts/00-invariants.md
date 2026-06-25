@@ -10,6 +10,42 @@
 - If a test needs a new source seam, make it a real production seam with clear runtime ownership and product/debug value. Do not widen package exports, public APIs, runtime env branches, or internal object methods only to make a harness easier to drive.
 - Tests and E2E checks should mock the fewest boundaries needed to stay deterministic and affordable. Prefer production-faithful libraries, binaries, protocols, and runtime integrations over bespoke mocks; stub only external provider edges, secrets, clocks, or failure cases that cannot safely run in repo automation.
 
+## Durable Authority And Recovery
+
+- Any operation that resumes, wakes, mutates, egresses, delivers, deletes, exports, or recovers user state across web, Cloudflare, assistant-runtime, provider callbacks, or UI routes must revalidate an explicit durable authority tuple owned by the source-of-truth plane. Process-local pointers, dashboard/layout state, provider callback state, session presence, or cached "active" state may optimize only after durable authority is proven.
+- A session proves who is present, not that a sensitive or lifecycle-specific action is authorized. Destructive actions, bulk exports, managed-auth completion, mailbox resume, checkout recovery, provider egress, and runtime wake/reuse must bind to the narrow action, user/member, route/target, attempt/lease/fence, freshness proof, or row lock that owns that action.
+- If durable authority is missing, stale, ambiguous, or mismatched, fail closed or fall back to the narrower safe flow. Do not "complete" by trusting ambient UI state, process memory, or provider success alone.
+
+## Stable Idempotency Identity
+
+- Durable product identity, dedupe identity, idempotency keys, and revision identity must be derived from stable product/provider facts, not machine-local rows, runtime-local ids, mutable provider versions, media URLs, callback timing, or session-specific storage.
+- If two paths intentionally overlap — retry, replay, push+pull ingestion, warm/cold runtime restart, provider webhook reorder, outbox resend, media normalization, or migration re-entry — the shared identity must make overlap safe by construction.
+- A new write path is not complete until it names the stable identity it uses for idempotency, explains which mutable fields are excluded, and has a regression proving retry/replay/cold-start overlap does not duplicate or lose the user-visible fact.
+
+## Ordered Progress And Causal Anchors
+
+- Any persisted cursor, mailbox sequence, pending-input index, consume ack, wake gate, receipt watermark, or paginated read must use a total, transitive, owner-shared ordering primitive. Do not duplicate timestamp comparators, pick timestamp fields pairwise, or rely on ordering that can make persisted records unreachable or repeated.
+- Import progress is not handling progress; checkpoint progress is not delivery progress; scanner discovery is not consume authority. Consume/clear/advance only from owner-provided coverage plus terminal evidence, and preserve gates when a later pass sees no current work but older retryable work still exists.
+- Explicit causal anchors beat positional heuristics: provider reply ids, selected input ids, delivery-context ordinals, server sequences, and segment ordinals must be resolved before "latest", "oldest", grouping, watermarks, or time-window fallbacks. Events with different explicit anchors must not be grouped into one turn.
+
+## Deliverability And Provider Capability Contract
+
+- A saved automation, assistant side effect, notification, media response, or provider call must carry a concrete deliverable/authorized target before it can be persisted as executable or run side effects. Continuity locators, thread ids, redacted/private placeholders, route hints, and dashboard state are context only; they are not delivery targets.
+- Channel/provider capability must be one typed contract from planning through outbox/delivery service, hosted side-effect parsing, platform egress, and regression tests. Adding a new provider, media kind, channel operation, or runtime tool is incomplete until the exact operation has target validation, idempotency identity, and egress authorization.
+- Invalid routes or unauthorized provider operations must fail before model execution, delivery, provider mutation, or generated subject/media work. Do not add a scheduler, queue, route-repair worker, or broad abstraction to compensate for an invalid route shape.
+
+## Decision Sources And Projection Drift
+
+- Any user-visible gate, billing/usage decision, experiment outcome, lifecycle automation, export completeness check, or safety/freshness claim must name its authoritative source. Caches, current-period aggregates, sparse entity models, browser/dashboard snapshots, runtime state, and SQLite projections are accelerators unless their owner contract explicitly makes them the decision source.
+- If a cached aggregate can lag an append-only ledger or canonical source, reads that enforce limits or report status must reconcile against the authoritative source and repair bounded aggregates only in the owning mutating path.
+- Do not add raw-vault fallbacks, provider-specific remapping, duplicate persisted state, or larger projection payloads when the owned projection/ledger already contains the decision-grade facts. Prefer passing the existing projection rows into pure analysis functions over creating another state owner.
+
+## Production-Faithful Seams And Executable Architecture Budgets
+
+- If an invariant exists to keep a hot path small, a protocol boundary faithful, or a dependency surface narrow, make it executable with deterministic graph, byte, package-surface, shape, or protocol-contract tests. A docs-only invariant is not enough when one static import or shim drift can silently defeat it.
+- Test doubles may stand behind the real production adapter/protocol, but they must not reimplement owned production protocols in parallel. Prefer the real binary/library/protocol with stubbed external provider edges over a fake owner protocol that can drift while tests stay green.
+- A new abstraction, shim, compatibility layer, or generated test harness must have an owner, a deletion path, and a reason stronger than convenience. If the simpler path is to delete the shim and exercise the production seam, delete it.
+
 ## Latency And Scan Bounds
 
 - Do not add unbounded linear-or-worse scans over any growing collection, including repo files, vault records, runtime state, database rows, object-store keys, mailbox items, transcripts, logs, API result sets, or in-memory accumulators. Any path that can run during user-visible work, recurring jobs, deploy checks, or normal local commands must use a bounded window, limit, cursor, index, manifest, precomputed projection, exact key lookup, or explicit pagination. Intentional full scans are allowed only for bounded fixture data, one-shot migrations, offline/admin repair tools, or diagnostics with a documented size cap and operator-visible cost.
