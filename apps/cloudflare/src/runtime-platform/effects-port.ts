@@ -1,4 +1,10 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.ts";
@@ -17,6 +23,10 @@ import {
   fetchHostedResponse,
   readOptionalStringField,
 } from "./hosted-http.ts";
+import {
+  fetchHostedWebControlPlaneJson,
+  type HostedWebControlTransport,
+} from "./web-control-transport.ts";
 
 function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): string {
   return `/messages/${encodeURIComponent(rawMessageKey)}`;
@@ -71,10 +81,13 @@ function createCloudflareRunnerProviderFileEffectsPort(input: {
 }
 
 export function createCloudflareEffectsPort(input: {
+  boundUserId: string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
+  webControlTransport?: HostedWebControlTransport | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimeEffectsPort {
+  const webControlTransport = input.webControlTransport ?? null;
   const providerFileEffectsPort = input.workspaceCheckpointBridge
     ? createCloudflareRunnerProviderFileEffectsPort({
         fetchImpl: input.fetchImpl,
@@ -109,6 +122,27 @@ export function createCloudflareEffectsPort(input: {
       assertHostedOk(response, "Hosted raw email read");
       return new Uint8Array(await response.arrayBuffer());
     },
+    ...(webControlTransport
+      ? {
+          async assertLinqThreadRouteAuthority(
+            authority: HostedExecutionExternalThreadRouteAuthority,
+            context?: { signal?: AbortSignal | null },
+          ) {
+            await fetchHostedWebControlPlaneJson({
+              body: {
+                authority,
+              },
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq thread route authority assertion",
+              fetchImpl: input.fetchImpl,
+              path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+        }
+      : {}),
     async sendEmail(request) {
       const payload = await fetchHostedJson({
         body: request,

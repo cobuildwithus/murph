@@ -3041,6 +3041,14 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.effectsPort.readAssistantDeliveryRecord!(readInput)),
           }
         : {}),
+      ...(platform.effectsPort.assertLinqThreadRouteAuthority
+        ? {
+            assertLinqThreadRouteAuthority: (authority, context) =>
+              guard(() =>
+                platform.effectsPort.assertLinqThreadRouteAuthority!(authority, context)
+              ),
+          }
+        : {}),
       readRawEmailMessage: (rawMessageKey) =>
         guard(() => platform.effectsPort.readRawEmailMessage(rawMessageKey)),
       sendEmail: (request) => guard(() => platform.effectsPort.sendEmail(request)),

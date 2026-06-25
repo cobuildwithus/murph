@@ -621,6 +621,12 @@ describe('assistant consumption lookup guidance', () => {
       'When meal logging or food-pattern context is central, follow the food-journal skill',
     )
     expect(prompt).toContain(
+      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+    )
+    expect(prompt).toContain(
+      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
+    )
+    expect(prompt).toContain(
       'Ask one targeted follow-up only when missing detail materially changes the user\'s chosen focus, safety, or whether the record will be useful',
     )
     expect(prompt).toContain(
@@ -1149,7 +1155,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
+      '9bc3fd71a8785e25a79376fe2b66720df0c529fe56c9b1ea2ef7080a4250e41d',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1394,6 +1400,9 @@ describe('assistant experiment onboarding guidance', () => {
       'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
     )
     expect(prompt).toContain(
+      'When stress, overload, acute activation, winding down, or symptom fear is the immediate bottleneck, use the stress-regulation skill',
+    )
+    expect(prompt).toContain(
       'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
     )
     expect(prompt).toContain(
@@ -1404,6 +1413,47 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).not.toContain(
       'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
+  it('renders running and cardio planning through the Murph skill registry', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const healthReasoningStart = prompt.indexOf('Health reasoning:')
+    const chronicSupportStart = prompt.indexOf(
+      'Chronic illness, persistent pain, and self-management experiments:',
+    )
+
+    expect(prompt).toContain(
+      '- running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      'otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
+    )
+    expect(prompt).toContain(
+      'Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance.',
+    )
+    expect(prompt).toContain(
+      'Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+    )
+    expect(prompt).toContain(
+      'File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.',
+    )
+    expect(healthReasoningStart).toBeGreaterThanOrEqual(0)
+    expect(chronicSupportStart).toBeGreaterThan(healthReasoningStart)
+    expect(
+      prompt.slice(healthReasoningStart, chronicSupportStart),
+    ).not.toContain('running-cardio')
+    expect(prompt).toContain('- competition-training: Use when a user is preparing')
+  })
+
+  it('routes acute stress support through the Murph stress skill', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Use `stress-regulation` when stress or overload is the immediate bottleneck and the useful answer is a brief safety-aware downshift, load adjustment, or handoff.',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
     )
   })
 
@@ -1427,10 +1477,29 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(prompt).toContain('competition-training')
+    expect(prompt).toContain('target fitness race or competition')
+    expect(prompt).toContain('use strength-training first')
+    expect(prompt).toContain('powerlifting, weightlifting, or strongman')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
+    )
     expect(prompt).toContain('strength-training')
     expect(prompt).toContain('strength or resistance training plans')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
+    expect(prompt).toContain('running-cardio')
+    expect(prompt).toContain(
+      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
+    )
+    expect(prompt).toContain('stress-regulation')
+    expect(prompt).toContain('stress or overload is the immediate bottleneck')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
     )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',

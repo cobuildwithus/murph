@@ -6,7 +6,7 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
-  readHostedLinqConversationMessageContact,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
   resolveHostedEmailSelfAddresses,
@@ -319,9 +319,8 @@ async function normalizeHostedConversationMessageWake(input: {
   signal?: AbortSignal | null;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
-    const contact = readHostedLinqConversationMessageContact(input.wake.message);
     return normalizeHostedLinqConversationCapture({
-      accountId: contact.lookupKey,
+      accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
       downloadDriver: createHostedLinqAttachmentDownloadDriver({
         env: buildHostedLinqAttachmentDownloadEnv(input.runtime),

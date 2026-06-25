@@ -281,6 +281,81 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
+  it("deletes owned external-thread container runtimes with the account owner", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => {},
+      ownedThreadContainerMemberIds: ["member_thread_container_123"],
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.cloudflare.deleted).toBe(true);
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "settings.account-data.delete",
+      userId: "member_123",
+    });
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "settings.account-data.delete",
+      userId: "member_thread_container_123",
+    });
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      userId: "member_thread_container_123",
+    });
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedThreadRoute",
+        where: {
+          OR: [
+            {
+              containerMemberId: {
+                in: ["member_123", "member_thread_container_123"],
+              },
+            },
+            {
+              container: {
+                ownerMemberId: {
+                  in: ["member_123", "member_thread_container_123"],
+                },
+              },
+            },
+          ],
+        },
+      },
+      {
+        model: "hostedThreadContainer",
+        where: {
+          OR: [
+            {
+              memberId: {
+                in: ["member_123", "member_thread_container_123"],
+              },
+            },
+            {
+              ownerMemberId: {
+                in: ["member_123", "member_thread_container_123"],
+              },
+            },
+          ],
+        },
+      },
+      {
+        model: "hostedMember",
+        where: {
+          id: {
+            in: ["member_123", "member_thread_container_123"],
+          },
+        },
+      },
+    ]));
+  });
+
   it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {
     const order: string[] = [];
     const stripe = {
@@ -1308,6 +1383,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -1359,6 +1435,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
       ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
       findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
     },
+    hostedThreadContainer: {
+      ...makeDeleteDelegate("hostedThreadContainer"),
+      findMany: async () => (input.ownedThreadContainerMemberIds ?? []).map((memberId) => ({
+        memberId,
+      })),
+    },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
       updateMany: async () => {
@@ -1397,6 +1479,11 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedConnectedAppConnectIntent: {
       findMany: async () => input.connectedAppConnectIntentRows ?? [],
+    },
+    hostedThreadContainer: {
+      findMany: async () => (input.ownedThreadContainerMemberIds ?? []).map((memberId) => ({
+        memberId,
+      })),
     },
     hostedComputerRun: {
       findMany: async () => {
@@ -1506,6 +1593,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
+  };
+  hostedThreadContainer: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{ memberId: string }>>;
   };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
     updateMany: (args: unknown) => Promise<{ count: number }>;

@@ -1,4 +1,7 @@
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
+import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -219,6 +222,10 @@ type HostedRuntimeEffectsPortBase = {
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
+  assertLinqThreadRouteAuthority?(
+    authority: HostedExecutionExternalThreadRouteAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,

@@ -1049,6 +1049,7 @@ describe("hosted mailbox import loop", () => {
             directRecipientPhoneNumber: "+15550000001",
             fromPhoneNumber: null,
             replyToMessageId: "linq-message-1",
+            routeAuthority: null,
             target: "linq-thread-1",
           },
           status: "imported",
@@ -1067,6 +1068,7 @@ describe("hosted mailbox import loop", () => {
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: null,
       replyToMessageId: "linq-message-1",
+      routeAuthority: null,
       target: "linq-thread-1",
     });
     assert.equal(result.state.watermarks.conversation, "1");

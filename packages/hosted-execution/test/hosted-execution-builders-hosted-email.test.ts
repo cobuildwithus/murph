@@ -232,15 +232,23 @@ describe("hosted execution wake builders", () => {
       replyToMessageId: null,
       service: "SMS",
     };
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "user_123",
+      threadId: "chat_123",
+    };
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-1",
       linqMessage,
       occurredAt,
       phoneLookupKey: "phone_lookup_123",
+      routeAuthority,
       userId: "user_123",
     });
 
     linqMessage.parts[0]!.value = "mutated";
+    routeAuthority.threadId = "mutated";
 
     expect(wake.message).toEqual({
       channel: "linq",
@@ -261,11 +269,18 @@ describe("hosted execution wake builders", () => {
         service: "SMS",
       },
       phoneLookupKey: "phone_lookup_123",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "user_123",
+        threadId: "chat_123",
+      },
     });
     expect(wake.message).not.toHaveProperty("linqEvent");
     expect(wake.message).not.toHaveProperty("linqMessageId");
     expect(wake.message.linqMessage).not.toBe(linqMessage);
     expect(wake.message.linqMessage.parts).not.toBe(linqMessage.parts);
+    expect(wake.message.routeAuthority).not.toBe(routeAuthority);
   });
 
   it("preserves Linq email contact lookup metadata alongside the legacy phone lookup field", () => {

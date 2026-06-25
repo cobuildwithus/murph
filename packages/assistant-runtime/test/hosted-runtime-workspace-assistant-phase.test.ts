@@ -4991,6 +4991,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: "+15550000002",
       replyToMessageId: "linq-message-1",
+      routeAuthority: null,
       target: "linq-thread-1",
     };
 
@@ -6515,6 +6516,7 @@ function createPhaseInput(input: {
     directRecipientPhoneNumber: string | null;
     fromPhoneNumber: string | null;
     replyToMessageId: string | null;
+    routeAuthority: null;
     target: string | null;
   };
   logRequests?: HostedRuntimeLogRequest[];
