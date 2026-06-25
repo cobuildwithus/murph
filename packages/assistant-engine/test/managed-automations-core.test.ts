@@ -28,6 +28,63 @@ const defaultRoute = {
   threadId: null,
 }
 
+const MANAGED_CRON_WINDOWS = {
+  digest: {
+    daysOfWeek: [1, 2],
+    startLocalTime: '08:30',
+    endLocalTime: '12:30',
+    slotMinutes: 30,
+  },
+  insight: {
+    daysOfWeek: [0, 1, 2],
+    startLocalTime: '10:00',
+    endLocalTime: '17:00',
+    slotMinutes: 30,
+  },
+  researchScout: {
+    daysOfWeek: [3, 4],
+    startLocalTime: '14:00',
+    endLocalTime: '20:00',
+    slotMinutes: 30,
+  },
+  productUpdates: {
+    daysOfWeek: [4, 5],
+    startLocalTime: '10:00',
+    endLocalTime: '17:00',
+    slotMinutes: 30,
+  },
+} as const
+
+function expectManagedCronInWindow(
+  schedule: NonNullable<Awaited<ReturnType<typeof showAutomation>>>['schedule'] | undefined,
+  window: (typeof MANAGED_CRON_WINDOWS)[keyof typeof MANAGED_CRON_WINDOWS],
+): void {
+  expect(schedule?.kind).toBe('cron')
+  if (!schedule || schedule.kind !== 'cron') {
+    throw new Error('Expected a managed automation cron schedule.')
+  }
+
+  const match = /^(?<minute>\d+) (?<hour>\d+) \* \* (?<dayOfWeek>\d+)$/u.exec(
+    schedule.expression,
+  )
+  expect(match?.groups).toBeDefined()
+  const minute = Number.parseInt(match?.groups?.minute ?? '', 10)
+  const hour = Number.parseInt(match?.groups?.hour ?? '', 10)
+  const dayOfWeek = Number.parseInt(match?.groups?.dayOfWeek ?? '', 10)
+  const minuteOfDay = hour * 60 + minute
+
+  expect(window.daysOfWeek).toContain(dayOfWeek)
+  expect(minuteOfDay).toBeGreaterThanOrEqual(localTimeMinutes(window.startLocalTime))
+  expect(minuteOfDay).toBeLessThan(localTimeMinutes(window.endLocalTime))
+  expect(minute % window.slotMinutes).toBe(0)
+}
+
+function localTimeMinutes(value: string): number {
+  const [hourText, minuteText] = value.split(':')
+  return Number.parseInt(hourText ?? '', 10) * 60 +
+    Number.parseInt(minuteText ?? '', 10)
+}
+
 const legacyOnboardingFollowupInstructions = [
   'This scheduled check helps continue Murph setup.',
   '',
@@ -87,18 +144,16 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord).toMatchObject({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '0 12 * * 0',
-      },
       slug: 'weekly-health-insight',
       status: 'active',
       title: 'Weekly health insight',
     })
+    expectManagedCronInWindow(insightRecord?.schedule, MANAGED_CRON_WINDOWS.insight)
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
-    expect(insightRecord?.instructions).toContain('Sunday at noon local time')
+    expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('assistant onboarding')
     expect(insightRecord?.instructions).not.toContain('14 days')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
@@ -154,17 +209,18 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord).toMatchObject({
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '30 19 * * 3',
-      },
       slug: 'weekly-health-research-scout',
       status: 'active',
       title: 'Weekly health research scout',
     })
+    expectManagedCronInWindow(
+      researchScoutRecord?.schedule,
+      MANAGED_CRON_WINDOWS.researchScout,
+    )
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain('Wednesday at 7:30 PM local time')
+    expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
@@ -184,14 +240,14 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord).toMatchObject({
       automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '30 11 * * 4',
-      },
       slug: 'weekly-product-updates',
       status: 'active',
       title: 'This week in Murph',
     })
+    expectManagedCronInWindow(
+      productUpdatesRecord?.schedule,
+      MANAGED_CRON_WINDOWS.productUpdates,
+    )
     expect(productUpdatesRecord?.tags).toContain('murph-managed:weekly-product-updates')
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
@@ -523,16 +579,14 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord).toMatchObject({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       route: existingRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '0 12 * * 0',
-      },
       slug: 'weekly-health-insight',
       status: 'active',
       summary: 'A weekly scout for one non-obvious personal health/body finding.',
       title: 'Weekly health insight',
     })
-    expect(insightRecord?.instructions).toContain('Sunday at noon local time')
+    expectManagedCronInWindow(insightRecord?.schedule, MANAGED_CRON_WINDOWS.insight)
+    expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('6:00 PM local time')
   })
 

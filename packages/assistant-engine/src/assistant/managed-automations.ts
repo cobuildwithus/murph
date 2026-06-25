@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import {
+  loadVault,
   patchAutomation,
   showAutomation,
   upsertAutomation,
@@ -69,6 +71,58 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
 
+interface MurphManagedWeeklyScheduleSpread {
+  daysOfWeek: readonly number[]
+  endLocalTime: string
+  slotMinutes: number
+  startLocalTime: string
+  version: number
+}
+
+interface MurphManagedWeeklyScheduleSlot {
+  dayOfWeek: number
+  hour: number
+  minute: number
+}
+
+// Built-in recurring managed automations should not all land at one global
+// local time. Keep the public/persisted model simple: these private windows
+// deterministically resolve to ordinary cron schedules before persistence.
+// Bump a window's version only when intentionally re-spreading that automation.
+const MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS: Partial<Record<
+  string,
+  MurphManagedWeeklyScheduleSpread
+>> = {
+  [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID]: {
+    daysOfWeek: [1, 2],
+    startLocalTime: '08:30',
+    endLocalTime: '12:30',
+    slotMinutes: 30,
+    version: 1,
+  },
+  [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID]: {
+    daysOfWeek: [0, 1, 2],
+    startLocalTime: '10:00',
+    endLocalTime: '17:00',
+    slotMinutes: 30,
+    version: 1,
+  },
+  [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID]: {
+    daysOfWeek: [3, 4],
+    startLocalTime: '14:00',
+    endLocalTime: '20:00',
+    slotMinutes: 30,
+    version: 1,
+  },
+  [MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID]: {
+    daysOfWeek: [4, 5],
+    startLocalTime: '10:00',
+    endLocalTime: '17:00',
+    slotMinutes: 30,
+    version: 1,
+  },
+}
+
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
 // seed long after its scheduled moment. Past this window the seed is
@@ -115,7 +169,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     ],
     instructions: [
-      'Each Monday morning, produce one concise weekly health digest for the configured automation route.',
+      'On this scheduled weekly run, produce one concise weekly health digest for the configured automation route.',
       '',
       'Focus on:',
       '- sleep',
@@ -143,7 +197,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-health-insight',
     ],
     instructions: [
-      'Each Sunday at noon local time, find one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas.',
+      'On this scheduled weekly run, find one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas.',
       '',
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
@@ -207,7 +261,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-health-research-scout',
     ],
     instructions: [
-      'Each Wednesday at 7:30 PM local time, run a quiet weekly health research scout for the configured automation route.',
+      'On this scheduled weekly run, run a quiet weekly health research scout for the configured automation route.',
       '',
       'Outcome:',
       "Surface 0-1 genuinely useful research-backed note that changes how the user might think about a current health experiment, habit, symptom, lab, device trend, or clinician question.",
@@ -275,7 +329,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-product-updates',
     ],
     instructions: [
-      'Each Thursday at 11:30 AM local time, compose one concise personalized in-chat update about what is new in Murph.',
+      'On this scheduled weekly run, compose one concise personalized in-chat update about what is new in Murph.',
       '',
       `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=70&improvementLimit=10.`,
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
@@ -301,12 +355,16 @@ export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
   const now = input.now ?? new Date()
-  const seeds =
+  const rawSeeds =
     input.seeds ??
     [
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
+  const seeds = await resolveMurphManagedAutomationSchedules({
+    seeds: rawSeeds,
+    vaultRoot: input.vaultRoot,
+  })
   let createRoute: AutomationRoute | null | undefined
   const resolveCreateRoute = async (): Promise<AutomationRoute | null> => {
     if (createRoute !== undefined) {
@@ -442,6 +500,145 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+async function resolveMurphManagedAutomationSchedules(input: {
+  seeds: readonly MurphManagedAutomationSeed[]
+  vaultRoot: string
+}): Promise<readonly MurphManagedAutomationSeed[]> {
+  if (!input.seeds.some((seed) => shouldSpreadMurphManagedAutomationSchedule(seed))) {
+    return input.seeds
+  }
+
+  const stableKey = await resolveMurphManagedScheduleStableKey(input.vaultRoot)
+  return input.seeds.map((seed) =>
+    resolveMurphManagedAutomationSchedule({
+      seed,
+      stableKey,
+    })
+  )
+}
+
+function shouldSpreadMurphManagedAutomationSchedule(
+  seed: MurphManagedAutomationSeed,
+): boolean {
+  return seed.schedule.kind === 'cron' &&
+    MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
+}
+
+function resolveMurphManagedAutomationSchedule(input: {
+  seed: MurphManagedAutomationSeed
+  stableKey: string
+}): MurphManagedAutomationSeed {
+  const spread = MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[input.seed.automationId]
+  if (!spread || input.seed.schedule.kind !== 'cron') {
+    return input.seed
+  }
+
+  return {
+    ...input.seed,
+    schedule: resolveMurphManagedWeeklySpreadSchedule({
+      automationId: input.seed.automationId,
+      spread,
+      stableKey: input.stableKey,
+    }),
+  }
+}
+
+async function resolveMurphManagedScheduleStableKey(vaultRoot: string): Promise<string> {
+  try {
+    const vault = await loadVault({ vaultRoot })
+    const vaultId = typeof vault.metadata.vaultId === 'string'
+      ? vault.metadata.vaultId.trim()
+      : ''
+    if (vaultId.length > 0) {
+      return vaultId
+    }
+  } catch {
+    // Best-effort: a vault metadata read issue must not block managed seeding.
+  }
+
+  return vaultRoot
+}
+
+function resolveMurphManagedWeeklySpreadSchedule(input: {
+  automationId: string
+  spread: MurphManagedWeeklyScheduleSpread
+  stableKey: string
+}): MurphManagedAutomationSchedule {
+  const slots = enumerateMurphManagedWeeklySpreadSlots(input.spread)
+  const slotIndex = stableHashToIndex(
+    [
+      'murph-managed-weekly-schedule',
+      String(input.spread.version),
+      input.stableKey,
+      input.automationId,
+    ].join(':'),
+    slots.length,
+  )
+  const slot = slots[slotIndex]
+  if (!slot) {
+    throw new Error('Managed automation schedule spread resolved an invalid slot.')
+  }
+
+  return {
+    kind: 'cron',
+    expression: `${slot.minute} ${slot.hour} * * ${slot.dayOfWeek}`,
+  }
+}
+
+function enumerateMurphManagedWeeklySpreadSlots(
+  spread: MurphManagedWeeklyScheduleSpread,
+): MurphManagedWeeklyScheduleSlot[] {
+  const startMinuteOfDay = parseMurphManagedLocalTime(spread.startLocalTime)
+  const endMinuteOfDay = parseMurphManagedLocalTime(spread.endLocalTime)
+  if (endMinuteOfDay <= startMinuteOfDay) {
+    throw new Error('Managed automation schedule spread end time must be after start time.')
+  }
+  if (!Number.isSafeInteger(spread.slotMinutes) || spread.slotMinutes <= 0) {
+    throw new Error('Managed automation schedule spread slot minutes must be positive.')
+  }
+
+  const slots: MurphManagedWeeklyScheduleSlot[] = []
+  for (const dayOfWeek of spread.daysOfWeek) {
+    if (!Number.isSafeInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+      throw new Error('Managed automation schedule spread day of week must be between 0 and 6.')
+    }
+    for (
+      let minuteOfDay = startMinuteOfDay;
+      minuteOfDay < endMinuteOfDay;
+      minuteOfDay += spread.slotMinutes
+    ) {
+      slots.push({
+        dayOfWeek,
+        hour: Math.floor(minuteOfDay / 60),
+        minute: minuteOfDay % 60,
+      })
+    }
+  }
+
+  if (slots.length === 0) {
+    throw new Error('Managed automation schedule spread produced no slots.')
+  }
+  return slots
+}
+
+function parseMurphManagedLocalTime(value: string): number {
+  const match = /^(?<hour>[01]\d|2[0-3]):(?<minute>[0-5]\d)$/u.exec(value)
+  if (!match?.groups) {
+    throw new Error(`Managed automation schedule spread time "${value}" must use HH:MM.`)
+  }
+
+  return Number.parseInt(match.groups.hour ?? '', 10) * 60 +
+    Number.parseInt(match.groups.minute ?? '', 10)
+}
+
+function stableHashToIndex(material: string, length: number): number {
+  if (!Number.isSafeInteger(length) || length <= 0) {
+    throw new Error('Managed automation schedule spread requires at least one slot.')
+  }
+
+  return createHash('sha256').update(material).digest().readUInt32BE(0) % length
 }
 
 async function reconcileExistingOnboardingFollowupAutomation(input: {
