@@ -289,7 +289,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Replace `{ids}` in `links.digestCardTemplate` with that joined value.',
       '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
       '',
-      'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
+      'Write a brief, warm note with the selected updates, why the top choices fit this user.',
       'If the user has not received one of these announcement automations before, let them know what the announcement is for at a high level before diving in (eg cool new features, helps us make Murph better for you every week if you give us good feedback).',
       'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
