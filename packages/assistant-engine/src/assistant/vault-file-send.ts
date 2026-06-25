@@ -171,7 +171,7 @@ export function buildAssistantVaultFileSendApprovalRequest(
 export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
   channel?: string | null
   file: AssistantVaultFileResponseMedia
-  targetFingerprint: string
+  targetFingerprint?: string | null
 }): HostedActionApprovalRequest {
   const targetFingerprint = normalizeNullableString(input.targetFingerprint)
   if (!targetFingerprint) {
@@ -225,7 +225,7 @@ function buildAssistantVaultFileSendTargetFingerprint(input: {
   replyToMessageId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
-}): string {
+}): string | null {
   const persistedTarget = buildAssistantOutboxPersistedTarget({
     actorId: input.actorId ?? null,
     bindingDelivery: input.bindingDelivery ?? undefined,
@@ -237,6 +237,15 @@ function buildAssistantVaultFileSendTargetFingerprint(input: {
     threadId: input.threadId ?? null,
     threadIsDirect: input.threadIsDirect ?? null,
   })
+  const bindingDeliveryTarget = persistedTarget.bindingDelivery
+    ? normalizeNullableString(persistedTarget.bindingDelivery.target)
+    : null
+  if (
+    !bindingDeliveryTarget
+    && !normalizeNullableString(persistedTarget.explicitTarget)
+  ) {
+    return null
+  }
   return hashAssistantOutboxTargetFingerprint(
     buildAssistantOutboxRawTargetIdentity(persistedTarget),
   )

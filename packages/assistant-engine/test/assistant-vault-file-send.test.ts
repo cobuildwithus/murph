@@ -131,6 +131,30 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('refuses to create a vault-file approval without a concrete destination', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-targetless-',
+    )
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'content')
+
+    const approvalPort = {
+      request: vi.fn(),
+    }
+
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: approvalPort,
+      channel: 'linq',
+      identityId: 'member_123',
+      ref: 'documents/report.pdf',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+    })
+    expect(approvalPort.request).not.toHaveBeenCalled()
+  })
+
   it('moves only an approved legacy awaiting intent into the normal pending outbox lifecycle', async () => {
     const now = new Date('2026-06-24T12:00:00.000Z')
     const intent = createVaultFileIntent()

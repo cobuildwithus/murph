@@ -25,6 +25,8 @@ export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =
   "/api/internal/hosted-runtime/action-approvals/request";
+export const HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH =
+  "/api/internal/hosted-runtime/action-approvals/consume";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
 export const HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH =

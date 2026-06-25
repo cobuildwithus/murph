@@ -378,6 +378,9 @@ export interface HostedRuntimeLatencyTracePort {
 }
 
 export interface HostedRuntimeActionApprovalPort {
+  consume(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalResult>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;

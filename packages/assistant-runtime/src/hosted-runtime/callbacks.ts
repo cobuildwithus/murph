@@ -1836,7 +1836,7 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(
+    approval = await input.actionApprovalPort.consume(
       buildAssistantVaultFileSendApprovalRequest(intent),
     );
   } catch {
