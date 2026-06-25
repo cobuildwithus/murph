@@ -109,6 +109,21 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('requires pending vault-file approvals to include the returned handoff link', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Vault file sends:')
+    expect(prompt).toContain(
+      'the file will not send until the user opens that link and approves',
+    )
+    expect(prompt).toContain(
+      'Include the raw approval URL in the normal reply',
+    )
+    expect(prompt).toContain(
+      'Do not omit it, summarize around it without the URL, or rely on a separate automated message.',
+    )
+  })
+
   it('routes accepted habit plans through canonical health surfaces', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
