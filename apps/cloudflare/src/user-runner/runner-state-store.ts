@@ -63,6 +63,13 @@ export type RunnerProviderEgressTokenValidationRejectReason =
   | "provider_egress_token_mismatch"
   | "write_fence_mismatch";
 
+export type RunnerProviderEgressCredentialValidationRejectReason =
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "provider_egress_not_allowed"
+  | "runner_container_mismatch"
+  | "write_fence_mismatch";
+
 export type RunnerActiveWriteFenceValidationResult =
   | {
       owns: false;
@@ -82,6 +89,21 @@ export type RunnerProviderEgressTokenValidationResult =
   | {
       owns: false;
       reason: RunnerProviderEgressTokenValidationRejectReason;
+      record?: RunnerStateRecord;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
+      record: RunnerStateRecord;
+      userId: string;
+      workspaceVersion: string | null;
+    };
+
+export type RunnerProviderEgressCredentialValidationResult =
+  | {
+      owns: false;
+      reason: RunnerProviderEgressCredentialValidationRejectReason;
       record?: RunnerStateRecord;
     }
   | {
@@ -530,6 +552,69 @@ export class RunnerStateStore {
     };
   }
 
+  async validateProviderEgressCredential(input: {
+    providerKind: string;
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<RunnerProviderEgressCredentialValidationResult> {
+    const providerKind = normalizeProviderKindOrNull(input.providerKind);
+    if (!providerKind || providerKind !== "openai") {
+      return {
+        owns: false,
+        reason: "provider_egress_not_allowed",
+      };
+    }
+
+    const runnerContainerName = normalizeRunnerContainerNameOrNull(
+      input.runnerContainerName,
+    );
+    if (!runnerContainerName) {
+      return {
+        owns: false,
+        reason: "runner_container_mismatch",
+      };
+    }
+
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return {
+        owns: false,
+        reason: "missing_runner_state",
+      };
+    }
+    const token = this.readWriteFenceTokenSync(meta);
+    if (!token) {
+      return {
+        owns: false,
+        reason: "missing_write_fence",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (token.kind !== "runtime" || token.userId !== input.userId) {
+      return {
+        owns: false,
+        reason: "write_fence_mismatch",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (token.runnerContainerName !== runnerContainerName) {
+      return {
+        owns: false,
+        reason: "runner_container_mismatch",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    return {
+      attemptId: token.attemptId,
+      leaseGeneration: token.leaseGeneration,
+      owns: true,
+      record: this.readStateFromMetaSync(meta),
+      userId: token.userId,
+      workspaceVersion: token.workspaceVersion,
+    };
+  }
+
   private readStateSync(): RunnerStateRecord {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
@@ -736,6 +821,12 @@ function normalizeRunnerContainerNameOrNull(value: unknown): string | null {
 
 function normalizeProviderEgressTokenOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeProviderKindOrNull(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value.trim())
+    ? value.trim()
+    : null;
 }
 
 function createRuntimeWriteAttemptId(): string {

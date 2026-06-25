@@ -86,12 +86,17 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
         HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "fixture-provider-egress-signing-secret",
       },
     });
 
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+    expect(container.envVars).not.toHaveProperty(
+      "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+    );
   });
 
   it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {

@@ -38,6 +38,12 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is preparing for a fitness race or competition and needs feasibility, phase selection, competition-specific training structure, pacing, tapering, event rehearsal, execution, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events. Do not use for ordinary exercise without a target event or as the primary skill for a new pain or injury complaint.',
   },
   {
+    slug: 'strength-training',
+    name: 'strength-training',
+    triggerHint:
+      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
