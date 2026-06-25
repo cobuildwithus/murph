@@ -155,16 +155,33 @@ function firstWhoopLocalDayKey(
   const offsetMinutes = whoopTimezoneOffsetMinutes(offsetSource);
 
   if (offsetMinutes !== undefined) {
-    for (const candidate of candidates) {
-      const dayKey = offsetDayKey(candidate, offsetMinutes);
+    const dayKey = firstWhoopOffsetDayKey(offsetMinutes, ...candidates);
 
-      if (dayKey) {
-        return dayKey;
-      }
+    if (dayKey) {
+      return dayKey;
     }
   }
 
   return firstDayKey(...candidates);
+}
+
+function firstWhoopOffsetDayKey(
+  offsetMinutes: number | undefined,
+  ...candidates: Array<string | undefined>
+): string | undefined {
+  if (offsetMinutes === undefined) {
+    return undefined;
+  }
+
+  for (const candidate of candidates) {
+    const dayKey = offsetDayKey(candidate, offsetMinutes);
+
+    if (dayKey) {
+      return dayKey;
+    }
+  }
+
+  return undefined;
 }
 
 function utcStartOfDay(dayKey: string | undefined): string | undefined {
@@ -659,7 +676,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(workout.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(workout.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
-    const dayKey = firstWhoopLocalDayKey(workout, startAt, recordedAt, endAt);
+    const dayKey = firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(workout), startAt, recordedAt, endAt);
     const durationMinutes = minutesBetween(startAt, endAt);
     const sportName = typeof workout.sport_name === "string" && workout.sport_name.trim()
       ? workout.sport_name.trim()

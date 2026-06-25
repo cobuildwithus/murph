@@ -517,6 +517,16 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
                 strain: 6.8,
               },
             },
+            {
+              id: "workout-no-offset-local-24",
+              start: "2026-06-25T03:45:00.000Z",
+              end: "2026-06-25T04:15:00.000Z",
+              updated_at: "2026-06-25T04:20:00.000Z",
+              sport_name: "Run",
+              score: {
+                strain: 5.9,
+              },
+            },
           ],
         },
       },
@@ -525,7 +535,12 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
       },
     );
 
-    const workoutEvent = result.events.find((event) => event.kind === "activity_session");
+    const workoutEvent = result.events.find(
+      (event) => event.kind === "activity_session" && event.externalRef?.resourceId === "workout-local-24",
+    );
+    const noOffsetWorkoutEvent = result.events.find(
+      (event) => event.kind === "activity_session" && event.externalRef?.resourceId === "workout-no-offset-local-24",
+    );
     const dayStrainEvent = result.events.find(
       (event) => event.kind === "observation" && event.metric === "day-strain",
     );
@@ -534,6 +549,7 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     );
 
     assert.equal(workoutEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetWorkoutEvent?.dayKey, "2026-06-24");
     assert.equal(dayStrainEvent?.dayKey, "2026-06-24");
     assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
   } finally {
