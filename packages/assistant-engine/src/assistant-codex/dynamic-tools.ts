@@ -287,7 +287,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
           },
         },
         description:
-          'Invite target for create_invite. Optional context for start_checkout when the user wants to start Family and prepare an invite for the same person in one reply.',
+          'Invite target for create_invite. Optional context for start_checkout when the user mentions the person they want to invite; no invite token is created until Family billing is active.',
       },
     },
     required: ['action'],

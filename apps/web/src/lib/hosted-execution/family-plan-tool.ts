@@ -151,28 +151,14 @@ async function startHostedRuntimeFamilyPlanCheckout(
     };
   }
 
-  const preparation = await prisma.$transaction(async (tx) => {
-    const group = await ensureHostedAccountGroupForOwnerTx({
+  const group = await prisma.$transaction(async (tx) => {
+    return await ensureHostedAccountGroupForOwnerTx({
       ownerMemberId: memberId,
       tx,
     });
-    const preparedInvite = inviteRequest
-      ? await issueHostedFamilyInviteFromOwnerTx({
-          ownerMemberId: memberId,
-          targetLabel: inviteRequest.targetLabel ?? null,
-          targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
-          targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
-          tx,
-        })
-      : null;
-
-    return {
-      group,
-      preparedInvite,
-    };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const checkout = await createHostedFamilyBillingCheckout({
-    groupId: preparation.group.id,
+    groupId: group.id,
     ownerMemberId: memberId,
     prisma,
   });
@@ -184,16 +170,11 @@ async function startHostedRuntimeFamilyPlanCheckout(
   return {
     alreadyActive: checkout.alreadyActive,
     billingActive: snapshot?.billingActive ?? checkout.alreadyActive,
-    billingStatus: snapshot?.billingStatus ?? preparation.group.billingStatus,
+    billingStatus: snapshot?.billingStatus ?? group.billingStatus,
     checkoutUrl: checkout.url,
     owner: true,
-    preparedInvite: preparation.preparedInvite
-      ? projectPreparedHostedRuntimeFamilyPlanToolInvite(
-          preparation.preparedInvite,
-          snapshot,
-        )
-      : null,
-    preparedInviteReplyText: preparation.preparedInvite?.replyText ?? null,
+    preparedInvite: null,
+    preparedInviteReplyText: null,
     seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
     unavailableReason: null,
   };

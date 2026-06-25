@@ -124,31 +124,20 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
   });
 
-  it("prepares an invite while starting checkout when the owner supplied an invite target", async () => {
+  it("does not prepare an invite while starting checkout before billing is active", async () => {
     mocks.readHostedFamilyOwnerSnapshotForMember
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         billingActive: false,
         billingStatus: "not_started",
-        invites: [
-          {
-            acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
-            expiresAt: new Date("2026-06-25T00:00:00.000Z"),
-            id: "hbagi_adam",
-            status: "pending",
-            targetLabel: "Adam",
-            targetPhoneHint: null,
-            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-          },
-        ],
         seats: {
           active: 1,
-          billed: 2,
-          invited: 1,
+          billed: 0,
+          invited: 0,
           max: 6,
           min: 2,
           remaining: 0,
-          used: 2,
+          used: 1,
         },
       });
 
@@ -170,37 +159,27 @@ describe("hosted runtime Family plan tool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
-        preparedInvite: {
-          acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
+        preparedInvite: null,
+        preparedInviteReplyText: null,
         seats: {
           active: 1,
-          billed: 2,
-          invited: 1,
+          billed: 0,
+          invited: 0,
           max: 6,
           min: 2,
           remaining: 0,
-          used: 2,
+          used: 1,
         },
         unavailableReason: null,
       },
     });
 
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
+    expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+      groupId: "hbag_family",
       ownerMemberId: "member_owner",
-      targetLabel: "Adam",
-      targetPhoneNumber: null,
-      targetTelegramUsername: "adam_username",
-      tx: {
-        label: "tx",
-      },
+      prisma: expect.any(Object),
     });
+    expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
   });
 
   it("does not create checkout when the owner already has active Family billing", async () => {
@@ -234,6 +213,98 @@ describe("hosted runtime Family plan tool", () => {
 
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  });
+
+  it("creates an invite from start_checkout when Family billing is already active", async () => {
+    mocks.readHostedFamilyOwnerSnapshotForMember
+      .mockResolvedValueOnce({
+        billingActive: true,
+        billingStatus: "active",
+        seats: {
+          active: 2,
+          billed: 4,
+          invited: 0,
+          max: 6,
+          min: 2,
+          remaining: 2,
+          used: 2,
+        },
+      })
+      .mockResolvedValueOnce({
+        billingActive: true,
+        billingStatus: "active",
+        invites: [
+          {
+            acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
+            expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+            id: "hbagi_adam",
+            status: "pending",
+            targetLabel: "Adam",
+            targetPhoneHint: null,
+            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
+          },
+        ],
+        seats: {
+          active: 2,
+          billed: 4,
+          invited: 1,
+          max: 6,
+          min: 2,
+          remaining: 1,
+          used: 3,
+        },
+      });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "start_checkout",
+        invite: {
+          targetLabel: "Adam",
+          targetPhoneNumber: null,
+          targetTelegramUsername: "adam_username",
+        },
+      },
+    })).resolves.toEqual({
+      action: "start_checkout",
+      result: {
+        alreadyActive: true,
+        billingActive: true,
+        billingStatus: "active",
+        checkoutUrl: null,
+        owner: true,
+        preparedInvite: {
+          acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
+          expiresAt: "2026-06-25T00:00:00.000Z",
+          status: "pending",
+          targetLabel: "Adam",
+          targetPhoneHint: null,
+          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
+        },
+        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
+        seats: {
+          active: 2,
+          billed: 4,
+          invited: 1,
+          max: 6,
+          min: 2,
+          remaining: 1,
+          used: 3,
+        },
+        unavailableReason: null,
+      },
+    });
+
+    expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
+      ownerMemberId: "member_owner",
+      targetLabel: "Adam",
+      targetPhoneNumber: null,
+      targetTelegramUsername: "adam_username",
+      tx: {
+        label: "tx",
+      },
+    });
   });
 
   it("does not create checkout for a member already sponsored by another Family plan", async () => {

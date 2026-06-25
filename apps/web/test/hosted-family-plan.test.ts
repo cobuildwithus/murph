@@ -19,6 +19,7 @@ const identityMocks = vi.hoisted(() => ({
   ensureHostedMemberForPhoneTx: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({
+  requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeApi: vi.fn(),
 }));
 
@@ -40,6 +41,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   ensureHostedMemberForPhoneTx: identityMocks.ensureHostedMemberForPhoneTx,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApi: runtimeMocks.requireHostedStripeApi,
 }));
 
@@ -57,6 +59,7 @@ import {
   buildHostedFamilyInviteReplyText,
   buildHostedFamilyTelegramInviteUrl,
   createHostedAccountGroupForOwnerTx,
+  createHostedFamilyBillingCheckout,
   hasHostedAccountGroupMembershipAccess,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
@@ -118,11 +121,14 @@ describe("hosted Family plan", () => {
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
   const previousLegacyHostedFamilyStripePriceId =
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
+  const previousHostedOnboardingPublicBaseUrl =
+    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://local.withmurph.ai:3443";
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY = "price_family";
     delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
     clearHostedOnboardingEnvCache();
@@ -147,6 +153,9 @@ describe("hosted Family plan", () => {
         }),
       },
     });
+    runtimeMocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue(
+      "https://local.withmurph.ai:3443",
+    );
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mockResolvedValue(undefined);
     identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
       billingStatus: HostedBillingStatus.not_started,
@@ -168,6 +177,10 @@ describe("hosted Family plan", () => {
     restoreEnvValue(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       previousHostedFamilyStripePriceId,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+      previousHostedOnboardingPublicBaseUrl,
     );
     clearHostedOnboardingEnvCache();
   });
@@ -491,6 +504,26 @@ describe("hosted Family plan", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
     });
+  });
+
+  it("does not issue invites before paid billed seats are confirmed", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: null,
+      pendingInviteCount: 0,
+    });
+
+    await expect(issueHostedFamilyInviteTx({
+      groupId: "hbag_family",
+      invitedByMemberId: "member_owner",
+      targetPhoneNumber: "+48 600 000 000",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+    });
+
+    expect(tx.hostedAccountGroupInvite.findFirst).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.create).not.toHaveBeenCalled();
   });
 
   it("accepts phone-bound invites only from the invited phone number", async () => {
@@ -1159,6 +1192,53 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("creates a fresh Stripe Checkout Session for each billing start", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn().mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/cs_test_familyRetry123",
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://local.withmurph.ai:3443/checkout/family/cs_test_familyRetry123",
+    });
+
+    expect(checkoutCreate).toHaveBeenCalledTimes(1);
+    expect(checkoutCreate.mock.calls[0]).toHaveLength(1);
+    expect(checkoutCreate.mock.calls[0]?.[0]).toMatchObject({
+      line_items: [{
+        price: "price_family",
+        quantity: 2,
+      }],
+      mode: "subscription",
+    });
+  });
+
   it("preserves subscription-owned billing fields when late checkout binds ids", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
@@ -1375,7 +1455,7 @@ function createTxMock(input: {
     status: "active",
   };
   const billingRef = {
-    billedSeatCount: input.billedSeatCount ?? 4,
+    billedSeatCount: input.billedSeatCount === undefined ? 4 : input.billedSeatCount,
     currentBillingPhase: "paid",
     currentBillingPlanCode: "launch_family_monthly",
     currentPeriodEnd: new Date("2026-07-18T12:00:00.000Z"),

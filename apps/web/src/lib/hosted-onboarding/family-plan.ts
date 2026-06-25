@@ -407,6 +407,9 @@ export async function readHostedFamilyAccessForMember(input: {
       tx: prisma,
     }),
   ]);
+  if (billedSeatCount === null) {
+    return null;
+  }
   if (activeMembershipCount > billedSeatCount) {
     return null;
   }
@@ -445,7 +448,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     return null;
   }
 
-  const [memberships, invites, acceptedInvites, billedSeatCount] = await Promise.all([
+  const [memberships, invites, acceptedInvites, paidSeatCount] = await Promise.all([
     prisma.hostedAccountGroupMembership.findMany({
       orderBy: {
         createdAt: "asc",
@@ -559,6 +562,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
   const active = members.length;
   const invited = inviteRows.length;
   const used = active + invited;
+  const billedSeatCount = paidSeatCount ?? 0;
 
   return {
     billingActive: hasHostedAccountGroupAccess({
@@ -647,7 +651,8 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
         tx: prisma,
       }),
     ]);
-    seatAvailable = activeMemberships + pendingInvites <= billedSeatCount;
+    seatAvailable = billedSeatCount !== null &&
+      activeMemberships + pendingInvites <= billedSeatCount;
   }
 
   const groupActive = hasHostedAccountGroupAccess({
@@ -1136,13 +1141,6 @@ export async function createHostedFamilyBillingCheckout(input: {
       metadata,
     },
     success_url: `${publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-  }, {
-    idempotencyKey: buildHostedFamilyBillingCheckoutIdempotencyKey({
-      groupId: checkoutInput.group.id,
-      priceId,
-      seatCount: checkoutInput.seatCount,
-      stripeCustomerId: checkoutInput.stripeCustomerId,
-    }),
   });
 
   if (!checkoutSession.url) {
@@ -1224,7 +1222,7 @@ export async function updateHostedFamilySeatCount(input: {
         message: "Family seats cannot be reduced below active members and pending invites.",
       });
     }
-    if (!billingRef?.stripeSubscriptionItemId) {
+    if (!billingRef?.stripeSubscriptionItemId || billingRef.billedSeatCount === null) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_SUBSCRIPTION_ITEM_REQUIRED",
         httpStatus: 409,
@@ -1233,7 +1231,7 @@ export async function updateHostedFamilySeatCount(input: {
     }
 
     return {
-      currentSeatCount: billingRef.billedSeatCount ?? HOSTED_FAMILY_MIN_SEATS,
+      currentSeatCount: billingRef.billedSeatCount,
       group,
       stripeSubscriptionItemId: billingRef.stripeSubscriptionItemId,
     };
@@ -1545,6 +1543,10 @@ export async function issueHostedFamilyInviteTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, input.invitedByMemberId);
+  const billedSeatCount = await readConfirmedHostedFamilyBilledSeatCountTx({
+    group,
+    tx: input.tx,
+  });
 
   const targetPhoneNumber = normalizePhoneNumber(input.targetPhoneNumber);
   const targetPhoneLookupKey = createHostedPhoneLookupKey(targetPhoneNumber);
@@ -1592,6 +1594,7 @@ export async function issueHostedFamilyInviteTx(input: {
   }
 
   await assertHostedFamilySeatAvailableTx({
+    billedSeatCount,
     group,
     now,
     tx: input.tx,
@@ -2300,7 +2303,7 @@ export function buildHostedFamilyInviteAcceptedReplyText(): string {
 async function readHostedFamilyBilledSeatCountTx(input: {
   groupId: string;
   tx: HostedOnboardingReadClient;
-}): Promise<number> {
+}): Promise<number | null> {
   const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: {
       billedSeatCount: true,
@@ -2310,14 +2313,48 @@ async function readHostedFamilyBilledSeatCountTx(input: {
     },
   });
 
-  return billingRef?.billedSeatCount ?? HOSTED_FAMILY_MIN_SEATS;
+  return billingRef?.billedSeatCount ?? null;
+}
+
+async function readConfirmedHostedFamilyBilledSeatCountTx(input: {
+  group: Pick<HostedAccountGroupAccessSnapshot, "billingStatus" | "id" | "suspendedAt">;
+  tx: HostedOnboardingReadClient;
+}): Promise<number> {
+  if (!hasHostedAccountGroupAccess(input.group)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats. Add a Family seat before inviting another person.",
+    });
+  }
+
+  const billedSeatCount = await readHostedFamilyBilledSeatCountTx({
+    groupId: input.group.id,
+    tx: input.tx,
+  });
+  if (billedSeatCount === null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats. Add a Family seat before inviting another person.",
+    });
+  }
+
+  return billedSeatCount;
 }
 
 async function assertHostedFamilySeatAvailableTx(input: {
+  billedSeatCount?: number;
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const billedSeatCountPromise = input.billedSeatCount === undefined
+    ? readHostedFamilyBilledSeatCountTx({
+        groupId: input.group.id,
+        tx: input.tx,
+      })
+    : Promise.resolve(input.billedSeatCount);
   const [activeMemberships, pendingInvites, billedSeatCount] = await Promise.all([
     input.tx.hostedAccountGroupMembership.count({
       where: {
@@ -2334,13 +2371,10 @@ async function assertHostedFamilySeatAvailableTx(input: {
         status: "pending",
       },
     }),
-    readHostedFamilyBilledSeatCountTx({
-      groupId: input.group.id,
-      tx: input.tx,
-    }),
+    billedSeatCountPromise,
   ]);
 
-  if (activeMemberships + pendingInvites >= billedSeatCount) {
+  if (billedSeatCount === null || activeMemberships + pendingInvites >= billedSeatCount) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
@@ -2393,7 +2427,10 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
     ]);
 
   const acceptedMemberSeatDelta = existingAcceptedMembership ? 0 : 1;
-  if (activeMemberships + pendingInvites + acceptedMemberSeatDelta > billedSeatCount) {
+  if (
+    billedSeatCount === null ||
+    activeMemberships + pendingInvites + acceptedMemberSeatDelta > billedSeatCount
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
@@ -2864,21 +2901,6 @@ function buildHostedFamilyStripeMetadata(
     kind: HOSTED_FAMILY_STRIPE_METADATA_KIND,
     ownerMemberId: group.ownerMemberId,
   };
-}
-
-function buildHostedFamilyBillingCheckoutIdempotencyKey(input: {
-  groupId: string;
-  priceId: string;
-  seatCount: number;
-  stripeCustomerId?: string | null;
-}): string {
-  return [
-    "hosted-family-billing-checkout",
-    input.groupId,
-    input.priceId,
-    `seats-${input.seatCount}`,
-    input.stripeCustomerId ?? "new-customer",
-  ].join(":");
 }
 
 function buildHostedFamilySeatQuantityIdempotencyKey(input: {
