@@ -89,6 +89,23 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
 export type HostedExecutionConversationMessageChannel =
   (typeof HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS)[number];
 
+export type HostedExecutionExternalThreadRouteChannel = Extract<
+  HostedExecutionConversationMessageChannel,
+  "email" | "linq" | "telegram"
+>;
+
+export interface HostedExecutionExternalThreadRouteAuthority {
+  accountLookupKey: string;
+  channel: HostedExecutionExternalThreadRouteChannel;
+  containerMemberId: string;
+  threadId: string;
+}
+
+export type HostedExecutionLinqExternalThreadRouteAuthority =
+  HostedExecutionExternalThreadRouteAuthority & {
+    channel: "linq";
+  };
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -267,6 +284,7 @@ export interface HostedExecutionLinqConversationMessage {
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
   service?: string | null;
+  threadIsDirect?: boolean | null;
 }
 
 export const HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS = [
@@ -278,8 +296,10 @@ export type HostedExecutionLinqConversationContactKind =
   (typeof HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS)[number];
 
 interface HostedExecutionLinqConversationMessagePayloadBase {
+  accountLookupKey?: string | null;
   channel: "linq";
   linqMessage: HostedExecutionLinqConversationMessage;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
 }
 
 export type HostedExecutionLinqConversationMessagePayload =
@@ -321,6 +341,14 @@ export function readHostedLinqConversationMessageContact(
   }
 
   throw new TypeError("Hosted Linq conversation message requires a contact lookup key.");
+}
+
+export function readHostedLinqConversationMessageAccountLookupKey(
+  payload: HostedExecutionLinqConversationMessagePayload,
+): string {
+  return typeof payload.accountLookupKey === "string" && payload.accountLookupKey.trim()
+    ? payload.accountLookupKey
+    : readHostedLinqConversationMessageContact(payload).lookupKey;
 }
 
 export interface HostedExecutionTelegramConversationMessagePayload {

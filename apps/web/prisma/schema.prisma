@@ -355,6 +355,8 @@ model HostedMember {
   computerHandoffs               HostedComputerHandoff[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
+  threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
+  ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -871,6 +873,34 @@ model HostedVaultShare {
 
   @@unique([grantorMemberId, projectionKind, destinationMemberId])
   @@map("hosted_vault_share")
+}
+
+model HostedThreadContainer {
+  memberId                   String              @id @map("member_id")
+  ownerMemberId              String              @map("owner_member_id")
+  monthlyUsageLimitUsdMicros BigInt              @default(4500000) @map("monthly_usage_limit_usd_micros")
+  createdAt                  DateTime            @default(now()) @map("created_at")
+  member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
+  owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  routes                     HostedThreadRoute[]
+
+  @@index([ownerMemberId])
+  @@map("hosted_thread_container")
+}
+
+model HostedThreadRoute {
+  channel                 String
+  threadLookupKey         String                @map("thread_lookup_key")
+  threadIdentityLookupKey String                @map("thread_identity_lookup_key")
+  containerMemberId       String                @map("container_member_id")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
+  container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([channel, threadIdentityLookupKey])
+  @@index([channel, threadLookupKey])
+  @@index([containerMemberId])
+  @@map("hosted_thread_route")
 }
 
 model HostedAiUsage {
