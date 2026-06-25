@@ -109,6 +109,22 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('routes accepted habit plans through canonical health surfaces', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('regimen with `kind=habit`')
+    expect(prompt).toContain(
+      'automation only for reminders, check-ins, or bounded support',
+    )
+    expect(prompt).toContain(
+      'baseline/current state, target/date, ladder',
+    )
+    expect(prompt).toContain(
+      'read the relevant active goal/regimen/automation record',
+    )
+    expect(prompt).toContain('instead of inventing it')
+  })
+
   it('guides explicit structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1117,7 +1133,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '072849c15b18c19b3ad6e5ac8b21461298a975dce08895e492e7053761cf03d9',
+      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1365,7 +1381,7 @@ describe('assistant experiment onboarding guidance', () => {
       'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
     )
     expect(prompt).toContain(
-      'use Murph\'s routine, automation, or experiment setup surfaces where available',
+      'use canonical vault surfaces before treating it as active',
     )
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',

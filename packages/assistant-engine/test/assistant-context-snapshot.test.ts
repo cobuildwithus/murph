@@ -109,6 +109,14 @@ describe('assistant context snapshot', () => {
       expect(prompt).not.toContain('Wearable coverage is present')
       expect(prompt).toContain('Blood test records are present.')
       expect(prompt).toContain('Saved health context includes 1 goal.')
+      expect(prompt).toContain('Active goals:')
+      expect(prompt).toContain('11 p.m. sleep schedule ramp')
+      expect(prompt).toContain('window 2026-06-24 to 2026-06-29')
+      expect(prompt).toContain('Bank coverage includes 1 regimen record.')
+      expect(prompt).toContain('Active habit regimens:')
+      expect(prompt).toContain('Sleep schedule ramp')
+      expect(prompt).toContain('Baseline 2:30 AM')
+      expect(prompt).toContain('read the relevant `vault-cli goal show` / `vault-cli regimen show` record')
       expect(prompt).toContain('Active experiment context for navigation only:')
       expect(prompt).toContain('Sleep consistency')
       await markAssistantContextSnapshotDirty({
@@ -264,15 +272,44 @@ async function writeTestSnapshotSources(vaultRoot: string): Promise<void> {
       'schemaVersion: murph.frontmatter.goal.v1',
       'docType: goal',
       'goalId: goal_01JNY0B2W4VG5C2A0G9S8M7R6Q',
-      'slug: sleep',
-      'title: Sleep',
+      'slug: eleven-pm-sleep-ramp',
+      'title: 11 p.m. sleep schedule ramp',
       'status: active',
-      'horizon: long_term',
+      'horizon: short_term',
       'priority: 4',
       'window:',
-      '  startAt: 2026-05-01',
+      '  startAt: 2026-06-24',
+      '  targetAt: 2026-06-29',
+      'domains:',
+      '  - sleep',
       '---',
-      '# Sleep',
+      '# 11 p.m. sleep schedule ramp',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+
+  await mkdir(path.join(vaultRoot, 'bank/regimens'), {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(vaultRoot, 'bank/regimens/sleep-schedule-ramp.md'),
+    [
+      '---',
+      'schemaVersion: murph.frontmatter.regimen.v1',
+      'docType: regimen',
+      'regimenId: reg_01JNY0B2W4VG5C2A0G9S8M7R6Q',
+      'slug: sleep-schedule-ramp',
+      'title: Sleep schedule ramp',
+      'kind: habit',
+      'status: active',
+      'startedOn: 2026-06-24',
+      'schedule: nightly wind-down plus morning light anchor',
+      'note: Baseline 2:30 AM; target lights-out 11 PM by June 29; ramp ladder saved; tiny version phone on charger, dim lights, brush teeth, sit quietly 2 minutes.',
+      'relatedGoalIds:',
+      '  - goal_01JNY0B2W4VG5C2A0G9S8M7R6Q',
+      '---',
+      '# Sleep schedule ramp',
       '',
     ].join('\n'),
     'utf8',

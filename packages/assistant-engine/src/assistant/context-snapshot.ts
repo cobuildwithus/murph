@@ -8,6 +8,7 @@ import {
   allergyFrontmatterSchema,
   conditionFrontmatterSchema,
   goalFrontmatterSchema,
+  type GoalFrontmatter,
   regimenFrontmatterSchema,
   safeParseContract,
   type RegimenFrontmatter,
@@ -87,7 +88,10 @@ const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
   ['experiments', 'blood_tests', 'health_context'] as const
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
+const MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS = 3
+const MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
+const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
 const MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_FILES = 3
 const MAX_ASSISTANT_CONTEXT_EVENT_LEDGER_BYTES = 256 * 1024
@@ -347,7 +351,10 @@ async function buildAssistantContextSnapshotPrompt(input: {
     '- Before making factual claims about current values, dates, counts, progress, or outcomes, query the relevant vault surface.',
     coverage.bloodTestsLine,
     coverage.healthContextLine,
+    coverage.activeGoalsLine,
     coverage.regimensLine,
+    coverage.activeHabitRegimensLine,
+    coverage.activePlanReadLine,
   ].filter((line): line is string => Boolean(line))
 
   const promptBlock = [
@@ -377,6 +384,11 @@ async function buildAssistantSnapshotCoverage(input: {
   signal: AbortSignal | null
   vaultRoot: string
 }): Promise<{
+  activeGoalCount: number
+  activeGoalsLine: string | null
+  activeHabitRegimenCount: number
+  activeHabitRegimensLine: string | null
+  activePlanReadLine: string | null
   allergyCount: number
   bloodTestCount: number
   bloodTestsLine: string | null
@@ -408,6 +420,20 @@ async function buildAssistantSnapshotCoverage(input: {
     VAULT_LAYOUT.regimensDirectory,
     regimenFrontmatterSchema,
   )
+  const activeGoals = goals
+    .filter(isActiveGoal)
+    .sort(compareActiveGoals)
+  const visibleActiveGoals = activeGoals.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS,
+  )
+  const activeHabitRegimens = regimens
+    .filter(isActiveHabitRegimen)
+    .sort(compareActiveHabitRegimens)
+  const visibleActiveHabitRegimens = activeHabitRegimens.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS,
+  )
   const supplementCount = regimens.filter(isSupplementRegimen).length
   const healthParts = [
     summarizePositiveCount(goals.length, 'goal'),
@@ -420,6 +446,17 @@ async function buildAssistantSnapshotCoverage(input: {
   ].filter((part): part is string => Boolean(part))
 
   return {
+    activeGoalCount: activeGoals.length,
+    activeGoalsLine: renderActiveGoalsLine(
+      visibleActiveGoals,
+      activeGoals.length,
+    ),
+    activeHabitRegimenCount: activeHabitRegimens.length,
+    activeHabitRegimensLine:
+      renderActiveHabitRegimensLine(visibleActiveHabitRegimens, activeHabitRegimens.length),
+    activePlanReadLine: activeGoals.length > 0 || activeHabitRegimens.length > 0
+      ? '- For current goals, habits, routines, or ramps, read the relevant `vault-cli goal show` / `vault-cli regimen show` record before reconstructing baselines, ladders, targets, or fallback details.'
+      : null,
     allergyCount: allergies.length,
     bloodTestCount: eventCoverage.bloodTestCount,
     bloodTestsLine: eventCoverage.bloodTestCount > 0
@@ -753,6 +790,135 @@ function parseNonNegativeInteger(value: unknown): number {
   }
 
   return value
+}
+
+function isActiveGoal(goal: GoalFrontmatter): boolean {
+  return normalizeToken(goal.status) === 'active'
+}
+
+function isActiveHabitRegimen(regimen: RegimenFrontmatter): boolean {
+  return normalizeToken(regimen.status) === 'active'
+    && normalizeToken(regimen.kind) === 'habit'
+}
+
+function compareActiveGoals(
+  left: GoalFrontmatter,
+  right: GoalFrontmatter,
+): number {
+  return (
+    (right.priority ?? 0) - (left.priority ?? 0)
+    || (left.window?.targetAt ?? '').localeCompare(right.window?.targetAt ?? '')
+    || (left.window?.startAt ?? '').localeCompare(right.window?.startAt ?? '')
+    || left.title.localeCompare(right.title)
+    || left.goalId.localeCompare(right.goalId)
+  )
+}
+
+function compareActiveHabitRegimens(
+  left: RegimenFrontmatter,
+  right: RegimenFrontmatter,
+): number {
+  return (
+    (left.startedOn ?? '').localeCompare(right.startedOn ?? '')
+    || left.title.localeCompare(right.title)
+    || left.regimenId.localeCompare(right.regimenId)
+  )
+}
+
+function renderActiveGoalsLine(
+  goals: readonly GoalFrontmatter[],
+  totalCount: number,
+): string | null {
+  if (goals.length === 0) {
+    return null
+  }
+
+  return `- Active goals: ${goals.map(renderActiveGoal).join('; ')}${renderOmittedCount(totalCount - goals.length, 'goal')}.`
+}
+
+function renderActiveGoal(goal: GoalFrontmatter): string {
+  const details = [
+    goal.horizon ? `horizon ${renderPromptField(goal.horizon)}` : null,
+    renderGoalWindow(goal),
+    renderStringList('domains', goal.domains, 3),
+  ].filter((part): part is string => Boolean(part))
+
+  return `${renderPromptLookup(goal.title, goal.slug, goal.goalId)}${renderDetailSuffix(details)}`
+}
+
+function renderGoalWindow(goal: GoalFrontmatter): string | null {
+  const startAt = goal.window?.startAt
+  const targetAt = goal.window?.targetAt
+  if (startAt && targetAt) {
+    return `window ${startAt} to ${targetAt}`
+  }
+  if (startAt) {
+    return `started ${startAt}`
+  }
+  return targetAt ? `target ${targetAt}` : null
+}
+
+function renderActiveHabitRegimensLine(
+  regimens: readonly RegimenFrontmatter[],
+  totalCount: number,
+): string | null {
+  if (regimens.length === 0) {
+    return null
+  }
+
+  return `- Active habit regimens: ${regimens.map(renderActiveHabitRegimen).join('; ')}${renderOmittedCount(totalCount - regimens.length, 'habit regimen')}.`
+}
+
+function renderActiveHabitRegimen(regimen: RegimenFrontmatter): string {
+  const details = [
+    regimen.schedule ? `schedule ${renderPromptField(regimen.schedule)}` : null,
+    regimen.startedOn ? `started ${regimen.startedOn}` : null,
+    regimen.note ? `note ${renderPromptField(regimen.note)}` : null,
+    renderStringList('related goals', regimen.relatedGoalIds, 3),
+  ].filter((part): part is string => Boolean(part))
+
+  return `${renderPromptLookup(regimen.title, regimen.slug, regimen.regimenId)}${renderDetailSuffix(details)}`
+}
+
+function renderPromptLookup(title: string, slug: string, id: string): string {
+  return `${renderPromptField(title)} (\`${slug}\`, ${id})`
+}
+
+function renderDetailSuffix(details: readonly string[]): string {
+  return details.length > 0 ? `: ${details.join(', ')}` : ''
+}
+
+function renderStringList(
+  label: string,
+  values: readonly string[] | undefined,
+  limit: number,
+): string | null {
+  if (!values || values.length === 0) {
+    return null
+  }
+
+  const visible = values.slice(0, limit).map(renderPromptField)
+  const omitted = values.length > visible.length
+    ? `, +${values.length - visible.length}`
+    : ''
+  return `${label} ${visible.join(', ')}${omitted}`
+}
+
+function renderOmittedCount(count: number, noun: string): string {
+  return count > 0 ? `; ${count} more active ${noun}${count === 1 ? '' : 's'} omitted` : ''
+}
+
+function renderPromptField(value: string): string {
+  const compact = value
+    .replace(/\\[nrt]/gu, ' ')
+    .replace(/[\n\r\t]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (compact.length <= MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH) {
+    return compact
+  }
+
+  return `${compact.slice(0, MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH - 3).trimEnd()}...`
 }
 
 function isSupplementRegimen(regimen: RegimenFrontmatter): boolean {
