@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 const RETELL_CREATE_PHONE_CALL_URL = "https://api.retellai.com/v2/create-phone-call";
+const RETELL_STOP_CALL_URL_BASE = "https://api.retellai.com/v2/stop-call";
 const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 
@@ -42,8 +43,39 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     if (!providerCallId) {
       throw new TypeError("Retell create phone call returned no call_id.");
     }
+    const storageSetting = readRetellDataStorageSetting(payload);
+    if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
+      await this.stopCallBestEffort(providerCallId);
+      throw new TypeError(
+        `Retell create phone call returned data_storage_setting ${formatRetellStorageSetting(storageSetting)}; expected ${RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING}.`,
+      );
+    }
 
     return { providerCallId };
+  }
+
+  private async stopCallBestEffort(providerCallId: string): Promise<void> {
+    try {
+      const response = await this.fetchImpl(readRetellStopCallUrl(providerCallId), {
+        headers: {
+          authorization: `Bearer ${requireEnv("RETELL_API_KEY")}`,
+        },
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(RETELL_START_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        console.warn("Retell phone call storage mismatch stop request failed.", {
+          providerCallIdPresent: true,
+          status: response.status,
+        });
+      }
+    } catch (error) {
+      console.warn("Retell phone call storage mismatch stop request failed.", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        providerCallIdPresent: true,
+      });
+    }
   }
 }
 
@@ -94,6 +126,11 @@ function readRetellCreatePhoneCallUrl(): string {
   return process.env.RETELL_CREATE_PHONE_CALL_URL?.trim() || RETELL_CREATE_PHONE_CALL_URL;
 }
 
+function readRetellStopCallUrl(providerCallId: string): string {
+  const base = process.env.RETELL_STOP_CALL_URL_BASE?.trim() || RETELL_STOP_CALL_URL_BASE;
+  return `${base.replace(/\/+$/u, "")}/${encodeURIComponent(providerCallId)}`;
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -108,4 +145,18 @@ function readProviderCallId(value: unknown): string | null {
   }
   const callId = (value as Record<string, unknown>).call_id;
   return typeof callId === "string" && callId.trim() ? callId.trim() : null;
+}
+
+function readRetellDataStorageSetting(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const setting = (value as Record<string, unknown>).data_storage_setting;
+  return typeof setting === "string" && setting.trim()
+    ? setting.trim().toLowerCase()
+    : null;
+}
+
+function formatRetellStorageSetting(value: string | null): string {
+  return value ?? "missing";
 }

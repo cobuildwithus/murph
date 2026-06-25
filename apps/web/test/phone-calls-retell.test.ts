@@ -66,7 +66,10 @@ describe("Retell phone-call runtime", () => {
     }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
       fetchCalls.push({ init, url });
-      return new Response(JSON.stringify({ call_id: "retell_call_123" }), {
+      return new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      }), {
         headers: {
           "content-type": "application/json",
         },
@@ -105,6 +108,49 @@ describe("Retell phone-call runtime", () => {
       override_agent_version: "prod",
       to_number: "+12125550123",
     });
+  });
+
+  it("stops the Retell call and fails when the returned storage mode is not basic attributes only", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    vi.stubEnv("RETELL_CREATE_PHONE_CALL_URL", "https://retell.example.test/v2/create-phone-call");
+    vi.stubEnv("RETELL_STOP_CALL_URL_BASE", "https://retell.example.test/v2/stop-call");
+    const fetchCalls: Array<{
+      init?: RequestInit;
+      url: RequestInfo | URL;
+    }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      fetchCalls.push({ init, url });
+      if (String(url).includes("/stop-call/")) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({
+        call_id: "retell_call_unsafe",
+        data_storage_setting: "everything",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    };
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    })).rejects.toThrow("data_storage_setting everything");
+
+    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls[0]!.url).toBe("https://retell.example.test/v2/create-phone-call");
+    expect(fetchCalls[1]!.url).toBe("https://retell.example.test/v2/stop-call/retell_call_unsafe");
+    expect(fetchCalls[1]!.init?.method).toBe("POST");
+    const stopHeaders = new Headers(fetchCalls[1]!.init?.headers);
+    expect(stopHeaders.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
   });
 
   it("fails closed before Retell start when the agent storage mode is not configured as basic attributes only", async () => {
