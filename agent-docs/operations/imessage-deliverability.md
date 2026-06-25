@@ -4,7 +4,7 @@ Last verified: 2026-06-25
 
 ## Purpose
 
-This is required reading for agent work in this repository, and it is mandatory guidance for any Murph change that can affect text-message or iMessage behavior. Read it especially carefully before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
+This is required reading for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
 The core rule is simple: design Murph messaging like a real reciprocal conversation, not a broadcast system. The highest-risk pattern is many outbound messages from one line with little or no recipient response.
 
@@ -114,16 +114,6 @@ A complete review should inspect:
 - tests or fixtures that prove the guardrail
 
 If a path lacks line-level pacing, recipient reply tracking, or delivery-health suppression, treat that as a deliverability risk even if the copy itself looks fine.
-
-## PDF-derived source document
-
-Source converted from `iMessage Best Practices Guide Technical 041426.pdf`.
-The source PDF is two pages and was rendered from a document titled
-`iMessage Best Practices Guide 041426.docx`. The text below preserves the
-full guidance in Markdown form while normalizing bullets, apostrophes, and
-spacing for repo readability.
-
-### iMessage Best Practices for Linq Partners
 
 #### Reciprocity Is Everything
 

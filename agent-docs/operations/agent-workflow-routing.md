@@ -16,7 +16,6 @@ Before repo code/docs/test/config work, read:
 5. this file
 6. `agent-docs/PRODUCT_SENSE.md`
 7. `agent-docs/PRODUCT_CONSTITUTION.md`
-8. `agent-docs/operations/imessage-deliverability.md`
 
 Then load only the task-relevant docs listed below.
 
