@@ -149,6 +149,69 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-local-service-phone-call-input-',
+  )
+  tempRoots.push(parentRoot)
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  let phoneCallScope: unknown = null
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    expect(providerInput.acceptedInputItems).toEqual([
+      expect.objectContaining({
+        id: 'manual-phone-call:turn-1',
+        promptFallback: expect.objectContaining({
+          reason: 'manual-input',
+        }),
+        source: 'manual',
+      }),
+    ])
+    phoneCallScope =
+      providerInput.hostedToolContext?.currentPhoneCallToolRequestKeyScope?.() ?? null
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        phoneCalls: {
+          start: vi.fn(async () => ({
+            phoneCallId: 'hpc_test',
+            status: 'calling' as const,
+          })),
+        },
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Please call the clinic.',
+    turnTrigger: 'manual-ask',
+    vault: vaultRoot,
+  })
+
+  expect(phoneCallScope).toMatchObject({
+    acceptedInputIds: ['manual-phone-call:turn-1'],
+  })
+})
+
 test('sendAssistantMessageLocal compacts oversized runtime logs before foreground turn writes', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'assistant-local-service-runtime-maintenance-',

@@ -144,6 +144,7 @@ import { withAssistantTurnLock } from './turn-lock.js'
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
+const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 
 function resolveAssistantProgressDeliveryChannel(input: {
   session: AssistantSession
@@ -440,7 +441,10 @@ export async function sendAssistantMessageLocal(
           userTurn: currentUserTurn,
         })
         const initialUserPromptInputId =
-          resolveInitialUserPromptAcceptedTurnInputId(input)
+          resolveInitialUserPromptAcceptedTurnInputId({
+            input,
+            userTurn: currentUserTurn,
+          })
         const initialAcceptedInputJournal =
           await runtimeState.turns.acceptedInputs.append({
             inputs: initialAcceptedTurnInputItems,
@@ -1584,7 +1588,10 @@ function resolveInitialAcceptedTurnInputItems(input: {
 
   return [
     {
-      id: DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID,
+      id: resolveDefaultInitialAcceptedTurnInputId({
+        input: input.input,
+        userTurn: input.userTurn,
+      }),
       promptFallbackReason:
         isManualAssistantTurnTrigger(input.input.turnTrigger)
           ? 'manual-input'
@@ -1605,13 +1612,30 @@ function resolveInitialAcceptedTurnInputItems(input: {
   ]
 }
 
-function resolveInitialUserPromptAcceptedTurnInputId(
-  input: AssistantMessageInput,
-): string | null {
-  const initialInputs = input.acceptedTurnInput?.initialInputs ?? null
+function resolveInitialUserPromptAcceptedTurnInputId(input: {
+  input: AssistantMessageInput
+  userTurn: PersistedUserTurn
+}): string | null {
+  const initialInputs = input.input.acceptedTurnInput?.initialInputs ?? null
   return initialInputs && initialInputs.length > 0
     ? null
+    : resolveDefaultInitialAcceptedTurnInputId(input)
+}
+
+function resolveDefaultInitialAcceptedTurnInputId(input: {
+  input: AssistantMessageInput
+  userTurn: PersistedUserTurn
+}): string {
+  return shouldUsePhoneCallManualAcceptedTurnInputId(input.input)
+    ? `${PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX}${input.userTurn.turnId}`
     : DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID
+}
+
+function shouldUsePhoneCallManualAcceptedTurnInputId(
+  input: AssistantMessageInput,
+): boolean {
+  return isManualAssistantTurnTrigger(input.turnTrigger) &&
+    input.executionContext?.hosted?.phoneCalls != null
 }
 
 async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
