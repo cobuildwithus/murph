@@ -1702,11 +1702,6 @@ function createHostedToolContext(): AssistantHostedToolContext {
     computerToolsAvailable: true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    requiredUserMessageDeliveryAvailable: true,
-    sendRequiredUserMessage: vi.fn(async () => ({
-      kind: 'sent' as const,
-      source: 'model' as const,
-    })),
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -192,7 +193,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -213,6 +214,8 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minItems: 0,
         maxItems: 7,
         default: [],
+        description:
+          'Optional metadata for known shipped changelog item ids. Leave empty for general product interest, feature requests, frustrations, inferred workflow friction, or assistant-observed product/tool friction.',
         items: {
           type: 'string',
           maxLength: 120,
@@ -221,24 +224,6 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
       },
     },
     required: ['kind', 'summary'],
-    oneOf: [
-      {
-        properties: {
-          kind: { enum: ['feature_interest'] },
-          relatedChangelogItemIds: {
-            type: 'array',
-            minItems: 1,
-          },
-        },
-        required: ['kind', 'relatedChangelogItemIds'],
-      },
-      {
-        properties: {
-          kind: { enum: ['feature_request', 'frustration'] },
-        },
-        required: ['kind'],
-      },
-    ],
   },
 } as const
 
@@ -246,7 +231,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; it does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; when approval is pending, include the returned approval link in your normal reply. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -583,23 +568,14 @@ const submitProductFeedbackArgumentsSchema = z
       .string()
       .trim()
       .min(1)
-      .max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
-      .transform((value) => value.replace(/\s+/gu, ' ')),
+      .transform(sanitizeHostedProductFeedbackSummary)
+      .pipe(z.string().min(1).max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
       .max(7)
       .default([]),
   })
   .strict()
-  .superRefine((feedback, context) => {
-    if (feedback.kind === 'feature_interest' && feedback.relatedChangelogItemIds.length === 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'feature_interest requires relatedChangelogItemIds',
-        path: ['relatedChangelogItemIds'],
-      })
-    }
-  })
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -1276,8 +1252,14 @@ export async function executeMurphDynamicToolRequest(input: {
         switch (result.status) {
           case 'pending':
             return {
-              ...toolTextResult(true, 'secure approval requested'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  approvalUrl: result.approvalUrl,
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
             }
           case 'approved':
             return {

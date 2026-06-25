@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -40,12 +41,10 @@ export async function recordHostedProductFeedback(input: {
 export function normalizeHostedProductFeedback(
   feedback: HostedRuntimeProductFeedbackRecord,
 ): HostedRuntimeProductFeedbackRecord {
-  const summary = feedback.summary.trim().replace(/\s+/gu, " ");
+  const summary = sanitizeHostedProductFeedbackSummary(feedback.summary);
   if (
     summary.length === 0 ||
     summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH ||
-    (feedback.kind === "feature_interest" &&
-      feedback.relatedChangelogItemIds.length === 0) ||
     (feedback.relatedChangelogItemIds.length > 0 &&
       !resolveChangelogCardItems(feedback.relatedChangelogItemIds))
   ) {

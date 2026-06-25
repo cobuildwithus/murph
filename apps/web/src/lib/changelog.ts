@@ -4,8 +4,8 @@ export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
 export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
-export const CHANGELOG_FEATURE_LIMIT_MAX = 20;
-export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 5;
+export const CHANGELOG_FEATURE_LIMIT_MAX = 100;
+export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 25;
 
 const CHANGELOG_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CHANGELOG_TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -60,7 +60,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-25",
     title: "Pain, rehab, and chronic conditions get real help",
     summary:
-      "Murph now reasons like a PT for strains and rehab, offers a best-current-assessment plus a recommended next action for chronic illness and pain instead of only validating or referring, and keeps your accepted goals and habits in working memory so plans don't drift. Exercise intros stay calm — a few movements, real catalog pictures, and a question.",
+      "Clinical-style reasoning for pain and rehab, real recommendations for chronic conditions, and goals that stay pinned across sessions.",
     items: [
       {
         id: "proactive-chronic-support",
@@ -105,6 +105,38 @@ const RAW_CHANGELOG_EDITIONS = [
           "When Murph introduces movements you haven't seen before, it now picks 2-4, attaches catalog images, gives only the immediate safety stop rule, and asks whether to walk you through them — instead of dumping a long numbered plan.",
         relevanceTags: ["assistant", "exercise", "images", "polish"],
         sourcePullRequests: [],
+      },
+      {
+        id: "openweather-tool",
+        kind: "feature",
+        priority: 4,
+        title: "Real weather, current and five days out",
+        summary:
+          "Ask about today's heat, tomorrow's rain, or the forecast for your long run on Saturday — Murph now pulls live current conditions and a five-day forecast from OpenWeather, scoped to wherever you ask about.",
+        relevanceTags: ["assistant", "weather", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Check the forecast",
+          prompt:
+            "What's the weather looking like for my long run Saturday morning?",
+        },
+      },
+      {
+        id: "composio-search-tools",
+        kind: "feature",
+        priority: 4,
+        title: "Search Amazon, Walmart, Google Maps, and find a clinician",
+        summary:
+          "Murph can now search Amazon and Walmart for products, look places up on Google Maps, and find providers by name or specialty through the national NPI directory — all in chat, no app switch.",
+        details:
+          "Product and place search lands the actual listing instead of guessing. The NPI lookup returns a real provider record — NPI number, address, taxonomy — so referrals and verifications stop being a dead end.",
+        relevanceTags: ["assistant", "search", "shopping", "providers", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Try a search",
+          prompt:
+            "Find a cardiologist near me on the NPI registry, and price magnesium glycinate on Amazon and Walmart while you're at it.",
+        },
       },
     ],
   },

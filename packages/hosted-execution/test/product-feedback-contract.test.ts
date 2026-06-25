@@ -37,14 +37,6 @@ describe("hosted product feedback contracts", () => {
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
         idempotencyKey: "a".repeat(64),
-        kind: "feature_interest",
-        relatedChangelogItemIds: [],
-        summary: "Interested in native message formatting.",
-      },
-    })).toThrow();
-    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
-      feedback: {
-        idempotencyKey: "a".repeat(64),
         kind: "bug_report",
         relatedChangelogItemIds: ["native-message-formatting"],
         summary: "Wants a bug-report workflow.",
@@ -132,6 +124,22 @@ describe("hosted product feedback contracts", () => {
   it("supports structured feature requests and frustrations", () => {
     expect(parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
         idempotencyKey: "b".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
@@ -158,6 +166,26 @@ describe("hosted product feedback contracts", () => {
         kind: "frustration",
         relatedChangelogItemIds: [],
         summary: "The dashboard feels slow.",
+      },
+    });
+  });
+
+  it("redacts high-confidence sensitive tokens from summaries", () => {
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "e".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary:
+          "Reach me at user@example.com or 415-555-1212; token sk_test_abcdefghijklmnopqrstuvwxyz.",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "e".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary:
+          "Reach me at [redacted] or [redacted]; token [redacted].",
       },
     });
   });

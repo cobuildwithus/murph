@@ -102,16 +102,13 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
-  normalizeAssistantProgressText,
   shouldCreateAssistantProgressDelivery,
-  type AssistantProgressDeliveryResult,
 } from './turn-progress.js'
 import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
-  buildAssistantVaultFileApprovalMessage,
   requestAssistantVaultFileSend,
 } from './vault-file-send.js'
 import type {
@@ -130,7 +127,6 @@ import {
 } from './active-turn-input-controller.js'
 import {
   normalizeNullableString,
-  warnAssistantBestEffortFailure,
 } from './shared.js'
 import type {
   AssistantMessageInput,
@@ -195,7 +191,7 @@ function isHostedOptionalProgressDeliveryAvailable(input: {
   })
 }
 
-function isRequiredUserMessageDeliveryAvailable(input: {
+function isHostedCurrentAudienceReplyDeliveryAvailable(input: {
   executionContext: AssistantExecutionContext | null
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
@@ -216,52 +212,6 @@ function isHostedComputerToolTransportAvailable(input: {
   executionContext: AssistantExecutionContext | null
 }): boolean {
   return typeof input.executionContext?.hosted?.providerFetch === 'function'
-}
-
-async function sendHostedRequiredUserMessage(input: {
-  dependencies?: AssistantHostedProgressDeliveryDependencies | null
-  getDeliveryContext: () => {
-    messageInput: AssistantMessageInput
-    session: AssistantSession
-  }
-  sharedPlan: AssistantTurnSharedPlan
-  text: string
-  turnId: string
-}): Promise<AssistantProgressDeliveryResult> {
-  const text = normalizeAssistantProgressText(input.text)
-  if (!text) {
-    return {
-      kind: 'skipped',
-      reason: 'empty',
-      source: 'model',
-    }
-  }
-
-  const deliveryContext = input.getDeliveryContext()
-  try {
-    await deliverAssistantProgressUpdate({
-      dependencies: input.dependencies ?? undefined,
-      input: deliveryContext.messageInput,
-      ordinal: 0,
-      session: deliveryContext.session,
-      sharedPlan: input.sharedPlan,
-      text,
-      turnId: input.turnId,
-    })
-    return {
-      kind: 'sent',
-      source: 'model',
-    }
-  } catch (error) {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'required hosted user-message delivery',
-    })
-    return {
-      kind: 'failed',
-      source: 'model',
-    }
-  }
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -503,8 +453,8 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
-        const requiredUserMessageDeliveryAvailable =
-          isRequiredUserMessageDeliveryAvailable({
+        const currentAudienceReplyDeliveryAvailable =
+          isHostedCurrentAudienceReplyDeliveryAvailable({
             executionContext,
             session: resolved.session,
             sharedPlan,
@@ -519,7 +469,7 @@ export async function sendAssistantMessageLocal(
           input.deliverResponse === true &&
           isHostedComputerToolTransportAvailable({
             executionContext,
-          }) && requiredUserMessageDeliveryAvailable
+          }) && currentAudienceReplyDeliveryAvailable
         const hostedExecutionContext = executionContext?.hosted ?? null
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
@@ -564,30 +514,6 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
           : null
-        const sendRequiredUserMessage = async (
-          text: string,
-        ): Promise<AssistantProgressDeliveryResult> =>
-          progressDelivery
-            ? await progressDelivery.send(text, {
-                required: true,
-                source: 'model',
-              })
-            : requiredUserMessageDeliveryAvailable && hostedExecutionContext
-              ? await sendHostedRequiredUserMessage({
-                  dependencies:
-                    hostedExecutionContext.progressDeliveryDependencies,
-                  getDeliveryContext: () => ({
-                    messageInput: currentInput,
-                    session: currentSession,
-                  }),
-                  sharedPlan,
-                  text,
-                  turnId: currentUserTurn.turnId,
-                })
-              : {
-                  kind: 'failed',
-                  source: 'model',
-                }
         const currentDeliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
           input: currentInput,
           session: currentSession,
@@ -599,7 +525,7 @@ export async function sendAssistantMessageLocal(
         const actionApprovalPort = hostedExecutionContext?.actionApprovalPort ?? null
         const vaultFileSendAvailable =
           input.deliverResponse === true
-          && requiredUserMessageDeliveryAvailable
+          && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
@@ -611,8 +537,6 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
-              requiredUserMessageDeliveryAvailable,
-              sendRequiredUserMessage,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
                     sendVaultFile: async (ref: string) => {
@@ -654,18 +578,10 @@ export async function sendAssistantMessageLocal(
                         vault: currentInput.vault,
                       })
                       if (result.status === 'pending') {
-                        const delivery = await sendRequiredUserMessage(
-                          buildAssistantVaultFileApprovalMessage({
-                            approvalUrl: result.approvalUrl,
-                            expiresAt: result.expiresAt,
-                            filename: result.filename,
-                          }),
-                        )
-                        if (delivery.kind === 'failed') {
-                          throw new VaultCliError(
-                            'ASSISTANT_VAULT_FILE_APPROVAL_LINK_DELIVERY_FAILED',
-                            'The secure approval link could not be delivered.',
-                          )
+                        return {
+                          approvalUrl: result.approvalUrl,
+                          filename: result.filename,
+                          status: 'pending',
                         }
                       }
                       return {

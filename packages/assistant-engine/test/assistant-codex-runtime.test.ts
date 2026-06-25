@@ -142,16 +142,11 @@ function createProgressDeliveryMock(
 
 function createHostedToolContext(input: {
   computerToolsAvailable?: boolean
-  sendResult?: Awaited<ReturnType<AssistantHostedToolContext['sendRequiredUserMessage']>>
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    requiredUserMessageDeliveryAvailable: true,
-    sendRequiredUserMessage: vi.fn(async () =>
-      input.sendResult ?? { kind: 'sent' as const, source: 'model' as const }
-    ),
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -1481,7 +1476,6 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('closes live steering before saving a computer pause', async () => {
@@ -1638,7 +1632,6 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(liveTurnReleased).toBe(1)
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('allows finish_without_reply after pausing a computer run for the user', async () => {
@@ -1774,7 +1767,6 @@ describe('assistant codex runtime', () => {
       finalAction: { kind: 'none' },
       finalMessage: '',
     })
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
@@ -4886,7 +4878,6 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-prestart-pause-live-turn-2',
     })
     expect(liveTurnRegistrations).toBe(0)
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {

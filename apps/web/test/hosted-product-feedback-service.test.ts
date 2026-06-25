@@ -85,11 +85,19 @@ describe("recordHostedProductFeedback", () => {
     expect(second.recorded).toBe(true);
   });
 
-  it("accepts feature requests without changelog ids", async () => {
+  it("accepts product feedback without changelog ids", async () => {
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
 
-    const result = await recordHostedProductFeedback({
+    const interest = await recordHostedProductFeedback({
       feedback: makeFeedback({
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      }),
+      memberId: "member_123",
+    });
+    const request = await recordHostedProductFeedback({
+      feedback: makeFeedback({
+        idempotencyKey: "d".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
         summary: "Wants Strava integration support.",
@@ -97,8 +105,18 @@ describe("recordHostedProductFeedback", () => {
       memberId: "member_123",
     });
 
-    expect(result.recorded).toBe(true);
-    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(interest.recorded).toBe(true);
+    expect(request.recorded).toBe(true);
+    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      data: [
+        expect.objectContaining({
+          kind: "feature_interest",
+          relatedChangelogItemIdsJson: [],
+          summary: "Interested in generated song reminders.",
+        }),
+      ],
+    }));
+    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       data: [
         expect.objectContaining({
           kind: "feature_request",
@@ -110,7 +128,6 @@ describe("recordHostedProductFeedback", () => {
   });
 
   it.each([
-    ["empty changelog ids for shipped interest", makeFeedback({ relatedChangelogItemIds: [] })],
     ["unknown changelog ids", makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] })],
     ["empty summary", makeFeedback({ summary: " \n\t " })],
     ["oversized summary", makeFeedback({ summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH + 1) })],
@@ -135,6 +152,17 @@ describe("normalizeHostedProductFeedback", () => {
     expect(normalizeHostedProductFeedback(makeFeedback({
       summary: "  Wants   better message formatting.  ",
     })).summary).toBe("Wants better message formatting.");
+  });
+
+  it("redacts high-confidence contact details and secret-shaped tokens", () => {
+    expect(normalizeHostedProductFeedback(makeFeedback({
+      kind: "feature_request",
+      relatedChangelogItemIds: [],
+      summary:
+        "Email user@example.com, call 415-555-1212, token sk_test_abcdefghijklmnopqrstuvwxyz.",
+    })).summary).toBe(
+      "Email [redacted], call [redacted], token [redacted].",
+    );
   });
 
   it("throws the hosted onboarding error type for rejected content", () => {
