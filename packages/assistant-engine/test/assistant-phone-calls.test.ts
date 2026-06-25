@@ -57,6 +57,7 @@ describe("assistant phone calls", () => {
   it("uses only user/manual accepted input as phone-call authority", () => {
     const acceptedInputItems = [
       { id: "initial_user", source: "initial" as const },
+      { id: "initial", source: "manual" as const },
       { id: "assistant_input", source: "assistant-input" as const },
       { id: "manual_input", source: "manual" as const },
       { id: "system_input", source: "system" as const },

@@ -27,6 +27,7 @@ const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'timeZone',
   'to',
 ] as const
+const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
 
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
@@ -98,6 +99,7 @@ export function resolveAssistantPhoneCallAcceptedInputIds(input: {
 }): readonly string[] {
   return input.acceptedInputItems
     .filter((item) => isAssistantPhoneCallAcceptedInputEligible({
+      id: item.id,
       source: item.source,
       turnTrigger: input.turnTrigger ?? null,
     }))
@@ -105,10 +107,14 @@ export function resolveAssistantPhoneCallAcceptedInputIds(input: {
 }
 
 function isAssistantPhoneCallAcceptedInputEligible(input: {
+  id: string
   source: AssistantAcceptedTurnInputSource
   turnTrigger: string | null
 }): boolean {
   if (!isManualPhoneCallTurnTrigger(input.turnTrigger)) {
+    return false
+  }
+  if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
     return false
   }
 
