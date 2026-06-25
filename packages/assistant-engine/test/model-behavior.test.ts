@@ -114,13 +114,16 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'the file will not send until the user opens that link and approves',
+      'send a normal text reply with the raw approval URL',
     )
     expect(prompt).toContain(
-      'Include the raw approval URL in the normal reply',
+      'The file is not attached yet.',
     )
     expect(prompt).toContain(
-      'Do not omit it, summarize around it without the URL, or rely on a separate automated message.',
+      'Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.',
+    )
+    expect(prompt).toContain(
+      'When `murph.send_vault_file` returns `status: "approved"`',
     )
   })
 

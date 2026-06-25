@@ -1,5 +1,6 @@
 import type {
   AssistantSession,
+  AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type {
@@ -21,8 +22,13 @@ export type AssistantHostedVaultFileSendResult =
       status: 'pending'
     }
   | {
+      file: AssistantVaultFileResponseMedia
       filename: string
-      status: 'approved' | 'denied' | 'expired'
+      status: 'approved'
+    }
+  | {
+      filename: string
+      status: 'denied' | 'expired'
     }
 
 export interface AssistantHostedToolContext {

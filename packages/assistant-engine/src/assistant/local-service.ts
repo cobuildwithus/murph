@@ -551,30 +551,18 @@ export async function sendAssistantMessageLocal(
                           'Vault files can only be sent to the current iMessage conversation.',
                         )
                       }
-                      const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-                        audience: sharedPlan.conversationPolicy.audience,
-                        channel: deliveryFields.channel,
-                        deliveryFields,
-                        input: currentInput,
-                        session: currentSession,
-                      })
                       const result = await requestAssistantVaultFileSend({
                         actionApprovalPort,
                         actorId: deliveryFields.actorId,
                         bindingDelivery: deliveryFields.bindingDelivery,
                         channel: deliveryFields.channel,
-                        deliveryIdempotencyKey:
-                          hostedDelivery.deliveryIdempotencyKey ?? `${currentSession.sessionId}:${currentUserTurn.turnId}`,
                         deliverySource: deliveryFields.deliverySource,
                         explicitTarget: deliveryFields.explicitTarget,
                         identityId: deliveryFields.identityId,
                         ref,
                         replyToMessageId: deliveryFields.replyToMessageId,
-                        sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
                         threadIsDirect: deliveryFields.threadIsDirect,
-                        turnId: currentUserTurn.turnId,
-                        turnTrigger: currentInput.turnTrigger ?? null,
                         vault: currentInput.vault,
                       })
                       if (result.status === 'pending') {
@@ -584,10 +572,22 @@ export async function sendAssistantMessageLocal(
                           status: 'pending',
                         }
                       }
-                      return {
-                        filename: result.filename,
-                        status: result.status,
+                      if (result.status === 'approved') {
+                        return {
+                          file: result.file,
+                          filename: result.filename,
+                          status: 'approved',
+                        }
                       }
+                      return result.status === 'denied'
+                        ? {
+                            filename: result.filename,
+                            status: 'denied',
+                          }
+                        : {
+                            filename: result.filename,
+                            status: 'expired',
+                          }
                     },
                   }
                 : {}),

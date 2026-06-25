@@ -105,7 +105,6 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
-  findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
@@ -122,8 +121,6 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
-  findAssistantAutoReplyDeliveryIntentIds:
-    evidenceMocks.findAssistantAutoReplyDeliveryIntentIds,
   hasCompleteAssistantAutoReplyTerminalEvidence:
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
@@ -1187,9 +1184,6 @@ beforeEach(() => {
   evidenceMocks.assistantAutoReplyTerminalEvidenceExists
     .mockReset()
     .mockResolvedValue(false)
-  evidenceMocks.findAssistantAutoReplyDeliveryIntentIds
-    .mockReset()
-    .mockResolvedValue(new Set())
   evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
     .mockReset()
     .mockImplementation(async (input: {
@@ -7838,109 +7832,6 @@ describe('assistant auto-reply runtime', () => {
     // when the terminal receipt fallback is gated off.
     expect(replyMocks.listAssistantTurnReceipts).toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
-  })
-
-  it('returns every same-turn auto-reply outbox intent for hosted queue-only dispatch', async () => {
-    const hostedInput = createCapturelessAssistantInputCandidate({
-      conversationThreadId: 'safe_thread_multi_intent',
-      inputId: 'ain_multi_intent_000000000000001',
-      mailboxRow: {
-        dedupeKey: 'dedupe_multi_intent',
-        eventId: 'evt_multi_intent',
-        itemId: 'mailbox_item_multi_intent',
-        laneSeq: '102',
-      },
-      occurredAt: '2026-04-08T00:09:00.000Z',
-      receivedAt: '2026-04-08T00:09:01.000Z',
-      replyTarget: {
-        channel: 'linq',
-        messageId: 'real_msg_multi_intent',
-        threadId: 'real_thread_multi_intent',
-      },
-      source: 'linq',
-      text: 'send the vault file',
-    })
-    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
-      {
-        createdAt: '2026-04-08T00:09:05.000Z',
-        intentId: 'intent_attachment_awaiting_approval',
-        turnId: 'turn_multi_intent',
-      },
-      {
-        createdAt: '2026-04-08T00:09:06.000Z',
-        intentId: 'intent_approval_link_text',
-        turnId: 'turn_multi_intent',
-      },
-      {
-        createdAt: '2026-04-08T00:09:07.000Z',
-        intentId: 'intent_other_turn',
-        turnId: 'turn_other',
-      },
-    ])
-    evidenceMocks.findAssistantAutoReplyDeliveryIntentIds.mockImplementation(
-      async (input: {
-        intents: readonly { intentId: string; turnId: string }[]
-      }) => new Set(input.intents.map((intent) => intent.intentId)),
-    )
-    replyMocks.sendAssistantMessage.mockResolvedValue({
-      delivery: null,
-      deliveryDeferred: true,
-      deliveryError: null,
-      deliveryIntentId: 'intent_approval_link_text',
-      response: 'approval link text',
-      session: {
-        sessionId: 'session-multi-intent',
-      },
-    })
-    const inboxServices = createInboxServices({
-      show: vi.fn(),
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-    const context = reply.createAssistantAutoReplyGroupContext([
-      createCapturelessReplyGroupItem(hostedInput),
-    ])
-
-    if (!context) {
-      throw new Error('expected reply context')
-    }
-
-    const result = await reply.processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
-      context,
-      deliveryDispatchMode: 'queue-only',
-      enabledChannels: ['linq'],
-      executionContext: {
-        hosted: {
-          memberId: 'member_multi_intent',
-          userEnvKeys: [],
-        },
-      },
-      inboxServices,
-      requestId: null,
-      sessionMaxAgeMs: null,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(evidenceMocks.findAssistantAutoReplyDeliveryIntentIds)
-      .toHaveBeenCalledWith({
-        intents: [
-          {
-            intentId: 'intent_attachment_awaiting_approval',
-            turnId: 'turn_multi_intent',
-          },
-          {
-            intentId: 'intent_approval_link_text',
-            turnId: 'turn_multi_intent',
-          },
-        ],
-        vault: '/tmp/assistant-automation-vault',
-      })
-    expect(result.currentTurnDeliveryIntentIds).toEqual([
-      'intent_attachment_awaiting_approval',
-      'intent_approval_link_text',
-    ])
   })
 
   it('skips replayed hosted queue-only Linq replies once reply-intent evidence exists', async () => {

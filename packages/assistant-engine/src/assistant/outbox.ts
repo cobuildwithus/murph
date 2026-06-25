@@ -12,7 +12,6 @@ import {
   type AssistantSession,
   type AssistantStatusOutboxSummary,
   type AssistantTurnTrigger,
-  type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
@@ -220,36 +219,6 @@ export type AssistantOutboxCreateIntentInput = {
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
 ): Promise<AssistantOutboxIntent> {
-  return createAssistantOutboxIntentWithInitialStatus(input, 'pending')
-}
-
-export async function createAssistantVaultFileSendOutboxIntent(
-  input: Omit<AssistantOutboxCreateIntentInput, 'media' | 'operation'> & {
-    file: AssistantVaultFileResponseMedia
-  },
-): Promise<AssistantOutboxIntent> {
-  if (normalizeNullableString(input.channel)?.toLowerCase() !== 'linq') {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-      'Vault file delivery currently supports only the current iMessage conversation.',
-    )
-  }
-
-  const { file, ...outboxInput } = input
-  return createAssistantOutboxIntentWithInitialStatus(
-    {
-      ...outboxInput,
-      media: [file],
-      operation: null,
-    },
-    'awaiting_approval',
-  )
-}
-
-async function createAssistantOutboxIntentWithInitialStatus(
-  input: AssistantOutboxCreateIntentInput,
-  initialStatus: 'awaiting_approval' | 'pending',
-): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
@@ -367,7 +336,7 @@ async function createAssistantOutboxIntentWithInitialStatus(
       nextAttemptAt: createdAt,
       sentAt: null,
       attemptCount: 0,
-      status: initialStatus,
+      status: 'pending',
       message,
       media,
       subject,
