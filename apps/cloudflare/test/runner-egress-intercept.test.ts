@@ -1570,6 +1570,7 @@ describe("hostedRunnerIntercept", () => {
         details: expect.objectContaining({
           activeContainerIdentitySource: null,
           providerKind: "openai",
+          providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "provider_egress_credential",
           providerEgressCredentialPresent: true,
           providerEgressTokenPresent: false,
@@ -1917,6 +1918,7 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
+          providerBearerCredentialKind: "sentinel",
           providerRequestAuthorized: false,
           writeFenceValidationMode: "missing_identity",
           writeFenceValidationRejectReason: "bound_user_missing",
@@ -1964,6 +1966,7 @@ describe("hostedRunnerIntercept", () => {
         details: expect.objectContaining({
           activeContainerIdentitySource: null,
           providerKind: "openai",
+          providerBearerCredentialKind: "provider_egress",
           providerRequestAuthorized: false,
           providerEgressAuthMode: "provider_egress_credential",
           providerEgressRejectReason: "missing_runner_state",
