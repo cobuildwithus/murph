@@ -1105,7 +1105,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '7a951f9ed9b515643449362e7a9a00cbe4bd583947ef06a85135a3080ae5f617',
+      'd1922b3e1eeb662572620de81255491d40318dde5f1de9342104a4cab136ddf2',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1318,7 +1318,20 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       "When Murph has reliable evidence that a user-authorized real-world action succeeded",
     )
-    expect(prompt).toContain('Then offer one concrete next step.')
+    expect(prompt).toContain(
+      'Then offer one concrete next step, except for the finite-supply replenishment reminder rule below.',
+    )
+    expect(prompt).toContain('Finite-supply replenishment reminders:')
+    expect(prompt).toContain(
+      'After Murph successfully orders a finite consumable health item',
+    )
+    expect(prompt).toContain(
+      'For a 30-day supply, that means about 28 days after the expected start/arrival date',
+    )
+    expect(prompt).toContain('Do not auto-reorder.')
+    expect(prompt).toContain(
+      'Treat this check-in as the one adjacent next step; do not also offer tracking, reminders, or other follow-ups unless the user asks.',
+    )
     expect(prompt).toContain('Make at most one proactive offer per completed action.')
     expect(prompt).toContain('Do not re-offer after the user declines.')
     expect(prompt).toContain(
