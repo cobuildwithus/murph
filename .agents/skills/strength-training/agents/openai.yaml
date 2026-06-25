@@ -1,0 +1,4 @@
+interface:
+  display_name: "Strength Training"
+  short_description: "Build simple, evidence-informed strength plans"
+  default_prompt: "Use $strength-training to answer my strength-training question or build the smallest safe plan that fits my goal, experience, equipment, schedule, and other training."
