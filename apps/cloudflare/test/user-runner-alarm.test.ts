@@ -225,6 +225,16 @@ describe("HostedUserRunner execution coordination", () => {
       },
       ok: true,
     });
+    const preparedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find((entry) => entry.message === "Hosted runner prepared workspace invocation.");
+    expect(preparedLog).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        openAiCredentialAfterMintKind: "provider_egress",
+        openAiCredentialBeforeMintKind: "sentinel",
+        openAiProviderCredentialMinted: true,
+      }),
+    }));
   });
 
   it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {
