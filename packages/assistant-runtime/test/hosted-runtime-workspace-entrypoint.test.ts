@@ -408,6 +408,14 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(phaseLogs.map((entry) => entry.details.runtimePhaseOrdinal)).toEqual(
         Array.from({ length: phaseLogs.length }, (_value, index) => index + 1),
       );
+      const codexPrepareDoneLog = phaseLogs.find((entry) =>
+        entry.details.runtimePhase === "codex.prepare"
+        && entry.details.runtimePhaseStatus === "done"
+      );
+      assert.equal(
+        codexPrepareDoneLog?.details.codexEffectiveModelProviderId,
+        "hosted-openai",
+      );
       expect(phaseLogs.every((entry) =>
         typeof entry.details.runtimeElapsedMs === "number"
       )).toBe(true);
