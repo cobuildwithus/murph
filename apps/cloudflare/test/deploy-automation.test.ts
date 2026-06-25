@@ -973,6 +973,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
@@ -991,6 +993,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
@@ -1013,6 +1017,8 @@ describe("hosted deploy automation helpers", () => {
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1031,6 +1037,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1049,6 +1057,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1066,6 +1076,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",

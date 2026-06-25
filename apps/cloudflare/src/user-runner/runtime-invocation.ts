@@ -34,6 +34,9 @@ import {
   readHostedRunnerContainerIdentity,
 } from "../hosted-runner-container-identity.js";
 import {
+  createHostedProviderEgressCredential,
+} from "../hosted-provider-egress-credential.js";
+import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../runner-job-transport.js";
@@ -624,13 +627,6 @@ export class RuntimeInvocationService {
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         }),
       ]);
-    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
-      configSource,
-      forwardedEnv,
-      rewritePlatformUrlsForContainer: true,
-      runnerSecrets,
-    });
-    const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerIdentity = readHostedRunnerContainerIdentity({
       containerName: input.token.runnerContainerName,
       source: this.input.runnerRuntimeEnvSource,
@@ -639,6 +635,25 @@ export class RuntimeInvocationService {
       throw new Error("Hosted runner container identity did not match the runtime invocation user.");
     }
     const runnerContainerName = runnerContainerIdentity.runnerContainerName;
+    if (
+      isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
+      && typeof forwardedEnv.OPENAI_API_KEY === "string"
+      && forwardedEnv.OPENAI_API_KEY.length > 0
+    ) {
+      forwardedEnv.OPENAI_API_KEY = await createHostedProviderEgressCredential({
+        providerKind: "openai",
+        runnerContainerName,
+        source: this.input.runnerRuntimeEnvSource,
+        userId: input.userId,
+      });
+    }
+    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    });
+    const userEnv = runtimeConfig.userEnv ?? {};
     const job: HostedExecutionWorkspaceInvocationJobInput = {
       ...(workspaceSnapshotPathHashSecret
         ? {

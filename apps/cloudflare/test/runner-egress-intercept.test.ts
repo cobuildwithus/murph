@@ -61,6 +61,7 @@ import type {
 import type {
   WorkerActiveRuntimeWriteFenceValidationResult,
   WorkerActiveRuntimeUserFenceResult,
+  WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../src/worker-contracts.ts";
 import {
@@ -69,6 +70,9 @@ import {
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  createHostedProviderEgressCredential,
+} from "../src/hosted-provider-egress-credential.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -84,6 +88,8 @@ const BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS = {
   authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
 } as const;
 const PROVIDER_EGRESS_TOKEN = "provider-egress-test-token";
+const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
+const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const BOUND_USER_PROVIDER_EGRESS_HEADERS = {
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
   [HOSTED_PROVIDER_EGRESS_TOKEN_HEADER]: PROVIDER_EGRESS_TOKEN,
@@ -146,6 +152,34 @@ function createProviderEgressTokenValidationResult(input: {
     userId: input.userId,
     workspaceVersion: "4",
   };
+}
+
+function createProviderEgressCredentialValidationResult(input: {
+  userId: string;
+}): WorkerProviderEgressCredentialValidationResult {
+  return {
+    attemptId: "attempt_provider_egress_credential",
+    leaseGeneration: "7",
+    owns: true,
+    userId: input.userId,
+    workspaceVersion: "4",
+  };
+}
+
+async function createTestProviderEgressCredential(input: {
+  providerKind?: string;
+  runnerContainerName?: string;
+  userId?: string;
+} = {}): Promise<string> {
+  return await createHostedProviderEgressCredential({
+    providerKind: input.providerKind ?? "openai",
+    runnerContainerName: input.runnerContainerName ?? RUNNER_CONTAINER_NAME,
+    source: {
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    },
+    userId: input.userId ?? "member_123",
+  });
 }
 
 function createActiveRuntimeWriteFenceValidationResult(input: {
@@ -1483,26 +1517,32 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("injects OpenAI authorization from active-user-fence proof for tokenless warm Codex egress", async () => {
+  it("injects OpenAI authorization from a runner-scoped provider credential without side headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI runner credentials must not use active-user-fence fallback.");
+    });
     const validateRuntimeProviderEgressToken = vi.fn(async () =>
       createProviderEgressTokenValidationResult({ userId: "unexpected" })
     );
+    const credential = await createTestProviderEgressCredential();
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
+      validateRuntimeProviderEgressCredential,
       validateRuntimeProviderEgressToken,
     });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          authorization: `Bearer ${credential}`,
         },
         method: "POST",
       }),
@@ -1512,7 +1552,10 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeProviderEgressToken).not.toHaveBeenCalled();
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "openai",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
@@ -1527,10 +1570,12 @@ describe("hostedRunnerIntercept", () => {
         details: expect.objectContaining({
           activeContainerIdentitySource: null,
           providerKind: "openai",
+          providerEgressAuthMode: "provider_egress_credential",
+          providerEgressCredentialPresent: true,
           providerEgressTokenPresent: false,
           runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
-          writeFenceValidationMode: "active_user_fence",
+          writeFenceValidationMode: "provider_egress_credential",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -1756,22 +1801,26 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("never consults the deploy-smoke fence once the active user fence authorizes production egress", async () => {
+  it("never consults the deploy-smoke fence once a provider credential authorizes production egress", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: true }));
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential();
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       readDeploySmokeLiveModelTurnFence,
-      validateActiveRuntimeWriteFence: async (input) =>
-        createActiveRuntimeWriteFenceValidationResult(input),
+      validateRuntimeProviderEgressCredential,
     });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          authorization: `Bearer ${credential}`,
         },
         method: "POST",
       }),
@@ -1780,15 +1829,20 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "openai",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
+      userId: "member_123",
+    });
     expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
   });
 
-  it("rejects tokenless active-user-fence provider egress when the bound user mismatches the current container user", async () => {
+  it("rejects sentinel-only OpenAI egress with only a bound user instead of active-user fallback", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
-      userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI sentinel-only egress must not use active-user fallback.");
+    });
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
       readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
@@ -1798,7 +1852,7 @@ describe("hostedRunnerIntercept", () => {
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_456",
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
         method: "GET",
@@ -1816,23 +1870,31 @@ describe("hostedRunnerIntercept", () => {
           activeContainerIdentitySource: null,
           providerKind: "openai",
           providerRequestAuthorized: false,
-          writeFenceValidationMode: "active_user_fence",
-          writeFenceValidationRejectReason: "active_user_context_mismatch",
+          providerEgressAuthMode: "provider_egress_token",
+          providerEgressRejectReason: "provider_egress_token_missing",
+          writeFenceValidationMode: "provider_egress_token",
+          writeFenceValidationRejectReason: "provider_egress_token_missing",
         }),
         message: "Hosted runner provider egress completed.",
       }),
     );
   });
 
-  it("rejects tokenless active-user-fence provider egress when the current container has no active runtime", async () => {
+  it("rejects sentinel-only OpenAI egress without reading current-container identity", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () =>
-      createActiveRuntimeWriteFenceValidationResult({ userId: "member_123" })
-    );
+    const readActiveRuntimeUserFence = vi.fn(async (): Promise<WorkerActiveRuntimeUserFenceResult> => ({
+      active: true,
+      attemptId: "attempt-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    }));
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI sentinel-only egress must not use active-user fallback.");
+    });
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readActiveRuntimeUserFence,
       validateActiveRuntimeWriteFence,
     });
 
@@ -1848,6 +1910,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -1856,32 +1919,32 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "openai",
           providerRequestAuthorized: false,
           writeFenceValidationMode: "missing_identity",
-          writeFenceValidationRejectReason: "active_user_context_missing",
+          writeFenceValidationRejectReason: "bound_user_missing",
         }),
         message: "Hosted runner provider egress completed.",
       }),
     );
   });
 
-  it("rejects tokenless active-user-fence provider egress when runner state is missing", async () => {
+  it("rejects provider credential egress when runner state is missing", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(
-      async (): Promise<WorkerActiveRuntimeWriteFenceValidationResult> => ({
+    const validateRuntimeProviderEgressCredential = vi.fn(
+      async (): Promise<WorkerProviderEgressCredentialValidationResult> => ({
         owns: false,
         reason: "missing_runner_state",
       }),
     );
+    const credential = await createTestProviderEgressCredential();
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      validateActiveRuntimeWriteFence,
+      validateRuntimeProviderEgressCredential,
     });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          authorization: `Bearer ${credential}`,
         },
         method: "GET",
       }),
@@ -1890,7 +1953,9 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "openai",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1900,7 +1965,9 @@ describe("hostedRunnerIntercept", () => {
           activeContainerIdentitySource: null,
           providerKind: "openai",
           providerRequestAuthorized: false,
-          writeFenceValidationMode: "active_user_fence",
+          providerEgressAuthMode: "provider_egress_credential",
+          providerEgressRejectReason: "missing_runner_state",
+          writeFenceValidationMode: "provider_egress_credential",
           writeFenceValidationRejectReason: "missing_runner_state",
         }),
         message: "Hosted runner provider egress completed.",
@@ -1908,24 +1975,24 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("rejects tokenless active-user-fence provider egress when validation throws", async () => {
+  it("rejects provider credential egress when validation throws", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(
-      async (): Promise<WorkerActiveRuntimeWriteFenceValidationResult> => {
-        throw new Error("active validation failed");
+    const validateRuntimeProviderEgressCredential = vi.fn(
+      async (): Promise<WorkerProviderEgressCredentialValidationResult> => {
+        throw new Error("provider credential validation failed");
       },
     );
+    const credential = await createTestProviderEgressCredential();
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      validateActiveRuntimeWriteFence,
+      validateRuntimeProviderEgressCredential,
     });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          authorization: `Bearer ${credential}`,
         },
         method: "GET",
       }),
@@ -1940,9 +2007,105 @@ describe("hostedRunnerIntercept", () => {
         details: expect.objectContaining({
           providerKind: "openai",
           providerRequestAuthorized: false,
+          providerEgressAuthMode: "provider_egress_credential",
+          providerEgressRejectReason: "provider_egress_credential_validation_error",
+          providerEgressValidationErrorName: "Error",
           writeFenceValidationErrorName: "Error",
-          writeFenceValidationMode: "active_user_fence",
-          writeFenceValidationRejectReason: "active_write_fence_validation_error",
+          writeFenceValidationMode: "provider_egress_credential",
+          writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects provider credential egress when the signing secret is unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(
+      async (input: {
+        providerKind: string;
+        runnerContainerName: string;
+        userId: string;
+      }) => createProviderEgressCredentialValidationResult(input),
+    );
+    const credential = await createTestProviderEgressCredential();
+    const env = createInterceptEnv({
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: " ",
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${credential}`,
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "openai",
+          providerRequestAuthorized: false,
+          providerEgressAuthMode: "provider_egress_credential",
+          providerEgressRejectReason: "provider_egress_credential_validation_error",
+          providerEgressValidationErrorName: "Error",
+          writeFenceValidationMode: "provider_egress_credential",
+          writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects provider credential egress when the provider claim does not match OpenAI", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(
+      async (input: {
+        providerKind: string;
+        runnerContainerName: string;
+        userId: string;
+      }) => createProviderEgressCredentialValidationResult(input),
+    );
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "exa",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${credential}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeProviderEgressCredential,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "openai",
+          providerRequestAuthorized: false,
+          providerEgressAuthMode: "provider_egress_credential",
+          providerEgressRejectReason: "provider_egress_credential_provider_mismatch",
+          writeFenceValidationMode: "provider_egress_credential",
+          writeFenceValidationRejectReason: "provider_egress_credential_provider_mismatch",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -2441,27 +2604,31 @@ describe("hostedRunnerIntercept", () => {
   it("injects OpenAI authorization for Codex auto-compaction requests", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential();
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses/compact", {
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          authorization: `Bearer ${credential}`,
         },
         method: "POST",
       }),
       createInterceptEnv({
         OPENAI_API_KEY: "openai-worker-secret",
-        validateRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "openai",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
@@ -6659,6 +6826,7 @@ function createInterceptEnv(input: {
   EXA_API_KEY?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
+  HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_WEB_BASE_URL?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
@@ -6690,6 +6858,11 @@ function createInterceptEnv(input: {
     providerEgressToken: string;
     userId: string;
   }) => Promise<WorkerProviderEgressTokenValidationResult>;
+  validateRuntimeProviderEgressCredential?: (input: {
+    providerKind: string;
+    runnerContainerName: string;
+    userId: string;
+  }) => Promise<WorkerProviderEgressCredentialValidationResult>;
 }): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
@@ -6699,6 +6872,9 @@ function createInterceptEnv(input: {
     EXA_API_KEY: input.EXA_API_KEY,
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
+    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+      input.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET
+      ?? PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     ...(input.HOSTED_WEB_BASE_URL === undefined
       ? {}
       : { HOSTED_WEB_BASE_URL: input.HOSTED_WEB_BASE_URL }),
@@ -6750,6 +6926,8 @@ function createInterceptEnv(input: {
       getByName: () => ({
         validateActiveRuntimeWriteFence:
           input.validateActiveRuntimeWriteFence ?? (async () => ({ owns: false })),
+        validateRuntimeProviderEgressCredential:
+          input.validateRuntimeProviderEgressCredential ?? (async () => ({ owns: false })),
         validateRuntimeProviderEgressToken:
           input.validateRuntimeProviderEgressToken ?? (async () => ({ owns: false })),
         validateRuntimeWriteFence: input.validateRuntimeWriteFence ?? (async () => false),

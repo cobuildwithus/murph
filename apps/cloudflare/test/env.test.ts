@@ -297,6 +297,9 @@ describe("hosted runner secrets policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_CONTAINER_DEBUG_SECRET")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_LOG_FINGERPRINT_SECRET")).toBe(false);
+    expect(
+      isHostedRunnerSecretKeyAllowed("HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET"),
+    ).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
@@ -310,6 +313,7 @@ describe("hosted runner secrets policy", () => {
         "HOSTED_CONTAINER_DEBUG_SECRET",
         "HOSTED_AI_USAGE_REPORTING_SECRET",
         "HOSTED_LOG_FINGERPRINT_SECRET",
+        "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
         "WHISPER_COMMAND",
         "NODE_OPTIONS",
       ].join(","),
@@ -320,6 +324,9 @@ describe("hosted runner secrets policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_CONTAINER_DEBUG_SECRET", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_LOG_FINGERPRINT_SECRET", source)).toBe(false);
+    expect(
+      isHostedRunnerSecretKeyAllowed("HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET", source),
+    ).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NODE_OPTIONS", source)).toBe(false);
   });
@@ -331,6 +338,8 @@ describe("hosted runner secrets policy", () => {
       HOSTED_CONTAINER_DEBUG_SECRET: "container-debug-secret",
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
       OPENAI_API_KEY: "sk-test",
       TELEGRAM_BOT_TOKEN: "telegram-token",
