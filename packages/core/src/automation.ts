@@ -123,6 +123,9 @@ export interface AdvanceAutomationDeviceActivityCursorInput {
   afterEntityId: string;
   afterOccurredAt: string;
   expectedActivityKind?: AutomationDeviceActivityKind;
+  expectedContinuityPolicy: AutomationContinuityPolicy;
+  expectedInstructions: string;
+  expectedRoute: AutomationRoute;
   expectedSource?: AutomationDeviceActivitySource;
   lookup: string;
   now?: Date;
@@ -714,6 +717,10 @@ export async function advanceAutomationDeviceActivityCursor(
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
     if (
+      existingRecord.status !== "active" ||
+      existingRecord.continuityPolicy !== input.expectedContinuityPolicy ||
+      existingRecord.instructions !== input.expectedInstructions ||
+      !automationRoutesEqual(existingRecord.route, input.expectedRoute) ||
       existingRecord.schedule.kind !== "deviceActivity" ||
       existingRecord.schedule.activityKind !== input.expectedActivityKind ||
       existingRecord.schedule.source !== input.expectedSource
@@ -776,6 +783,10 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
     "VAULT_AUTOMATION_EMPTY_PATCH",
     "Automation edit requires at least one field to update.",
   );
+}
+
+function automationRoutesEqual(left: AutomationRoute, right: AutomationRoute): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function resolveAdvancedDeviceActivityCursor(input: {

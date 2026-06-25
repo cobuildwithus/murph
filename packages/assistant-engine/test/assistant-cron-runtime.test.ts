@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -146,8 +145,9 @@ import {
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
 import {
-  buildAssistantDeviceActivityAuthorityTag,
-  buildAssistantDeviceActivityParentAutomationTag,
+  appendAssistantDeviceActivityCronJobMetadata,
+  buildAssistantDeviceActivityAuthorityKey,
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
 } from '../src/assistant/device-activity-cron-tags.ts'
 import {
   completeAssistantOnboarding,
@@ -155,6 +155,7 @@ import {
 } from '../src/assistant/onboarding-state.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
+  dispatchAssistantOutboxIntent,
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
   saveAssistantOutboxIntent,
@@ -1088,7 +1089,14 @@ describe('assistant cron runtime orchestration', () => {
       enabled: true,
       jobId: 'cron_device_activity_listener',
       keepAfterRun: true,
-      name: 'Device activity listener',
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity listener',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345678',
+          parentAutomationId,
+        },
+      ),
       prompt: 'Ask about the imported run.',
       schedule: {
         at: '2026-04-08T08:59:30.000Z',
@@ -1105,13 +1113,6 @@ describe('assistant cron runtime orchestration', () => {
         runningAt: null,
         runningPid: null,
       },
-      tags: [
-        'system:assistant-require-send',
-        buildAssistantDeviceActivityParentAutomationTag(parentAutomationId),
-        buildAssistantDeviceActivityAuthorityTag(
-          buildDeviceActivityAuthorityKey(parentAutomation),
-        ),
-      ],
       target: {
         alias: null,
         channel: 'linq',
@@ -1159,6 +1160,81 @@ describe('assistant cron runtime orchestration', () => {
         nextRunAt: null,
       }),
     })
+  })
+
+  it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-outbox-stale-',
+    )
+    const parentAutomationId = 'auto_device_activity_outbox'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about the imported run.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      slug: 'device-activity-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const metadata = {
+      authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+      occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef12',
+      parentAutomationId,
+    }
+    const intent = buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T08:01:00.000Z',
+      intentId: 'outbox_device_activity_stale',
+      message: 'How did that run feel?',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+        discriminator: {
+          jobId: 'cron_device_activity_listener',
+          target: intent.targetFingerprint,
+        },
+        metadata,
+      }),
+      nextAttemptAt: '2026-04-08T08:02:00.000Z',
+    })
+
+    parentAutomation.status = 'paused'
+    const prepareDispatchIntent = vi.fn()
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        prepareDispatchIntent,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-04-08T08:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(prepareDispatchIntent).not.toHaveBeenCalled()
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      }),
+    )
   })
 
   it('toggles canonical jobs and persists active and paused states through automation storage', async () => {
@@ -4261,17 +4337,13 @@ function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): stri
     throw new Error('Expected device activity automation.')
   }
 
-  return createHash('sha256')
-    .update(JSON.stringify({
-      activityKind: automation.schedule.activityKind ?? null,
-      automationId: automation.automationId,
-      continuityPolicy: automation.continuityPolicy,
-      instructions: automation.instructions,
-      route: automation.route,
-      source: automation.schedule.source ?? null,
-    }))
-    .digest('hex')
-    .slice(0, 40)
+  return buildAssistantDeviceActivityAuthorityKey({
+    ...automation,
+    schedule: {
+      activityKind: automation.schedule.activityKind,
+      source: automation.schedule.source,
+    },
+  })
 }
 
 function getVaultScheduledLogStore(vault: string): ScheduledLogQueryRecord[] {

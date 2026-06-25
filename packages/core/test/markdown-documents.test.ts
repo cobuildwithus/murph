@@ -293,6 +293,9 @@ describe("markdown document primitives", () => {
       afterOccurredAt: "2026-06-07T11:30:00.000Z",
       afterEntityId: "evt_walk",
       expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
       expectedSource: "whoop",
       now: new Date("2026-06-07T12:01:00.000Z"),
     });
@@ -316,6 +319,9 @@ describe("markdown document primitives", () => {
       afterOccurredAt: "2026-06-07T11:15:00.000Z",
       afterEntityId: "evt_older",
       expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
       expectedSource: "whoop",
       now: new Date("2026-06-07T12:01:30.000Z"),
     });
@@ -344,6 +350,9 @@ describe("markdown document primitives", () => {
       afterOccurredAt: "2026-06-07T12:30:00.000Z",
       afterEntityId: "evt_run",
       expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
       expectedSource: "whoop",
       now: new Date("2026-06-07T12:03:00.000Z"),
     });

@@ -13,6 +13,7 @@ import {
   type AssistantStatusOutboxSummary,
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { listAutomations } from '@murphai/query'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
@@ -83,6 +84,10 @@ import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
+import {
+  buildAssistantDeviceActivityAuthorityKey,
+  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
+} from './device-activity-cron-tags.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -708,6 +713,26 @@ export async function dispatchAssistantOutboxIntent(input: {
       message: 'Injected assistant delivery failure.',
     })
 
+    const deviceActivityAuthorityError = await resolveDeviceActivityOutboxAuthorityError({
+      intent: dispatchIntent,
+      vault: input.vault,
+    })
+    if (deviceActivityAuthorityError) {
+      const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+        error: deviceActivityAuthorityError,
+        failedAt: now,
+        intent: dispatchIntent,
+        intentPath: dispatchIntentPath,
+        status: 'failed',
+        vault: input.vault,
+      })
+      return {
+        intent: failedIntent,
+        deliveryError: failedIntent.lastError,
+        session: null,
+      }
+    }
+
     await input.dispatchHooks?.prepareDispatchIntent?.({
       intent: dispatchIntent,
       vault: input.vault,
@@ -848,6 +873,41 @@ function assistantOutboxIntentMatchesPreparedDispatch(
   return intent.preparedDispatchToken === preparedDispatch.preparedDispatchToken &&
     intent.deliveryIdempotencyKey === preparedDispatch.deliveryIdempotencyKey &&
     intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
+}
+
+async function resolveDeviceActivityOutboxAuthorityError(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<Error | null> {
+  const metadata = readAssistantDeviceActivityDeliveryIdempotencyMetadata(
+    input.intent.deliveryIdempotencyKey,
+  )
+  if (!metadata) {
+    return null
+  }
+
+  const parentAutomation = (await listAutomations(input.vault, {
+    status: ['active', 'paused', 'archived'],
+  })).find((automation) => automation.automationId === metadata.parentAutomationId)
+  if (
+    !parentAutomation ||
+    parentAutomation.status !== 'active' ||
+    parentAutomation.schedule.kind !== 'deviceActivity' ||
+    buildAssistantDeviceActivityAuthorityKey({
+      ...parentAutomation,
+      schedule: {
+        activityKind: parentAutomation.schedule.activityKind,
+        source: parentAutomation.schedule.source,
+      },
+    }) !== metadata.authorityKey
+  ) {
+    return new VaultCliError(
+      'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      'Device activity automation authority changed before outbound delivery.',
+    )
+  }
+
+  return null
 }
 
 export async function deliverAssistantOutboxMessage(input: {

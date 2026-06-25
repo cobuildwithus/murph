@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import { listAutomations, type AutomationQueryRecord } from '@murphai/query'
 import {
@@ -38,9 +38,9 @@ import {
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
-  readAssistantDeviceActivityAuthorityTag,
-  readAssistantDeviceActivityOccurrenceTag,
-  readAssistantDeviceActivityParentAutomationTag,
+  buildAssistantDeviceActivityAuthorityKey,
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
+  readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
 import {
   buildCanonicalAutomationUpsertInput,
@@ -395,42 +395,46 @@ export async function executeClaimedAssistantCronJob(input: {
           errorText = lifecycleSkipReason
         } else {
           const result = await sendAssistantNotificationLocal({
-          vault: input.vault,
-          ...automationTurn,
-          instructions: buildAssistantCronExecutionInstructions(claimedJob),
-          deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
-            job: claimedJob,
-            trigger: input.trigger,
-          }),
-          hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
-            job: claimedJob,
-            trigger: input.trigger,
-          }),
-          sessionId: claimedJob.target.sessionId,
-          alias: claimedJob.target.alias,
-          allowBindingRebind: claimedJob.target.sessionId !== null,
-          channel: claimedJob.target.channel,
-          identityId: claimedJob.target.identityId,
-          onTraceEvent: input.onTraceEvent,
-          participantId: claimedJob.target.participantId,
-          responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-          threadId: claimedJob.target.threadId,
-          bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
-          deliveryKind: bindingDelivery?.kind ?? undefined,
-          deliverySource: claimedJob.target.deliverySource,
-          deliveryTarget: claimedJob.target.deliveryTarget,
-          operatorAuthority: 'direct-operator',
-          workingDirectory: input.vault,
-        })
+            vault: input.vault,
+            ...automationTurn,
+            instructions: buildAssistantCronExecutionInstructions(claimedJob),
+            deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            deliveryIdempotencyKey: buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            sessionId: claimedJob.target.sessionId,
+            alias: claimedJob.target.alias,
+            allowBindingRebind: claimedJob.target.sessionId !== null,
+            channel: claimedJob.target.channel,
+            identityId: claimedJob.target.identityId,
+            onTraceEvent: input.onTraceEvent,
+            participantId: claimedJob.target.participantId,
+            responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
+            threadId: claimedJob.target.threadId,
+            bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+            deliveryKind: bindingDelivery?.kind ?? undefined,
+            deliverySource: claimedJob.target.deliverySource,
+            deliveryTarget: claimedJob.target.deliveryTarget,
+            operatorAuthority: 'direct-operator',
+            workingDirectory: input.vault,
+          })
 
-        sessionId = result.session.sessionId
-        response = result.response ?? result.decision.privateSummary
-        if (result.deliveryOutcome?.kind === 'queued') {
-          pendingDeliveryIntentId = result.deliveryOutcome.intentId
-          status = 'skipped'
-        } else {
-          status = 'succeeded'
-        }
+          sessionId = result.session.sessionId
+          response = result.response ?? result.decision.privateSummary
+          if (result.deliveryOutcome?.kind === 'queued') {
+            pendingDeliveryIntentId = result.deliveryOutcome.intentId
+            status = 'skipped'
+          } else {
+            status = 'succeeded'
+          }
         }
       }
     }
@@ -652,9 +656,34 @@ function resolveAssistantCronTurnServiceTier(input: {
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
+  if (readAssistantDeviceActivityCronJobMetadata(job.job.name)) {
+    return { kind: 'require_send' }
+  }
+
   return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
+}
+
+function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
+  job: AssistantCronJob
+  trigger: AssistantCronTrigger
+}): string | null {
+  const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.name)
+  const dueAt = normalizeNullableString(input.job.state.nextRunAt)
+  if (!metadata || input.trigger !== 'scheduled' || !dueAt) {
+    return null
+  }
+
+  return buildAssistantDeviceActivityDeliveryIdempotencyKey({
+    discriminator: {
+      dueAt,
+      jobId: input.job.jobId,
+      target: input.job.target,
+      trigger: input.trigger,
+    },
+    metadata,
+  })
 }
 
 function listAssistantCronNotificationTags(
@@ -863,21 +892,16 @@ async function resolveDeviceActivityParentAuthorityError(input: {
     return null
   }
 
-  const parentAutomationId = readAssistantDeviceActivityParentAutomationTag(input.job.job.tags)
-  const expectedAuthorityKey = readAssistantDeviceActivityAuthorityTag(input.job.job.tags)
-  const occurrenceKey = readAssistantDeviceActivityOccurrenceTag(input.job.job.tags)
-  if (!parentAutomationId) {
-    return expectedAuthorityKey || occurrenceKey
+  const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.job.name)
+  if (!metadata) {
+    return input.job.job.tags?.length
       ? ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
       : null
-  }
-  if (!expectedAuthorityKey || !occurrenceKey) {
-    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
   }
 
   const parentAutomation = (await listAutomations(input.vault, {
     status: ['active', 'paused', 'archived'],
-  })).find((automation) => automation.automationId === parentAutomationId)
+  })).find((automation) => automation.automationId === metadata.parentAutomationId)
   if (!parentAutomation || parentAutomation.status !== 'active') {
     return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
   }
@@ -888,29 +912,15 @@ async function resolveDeviceActivityParentAuthorityError(input: {
     return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
   }
 
-  return buildDeviceActivityAutomationAuthorityKey(parentAutomation) === expectedAuthorityKey
+  return buildAssistantDeviceActivityAuthorityKey({
+    ...parentAutomation,
+    schedule: {
+      activityKind: parentAutomation.schedule.activityKind,
+      source: parentAutomation.schedule.source,
+    },
+  }) === metadata.authorityKey
     ? null
     : ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
-}
-
-function buildDeviceActivityAutomationAuthorityKey(
-  automation: AutomationQueryRecord,
-): string {
-  if (automation.schedule.kind !== 'deviceActivity') {
-    throw new TypeError('Device activity automation authority requires a deviceActivity schedule.')
-  }
-
-  return createHash('sha256')
-    .update(JSON.stringify({
-      activityKind: automation.schedule.activityKind ?? null,
-      automationId: automation.automationId,
-      continuityPolicy: automation.continuityPolicy,
-      instructions: automation.instructions,
-      route: automation.route,
-      source: automation.schedule.source ?? null,
-    }))
-    .digest('hex')
-    .slice(0, 40)
 }
 
 function assistantCronTargetMatchesAutomationRoute(

@@ -95,7 +95,7 @@ export async function writeAssistantCronStore(
   paths: AssistantStatePaths,
   store: AssistantCronStore,
 ): Promise<void> {
-  await writeJsonFileAtomic(paths.cronJobsPath, store)
+  await writeJsonFileAtomic(paths.cronJobsPath, sanitizeAssistantCronStoreForPersistence(store))
 }
 
 export async function readAssistantCronRuns(
@@ -366,6 +366,16 @@ function normalizeAssistantCronStore(store: AssistantCronStore): AssistantCronSt
   return {
     ...store,
     jobs: store.jobs.map((job) => normalizeAssistantCronJob(job)),
+  }
+}
+
+function sanitizeAssistantCronStoreForPersistence(store: AssistantCronStore): AssistantCronStore {
+  return {
+    ...store,
+    jobs: store.jobs.map((job) => {
+      const { tags: _tags, ...persisted } = job
+      return assistantCronJobSchema.parse(persisted)
+    }),
   }
 }
 

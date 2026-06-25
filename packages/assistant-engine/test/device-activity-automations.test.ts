@@ -16,6 +16,9 @@ import {
   type CanonicalEntity,
   type VaultReadModel,
 } from '@murphai/query'
+import {
+  readAssistantDeviceActivityCronJobMetadata,
+} from '../src/assistant/device-activity-cron-tags.ts'
 
 const deviceActivityMocks = vi.hoisted(() => ({
   advanceAutomationDeviceActivityCursor: vi.fn(),
@@ -128,17 +131,15 @@ describe('device activity triggered automations', () => {
           kind: 'at',
           at: '2026-06-07T12:01:00.000Z',
         },
-        tags: expect.arrayContaining(['system:assistant-require-send']),
       }),
     )
-    expect(jobs[0]?.tags).toContain('user-visible')
-    expect(jobs[0]?.tags).toContain('system:assistant-device-activity-parent:auto_walk')
-    expect(jobs[0]?.tags?.some((tag) =>
-      tag.startsWith('system:assistant-device-activity-authority:'),
-    )).toBe(true)
-    expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-parent:auto_other')
-    expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-occurrence:stale_occurrence')
-    expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-authority:stale_authority')
+    expect(jobs[0]?.tags).toBeUndefined()
+    const metadata = readAssistantDeviceActivityCronJobMetadata(jobs[0]?.name ?? '')
+    expect(metadata).toEqual({
+      authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      occurrenceKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      parentAutomationId: 'auto_walk',
+    })
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:00:00.000Z',
@@ -254,13 +255,12 @@ describe('device activity triggered automations', () => {
     })
 
     const [queued] = await readQueuedCronJobs(vaultRoot)
-    expect(queued?.tags).toContain('system:assistant-device-activity-parent:auto_fresh_run')
-    expect(queued?.tags?.some((tag) =>
-      tag.startsWith('system:assistant-device-activity-authority:'),
-    )).toBe(true)
-    expect(queued?.tags?.some((tag) =>
-      tag.startsWith('system:assistant-device-activity-occurrence:'),
-    )).toBe(true)
+    expect(queued?.tags).toBeUndefined()
+    expect(readAssistantDeviceActivityCronJobMetadata(queued?.name ?? '')).toEqual({
+      authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      occurrenceKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      parentAutomationId: 'auto_fresh_run',
+    })
     expect(queued?.target.sessionId).toBeNull()
   })
 
