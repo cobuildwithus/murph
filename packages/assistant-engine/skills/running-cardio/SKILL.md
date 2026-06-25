@@ -1,6 +1,14 @@
 ---
 name: running-cardio
-description: Use for general running and cardiovascular fitness without a race or event target: starting or restarting, aerobic-base or Zone 2 work, non-event speed development, low-impact conditioning, cardio around strength or sport, and limited-time maintenance. Defer to a dedicated competition-training owner when one is registered and a named event, date, category, qualifying target, specific benchmark, or event-specific performance goal should shape the plan; otherwise keep support bounded to general cardio preparation. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance.
+description: >-
+  Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning,
+  low-impact conditioning, cardio around strength or sport, limited-time maintenance,
+  and non-event speed development. For a named event, date, competition category,
+  qualifying target, concrete benchmark, or event-specific performance goal, use
+  competition-training when registered; otherwise keep support bounded to general
+  capacity and preparation rather than event-specific tapering, peaking, race rules,
+  or benchmark-specific progression. Use physical-therapy first for active pain,
+  injury, rehabilitation, or return-to-run clearance.
 ---
 
 # Running and cardio

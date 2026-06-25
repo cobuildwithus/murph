@@ -1149,7 +1149,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '99ac8a63098dffc0afde16319e571ebbabd5ecad41150a262e19018c315943cf',
+      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1407,24 +1407,33 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
-  it('routes general running and cardio planning through the Murph running-cardio skill', () => {
+  it('renders running and cardio planning through the Murph skill registry', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const healthReasoningStart = prompt.indexOf('Health reasoning:')
+    const chronicSupportStart = prompt.indexOf(
+      'Chronic illness, persistent pain, and self-management experiments:',
+    )
 
     expect(prompt).toContain(
-      'For running, walking, cycling, aerobic-base, Zone 2, cardio conditioning, or non-event speed-development requests',
+      '- running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
     )
     expect(prompt).toContain(
-      'read the running-cardio skill before planning, ramping, adjusting intensity, or choosing modalities.',
+      'otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
     )
     expect(prompt).toContain(
-      'Keep pain and return-to-run clearance in physical-therapy first',
+      'Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance.',
     )
     expect(prompt).toContain(
-      'For named events, qualifying targets, competition categories, or concrete performance benchmarks, use a dedicated competition-training owner when one is registered; otherwise read running-cardio',
+      'Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
     )
     expect(prompt).toContain(
-      'keep help bounded to general preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
+      'File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.',
     )
+    expect(healthReasoningStart).toBeGreaterThanOrEqual(0)
+    expect(chronicSupportStart).toBeGreaterThan(healthReasoningStart)
+    expect(
+      prompt.slice(healthReasoningStart, chronicSupportStart),
+    ).not.toContain('running-cardio')
     expect(prompt).not.toContain('- competition-training:')
   })
 
@@ -1449,7 +1458,9 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
     expect(prompt).toContain('running-cardio')
-    expect(prompt).toContain('general running and cardiovascular fitness')
+    expect(prompt).toContain(
+      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
     )

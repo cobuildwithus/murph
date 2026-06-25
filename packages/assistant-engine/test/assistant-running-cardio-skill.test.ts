@@ -41,9 +41,11 @@ describe('assistant running cardio skill', () => {
 
     expect(skill).toBeDefined()
     expect(skill?.name).toBe('running-cardio')
-    expect(skill?.triggerHint).toContain('general running and cardiovascular fitness')
+    expect(skill?.triggerHint).toContain(
+      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
     expect(skill?.triggerHint).toContain('competition-training')
-    expect(skill?.triggerHint).toContain('specific benchmark')
+    expect(skill?.triggerHint).toContain('concrete benchmark')
     expect(skill?.triggerHint).toContain('physical-therapy')
     expect(skill?.triggerHint).toContain('behavior-followthrough')
   })
@@ -52,7 +54,7 @@ describe('assistant running cardio skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'running-cardio: Use for general running and cardiovascular fitness',
+      'running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',

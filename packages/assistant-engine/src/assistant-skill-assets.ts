@@ -77,7 +77,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'running-cardio',
     name: 'running-cardio',
     triggerHint:
-      'Use for general running and cardiovascular fitness without a race, event, or concrete performance benchmark: starting or restarting, aerobic-base or Zone 2 work, non-event speed development, low-impact conditioning, cardio around strength or sport, and limited-time maintenance. For a named event, date, competition category, qualifying target, specific benchmark even without a date, or event-specific performance goal, defer to a dedicated competition-training owner when one is registered; otherwise keep support bounded to general cardio preparation. For current pain, injury, rehabilitation, or return-to-run clearance, use physical-therapy first. Compose with chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+      'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
 ] as const
 

@@ -27,6 +27,86 @@ const DELETED_COMMONS_COMMANDS = [
   'vault-cli commons source list',
 ] as const
 
+type AssistantSkillMetadata = {
+  readonly description: string
+  readonly name: string
+}
+
+function parseAssistantSkillFrontmatter(raw: string): AssistantSkillMetadata {
+  const normalized = raw.replace(/\r\n/gu, '\n')
+  if (!normalized.startsWith('---\n')) {
+    throw new Error('SKILL.md must start with YAML frontmatter')
+  }
+
+  const frontmatterEnd = normalized.indexOf('\n---\n', 4)
+  if (frontmatterEnd === -1) {
+    throw new Error('SKILL.md must close YAML frontmatter')
+  }
+
+  const values = new Map<string, string>()
+  let blockKey: string | null = null
+  let blockStyle: 'folded' | 'literal' | null = null
+
+  for (const line of normalized.slice(4, frontmatterEnd).split('\n')) {
+    if (line.length === 0) {
+      continue
+    }
+
+    if (/^\s/u.test(line)) {
+      if (!blockKey || !blockStyle) {
+        throw new Error(`Unexpected indented SKILL.md frontmatter line: ${line}`)
+      }
+      const current = values.get(blockKey) ?? ''
+      const text = line.trim()
+      values.set(
+        blockKey,
+        blockStyle === 'folded'
+          ? [current, text].filter(Boolean).join(' ')
+          : [current, text].filter(Boolean).join('\n'),
+      )
+      continue
+    }
+
+    blockKey = null
+    blockStyle = null
+    const match = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s*(.*))?$/u.exec(line)
+    if (!match) {
+      throw new Error(`Invalid SKILL.md frontmatter line: ${line}`)
+    }
+
+    const key = match[1]
+    const value = match[2] ?? ''
+    if (!key) {
+      throw new Error(`Invalid SKILL.md frontmatter key: ${line}`)
+    }
+
+    if (/^[>|][+-]?$/u.test(value)) {
+      blockKey = key
+      blockStyle = value.startsWith('>') ? 'folded' : 'literal'
+      values.set(key, '')
+      continue
+    }
+
+    const trimmedValue = value.trim()
+    const quoted =
+      trimmedValue.startsWith('"') || trimmedValue.startsWith("'")
+    if (!quoted && /:\s/u.test(trimmedValue)) {
+      throw new Error(
+        `Plain SKILL.md frontmatter scalar for ${key} contains ': '; use a quoted or folded scalar`,
+      )
+    }
+    values.set(key, trimmedValue)
+  }
+
+  const name = values.get('name')?.trim()
+  const description = values.get('description')?.trim()
+  if (!name || !description) {
+    throw new Error('SKILL.md frontmatter must include name and description')
+  }
+
+  return { description, name }
+}
+
 describe('assistant skill assets', () => {
   async function readSkillFile(skill: (typeof ASSISTANT_SKILLS)[number]) {
     return readFile(
@@ -44,10 +124,10 @@ describe('assistant skill assets', () => {
   it('has a valid SKILL.md for every registered assistant skill', async () => {
     for (const skill of ASSISTANT_SKILLS) {
       const raw = await readSkillFile(skill)
+      const metadata = parseAssistantSkillFrontmatter(raw)
 
-      expect(raw).toContain('---')
-      expect(raw).toContain(`name: ${skill.name}`)
-      expect(raw).toContain('description:')
+      expect(metadata.name).toBe(skill.name)
+      expect(metadata.description.length).toBeGreaterThan(0)
       expect(raw.length).toBeGreaterThan(0)
     }
   })
