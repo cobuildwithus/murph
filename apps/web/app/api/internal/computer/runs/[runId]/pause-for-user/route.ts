@@ -14,12 +14,15 @@ export const POST = withJsonError(async (
   const { body, memberId } = await readSignedComputerPauseForUserRequest(request);
   const runId = await resolveDecodedRouteParam(context.params, "runId");
   const service = createComputerUseService();
+  const handoffPurpose = body.handoffPurpose === "screen_inspection"
+    ? "manual_browser_help"
+    : body.handoffPurpose;
 
   return jsonOk(await withHostedComputerToolFailureRuntimeLog({
     memberId,
     operation: "pause-for-user",
     run: () => service.pauseForUser({
-      handoffPurpose: body.handoffPurpose,
+      handoffPurpose,
       memberId,
       pauseDeliveryContext: body.pauseDeliveryContext,
       reason: body.reason,
