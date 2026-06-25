@@ -157,12 +157,44 @@ describe("createHostedPhoneCall", () => {
       where: { id: createdCallId },
     }]);
   });
+
+  it("does not mark the call failed after the provider already started", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({
+      created,
+      updateError: new Error("database unavailable"),
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_started" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).rejects.toThrow("database unavailable");
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(runtime.startCalls).toEqual([{
+      brief: VALID_BRIEF,
+      id: createdCallId,
+      memberId: created.memberId,
+    }]);
+    expect(store.updateCalls).toEqual([{
+      data: {
+        providerCallId: "retell_started",
+        status: "calling",
+      },
+      where: { id: createdCallId },
+    }]);
+  });
 });
 
 function createPhoneCallStore(input: {
   createError?: unknown;
   created?: HostedPhoneCall;
   existing?: HostedPhoneCall;
+  updateError?: Error;
 }) {
   const createCalls: PhoneCallCreateInput[] = [];
   const findCalls: PhoneCallFindInput[] = [];
@@ -191,6 +223,9 @@ function createPhoneCallStore(input: {
       },
       update: async (args) => {
         updateCalls.push(args);
+        if (input.updateError) {
+          throw input.updateError;
+        }
         current = {
           ...current,
           providerCallId: args.data.providerCallId ?? current.providerCallId,

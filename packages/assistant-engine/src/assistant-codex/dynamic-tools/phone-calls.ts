@@ -10,6 +10,10 @@ import type {
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantAcceptedTurnInputSource,
+} from '../../assistant/active-turn-input-journal.js'
+import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
@@ -71,14 +75,52 @@ export function createPhoneCallRequestKey(input: {
   brief: HostedPhoneCallBrief
   scope: AssistantHostedToolRequestKeyScope
 }): string {
+  if (input.scope.acceptedInputIds.length === 0) {
+    throw new TypeError('Phone call request key requires accepted user input.')
+  }
+
   const digest = createHash('sha256')
     .update(stableJson({
-      brief: input.brief,
-      scope: input.scope,
+      acceptedInputIds: [...input.scope.acceptedInputIds],
+      allowTransferToUser: input.brief.allowTransferToUser,
+      assistantTurnOrdinal: input.scope.assistantTurnOrdinal,
+      conversationId: input.scope.conversationId,
+      inboundMailboxItemIds: [...input.scope.inboundMailboxItemIds],
+      recipientKey: input.scope.recipientKey,
       schema: 'murph.create-phone-call.request-key.v1',
+      shareableFacts: input.brief.shareableFacts,
+      toPhoneNumber: input.brief.to.phoneNumber,
+      turnId: input.scope.turnId,
     }))
     .digest('hex')
   return `phone_call_${digest}`
+}
+
+export function resolveAssistantPhoneCallAcceptedInputIds(input: {
+  acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+  turnTrigger?: string | null
+}): readonly string[] {
+  return input.acceptedInputItems
+    .filter((item) => isAssistantPhoneCallAcceptedInputEligible({
+      source: item.source,
+      turnTrigger: input.turnTrigger ?? null,
+    }))
+    .map((item) => item.id)
+}
+
+function isAssistantPhoneCallAcceptedInputEligible(input: {
+  source: AssistantAcceptedTurnInputSource
+  turnTrigger: string | null
+}): boolean {
+  switch (input.source) {
+    case 'assistant-input':
+    case 'manual':
+      return true
+    case 'initial':
+      return input.turnTrigger !== 'automation-cron'
+    case 'system':
+      return false
+  }
 }
 
 function stableJson(value: unknown): string {

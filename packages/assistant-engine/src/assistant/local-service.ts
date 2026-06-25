@@ -471,6 +471,10 @@ export async function sendAssistantMessageLocal(
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
         const hostedExecutionContext = executionContext?.hosted ?? null
+        let acceptedInputIdsForProviderRequest: readonly string[] =
+          initialAcceptedInputJournal.inputIds
+        let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
+          initialAcceptedInputJournal.inputs
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
@@ -533,10 +537,12 @@ export async function sendAssistantMessageLocal(
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
+              getAcceptedInputIds: () => acceptedInputIdsForProviderRequest,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getTurnId: () => currentUserTurn.turnId,
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -598,10 +604,6 @@ export async function sendAssistantMessageLocal(
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
         const providerRequestOrdinal = 0
-        let acceptedInputIdsForProviderRequest: readonly string[] =
-          initialAcceptedInputJournal.inputIds
-        let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
-          initialAcceptedInputJournal.inputs
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string

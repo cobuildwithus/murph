@@ -1026,11 +1026,12 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => input.deliveryContext ?? null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
     currentHostedToolRequestKeyScope: () => ({
+      acceptedInputIds: ["input_test"],
       assistantTurnOrdinal: "1",
       conversationId: input.deliveryContext?.conversationId ?? null,
       inboundMailboxItemIds: input.hostedMailboxItemIds ?? [],
       recipientKey: input.deliveryContext?.recipientKey ?? null,
-      sessionId: "session_test",
+      turnId: "turn_test",
     }),
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     sendVaultFile: vi.fn(async () => {

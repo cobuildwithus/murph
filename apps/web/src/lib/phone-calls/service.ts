@@ -82,24 +82,13 @@ export async function createHostedPhoneCall(input: {
     };
   }
 
+  let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
-    const started = await runtime.start({
+    started = await runtime.start({
       brief: input.brief,
       id: call.id,
       memberId: input.memberId,
     });
-    await prisma.hostedPhoneCall.update({
-      data: {
-        providerCallId: started.providerCallId,
-        status: "calling",
-      },
-      where: { id: call.id },
-    });
-
-    return {
-      phoneCallId: call.id,
-      status: "calling",
-    };
   } catch (error) {
     await prisma.hostedPhoneCall.update({
       data: {
@@ -113,6 +102,19 @@ export async function createHostedPhoneCall(input: {
     });
     throw error;
   }
+
+  await prisma.hostedPhoneCall.update({
+    data: {
+      providerCallId: started.providerCallId,
+      status: "calling",
+    },
+    where: { id: call.id },
+  });
+
+  return {
+    phoneCallId: call.id,
+    status: "calling",
+  };
 }
 
 function createHostedPhoneCallId(): string {
