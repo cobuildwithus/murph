@@ -1407,6 +1407,36 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('renders running and cardio planning through the Murph skill registry', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const healthReasoningStart = prompt.indexOf('Health reasoning:')
+    const chronicSupportStart = prompt.indexOf(
+      'Chronic illness, persistent pain, and self-management experiments:',
+    )
+
+    expect(prompt).toContain(
+      '- running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      'otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
+    )
+    expect(prompt).toContain(
+      'Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance.',
+    )
+    expect(prompt).toContain(
+      'Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+    )
+    expect(prompt).toContain(
+      'File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.',
+    )
+    expect(healthReasoningStart).toBeGreaterThanOrEqual(0)
+    expect(chronicSupportStart).toBeGreaterThan(healthReasoningStart)
+    expect(
+      prompt.slice(healthReasoningStart, chronicSupportStart),
+    ).not.toContain('running-cardio')
+    expect(prompt).toContain('- competition-training: Use when a user is preparing')
+  })
+
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
@@ -1438,6 +1468,13 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('strength or resistance training plans')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
+    expect(prompt).toContain('running-cardio')
+    expect(prompt).toContain(
+      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
     )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
