@@ -50,7 +50,7 @@ describe("changelog routes", () => {
     for (const url of [
       "https://join.example.test/api/changelog?from=2026-06-01",
       "https://join.example.test/api/changelog?from=2026-07-01&to=2026-06-01",
-      "https://join.example.test/api/changelog?days=32",
+      "https://join.example.test/api/changelog?days=156",
     ]) {
       const response = await getChangelogFeed(new Request(url));
       await expect(response.json()).resolves.toMatchObject({
