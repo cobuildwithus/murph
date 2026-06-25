@@ -1283,39 +1283,8 @@ export async function updateHostedFamilySeatCount(input: {
       });
     }
 
-    await prisma.$transaction(async (tx) => {
-      const group = await tx.hostedAccountGroup.findUnique({
-        select: hostedAccountGroupAccessSelect,
-        where: {
-          id: input.groupId,
-        },
-      });
-      if (!group || group.ownerMemberId !== input.ownerMemberId) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_OWNER_REQUIRED",
-          httpStatus: 403,
-          message: "Only the family plan owner can change family seats.",
-        });
-      }
-
-      await lockHostedMemberRow(tx, group.ownerMemberId);
-      await tx.hostedAccountGroupBillingRef.update({
-        data: {
-          billedSeatCount: targetSeatCount,
-          stripeSubscriptionItemIdEncrypted: await encryptHostedWebNullableString({
-            field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_ITEM_FIELD,
-            memberId: group.ownerMemberId,
-            prisma: tx,
-            value: seatChange.stripeSubscriptionItemId,
-          }),
-          stripeSubscriptionItemLookupKey:
-            createHostedStripeSubscriptionItemLookupKey(seatChange.stripeSubscriptionItemId),
-        },
-        where: {
-          groupId: group.id,
-        },
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    // Stripe owns the durable seat quantity. The subscription webhook reconciler
+    // is the only local writer of billedSeatCount so event freshness has one fence.
   }
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -2504,6 +2473,19 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  if (await hasHostedFamilyMemberDirectPaidTx(input)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+      httpStatus: 409,
+      message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
+    });
+  }
+}
+
+async function hasHostedFamilyMemberDirectPaidTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
   const member = await input.tx.hostedMember.findUnique({
     select: {
       billingRef: {
@@ -2518,16 +2500,10 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
     },
   });
 
-  if (
+  return (
     member?.billingStatus === HostedBillingStatus.active &&
     parseHostedBillingPhase(member.billingRef?.currentBillingPhase) === "paid"
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
-      httpStatus: 409,
-      message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
-    });
-  }
+  );
 }
 
 async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
@@ -2546,20 +2522,24 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
     },
   });
 
+  const eligibleMemberships: typeof memberships = [];
   for (const membership of memberships) {
     await assertHostedFamilyMemberNotSponsoredElsewhereTx({
       groupId: input.groupId,
       memberId: membership.memberId,
       tx: input.tx,
     });
-    await assertHostedFamilyMemberNotDirectPaidTx({
+    if (await hasHostedFamilyMemberDirectPaidTx({
       memberId: membership.memberId,
       tx: input.tx,
-    });
+    })) {
+      continue;
+    }
+    eligibleMemberships.push(membership);
   }
 
   const activations: HostedMemberActivationResult[] = [];
-  for (const membership of memberships) {
+  for (const membership of eligibleMemberships) {
     activations.push(await activateHostedMemberForFamilySponsorshipTx({
       memberId: membership.memberId,
       occurredAt: input.occurredAt,

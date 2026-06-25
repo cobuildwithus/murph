@@ -1073,6 +1073,45 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("reconciles active Family billing while skipping direct-paid members during activation", async () => {
+    const tx = createTxMock();
+    const eventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
+    tx.hostedMember.findUnique.mockImplementation(async ({ where }) => ({
+      billingRef: {
+        currentBillingPhase: where.id === "member_mom" ? "paid" : null,
+      },
+      billingStatus: where.id === "member_mom"
+        ? HostedBillingStatus.active
+        : HostedBillingStatus.not_started,
+    }));
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt,
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toMatchObject({
+      activations: [
+        { memberId: "member_owner" },
+      ],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: 4,
+      }),
+    }));
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledTimes(1);
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      occurredAt: eventCreatedAt,
+      prisma: tx,
+      sourceEventId: "family-subscription:sub_family",
+    });
+  });
+
   it("fails closed when the family subscription item quantity is outside the seat range", async () => {
     const tx = createTxMock();
 
@@ -1442,7 +1481,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
-  it("updates Family seat count through Stripe and mirrors the confirmed quantity", async () => {
+  it("updates Family seat count through Stripe without writing the reconciled seat quantity", async () => {
     const tx = createTxMock({
       activeMembershipCount: 2,
       billedSeatCount: 2,
@@ -1483,17 +1522,7 @@ describe("hosted Family plan", () => {
         idempotencyKey: expect.stringContaining("seats-3"),
       },
     );
-    expect(tx.hostedAccountGroupBillingRef.update).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        billedSeatCount: 3,
-        stripeSubscriptionItemIdEncrypted: "encrypted:si_family",
-        stripeSubscriptionItemLookupKey:
-          expect.stringMatching(/^hbidx:stripe-subscription-item:v1:/u),
-      }),
-      where: {
-        groupId: "hbag_family",
-      },
-    });
+    expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 
   it("does not reduce Family seats below active members and pending invites", async () => {
