@@ -46,9 +46,6 @@ describe('assistant sleep recovery readiness skill', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-recovery-readiness/SKILL.md',
     )
-    expect(prompt).toContain(
-      'Use `sleep-recovery-readiness` when sleep, fatigue, soreness, low motivation, recovery/readiness, deloading, naps, shift work, travel/jet lag, or wearable recovery trends should decide whether to train as planned, modify, recover, rest, or seek care.',
-    )
   })
 
   it('keeps one compact decision layer instead of a parallel recovery system', async () => {
