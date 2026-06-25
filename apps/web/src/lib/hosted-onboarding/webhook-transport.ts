@@ -9,6 +9,11 @@ import {
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
 import { hostedOnboardingError } from "./errors";
+import {
+  markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliverySendFailedTx,
+  recordHostedLinqDeliveryAttemptTx,
+} from "./linq-delivery-store";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { buildHostedInviteUrl } from "./invite-service";
@@ -233,22 +238,102 @@ async function sendHostedLinqSideEffect(
   },
 ): Promise<void> {
   const startedAtMs = Date.now();
+  await recordHostedLinqDeliveryAttemptBestEffort({
+    effect,
+    prisma: options.prisma,
+    startedAtMs,
+  });
 
   try {
     await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
-    await sendHostedLinqChatMessage({
+    const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: effect.effectId,
       message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
+    await markHostedLinqDeliveryAcceptedBestEffort({
+      chatId: result.chatId ?? effect.payload.chatId,
+      effect,
+      messageId: result.messageId,
+      prisma: options.prisma,
+    });
   } catch (error) {
+    await markHostedLinqDeliveryFailedBestEffort({
+      effect,
+      error,
+      prisma: options.prisma,
+    });
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
     );
     throw error;
+  }
+}
+
+async function recordHostedLinqDeliveryAttemptBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  prisma: HostedLinqTransportPersistenceClient;
+  startedAtMs: number;
+}): Promise<void> {
+  const template = input.effect.payload.template;
+  try {
+    await recordHostedLinqDeliveryAttemptTx({
+      attemptedAt: new Date(input.startedAtMs),
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.effect.payload.chatId,
+      prisma: input.prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: input.effect.effectId,
+      targetKind: "thread",
+      template: input.effect.payload.template,
+    });
+  } catch (error) {
+    console.warn("Hosted Linq delivery attempt recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      template,
+    });
+  }
+}
+
+async function markHostedLinqDeliveryAcceptedBestEffort(input: {
+  chatId: string;
+  effect: HostedLinqMessageSideEffect;
+  messageId: string | null;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  const template = input.effect.payload.template;
+  try {
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.chatId,
+      messageId: input.messageId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.warn("Hosted Linq delivery accepted recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      template,
+    });
+  }
+}
+
+async function markHostedLinqDeliveryFailedBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  error: unknown;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  try {
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
+      failureReason: input.error instanceof Error ? input.error.message : null,
+      idempotencyKey: input.effect.effectId,
+      prisma: input.prisma,
+    });
+  } catch {
+    // Preserve the original delivery error. This telemetry update is non-critical.
   }
 }
 
@@ -334,6 +419,10 @@ function readHostedLinqSideEffectString(
   return record && typeof record[key] === "string"
     ? record[key] as string
     : null;
+}
+
+function readErrorRecord(error: unknown): Record<string, unknown> | null {
+  return error && typeof error === "object" ? error as Record<string, unknown> : null;
 }
 
 async function buildHostedLinqSideEffectMessage(

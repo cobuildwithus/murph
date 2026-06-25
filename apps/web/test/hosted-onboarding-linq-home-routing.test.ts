@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
+  syncHostedLinqConfiguredLinesTx: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
@@ -19,6 +20,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  syncHostedLinqConfiguredLinesTx: mocks.syncHostedLinqConfiguredLinesTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -43,6 +48,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       linqConversationPhoneNumbers: [],
       linqMaxActiveMembersPerConversationPhone: null,
     });
+    mocks.syncHostedLinqConfiguredLinesTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -117,6 +123,11 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.syncHostedLinqConfiguredLinesTx).toHaveBeenCalledWith({
+      activeMemberLimit: 3,
+      phoneNumbers: ["+15550100001", "+15550100002"],
+      prisma: {} as never,
+    });
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_pending",

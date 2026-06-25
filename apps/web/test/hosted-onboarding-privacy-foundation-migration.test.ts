@@ -381,6 +381,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqObservabilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062500_hosted_linq_observability/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -438,6 +445,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
+      "2026062500_hosted_linq_observability",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -513,6 +521,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
     );
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_line"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_provider_event"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_delivery"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_alert"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"payload_shape_json" JSONB');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"payload_sanitized_json" JSONB');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"provider_created_at" TIMESTAMP(3) NOT NULL');
+    expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

@@ -285,6 +285,24 @@ type UsageResetPrismaFixture = {
     update: MockedFunction;
     updateMany: MockedFunction;
   };
+  hostedLinqAlert: {
+    createMany: MockedFunction;
+  };
+  hostedLinqDelivery: {
+    create: MockedFunction;
+    findUnique: MockedFunction;
+    update: MockedFunction;
+    updateMany: MockedFunction;
+    upsert: MockedFunction;
+  };
+  hostedLinqLine: {
+    findUnique: MockedFunction;
+    update: MockedFunction;
+    upsert: MockedFunction;
+  };
+  hostedLinqProviderEvent: {
+    createMany: MockedFunction;
+  };
   hostedMember: {
     findUnique: MockedFunction;
   };
@@ -339,8 +357,8 @@ describe("hosted Linq usage reset e2e", () => {
       nextAlarmAtPresent: false,
     });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
-      ok: true,
-      status: 201,
+      chatId: CHAT_ID,
+      messageId: "provider_msg_usage_reset",
     });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
       ok: true,
@@ -693,6 +711,24 @@ function createUsageResetPrismaFixture(input: {
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
+    },
+    hostedLinqAlert: {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedLinqDelivery: {
+      create: vi.fn().mockResolvedValue({ id: "hld_random" }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue(undefined),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
+    },
+    hostedLinqLine: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue(undefined),
+      upsert: vi.fn().mockResolvedValue(undefined),
+    },
+    hostedLinqProviderEvent: {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({

@@ -11,6 +11,9 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
+import {
+  syncHostedLinqConfiguredLinesTx,
+} from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { hostedOnboardingError } from "./errors";
@@ -145,6 +148,12 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   }
 
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  });
+
+  await syncHostedLinqConfiguredLinesTx({
+    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+    phoneNumbers: environment.linqConversationPhoneNumbers,
     prisma: input.prisma,
   });
 

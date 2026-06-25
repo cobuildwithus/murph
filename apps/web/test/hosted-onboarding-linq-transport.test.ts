@@ -17,7 +17,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   buildHostedDailyQuotaReply: vi.fn(() => "daily-quota"),
   buildHostedInviteReply: vi.fn(() => "invite-reply"),
   buildHostedLinqConversationHomeRedirectReply: vi.fn(({ homeRecipientPhone }: { homeRecipientPhone: string }) => `redirect:${homeRecipientPhone}`),
-  sendHostedLinqChatMessage: vi.fn().mockResolvedValue(undefined),
+  sendHostedLinqChatMessage: vi.fn().mockResolvedValue({
+    chatId: "chat-1",
+    messageId: "provider-message-1",
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({

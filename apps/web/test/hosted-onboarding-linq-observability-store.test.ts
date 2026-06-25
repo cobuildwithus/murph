@@ -1,0 +1,332 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import {
+  markHostedLinqDeliveryAcceptedTx,
+  recordHostedLinqDeliveryAttemptTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
+
+describe("hosted Linq observability stores", () => {
+  it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValue({
+      id: "hld_attempt_123",
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered",
+        },
+        message_id: "msg_failed_123",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_123",
+      eventType: "message.failed",
+    }));
+
+    const result = await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:02.000Z"),
+    });
+
+    expect(result).toEqual({
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
+      duplicate: false,
+    });
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: "evt_failed_123",
+          eventType: "message.failed",
+          failureCode: "30007",
+          failureReason: "carrier filtered",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+    expect(fixture.hostedLinqLineUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.hostedLinqProviderEventCreateMany.mock.invocationCallOrder[0],
+    );
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          healthStatus: "warning",
+          lastFailureCode: "30007",
+          lastFailureReason: "carrier filtered",
+          totalFailedCount: { increment: 1 },
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failureCode: "30007",
+          failureReason: "carrier filtered",
+          status: "failed",
+        }),
+        where: {
+          id: "hld_attempt_123",
+        },
+      }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryId: "hld_attempt_123",
+          eventId: "evt_failed_123",
+          kind: "message_failed",
+          status: "pending",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+  });
+
+  it("counts outbound message.received echoes against line pacing", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "outbound",
+      eventId: "evt_outbound_123",
+      isFromMe: true,
+      messageId: "msg_outbound_123",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
+          totalOutboundCount: { increment: 1 },
+        },
+      }),
+    );
+  });
+
+  it("does not project duplicate provider events", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqProviderEventCreateMany.mockResolvedValueOnce({ count: 0 });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        message_id: "msg_delivered_123",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_delivered_123",
+      eventType: "message.delivered",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: true,
+    });
+
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not re-enable egress policy for healthy status updates", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        phone_number: "+15550000000",
+        status: "active",
+      },
+      eventId: "evt_status_123",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    const updateInput = fixture.hostedLinqLineUpdate.mock.calls[0]?.[0] as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    expect(updateInput?.data).toMatchObject({
+      healthStatus: "healthy",
+      lastStatusEventId: "evt_status_123",
+      providerStatus: "active",
+    });
+    expect(updateInput?.data).not.toHaveProperty("egressPolicy");
+  });
+
+  it("records attempts and later preserves provider ids as lookup keys on acceptance", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(recordHostedLinqDeliveryAttemptTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      id: "hld_123",
+    });
+    expect(fixture.hostedLinqDeliveryUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+          idempotencyKey: "linq-message:event-123",
+          status: "attempted",
+        }),
+        where: {
+          idempotencyKey: "linq-message:event-123",
+        },
+      }),
+    );
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          messageIdSuffix: "ge_123",
+          status: "accepted",
+        }),
+        where: {
+          idempotencyKey: "linq-message:event-123",
+        },
+      }),
+    );
+    const updateData = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.data as
+      | Record<string, unknown>
+      | undefined;
+    expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
+  });
+});
+
+function createObservabilityPrismaFixture() {
+  const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
+  const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
+  const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
+  const hostedLinqLineUpdate = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqLineUpsert = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const prisma = {
+    hostedLinqAlert: {
+      createMany: hostedLinqAlertCreateMany,
+    },
+    hostedLinqDelivery: {
+      create: hostedLinqDeliveryCreate,
+      findUnique: hostedLinqDeliveryFindUnique,
+      update: hostedLinqDeliveryUpdate,
+      updateMany: hostedLinqDeliveryUpdateMany,
+      upsert: hostedLinqDeliveryUpsert,
+    },
+    hostedLinqLine: {
+      findUnique: hostedLinqLineFindUnique,
+      update: hostedLinqLineUpdate,
+      upsert: hostedLinqLineUpsert,
+    },
+    hostedLinqProviderEvent: {
+      createMany: hostedLinqProviderEventCreateMany,
+    },
+  };
+
+  return {
+    hostedLinqAlertCreateMany,
+    hostedLinqDeliveryFindUnique,
+    hostedLinqDeliveryUpdate,
+    hostedLinqDeliveryUpdateMany,
+    hostedLinqDeliveryUpsert,
+    hostedLinqLineUpdate,
+    hostedLinqLineUpsert,
+    hostedLinqProviderEventCreateMany,
+    prisma,
+  };
+}
+
+function requireParsedProviderEvent(event: HostedLinqWebhookEvent) {
+  const parsed = parseHostedLinqProviderEvent({
+    event,
+    rawBody: JSON.stringify(event),
+  });
+  if (!parsed) {
+    throw new TypeError("Expected test provider event to parse.");
+  }
+
+  return parsed;
+}
+
+function buildProviderEvent(input: {
+  data: Record<string, unknown>;
+  eventId: string;
+  eventType: string;
+}): HostedLinqWebhookEvent {
+  return {
+    api_version: "v3",
+    created_at: "2026-03-26T12:00:00.000Z",
+    data: input.data,
+    event_id: input.eventId,
+    event_type: input.eventType,
+    trace_id: "trace_1234567890",
+    webhook_version: "2026-02-03",
+  } as HostedLinqWebhookEvent;
+}
+
+function buildMessageReceivedEvent(input: {
+  direction: "inbound" | "outbound";
+  eventId: string;
+  isFromMe: boolean;
+  messageId: string;
+}): HostedLinqWebhookEvent {
+  return {
+    api_version: "v3",
+    created_at: "2026-03-26T12:00:00.000Z",
+    data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: input.direction,
+      id: input.messageId,
+      is_from_me: input.isFromMe,
+      parts: [
+        {
+          type: "text",
+          value: "hello",
+        },
+      ],
+      sender_handle: {
+        handle: "+15550000000",
+        id: "handle_owner_123",
+        service: "iMessage",
+      },
+      sent_at: "2026-03-26T12:00:00.000Z",
+      service: "iMessage",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    trace_id: "trace_1234567890",
+    webhook_version: "2026-02-03",
+  } as HostedLinqWebhookEvent;
+}

@@ -1,6 +1,7 @@
 import type {
   LinqCreateChatResponse,
   LinqCreateWebhookSubscriptionResponse,
+  LinqSendMessageResponse,
 } from "@murphai/messaging-ingress/linq-webhook";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
@@ -19,13 +20,18 @@ export type HostedLinqWebhookSubscription = {
   updatedAt: string | null;
 };
 
+export type HostedLinqSendResult = {
+  chatId: string | null;
+  messageId: string | null;
+};
+
 export async function sendHostedLinqChatMessage(input: {
   chatId: string;
   idempotencyKey?: string | null;
   message: string;
   replyToMessageId?: string | null;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<HostedLinqSendResult> {
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
 
   const response = await fetchHostedLinqApiOrThrow({
@@ -48,6 +54,12 @@ export async function sendHostedLinqChatMessage(input: {
       status: response.status,
     });
   }
+
+  const payload = await readHostedLinqOptionalJsonResponse<LinqSendMessageResponse>(response);
+  return {
+    chatId: normalizeNullableString(payload?.chat_id),
+    messageId: normalizeNullableString(payload?.message?.id),
+  };
 }
 
 export async function sendHostedLinqReadReceipt(input: {
@@ -226,6 +238,19 @@ function buildHostedLinqRequestFailedError(input: {
     httpStatus: 502,
     retryable: input.retryable,
   });
+}
+
+async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promise<T | null> {
+  try {
+    const text = await response.text();
+    if (!text.trim()) {
+      return null;
+    }
+
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

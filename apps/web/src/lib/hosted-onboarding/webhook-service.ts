@@ -27,6 +27,15 @@ import {
   verifyAndParseHostedWhatsAppWebhookRequest,
 } from "./whatsapp";
 import {
+  sendPendingHostedLinqAlertsBestEffort,
+} from "./linq-alert-email";
+import {
+  ingestHostedLinqProviderEventTx,
+} from "./linq-provider-event-store";
+import {
+  parseHostedLinqProviderEvent,
+} from "./linq-provider-events";
+import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -106,6 +115,40 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
+    const providerEvent = parseHostedLinqProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+    if (providerEvent && event.event_type !== "message.received") {
+      const prisma = input.prisma ?? getPrisma();
+      const providerResult = await ingestHostedLinqProviderEventDirect({
+        event: providerEvent,
+        prisma,
+      });
+      await scheduleHostedLinqProviderAlertEmails({
+        alertIds: providerResult.alertIds,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const response: HostedOnboardingLinqWebhookResponse = {
+        duplicate: providerResult.duplicate || undefined,
+        ignored: true,
+        ok: true,
+        reason: providerResult.duplicate
+          ? "duplicate-linq-provider-event"
+          : `recorded-linq-provider-event:${providerEvent.eventType}`,
+      };
+      responseReason = response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        alertCount: providerResult.alertIds.length,
+        duplicate: providerResult.duplicate,
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+      });
+      return response;
+    }
+
     if (event.event_type === "message.received") {
       requireHostedLinqMessageReceivedEvent(event);
     }
@@ -119,14 +162,23 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       },
     );
     let plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+    let providerAlertIds: string[] = [];
     try {
       plan = await runHostedOnboardingWebhookTransaction(
         prisma,
-        (transaction) =>
-          planHostedOnboardingLinqWebhook({
+        async (transaction) => {
+          if (providerEvent) {
+            const providerResult = await ingestHostedLinqProviderEventTx({
+              event: providerEvent,
+              prisma: transaction,
+            });
+            providerAlertIds = providerResult.alertIds;
+          }
+          return planHostedOnboardingLinqWebhook({
             event,
             prisma: transaction,
-          }),
+          });
+        },
       );
     } catch (error) {
       finishHostedOnboardingTiming(planTiming, "failed", {
@@ -148,6 +200,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         signal: input.signal,
       });
     }
+
+    await scheduleHostedLinqProviderAlertEmails({
+      alertIds: providerAlertIds,
+      prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
 
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
@@ -262,6 +320,41 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       wakeHandoffSignalAccepted,
     });
   }
+}
+
+async function ingestHostedLinqProviderEventDirect(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
+  return runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    (transaction) => ingestHostedLinqProviderEventTx({
+      event: input.event,
+      prisma: transaction,
+    }),
+  );
+}
+
+async function scheduleHostedLinqProviderAlertEmails(input: {
+  alertIds: readonly string[];
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  if (input.alertIds.length === 0) {
+    return;
+  }
+
+  const sendAlerts = () => sendPendingHostedLinqAlertsBestEffort({
+    alertIds: input.alertIds,
+    prisma: input.prisma,
+  });
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(sendAlerts);
+    return;
+  }
+
+  await sendAlerts();
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {

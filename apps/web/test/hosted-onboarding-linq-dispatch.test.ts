@@ -308,6 +308,28 @@ type HostedLinqDailyStateFixture = {
   }) => Promise<unknown>;
 };
 
+type HostedLinqAlertFixture = {
+  createMany?: MockedFunction;
+};
+
+type HostedLinqDeliveryFixture = {
+  create?: MockedFunction;
+  findUnique?: MockedFunction;
+  update?: MockedFunction;
+  updateMany?: MockedFunction;
+  upsert?: MockedFunction;
+};
+
+type HostedLinqLineFixture = {
+  findUnique?: MockedFunction;
+  update?: MockedFunction;
+  upsert?: MockedFunction;
+};
+
+type HostedLinqProviderEventFixture = {
+  createMany?: MockedFunction;
+};
+
 type HostedMemberFixture = {
   findUnique?: (input: {
     where?: Record<string, unknown>;
@@ -369,7 +391,11 @@ type PrismaFixtureBase = {
   $queryRaw?: MockedFunction;
   $transaction?: MockedFunction;
   hostedInvite?: HostedInviteFixture;
+  hostedLinqAlert?: HostedLinqAlertFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
+  hostedLinqDelivery?: HostedLinqDeliveryFixture;
+  hostedLinqLine?: HostedLinqLineFixture;
+  hostedLinqProviderEvent?: HostedLinqProviderEventFixture;
   hostedMember?: HostedMemberFixture;
   hostedMemberEmailAuthorization?: HostedMemberEmailAuthorizationFixture;
   hostedMemberIdentity?: HostedMemberIdentityFixture;
@@ -444,6 +470,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       spentUsdMicros: 0n,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_123",
+      messageId: "provider_msg_123",
+    });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
       ok: true,
       status: 204,
@@ -4395,6 +4425,10 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 ): T & HostedOnboardingLinqWebhookPrismaFixture {
   const hostedInvite = prisma.hostedInvite;
   const hostedLinqDailyState = prisma.hostedLinqDailyState;
+  const hostedLinqAlert = prisma.hostedLinqAlert;
+  const hostedLinqDelivery = prisma.hostedLinqDelivery;
+  const hostedLinqLine = prisma.hostedLinqLine;
+  const hostedLinqProviderEvent = prisma.hostedLinqProviderEvent;
   const hostedMemberIdentity = prisma.hostedMemberIdentity;
   const hostedMemberRouting = prisma.hostedMemberRouting;
   const hostedMember = prisma.hostedMember;
@@ -4402,6 +4436,48 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
   prisma.$executeRaw ??= vi.fn(async () => 0);
   prisma.$queryRaw ??= vi.fn(async () => []);
+
+  if (!hostedLinqProviderEvent?.createMany) {
+    Object.defineProperty(prisma, "hostedLinqProviderEvent", {
+      configurable: true,
+      value: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+  }
+
+  if (!hostedLinqLine?.upsert || !hostedLinqLine?.update || !hostedLinqLine?.findUnique) {
+    Object.defineProperty(prisma, "hostedLinqLine", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(undefined),
+        upsert: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+  }
+
+  if (!hostedLinqDelivery?.findUnique) {
+    Object.defineProperty(prisma, "hostedLinqDelivery", {
+      configurable: true,
+      value: {
+        create: vi.fn().mockResolvedValue({ id: "hld_random" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(undefined),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
+      },
+    });
+  }
+
+  if (!hostedLinqAlert?.createMany) {
+    Object.defineProperty(prisma, "hostedLinqAlert", {
+      configurable: true,
+      value: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+  }
 
   if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
     hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
