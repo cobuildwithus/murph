@@ -38,6 +38,9 @@ import {
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
+import {
+  assertHostedThreadRouteEgressAuthority,
+} from "../hosted-routing/thread-route-store";
 
 export {
   handleHostedStripeWebhook,
@@ -157,6 +160,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       plan,
+      prisma,
       signal: input.signal,
       wakeHandoff,
     });
@@ -191,6 +195,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+  prisma: PrismaClient;
   signal?: AbortSignal;
   wakeHandoff: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
 }): Promise<void> {
@@ -227,6 +232,13 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   try {
+    if (input.plan.linqReadReceiptRouteAuthority) {
+      await assertHostedThreadRouteEgressAuthority({
+        authority: input.plan.linqReadReceiptRouteAuthority,
+        prisma: input.prisma,
+      });
+    }
+
     const result = await sendHostedLinqReadReceipt({
       chatId,
       signal: input.signal,

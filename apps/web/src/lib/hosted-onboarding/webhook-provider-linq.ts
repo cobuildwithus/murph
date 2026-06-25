@@ -70,6 +70,7 @@ import {
 } from "./contact-privacy";
 import {
   readHostedThreadRouteByExternalThread,
+  type HostedThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 export type {
@@ -649,6 +650,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     );
   }
 
+  const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
+    route: input.route,
+    routeAccountLookupKey: input.routeAccountLookupKey,
+    threadId: summary.chatId,
+  });
+
   const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
     dedupeKey: input.event.event_id,
     prisma: input.prisma,
@@ -668,6 +675,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         wakeLinqChatId: summary.chatId,
         wakeMailboxItemId: existingMailboxItem.id,
         wakeUserId: input.route.containerMemberId,
+        linqReadReceiptRouteAuthority: routeAuthority,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         duplicate: true,
@@ -705,6 +713,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       dailyQuotaReached: "thread-route-daily-quota-reached",
       dailyQuotaReply: "thread-route-daily-quota-reply",
     },
+    routeAuthority,
     usageGate,
   });
   if (admissionPlan) {
@@ -754,6 +763,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       wakeLinqChatId: summary.chatId,
       wakeMailboxItemId: mailboxAppend.item.id,
       wakeUserId: input.route.containerMemberId,
+      linqReadReceiptRouteAuthority: routeAuthority,
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
       dailyInboundCount: dailyState.inboundCount,
@@ -773,6 +783,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
   prisma: Prisma.TransactionClient;
+  routeAuthority?: HostedThreadRouteEgressAuthority | null;
   routeStages: {
     aiUsageDenied: string;
     aiUsageReply: string;
@@ -839,6 +850,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         messageId: input.context.summary.messageId,
         noticeCode: deniedUsageGate.userNotice.code,
         occurredAt: input.context.occurredAt,
+        routeAuthority: input.routeAuthority ?? null,
         sourceEventId: input.event.event_id,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -875,6 +887,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         memberId: input.memberId,
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,
+        routeAuthority: input.routeAuthority ?? null,
         sourceEventId: input.event.event_id,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -891,6 +904,19 @@ async function planHostedLinqInboundAdmissionDenied(input: {
   }
 
   return null;
+}
+
+function buildHostedLinqThreadRouteEgressAuthority(input: {
+  route: HostedThreadRouteSnapshot;
+  routeAccountLookupKey: string;
+  threadId: string;
+}): HostedThreadRouteEgressAuthority {
+  return {
+    accountLookupKey: input.routeAccountLookupKey,
+    channel: input.route.channel,
+    containerMemberId: input.route.containerMemberId,
+    threadId: input.threadId,
+  };
 }
 
 function resolveHostedLinqExistingMemberMatch(input: {

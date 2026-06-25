@@ -28,6 +28,9 @@ import {
   type HostedLinqMessageSideEffect,
 } from "./webhook-transport";
 import type {
+  HostedThreadRouteEgressAuthority,
+} from "../hosted-routing/thread-route-store";
+import type {
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
@@ -164,6 +167,7 @@ export function buildAiUsageQuotaReplyResponse(input: {
   messageId: string;
   noticeCode: HostedAiUsageGateNoticeCode;
   occurredAt: string;
+  routeAuthority?: HostedThreadRouteEgressAuthority | null;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const baseInput = {
@@ -172,6 +176,7 @@ export function buildAiUsageQuotaReplyResponse(input: {
     message: input.message,
     occurredAt: input.occurredAt,
     replyToMessageId: input.messageId,
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     sourceEventId: input.sourceEventId,
     template: "ai_usage_quota" as const,
   };
@@ -229,6 +234,7 @@ export function buildQuotaReplyResponse(input: {
   memberId: string;
   messageId: string;
   occurredAt: string;
+  routeAuthority?: HostedThreadRouteEgressAuthority | null;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
@@ -238,6 +244,7 @@ export function buildQuotaReplyResponse(input: {
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
+        ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
         sourceEventId: input.sourceEventId,
         template: "daily_quota",
       }),

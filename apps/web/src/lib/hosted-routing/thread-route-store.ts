@@ -9,6 +9,9 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
+import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import type {
@@ -28,6 +31,13 @@ export interface HostedThreadRouteSnapshot {
   container: HostedMemberCoreState;
   containerMemberId: string;
   owner: HostedMemberCoreState;
+}
+
+export interface HostedThreadRouteEgressAuthority {
+  accountLookupKey: string;
+  channel: HostedThreadRouteChannel;
+  containerMemberId: string;
+  threadId: string;
 }
 
 export async function readHostedThreadRouteByExternalThread(input: {
@@ -116,4 +126,32 @@ export async function readHostedThreadRouteByExternalThread(input: {
     containerMemberId: row.containerMemberId,
     owner: row.container.owner,
   };
+}
+
+export async function assertHostedThreadRouteEgressAuthority(input: {
+  authority: HostedThreadRouteEgressAuthority;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  const route = await readHostedThreadRouteByExternalThread({
+    accountLookupKey: input.authority.accountLookupKey,
+    channel: input.authority.channel,
+    prisma: input.prisma,
+    threadId: input.authority.threadId,
+  });
+
+  if (
+    route
+    && route.containerMemberId === input.authority.containerMemberId
+    && hasHostedMemberActiveAccess(route.container)
+    && hasHostedMemberActiveAccess(route.owner)
+  ) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "External thread route egress is no longer authorized.",
+    retryable: false,
+  });
 }

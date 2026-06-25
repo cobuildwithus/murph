@@ -7,6 +7,10 @@ import {
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
+  createHostedExternalThreadLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
   parseHostedLinqWebhookEvent,
@@ -1395,6 +1399,111 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         httpStatus: 204,
         responseReason: "wake-appended-active-member",
+        wakeHandoffStarted: true,
+        wakeHandoffSignalAccepted: true,
+      }),
+    );
+  });
+
+  it("revalidates routed Linq read receipts before provider delivery", async () => {
+    const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!routeAccountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const routeLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: routeAccountLookupKey,
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey) {
+      throw new Error("Expected test route lookup key.");
+    }
+    const prisma = asPrismaTransactionClient({
+      hostedThreadRoute: {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([
+            {
+              channel: "linq",
+              container: {
+                member: {
+                  billingStatus: HostedBillingStatus.active,
+                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                  id: "member_thread_container_123",
+                  suspendedAt: null,
+                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+                },
+                owner: {
+                  billingStatus: HostedBillingStatus.active,
+                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                  id: "member_owner_123",
+                  suspendedAt: null,
+                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+                },
+              },
+              containerMemberId: "member_thread_container_123",
+            },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_routed_read_receipt_stale",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_thread_container_123",
+      mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadLookupKey: {
+            in: expect.arrayContaining([routeLookupKey]),
+          },
+        }),
+      }),
+    );
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadLookupKey: {
+            in: expect.arrayContaining([routeLookupKey]),
+          },
+        }),
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "failed",
+      expect.objectContaining({
+        errorName: "Error",
+        responseReason: "wake-appended-thread-route",
         wakeHandoffStarted: true,
         wakeHandoffSignalAccepted: true,
       }),
