@@ -6,6 +6,9 @@ import {
   ensureHostedThreadContainerRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
+  readHostedThreadRouteByExternalThread,
+} from "../src/lib/hosted-routing/thread-route-store";
+import {
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
@@ -62,6 +65,11 @@ const usageAllowance = await import("../src/lib/hosted-execution/usage-allowance
 const linqDailyState = await import("../src/lib/hosted-onboarding/linq-daily-state");
 const domainRootStore = await import("../src/lib/hosted-crypto/domain-root-store");
 const hostedMemberStore = await import("../src/lib/hosted-onboarding/hosted-member-store");
+
+const TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+} as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -260,6 +268,8 @@ function createStatefulThreadRoutePrisma() {
               ...ownerState,
               id: containers.get(route.containerMemberId)?.ownerMemberId ?? ownerState.id,
             },
+            ownerMemberId: containers.get(route.containerMemberId)?.ownerMemberId
+              ?? ownerState.id,
           },
           containerMemberId: route.containerMemberId,
           threadLookupKey: route.threadLookupKey,
@@ -308,6 +318,22 @@ function createStatefulThreadRoutePrisma() {
     hostedThreadContainer,
     hostedThreadRoute,
     hostedWorkspace,
+    seedThreadRoute(input: {
+      channel: string;
+      containerMemberId: string;
+      ownerMemberId: string;
+      threadLookupKey: string;
+    }) {
+      containers.set(input.containerMemberId, {
+        monthlyUsageLimitUsdMicros: 4_500_000n,
+        ownerMemberId: input.ownerMemberId,
+      });
+      routes.push({
+        channel: input.channel,
+        containerMemberId: input.containerMemberId,
+        threadLookupKey: input.threadLookupKey,
+      });
+    },
   };
 }
 
@@ -335,7 +361,132 @@ function buildHostedMailboxItem(input: {
   };
 }
 
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
+
 describe("Linq explicit external-thread routing", () => {
+  it("reuses a prior lookup-key route during privacy key rotation", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+    const priorAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    const priorThreadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: priorAccountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    restoreV1();
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+
+    try {
+      const currentAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
+      const currentThreadLookupKey = createHostedExternalThreadLookupKey({
+        accountLookupKey: currentAccountLookupKey,
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      if (
+        !priorAccountLookupKey
+        || !priorThreadLookupKey
+        || !currentAccountLookupKey
+        || !currentThreadLookupKey
+      ) {
+        throw new Error("Expected rotated test lookup keys.");
+      }
+      prisma.seedThreadRoute({
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        ownerMemberId: "member_owner_123",
+        threadLookupKey: priorThreadLookupKey,
+      });
+      vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-06-24T00:00:00.000Z"),
+        id: "member_owner_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      });
+
+      await expect(
+        ensureHostedThreadContainerRouteTx({
+          accountLookupKey: currentAccountLookupKey,
+          accountLookupKeys: [currentAccountLookupKey, priorAccountLookupKey],
+          channel: "linq",
+          occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+          ownerMemberId: "member_owner_123",
+          prisma: prisma as unknown as Prisma.TransactionClient,
+          threadId: "chat_group_123",
+        }),
+      ).resolves.toMatchObject({
+        activationMailboxItemId: null,
+        containerMemberId: "member_thread_container_123",
+        created: false,
+      });
+
+      expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+      expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadRoute.create).toHaveBeenCalledWith({
+        data: {
+          channel: "linq",
+          containerMemberId: "member_thread_container_123",
+          threadLookupKey: currentThreadLookupKey,
+        },
+      });
+      await expect(
+        readHostedThreadRouteByExternalThread({
+          accountLookupKeys: [currentAccountLookupKey, priorAccountLookupKey],
+          channel: "linq",
+          prisma: prisma as unknown as Prisma.TransactionClient,
+          threadId: "chat_group_123",
+        }),
+      ).resolves.toMatchObject({
+        containerMemberId: "member_thread_container_123",
+      });
+    } finally {
+      restoreV2();
+    }
+  });
+
   it("creates and reuses a route container before routing Linq ingress", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     const owner = {

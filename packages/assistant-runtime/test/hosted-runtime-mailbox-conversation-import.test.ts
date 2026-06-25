@@ -175,6 +175,7 @@ describe("hosted mailbox conversation import adapter", () => {
       threadId: "chat_synthetic",
     });
     assert.deepEqual(event.sourceMetadata, {
+      externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 2,
       reactionEligible: false,
@@ -1051,6 +1052,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.replyTarget?.threadId, "chat_email_identity");
     assert.equal(event.replyTarget?.messageId, "msg_email_identity");
     assert.deepEqual(event.sourceMetadata, {
+      externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 1,
       reactionEligible: true,
@@ -1085,6 +1087,12 @@ describe("hosted mailbox conversation import adapter", () => {
           threadIsDirect: false,
         },
         phoneLookupKey: contactLookupKey,
+        routeAuthority: {
+          accountLookupKey,
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_group_identity",
+        },
       },
     });
 
@@ -1133,6 +1141,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.source, "linq");
     assert.equal(event.conversation?.threadId, expectedThreadId);
     assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.externalThreadRouteAuthorityPresent
+        : false,
+      true,
+    );
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
   });
 

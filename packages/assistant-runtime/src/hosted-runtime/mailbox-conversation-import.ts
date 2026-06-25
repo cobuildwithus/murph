@@ -1255,6 +1255,8 @@ function createHostedConversationAssistantInputSourceMetadata(
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
+      externalThreadRouteAuthorityPresent: wake.message.routeAuthority !== undefined
+        && wake.message.routeAuthority !== null,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       reactionEligible: wake.message.linqMessage.reactionEligible === true,

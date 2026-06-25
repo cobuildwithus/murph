@@ -203,6 +203,7 @@ export interface AssistantDeliveryCandidate {
 }
 
 export interface AssistantChannelAutoReplyEligibility {
+  externalThreadRouteAuthorityPresent?: boolean
   source: string | null
   threadIsDirect: boolean | null
 }

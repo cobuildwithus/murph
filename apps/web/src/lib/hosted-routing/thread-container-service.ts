@@ -18,6 +18,7 @@ import {
 } from "../hosted-mailbox/store";
 import {
   createHostedExternalThreadLookupKey,
+  createHostedExternalThreadLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
 import {
   hasHostedMemberActiveAccess,
@@ -56,6 +57,7 @@ export interface HostedThreadContainerRouteEnsureResult {
 
 export async function ensureHostedThreadContainerRoute(input: {
   accountLookupKey: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadRouteChannel;
   containerMemberId?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
@@ -87,6 +89,7 @@ export async function ensureHostedThreadContainerRoute(input: {
 
 export async function ensureHostedThreadContainerRouteTx(input: {
   accountLookupKey: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadRouteChannel;
   containerMemberId?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
@@ -122,7 +125,22 @@ export async function ensureHostedThreadContainerRouteTx(input: {
 
   const requestedContainerMemberId =
     normalizeHostedThreadContainerMemberId(input.containerMemberId);
-  const existing = await input.prisma.hostedThreadRoute.findUnique({
+  const accountLookupKeys = normalizeHostedThreadAccountLookupKeys([
+    ...(input.accountLookupKeys ?? []),
+    input.accountLookupKey,
+  ]);
+  const threadLookupKeys = normalizeHostedThreadLookupKeys([
+    threadLookupKey,
+    ...accountLookupKeys.flatMap((accountLookupKey) =>
+      createHostedExternalThreadLookupKeyReadCandidates({
+        accountLookupKey,
+        channel: input.channel,
+        threadId: input.threadId,
+      })
+    ),
+  ]);
+  const existingRows = await input.prisma.hostedThreadRoute.findMany({
+    orderBy: { createdAt: "asc" },
     select: {
       container: {
         select: {
@@ -130,17 +148,22 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         },
       },
       containerMemberId: true,
+      threadLookupKey: true,
     },
     where: {
-      channel_threadLookupKey: {
-        channel: input.channel,
-        threadLookupKey,
+      channel: input.channel,
+      threadLookupKey: {
+        in: threadLookupKeys,
       },
     },
   });
 
-  if (existing) {
+  if (existingRows.length > 0) {
+    const distinctContainerIds = new Set(existingRows.map((row) => row.containerMemberId));
+    const existing = existingRows[0]!;
     if (
+      distinctContainerIds.size > 1
+      ||
       existing.container.ownerMemberId !== input.ownerMemberId
       || (
         requestedContainerMemberId !== null
@@ -152,6 +175,15 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         httpStatus: 409,
         message: "This external thread is already routed to another container.",
         retryable: false,
+      });
+    }
+
+    if (!existingRows.some((row) => row.threadLookupKey === threadLookupKey)) {
+      await createHostedThreadRouteRowTx({
+        channel: input.channel,
+        containerMemberId: existing.containerMemberId,
+        prisma: input.prisma,
+        threadLookupKey,
       });
     }
 
@@ -188,26 +220,12 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     },
   });
 
-  try {
-    await input.prisma.hostedThreadRoute.create({
-      data: {
-        channel: input.channel,
-        containerMemberId,
-        threadLookupKey,
-      },
-    });
-  } catch (error) {
-    if (isPrismaUniqueConstraintError(error)) {
-      throw hostedOnboardingError({
-        code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
-        httpStatus: 409,
-        message: "This external thread route was created concurrently.",
-        retryable: true,
-      });
-    }
-
-    throw error;
-  }
+  await createHostedThreadRouteRowTx({
+    channel: input.channel,
+    containerMemberId,
+    prisma: input.prisma,
+    threadLookupKey,
+  });
 
   const activationWake = buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedThreadContainerActivationEventId({
@@ -234,6 +252,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
 
 async function ensureHostedThreadContainerRouteWithRetry(input: {
   accountLookupKey: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadRouteChannel;
   containerMemberId?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
@@ -247,6 +266,7 @@ async function ensureHostedThreadContainerRouteWithRetry(input: {
     return await input.prisma.$transaction(async (tx) =>
       ensureHostedThreadContainerRouteTx({
         accountLookupKey: input.accountLookupKey,
+        accountLookupKeys: input.accountLookupKeys,
         channel: input.channel,
         containerMemberId: input.containerMemberId,
         monthlyUsageLimitUsdMicros: input.monthlyUsageLimitUsdMicros,
@@ -264,6 +284,34 @@ async function ensureHostedThreadContainerRouteWithRetry(input: {
       return ensureHostedThreadContainerRouteWithRetry({
         ...input,
         retryRouteConflict: false,
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function createHostedThreadRouteRowTx(input: {
+  channel: HostedThreadRouteChannel;
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadLookupKey: string;
+}): Promise<void> {
+  try {
+    await input.prisma.hostedThreadRoute.create({
+      data: {
+        channel: input.channel,
+        containerMemberId: input.containerMemberId,
+        threadLookupKey: input.threadLookupKey,
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+        httpStatus: 409,
+        message: "This external thread route was created concurrently.",
+        retryable: true,
       });
     }
 
@@ -299,6 +347,20 @@ function normalizeHostedThreadContainerUsageLimit(value: bigint | null | undefin
     throw new TypeError("Hosted thread container monthly usage limit must be positive.");
   }
   return limit;
+}
+
+function normalizeHostedThreadAccountLookupKeys(
+  values: readonly (string | null | undefined)[],
+): string[] {
+  const normalized = values
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0);
+
+  return [...new Set(normalized)];
+}
+
+function normalizeHostedThreadLookupKeys(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {
