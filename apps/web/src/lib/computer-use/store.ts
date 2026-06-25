@@ -63,13 +63,17 @@ export interface ComputerHandoffRecord {
   expiresAt: Date;
   id: string;
   memberId: string;
-  purpose: HostedComputerHandoffPurpose;
+  purpose: PersistedComputerHandoffPurpose;
   runId: string;
   status: HostedComputerHandoffStatus;
   suggestedReply: string | null;
   tokenHash: string;
   updatedAt: Date;
 }
+
+export type PersistedComputerHandoffPurpose =
+  | HostedComputerHandoffPurpose
+  | "screen_inspection";
 
 export interface ComputerCreateRunResult {
   created: boolean;
@@ -1337,15 +1341,15 @@ function readAwaitingReason(
   }
 }
 
-function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
+function readHandoffPurpose(value: string): PersistedComputerHandoffPurpose {
   switch (value) {
+    case "screen_inspection":
     case "managed_login":
     case "login":
     case "payment":
     case "card":
     case "captcha":
     case "manual_browser_help":
-    case "screen_inspection":
       return value;
     default:
       throw new TypeError("Stored computer handoff purpose is unsupported.");

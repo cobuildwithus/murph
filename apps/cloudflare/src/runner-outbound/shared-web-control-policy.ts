@@ -22,6 +22,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -58,6 +59,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_payload_fetch"
   | "runtime_latency_trace"
   | "runtime_log_write"
+  | "thread_route_egress_authority"
   | "product_feedback_recording"
   | "usage_recording"
   | "vault_share_deliver"
@@ -87,6 +89,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
+  [HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH, "thread_route_egress_authority"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

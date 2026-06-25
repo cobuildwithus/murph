@@ -389,7 +389,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input, direct user takeover, or view-only screen inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
+    'Pause a computer run for missing user input, direct user takeover, or browser inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -405,7 +405,6 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
               'card',
               'captcha',
               'manual_browser_help',
-              'screen_inspection',
             ],
           },
           { type: 'null' },

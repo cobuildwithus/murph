@@ -70,6 +70,7 @@ export interface NormalizeHostedLinqConversationMessageInput {
     replyToMessageId?: string | null;
     replyToPartIndex?: number | null;
     service?: string | null;
+    threadIsDirect?: boolean | null;
   };
   occurredAt: string;
   source?: string;
@@ -255,7 +256,9 @@ async function toHostedLinqChatMessage(input: {
     thread: {
       id: chatId,
       title: buildHostedLinqThreadTitle(message),
-      isDirect: true,
+      isDirect: typeof message.threadIsDirect === "boolean"
+        ? message.threadIsDirect
+        : true,
     },
     actor: {
       id: normalizeTextValue(message.from),
