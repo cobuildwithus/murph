@@ -488,75 +488,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("keeps the manual handoff purpose when screen inspection is requested for the same paused run", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const oldHandoff = createHandoffRecord({
-      id: "hch_handoff123",
-      purpose: "manual_browser_help",
-      status: "open",
-      suggestedReply: "yes",
-      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      handoff: oldHandoff,
-      run: createRunRecord({
-        awaitingMessage: "Should I book this appointment?",
-        awaitingReason: "final_confirmation",
-        checkpointContext: {
-          conversationId: "conversation-a",
-          recipientKey: "recipient-a",
-        },
-        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-        pendingHandoffId: oldHandoff.id,
-        status: "awaiting_user",
-        suggestedReply: "yes",
-      }),
-    });
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      },
-      kernel: fakeKernel,
-      now: () => now,
-      store,
-    });
-
-    // The open manual handoff page already holds a live, decrypted browser
-    // iframe that we cannot revoke. A refreshed handoff for the same paused
-    // run must preserve the existing manual_browser_help purpose so a later
-    // "view-only" request cannot misrepresent an interactive session as
-    // screenshot-only.
-    const result = await service.pauseForUser({
-      handoffPurpose: "screen_inspection",
-      memberId: "member_123",
-      pauseDeliveryContext: {
-        conversationId: "conversation-a",
-        recipientKey: "recipient-a",
-      },
-      reason: "final_confirmation",
-      runId: "hcr_run123",
-      suggestedReply: null,
-    });
-
-    expect(result).toMatchObject({
-      awaitingReason: "final_confirmation",
-      suggestedReply: "yes",
-    });
-    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
-      status: "expired",
-    });
-    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
-      purpose: "manual_browser_help",
-      status: "open",
-      suggestedReply: "yes",
-    });
-    expect(store.run).toMatchObject({
-      pendingHandoffId: "hch_handoff124",
-      status: "awaiting_user",
-    });
-  });
-
-  it("upgrades a screen-inspection handoff to manual takeover when requested", async () => {
+  it("replaces a legacy stored static-preview handoff with manual browser help", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const oldHandoff = createHandoffRecord({
       id: "hch_handoff123",
@@ -589,9 +521,6 @@ describe("ComputerUseService", () => {
       store,
     });
 
-    // The existing screen_inspection page only renders a screenshot; it never
-    // received an interactive iframe, so swapping the handoff up to a manual
-    // takeover purpose adds capability without leaving stale capability behind.
     const result = await service.pauseForUser({
       handoffPurpose: "manual_browser_help",
       memberId: "member_123",
@@ -608,6 +537,9 @@ describe("ComputerUseService", () => {
       awaitingReason: "final_confirmation",
       suggestedReply: "yes",
     });
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
       status: "expired",
     });
@@ -755,33 +687,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects screen inspection for a running run", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const run = createRunRecord({ updatedAt: now });
-    const store = new FakeComputerUseStore({ run });
-    const service = new ComputerUseService({
-      kernel: fakeKernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.pauseForUser({
-      handoffPurpose: "screen_inspection",
-      memberId: "member_123",
-      reason: "final_confirmation",
-      runId: "hcr_run123",
-      suggestedReply: "yes",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_SCREEN_INSPECTION_UNAVAILABLE",
-    });
-    expect(store.run).toMatchObject({
-      pendingHandoffId: null,
-      status: "running",
-    });
-    expect(store.handoff).toBeNull();
-  });
-
-  it("mints an inspection handoff for an already-awaiting final confirmation", async () => {
+  it("mints a live handoff for an already-awaiting final confirmation", async () => {
     const pausedAt = new Date("2026-06-17T12:00:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
@@ -802,7 +708,7 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.pauseForUser({
-      handoffPurpose: "screen_inspection",
+      handoffPurpose: "manual_browser_help",
       memberId: "member_123",
       reason: "final_confirmation",
       runId: "hcr_run123",
@@ -823,7 +729,7 @@ describe("ComputerUseService", () => {
       status: "awaiting_user",
     });
     expect(store.handoff).toMatchObject({
-      purpose: "screen_inspection",
+      purpose: "manual_browser_help",
       status: "open",
       suggestedReply: "yes",
     });
@@ -1446,7 +1352,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("resumes final confirmation from chat while an inspection handoff is open", async () => {
+  it("resumes over a legacy stored static-preview handoff after user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
       purpose: "screen_inspection",
@@ -1460,7 +1366,7 @@ describe("ComputerUseService", () => {
       pendingHandoffId: handoff.id,
       status: "awaiting_user",
       suggestedReply: "yes",
-      updatedAt: new Date("2026-06-17T12:02:00.000Z"),
+      updatedAt: now,
     });
     const store = new FakeComputerUseStore({
       handoff,
@@ -1490,78 +1396,15 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       status: "running",
     });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
     expect(store.run).toMatchObject({
       pendingHandoffId: null,
       status: "running",
     });
-    expect(store.handoff).toMatchObject({
-      status: "expired",
-    });
     expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
-
-  it.each([
-    ["logically expired open", "open"],
-    ["already marked expired", "expired"],
-  ] as const)(
-    "resumes final confirmation from chat while an inspection handoff is %s",
-    async (_label, handoffStatus) => {
-      const now = new Date("2026-06-17T12:25:00.000Z");
-      const handoff = createHandoffRecord({
-        expiresAt: new Date("2026-06-17T12:20:00.000Z"),
-        purpose: "screen_inspection",
-        status: handoffStatus,
-        suggestedReply: "yes",
-        updatedAt: new Date("2026-06-17T12:03:00.000Z"),
-      });
-      const run = createRunRecord({
-        awaitingReason: "final_confirmation",
-        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
-        pausedAt: new Date("2026-06-17T12:02:00.000Z"),
-        pendingHandoffId: handoff.id,
-        status: "awaiting_user",
-        suggestedReply: "yes",
-        updatedAt: new Date("2026-06-17T12:02:00.000Z"),
-      });
-      const store = new FakeComputerUseStore({
-        handoff,
-        resumeMailboxItems: [
-          createResumeMailboxItem({
-            createdAt: new Date("2026-06-17T12:24:00.000Z"),
-            id: "hmi_user_reply",
-            occurredAt: new Date("2026-06-17T12:24:00.000Z"),
-          }),
-        ],
-        run,
-      });
-      const service = new ComputerUseService({
-        kernel: createFakeKernel(),
-        now: () => now,
-        store,
-      });
-
-      const result = await service.startRun({
-        memberId: "member_123",
-        resumeAfterMailboxItemId: "hmi_user_reply",
-        startUrl: null,
-      });
-
-      expect(result).toMatchObject({
-        awaitingReason: null,
-        reused: true,
-        runId: "hcr_run123",
-        status: "running",
-      });
-      expect(store.run).toMatchObject({
-        pendingHandoffId: null,
-        status: "running",
-      });
-      expect(store.handoff).toMatchObject({
-        status: "expired",
-      });
-      expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
-    },
-  );
 
   it("expires an open handoff without deleting the awaiting browser run", async () => {
     const now = new Date("2026-06-17T12:25:00.000Z");
@@ -3228,6 +3071,47 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("expires legacy stored static-preview handoff pages", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "screen_inspection",
+      status: "open",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      }),
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "expired",
+      suggestedReply: "yes",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+  });
+
   it("does not expire a fresh checkpointing handoff page after its TTL", async () => {
     const now = new Date("2026-06-17T12:21:00.000Z");
     const handoff = createHandoffRecord({
@@ -3313,55 +3197,6 @@ describe("ComputerUseService", () => {
       kernelSessionId: "kernel-session-1",
       status: "awaiting_user",
     });
-  });
-
-  it("returns a view-only handoff page state for final confirmation inspection links", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const handoff = createHandoffRecord({
-      purpose: "screen_inspection",
-      status: "open",
-      suggestedReply: "yes",
-      updatedAt: new Date("2026-06-17T12:03:00.000Z"),
-    });
-    const store = new FakeComputerUseStore({
-      handoff,
-      run: createRunRecord({
-        awaitingReason: "final_confirmation",
-        pausedAt: new Date("2026-06-17T12:02:00.000Z"),
-        pendingHandoffId: handoff.id,
-        status: "awaiting_user",
-        suggestedReply: "yes",
-      }),
-    });
-    const crypto = createFakeCrypto({
-      decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
-    });
-    const service = new ComputerUseService({
-      crypto,
-      kernel: createFakeKernel({
-        executeResult: "data:image/jpeg;base64,aW1hZ2U=",
-      }),
-      now: () => now,
-      store,
-    });
-
-    const result = await service.readHandoffPageState({
-      memberId: "member_123",
-      token: "handoff-token",
-    });
-
-    expect(result).toEqual({
-      handoffId: handoff.id,
-      interaction: "view_only",
-      kind: "open",
-      purpose: "screen_inspection",
-      screenshotDataUrl: "data:image/jpeg;base64,aW1hZ2U=",
-      suggestedReply: "yes",
-    });
-    expect(store.run).toMatchObject({
-      kernelLiveViewUrlEncrypted: "encrypted-live-view",
-    });
-    expect(crypto.decryptRunSecretCalls).toBe(0);
   });
 
   it("keeps final confirmation manual help handoffs interactive", async () => {
@@ -5286,7 +5121,7 @@ describe("PrismaComputerUseStore", () => {
     });
   });
 
-  it("can fence resume by an optional open inspection handoff", async () => {
+  it("can fence resume by a pending open handoff", async () => {
     const handoffUpdatedAt = new Date("2026-06-17T12:03:00.000Z");
     const pausedAt = new Date("2026-06-17T12:02:00.000Z");
     const now = new Date("2026-06-17T12:05:00.000Z");

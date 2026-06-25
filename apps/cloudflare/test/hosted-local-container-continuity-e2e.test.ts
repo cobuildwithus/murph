@@ -166,7 +166,6 @@ async function startScenario(): Promise<void> {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -182,6 +181,7 @@ async function startScenario(): Promise<void> {
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted container continuity e2e",
     streamLogs: streamDevLogs,
+    testControls: true,
   });
 }
 
