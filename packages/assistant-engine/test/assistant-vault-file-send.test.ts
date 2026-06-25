@@ -188,6 +188,14 @@ describe('assistant vault-file send', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
+      currentHostedToolRequestKeyScope: () => ({
+        acceptedInputIds: ['input_test'],
+        assistantTurnOrdinal: '1',
+        conversationId: null,
+        inboundMailboxItemIds: [],
+        recipientKey: null,
+        turnId: 'turn_test',
+      }),
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/haa_test',
         filename: 'report.pdf',
