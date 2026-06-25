@@ -56,7 +56,7 @@ export default async function ComputerHandoffPage({
             </h1>
             <p className="mt-4 text-sm text-muted-foreground text-pretty">
               {isRetry
-                ? "Try again. If the site still cannot connect, return to Murph and ask for browser takeover."
+                ? "Try again. If the site still cannot connect, return to Murph and ask for a live browser link."
                 : "Kernel is still finishing this sign-in. Check again in a moment."}
             </p>
             <a
@@ -139,14 +139,17 @@ export default async function ComputerHandoffPage({
 
   if (state.interaction === "view_only") {
     return (
-      <main className="relative min-h-dvh bg-foreground text-foreground">
-        {/* eslint-disable-next-line @next/next/no-img-element -- Ephemeral data URL screenshot; next/image optimization does not apply. */}
-        <img
-          alt="Murph private page preview"
-          className="block h-dvh w-full object-contain bg-foreground"
-          draggable={false}
-          src={state.screenshotDataUrl}
-        />
+      <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
+        <section className="mx-auto flex min-h-[70vh] max-w-2xl flex-col justify-center">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <Clock3 className="mb-4 h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <h1 className="font-serif text-3xl text-balance">Open a live browser link</h1>
+            <p className="mt-4 text-sm text-muted-foreground text-pretty">
+              Static page previews are no longer supported. Return to Murph and ask
+              for a live browser handoff if you want to inspect or control this step.
+            </p>
+          </div>
+        </section>
       </main>
     );
   }
