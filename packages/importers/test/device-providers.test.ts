@@ -501,6 +501,16 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
               timezone_offset: "-04:00",
               score: {},
             },
+            {
+              id: "sleep-no-offset-local-24",
+              cycle_id: "cycle-no-offset-local-24",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              score: {
+                respiratory_rate: 13.9,
+              },
+            },
           ],
           cycles: [
             {
@@ -519,6 +529,15 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
               end: "2026-06-25T03:59:00.000Z",
               updated_at: "2026-06-25T04:10:00.000Z",
               score: {},
+            },
+            {
+              id: "cycle-no-offset-local-24",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                strain: 10.1,
+              },
             },
           ],
           recoveries: [
@@ -568,10 +587,28 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
       (event) => event.kind === "activity_session" && event.externalRef?.resourceId === "workout-no-offset-local-24",
     );
     const dayStrainEvent = result.events.find(
-      (event) => event.kind === "observation" && event.metric === "day-strain",
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "day-strain"
+        && event.externalRef?.resourceId === "cycle-local-24",
     );
     const respiratoryEvent = result.events.find(
-      (event) => event.kind === "observation" && event.metric === "respiratory-rate",
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-local-24",
+    );
+    const noOffsetDayStrainEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "day-strain"
+        && event.externalRef?.resourceId === "cycle-no-offset-local-24",
+    );
+    const noOffsetRespiratoryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-no-offset-local-24",
     );
     const recoveryEvent = result.events.find(
       (event) => event.kind === "observation" && event.metric === "recovery-score",
@@ -581,6 +618,8 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     assert.equal(noOffsetWorkoutEvent?.dayKey, "2026-06-24");
     assert.equal(dayStrainEvent?.dayKey, "2026-06-24");
     assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetDayStrainEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetRespiratoryEvent?.dayKey, "2026-06-24");
     assert.equal(recoveryEvent?.dayKey, "2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -862,10 +901,10 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   assert.equal(ouraNonWearEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
   assert.equal(whoopRemEvent?.fields?.unit, "minutes");
-  assert.equal(whoopRemEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopRemEvent?.dayKey, undefined);
   assert.equal(whoopRemEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopTemperatureEvent?.fields?.unit, "celsius");
-  assert.equal(whoopTemperatureEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopTemperatureEvent?.dayKey, undefined);
   assert.equal(whoopTemperatureEvent?.fields?.observationGrain, "summary");
 });
 

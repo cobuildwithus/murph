@@ -3200,16 +3200,16 @@ function resolveJunctionLocalDayKey(
     return rawDayKey;
   }
 
+  if (timestampSemantics === "offset") {
+    return rawDayKey;
+  }
+
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
   if (offsetSeconds !== null && offsetSeconds !== undefined && resolvedTimestamp) {
     const offsetDayKey = extractLocalDayKeyFromUtcOffset(resolvedTimestamp, offsetSeconds);
     if (offsetDayKey) {
       return offsetDayKey;
     }
-  }
-
-  if (timestampSemantics === "offset") {
-    return rawDayKey;
   }
 
   return undefined;
@@ -3573,6 +3573,10 @@ function resolveJunctionTimeseriesAggregateDayKey(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   sampleAt: string | undefined,
 ): string | undefined {
+  if (timestamp.timestampSemantics === "offset") {
+    return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+  }
+
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
   if (
     offsetSeconds !== null

@@ -152,17 +152,7 @@ function firstWhoopLocalDayKey(
   offsetSource: PlainObject | undefined,
   ...candidates: Array<string | undefined>
 ): string | undefined {
-  const offsetMinutes = whoopTimezoneOffsetMinutes(offsetSource);
-
-  if (offsetMinutes !== undefined) {
-    const dayKey = firstWhoopOffsetDayKey(offsetMinutes, ...candidates);
-
-    if (dayKey) {
-      return dayKey;
-    }
-  }
-
-  return firstDayKey(...candidates);
+  return firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(offsetSource), ...candidates);
 }
 
 function firstWhoopOffsetDayKey(
@@ -616,9 +606,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const recoverySleepEndAt = toIso(recoverySleep?.end);
     const recoverySleepStartAt = toIso(recoverySleep?.start);
     const dayKey =
-      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recoveryCycle), recoveryCycleEndAt, recoveryCycleStartAt) ??
-      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recoverySleep), recoverySleepEndAt, recoverySleepStartAt) ??
-      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recovery), recordedAt) ??
       firstWhoopLocalDayKey(recoveryCycle, recoveryCycleEndAt, recoveryCycleStartAt) ??
       firstWhoopLocalDayKey(recoverySleep, recoverySleepEndAt, recoverySleepStartAt) ??
       firstWhoopLocalDayKey(recovery, recordedAt);

@@ -578,6 +578,31 @@ test("Junction normalizer buckets stress level aggregates by provider local offs
   assert.equal(localDayTwo?.dataOrigin?.timeZoneOffsetMinutes, -420);
 });
 
+test("Junction timeseries aggregates trust embedded offset timestamps before separate offset metadata", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-06-25T00:30:00+02:00", timezone_offset: -14_400, score: 44 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const stressEvent = payload.events?.find((event) => event.fields?.metric === "stress-level");
+
+  assert.equal(stressEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
+  assert.equal(stressEvent?.dayKey, "2026-06-25");
+  assert.equal(stressEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+  assert.equal(stressEvent?.dataOrigin?.timestampSemantics, "offset");
+});
+
 test("Junction normalizer keeps floating stress timestamps on their raw day despite offset metadata", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -635,6 +660,31 @@ test("Junction WHOOP workout summaries use provider offset local day across UTC 
   assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
   assert.equal(workoutEvent?.dayKey, "2026-06-24");
   assert.equal(workoutEvent?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries trust embedded offset timestamps before separate offset metadata", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-embedded-offset",
+        start: "2026-06-25T00:30:00+02:00",
+        end: "2026-06-25T01:00:00+02:00",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-25");
   assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
 });
 
