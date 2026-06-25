@@ -442,7 +442,16 @@ describe("hosted Prisma baseline migration", () => {
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
-    expect(hostedThreadRoutesMigrationSql).toContain('PRIMARY KEY ("channel", "thread_lookup_key")');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'PRIMARY KEY ("channel", "thread_identity_lookup_key")',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain('"thread_lookup_key" TEXT NOT NULL');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"thread_identity_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"hosted_thread_route_channel_thread_lookup_key_idx"',
+    );
     expect(hostedThreadRoutesMigrationSql).toContain('"owner_member_id" TEXT NOT NULL');
     expect(hostedThreadRoutesMigrationSql).toContain('"monthly_usage_limit_usd_micros" BIGINT NOT NULL DEFAULT 4500000');
     expect(hostedThreadRoutesMigrationSql).toContain('REFERENCES "hosted_thread_container"("member_id")');

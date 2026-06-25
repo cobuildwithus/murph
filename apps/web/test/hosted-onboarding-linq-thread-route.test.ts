@@ -9,6 +9,7 @@ import {
   readHostedThreadRouteByExternalThread,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
@@ -149,12 +150,21 @@ function createPrisma(input: {
         return [];
       }
       const lookupKeys = (where.threadLookupKey as { in?: string[] } | undefined)?.in ?? [];
+      const identityLookupKeys =
+        (where.threadIdentityLookupKey as { in?: string[] } | undefined)?.in ?? [];
       const expected = createHostedExternalThreadLookupKey({
         accountLookupKey: routeAccountLookupKey,
         channel: "linq",
         threadId: "chat_group_123",
       });
-      if (!expected || !lookupKeys.includes(expected)) {
+      const expectedIdentity = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      if (
+        (!expected || !lookupKeys.includes(expected))
+        && (!expectedIdentity || !identityLookupKeys.includes(expectedIdentity))
+      ) {
         return [];
       }
       return [
@@ -181,6 +191,7 @@ function createPrisma(input: {
             },
           },
           containerMemberId: routeContainerMemberId,
+          threadIdentityLookupKey: expectedIdentity,
           threadLookupKey: expected,
         },
       ];
@@ -218,6 +229,7 @@ function createStatefulThreadRoutePrisma() {
   const routes: Array<{
     channel: string;
     containerMemberId: string;
+    threadIdentityLookupKey: string;
     threadLookupKey: string;
   }> = [];
   const containers = new Map<string, {
@@ -255,6 +267,7 @@ function createStatefulThreadRoutePrisma() {
       data: {
         channel: string;
         containerMemberId: string;
+        threadIdentityLookupKey: string;
         threadLookupKey: string;
       };
     }) => {
@@ -263,10 +276,15 @@ function createStatefulThreadRoutePrisma() {
     }),
     findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
       const lookupKeys = (where.threadLookupKey as { in?: string[] } | undefined)?.in ?? [];
+      const identityLookupKeys =
+        (where.threadIdentityLookupKey as { in?: string[] } | undefined)?.in ?? [];
       return routes
         .filter((route) =>
           route.channel === where.channel
-          && lookupKeys.includes(route.threadLookupKey),
+          && (
+            lookupKeys.includes(route.threadLookupKey)
+            || identityLookupKeys.includes(route.threadIdentityLookupKey)
+          ),
         )
         .map((route) => ({
           channel: route.channel,
@@ -283,20 +301,22 @@ function createStatefulThreadRoutePrisma() {
               ?? ownerState.id,
           },
           containerMemberId: route.containerMemberId,
+          threadIdentityLookupKey: route.threadIdentityLookupKey,
           threadLookupKey: route.threadLookupKey,
         }));
     }),
     findUnique: vi.fn().mockImplementation(async ({ where }: {
       where: {
-        channel_threadLookupKey: {
+        channel_threadIdentityLookupKey: {
           channel: string;
-          threadLookupKey: string;
+          threadIdentityLookupKey: string;
         };
       };
     }) => {
       const route = routes.find((candidate) =>
-        candidate.channel === where.channel_threadLookupKey.channel
-        && candidate.threadLookupKey === where.channel_threadLookupKey.threadLookupKey,
+        candidate.channel === where.channel_threadIdentityLookupKey.channel
+        && candidate.threadIdentityLookupKey
+          === where.channel_threadIdentityLookupKey.threadIdentityLookupKey,
       );
       if (!route) {
         return null;
@@ -308,6 +328,30 @@ function createStatefulThreadRoutePrisma() {
         },
         containerMemberId: route.containerMemberId,
       };
+    }),
+    update: vi.fn().mockImplementation(async ({ data, where }: {
+      data: {
+        threadIdentityLookupKey: string;
+        threadLookupKey: string;
+      };
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: string;
+          threadIdentityLookupKey: string;
+        };
+      };
+    }) => {
+      const route = routes.find((candidate) =>
+        candidate.channel === where.channel_threadIdentityLookupKey.channel
+        && candidate.threadIdentityLookupKey
+          === where.channel_threadIdentityLookupKey.threadIdentityLookupKey,
+      );
+      if (!route) {
+        throw new Error("Expected existing route.");
+      }
+      route.threadIdentityLookupKey = data.threadIdentityLookupKey;
+      route.threadLookupKey = data.threadLookupKey;
+      return route;
     }),
   };
   const hostedMemberRouting = {
@@ -333,6 +377,7 @@ function createStatefulThreadRoutePrisma() {
       channel: string;
       containerMemberId: string;
       ownerMemberId: string;
+      threadIdentityLookupKey: string;
       threadLookupKey: string;
     }) {
       containers.set(input.containerMemberId, {
@@ -342,6 +387,7 @@ function createStatefulThreadRoutePrisma() {
       routes.push({
         channel: input.channel,
         containerMemberId: input.containerMemberId,
+        threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       });
     },
@@ -464,6 +510,10 @@ describe("Linq explicit external-thread routing", () => {
       channel: "linq",
       threadId: "chat_group_123",
     });
+    const priorThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
     restoreV1();
     const restoreV2 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
@@ -477,11 +527,17 @@ describe("Linq explicit external-thread routing", () => {
         channel: "linq",
         threadId: "chat_group_123",
       });
+      const currentThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
       if (
         !priorAccountLookupKey
         || !priorThreadLookupKey
+        || !priorThreadIdentityLookupKey
         || !currentAccountLookupKey
         || !currentThreadLookupKey
+        || !currentThreadIdentityLookupKey
       ) {
         throw new Error("Expected rotated test lookup keys.");
       }
@@ -489,6 +545,7 @@ describe("Linq explicit external-thread routing", () => {
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         ownerMemberId: "member_owner_123",
+        threadIdentityLookupKey: priorThreadIdentityLookupKey,
         threadLookupKey: priorThreadLookupKey,
       });
       vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
@@ -518,11 +575,17 @@ describe("Linq explicit external-thread routing", () => {
       expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
       expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-      expect(prisma.hostedThreadRoute.create).toHaveBeenCalledWith({
+      expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
         data: {
-          channel: "linq",
-          containerMemberId: "member_thread_container_123",
+          threadIdentityLookupKey: currentThreadIdentityLookupKey,
           threadLookupKey: currentThreadLookupKey,
+        },
+        where: {
+          channel_threadIdentityLookupKey: {
+            channel: "linq",
+            threadIdentityLookupKey: priorThreadIdentityLookupKey,
+          },
         },
       });
       await expect(
@@ -735,7 +798,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "thread-route-authority-mismatch",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });

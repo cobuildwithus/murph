@@ -12,6 +12,7 @@ const HOSTED_BLIND_INDEX_PATTERN =
 export type HostedBlindIndexKind =
   | "email"
   | "external-thread"
+  | "external-thread-identity"
   | "linq-chat"
   | "phone"
   | "privy-user"
@@ -113,6 +114,26 @@ export function createHostedExternalThreadLookupKeyReadCandidates(input: {
   return createHostedLookupKeyReadCandidates(
     "external-thread",
     normalizeHostedExternalThreadLookupInput(input),
+  );
+}
+
+export function createHostedExternalThreadIdentityLookupKey(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string | null {
+  return createHostedLookupKey(
+    "external-thread-identity",
+    normalizeHostedExternalThreadIdentityLookupInput(input),
+  );
+}
+
+export function createHostedExternalThreadIdentityLookupKeyReadCandidates(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "external-thread-identity",
+    normalizeHostedExternalThreadIdentityLookupInput(input),
   );
 }
 
@@ -288,6 +309,16 @@ function normalizeHostedExternalThreadLookupInput(input: {
   return accountLookupKey && channel && threadId
     ? `${channel}:${accountLookupKey}:${threadId}`
     : null;
+}
+
+function normalizeHostedExternalThreadIdentityLookupInput(input: {
+  channel: string | null | undefined;
+  threadId: string | number | null | undefined;
+}): string | null {
+  const channel = normalizeHostedExternalThreadChannel(input.channel);
+  const threadId = normalizeHostedOpaqueInput(input.threadId);
+
+  return channel && threadId ? `${channel}:${threadId}` : null;
 }
 
 function normalizeHostedExternalThreadChannel(

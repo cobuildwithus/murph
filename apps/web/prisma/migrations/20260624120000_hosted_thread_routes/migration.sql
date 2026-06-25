@@ -10,11 +10,12 @@ CREATE TABLE "hosted_thread_container" (
 CREATE TABLE "hosted_thread_route" (
     "channel" TEXT NOT NULL,
     "thread_lookup_key" TEXT NOT NULL,
+    "thread_identity_lookup_key" TEXT NOT NULL,
     "container_member_id" TEXT NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "hosted_thread_route_pkey" PRIMARY KEY ("channel", "thread_lookup_key")
+    CONSTRAINT "hosted_thread_route_pkey" PRIMARY KEY ("channel", "thread_identity_lookup_key")
 );
 
 CREATE INDEX "hosted_thread_container_owner_member_id_idx"
@@ -22,6 +23,9 @@ CREATE INDEX "hosted_thread_container_owner_member_id_idx"
 
 CREATE INDEX "hosted_thread_route_container_member_id_idx"
   ON "hosted_thread_route"("container_member_id");
+
+CREATE INDEX "hosted_thread_route_channel_thread_lookup_key_idx"
+  ON "hosted_thread_route"("channel", "thread_lookup_key");
 
 ALTER TABLE "hosted_thread_container"
   ADD CONSTRAINT "hosted_thread_container_member_id_fkey"

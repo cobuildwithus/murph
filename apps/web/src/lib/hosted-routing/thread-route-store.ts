@@ -7,6 +7,7 @@ import type {
 } from "@murphai/hosted-execution";
 
 import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
@@ -30,6 +31,13 @@ export type HostedThreadRouteChannel = Extract<
 
 export interface HostedThreadRouteSnapshot {
   accountLookupKey: string;
+  channel: HostedThreadRouteChannel;
+  container: HostedMemberCoreState;
+  containerMemberId: string;
+  owner: HostedMemberCoreState;
+}
+
+export interface HostedThreadRouteIdentitySnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
@@ -138,6 +146,93 @@ export async function readHostedThreadRouteByExternalThread(input: {
 
   return {
     accountLookupKey,
+    channel: row.channel,
+    container: row.container.member,
+    containerMemberId: row.containerMemberId,
+    owner: row.container.owner,
+  };
+}
+
+export async function readHostedThreadRouteByThreadIdentity(input: {
+  channel: HostedThreadRouteChannel;
+  prisma: HostedOnboardingReadClient;
+  threadId: string | number | null | undefined;
+}): Promise<HostedThreadRouteIdentitySnapshot | null> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: input.channel,
+      threadId: input.threadId,
+    });
+
+  if (threadIdentityLookupKeys.length === 0) {
+    return null;
+  }
+
+  const rows = await input.prisma.hostedThreadRoute.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      channel: true,
+      container: {
+        select: {
+          member: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+          owner: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+      },
+      containerMemberId: true,
+    },
+    where: {
+      channel: input.channel,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const distinctContainerIds = new Set(rows.map((row) => row.containerMemberId));
+  if (distinctContainerIds.size > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        channel: input.channel,
+        matchCount: rows.length,
+      },
+      httpStatus: 500,
+      message: "External thread identity lookup matched multiple containers.",
+      retryable: true,
+    });
+  }
+
+  const row = rows[0]!;
+  if (!isHostedExternalThreadChannel(row.channel)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_CHANNEL_INVALID",
+      httpStatus: 500,
+      message: "External thread route has an unsupported channel.",
+      retryable: false,
+    });
+  }
+
+  return {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,

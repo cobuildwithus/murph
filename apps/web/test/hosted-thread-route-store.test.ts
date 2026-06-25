@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   readHostedThreadRouteByExternalThread,
+  readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
@@ -90,6 +92,65 @@ describe("hosted thread route store", () => {
                 threadId: "chat_group_abc",
               }),
             ]),
+          },
+        }),
+      }),
+    );
+  });
+
+  it("reads explicit thread identity without account authority", async () => {
+    const prisma = createPrismaMock();
+    const container = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_container_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    const owner = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadIdentityLookupKey) {
+      throw new Error("Expected test thread identity lookup key.");
+    }
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
+      {
+        channel: "linq",
+        container: {
+          member: container,
+          owner,
+        },
+        containerMemberId: "member_container_123",
+      },
+    ]);
+
+    await expect(
+      readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma,
+        threadId: "chat_group_abc",
+      }),
+    ).resolves.toEqual({
+      channel: "linq",
+      container,
+      containerMemberId: "member_container_123",
+      owner,
+    });
+
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          channel: "linq",
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([threadIdentityLookupKey]),
           },
         }),
       }),

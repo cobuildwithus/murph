@@ -17,6 +17,8 @@ import {
   appendHostedMailboxEnvelopeTx,
 } from "../hosted-mailbox/store";
 import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
@@ -139,6 +141,15 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       "Hosted thread route requires an account lookup key, supported channel, and non-empty thread id.",
     );
   }
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: input.channel,
+    threadId: input.threadId,
+  });
+  if (!threadIdentityLookupKey) {
+    throw new TypeError(
+      "Hosted thread route requires a supported channel and non-empty thread id.",
+    );
+  }
 
   const requestedContainerMemberId =
     normalizeHostedThreadContainerMemberId(input.containerMemberId);
@@ -156,6 +167,13 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       })
     ),
   ]);
+  const threadIdentityLookupKeys = normalizeHostedThreadLookupKeys([
+    threadIdentityLookupKey,
+    ...createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: input.channel,
+      threadId: input.threadId,
+    }),
+  ]);
   const existingRows = await input.prisma.hostedThreadRoute.findMany({
     orderBy: { createdAt: "asc" },
     select: {
@@ -165,21 +183,27 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         },
       },
       containerMemberId: true,
+      threadIdentityLookupKey: true,
       threadLookupKey: true,
     },
     where: {
       channel: input.channel,
-      threadLookupKey: {
-        in: threadLookupKeys,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
       },
     },
   });
 
   if (existingRows.length > 0) {
     const distinctContainerIds = new Set(existingRows.map((row) => row.containerMemberId));
+    const authorityMatched = existingRows.some((row) =>
+      threadLookupKeys.includes(row.threadLookupKey)
+    );
     const existing = existingRows[0]!;
     if (
       distinctContainerIds.size > 1
+      ||
+      !authorityMatched
       ||
       existing.container.ownerMemberId !== input.ownerMemberId
       || (
@@ -195,11 +219,18 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       });
     }
 
-    if (!existingRows.some((row) => row.threadLookupKey === threadLookupKey)) {
-      await createHostedThreadRouteRowTx({
+    const currentIdentityRow = existingRows.find((row) =>
+      row.threadIdentityLookupKey === threadIdentityLookupKey
+    ) ?? existing;
+    if (
+      currentIdentityRow.threadIdentityLookupKey !== threadIdentityLookupKey
+      || currentIdentityRow.threadLookupKey !== threadLookupKey
+    ) {
+      await updateHostedThreadRouteAuthorityRowTx({
         channel: input.channel,
-        containerMemberId: existing.containerMemberId,
         prisma: input.prisma,
+        previousThreadIdentityLookupKey: currentIdentityRow.threadIdentityLookupKey,
+        threadIdentityLookupKey,
         threadLookupKey,
       });
     }
@@ -241,6 +272,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     channel: input.channel,
     containerMemberId,
     prisma: input.prisma,
+    threadIdentityLookupKey,
     threadLookupKey,
   });
 
@@ -312,6 +344,7 @@ async function createHostedThreadRouteRowTx(input: {
   channel: HostedThreadRouteChannel;
   containerMemberId: string;
   prisma: Prisma.TransactionClient;
+  threadIdentityLookupKey: string;
   threadLookupKey: string;
 }): Promise<void> {
   try {
@@ -319,6 +352,7 @@ async function createHostedThreadRouteRowTx(input: {
       data: {
         channel: input.channel,
         containerMemberId: input.containerMemberId,
+        threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       },
     });
@@ -328,6 +362,40 @@ async function createHostedThreadRouteRowTx(input: {
         code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
         httpStatus: 409,
         message: "This external thread route was created concurrently.",
+        retryable: true,
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function updateHostedThreadRouteAuthorityRowTx(input: {
+  channel: HostedThreadRouteChannel;
+  previousThreadIdentityLookupKey: string;
+  prisma: Prisma.TransactionClient;
+  threadIdentityLookupKey: string;
+  threadLookupKey: string;
+}): Promise<void> {
+  try {
+    await input.prisma.hostedThreadRoute.update({
+      data: {
+        threadIdentityLookupKey: input.threadIdentityLookupKey,
+        threadLookupKey: input.threadLookupKey,
+      },
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: input.channel,
+          threadIdentityLookupKey: input.previousThreadIdentityLookupKey,
+        },
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+        httpStatus: 409,
+        message: "This external thread route was updated concurrently.",
         retryable: true,
       });
     }

@@ -70,6 +70,7 @@ import {
 } from "./contact-privacy";
 import {
   readHostedThreadRouteByExternalThread,
+  readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
@@ -143,6 +144,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
         route: explicitThreadRoute,
       });
     }
+  }
+
+  const mismatchedThreadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: summary.chatId,
+  });
+  if (mismatchedThreadRoute) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("thread-route-authority-mismatch"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: false,
+        existingMemberMatch: "none",
+        reason: "thread-route-authority-mismatch",
+        routeStage: "thread-route-authority-mismatch",
+      }),
+    );
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
