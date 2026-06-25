@@ -8,6 +8,7 @@ import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-co
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
+  saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
   applyAssistantVaultFileSendApprovalResult,
@@ -210,6 +211,64 @@ describe('assistant vault-file send', () => {
     expect(requests).toHaveLength(3)
     expect(requests[1]).toEqual(requests[0])
     expect(requests[2]).toEqual(requests[0])
+  })
+
+  it('repairs approved legacy targetless intents without changing approval identity', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-approved-legacy-target-',
+    )
+    tempRoots.push(parentRoot)
+    const now = new Date('2026-06-24T12:00:00.000Z')
+    const legacy = {
+      ...createVaultFileIntent(),
+      bindingDelivery: null,
+      explicitTarget: null,
+      targetFingerprint: 'legacy-targetless-fingerprint',
+    }
+    const approvedRequest = buildAssistantVaultFileSendApprovalRequest(legacy)
+
+    const approved = applyAssistantVaultFileSendApprovalResult({
+      approval: {
+        approvalId: `haa_${'e'.repeat(32)}`,
+        status: 'approved',
+      },
+      intent: legacy,
+      now,
+    })
+
+    expect(approved).toMatchObject({
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      nextAttemptAt: now.toISOString(),
+      status: 'pending',
+      targetFingerprint: legacy.targetFingerprint,
+    })
+    expect(buildAssistantVaultFileSendApprovalRequest(approved)).toEqual(
+      approvedRequest,
+    )
+
+    await saveAssistantOutboxIntent(vaultRoot, approved)
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'chat_123',
+      target: 'chat_123',
+      targetKind: 'thread',
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: approved.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: approved.deliveryIdempotencyKey,
+      media: [expect.objectContaining({ kind: 'vault_file', ref: 'documents/report.pdf' })],
+      target: 'chat_123',
+      targetKind: 'thread',
+    }))
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
   })
 
   it('never dispatches an awaiting-approval intent even when forced', async () => {

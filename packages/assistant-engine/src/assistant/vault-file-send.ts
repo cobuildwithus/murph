@@ -17,6 +17,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
+import { resolveAssistantBindingDelivery } from './bindings.js'
 import {
   createAssistantVaultFileSendOutboxIntent,
   saveAssistantOutboxIntentIfUnchanged,
@@ -259,11 +260,8 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
       if (input.intent.status !== 'awaiting_approval') {
         return input.intent
       }
-      return assistantOutboxIntentSchema.parse({
-        ...input.intent,
-        lastError: null,
-        nextAttemptAt: updatedAt,
-        status: 'pending',
+      return approveAssistantVaultFileSendIntent({
+        intent: input.intent,
         updatedAt,
       })
     case 'pending':
@@ -310,6 +308,59 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
         updatedAt,
       })
   }
+}
+
+function approveAssistantVaultFileSendIntent(input: {
+  intent: AssistantOutboxIntent
+  updatedAt: string
+}): AssistantOutboxIntent {
+  const repair = materializeApprovedAssistantVaultFileLegacyTarget(input.intent)
+  if (!repair) {
+    return assistantOutboxIntentSchema.parse({
+      ...input.intent,
+      lastError: {
+        code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+        message: 'Approved vault-file delivery did not have a concrete destination.',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+      updatedAt: input.updatedAt,
+    })
+  }
+
+  return assistantOutboxIntentSchema.parse({
+    ...repair,
+    lastError: null,
+    nextAttemptAt: input.updatedAt,
+    status: 'pending',
+    updatedAt: input.updatedAt,
+  })
+}
+
+function materializeApprovedAssistantVaultFileLegacyTarget(
+  intent: AssistantOutboxIntent,
+): AssistantOutboxIntent | null {
+  if (intent.bindingDelivery !== null || intent.explicitTarget !== null) {
+    return intent
+  }
+
+  const bindingDelivery = resolveAssistantBindingDelivery({
+    actorId: intent.actorId,
+    channel: intent.channel,
+    threadId: intent.threadId,
+    threadIsDirect: intent.threadIsDirect,
+  })
+  if (!bindingDelivery) {
+    return null
+  }
+
+  return assistantOutboxIntentSchema.parse({
+    ...intent,
+    bindingDelivery,
+    // Preserve the pre-repair target fingerprint because it is part of the
+    // already-approved action identity verified again at dispatch time.
+    targetFingerprint: intent.targetFingerprint,
+  })
 }
 
 export function deferAssistantVaultFileApprovalCheck(input: {
