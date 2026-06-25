@@ -1,6 +1,6 @@
 ---
 name: competition-training
-description: Use when a Murph user is preparing for a fitness race or competition and needs feasibility, phase selection, training structure, pacing, tapering, event-specific practice, fueling rehearsal, execution, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events.
+description: Use when a Murph user is preparing for a target fitness race or competition and needs feasibility, phase selection, event-demand classification, pacing, tapering, event-specific practice, fueling rehearsal, execution, logistics, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events. For pure strength-sport meets such as powerlifting, weightlifting, or strongman, use strength-training first for strength or resistance programming.
 ---
 
 # Competition training
@@ -30,9 +30,11 @@ A useful answer:
 
 ## Use and routing
 
-Use for a target race, meet, challenge, competition, or qualifying standard, including running, trail/ultra, multisport, cycling, swimming/rowing/paddling, HYROX, obstacle racing, functional fitness, and other endurance or hybrid formats.
+Use for a target race, challenge, competition, or qualifying standard, including running, trail/ultra, multisport, cycling, swimming/rowing/paddling, HYROX, obstacle racing, functional fitness, and other endurance or hybrid formats.
 
 Use for feasibility, phase changes, weekly/block structure, taper, pacing, transitions, movement standards, simulations, race week, adaptation after disruption, and post-event review.
+
+For pure strength-sport meets such as powerlifting, weightlifting, or strongman, use `strength-training` first for the actual strength/resistance program. Use this skill only for event-demand classification, current rule or standard checks, taper, execution, logistics, or post-event review when those change the decision.
 
 Do not make this the primary skill for ordinary exercise without a target event; a new or materially changed pain complaint; persistent-pain or chronic-illness management as the main problem; a new medical symptom; disordered-eating concern; or behavior support without an event-programming decision. Route the more important issue first and preserve the event goal when responsible. Do not route away solely because an athlete is disabled or uses adaptive equipment.
 
@@ -40,12 +42,13 @@ Do not make this the primary skill for ordinary exercise without a target event;
 
 - `behavior-followthrough` owns anchors, standard/tiny/fallback versions, reminders, support style, repeated-miss repair, privacy, and support fading.
 - `physical-therapy` owns new or changed musculoskeletal pain, rehabilitation, return to activity, and pain-driven exercise modification.
+- `strength-training` owns strength/resistance programming, maximal strength, power, hypertrophy, exercise selection, loading, progression, plateaus, and pure strength-sport programming.
 - `chronic-illness-support` and `chronic-pain-support` own fluctuating illness, treatment burden, and persistent pain when central. Disability itself is not an illness route.
 - `experiment-onboarding` and `self-management-experiments` own bounded tests of fueling, caffeine, equipment, warm-up, sleep, pacing, or logistics.
 - `food-journal` owns low-burden food/performance observation when the user chooses it.
 - `computer-use` owns non-trivial live browser operation.
 
-This skill owns the event model, current training priority, weekly architecture, competition-specific practice, execution plan, and review.
+This skill owns the event model, current training priority, event-demand classification, current-fact verification, competition-specific practice, taper/execution/logistics, and review. For pure strength-sport programming, compose with `strength-training` instead of owning the block.
 
 ## Progressive disclosure
 

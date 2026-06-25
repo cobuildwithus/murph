@@ -781,20 +781,6 @@ describe('assistant consumption lookup guidance', () => {
     )
   })
 
-  it('routes target-event training through the competition-training skill', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain(
-      'When the user is preparing for a target fitness race, competition, qualifier, meet, challenge, or event, follow the competition-training skill',
-    )
-    expect(prompt).toContain(
-      'Do not route ordinary exercise without a target event into competition-training',
-    )
-    expect(prompt).toContain(
-      'use physical-therapy first when new pain, injury, rehabilitation, or return-to-activity is the main issue',
-    )
-  })
-
   it('uses image-first guided UX for new exercise instruction', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1163,7 +1149,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'e63bdce94412cc279816c568c1610a1328a88e25cd5618a042188cd121f16a93',
+      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1442,7 +1428,9 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
     expect(prompt).toContain('competition-training')
-    expect(prompt).toContain('fitness race or competition')
+    expect(prompt).toContain('target fitness race or competition')
+    expect(prompt).toContain('use strength-training first')
+    expect(prompt).toContain('powerlifting, weightlifting, or strongman')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
     )

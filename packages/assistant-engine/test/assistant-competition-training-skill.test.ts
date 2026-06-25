@@ -23,7 +23,13 @@ describe('assistant competition-training skill', () => {
 
     expect(matches).toHaveLength(1)
     expect(matches[0]?.name).toBe('competition-training')
-    expect(matches[0]?.triggerHint).toContain('fitness race or competition')
+    expect(matches[0]?.triggerHint).toContain(
+      'target fitness race or competition',
+    )
+    expect(matches[0]?.triggerHint).toContain('use strength-training first')
+    expect(matches[0]?.triggerHint).toContain(
+      'powerlifting, weightlifting, or strongman',
+    )
     expect(matches[0]?.triggerHint).toContain('ordinary exercise')
     expect(matches[0]?.triggerHint).toContain('new pain or injury')
   })
@@ -105,15 +111,20 @@ describe('assistant competition-training skill', () => {
   })
 
   it('composes with behavior-followthrough instead of recreating it', async () => {
-    const [core, psychology, behavior] = await Promise.all([
+    const [core, psychology, behavior, strength] = await Promise.all([
       readSkillFile('SKILL.md'),
       readSkillFile('references/performance-psychology.md'),
       readFile(path.join(skillsRoot, 'behavior-followthrough', 'SKILL.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'strength-training', 'SKILL.md'), 'utf8'),
     ])
 
     expect(core).toContain(
       '`behavior-followthrough` owns anchors, standard/tiny/fallback versions',
     )
+    expect(core).toContain(
+      '`strength-training` owns strength/resistance programming',
+    )
+    expect(core).toContain('For pure strength-sport programming')
     expect(core).toContain(
       'hand the implementation loop to `behavior-followthrough`',
     )
@@ -126,6 +137,8 @@ describe('assistant competition-training skill', () => {
     expect(behavior).toContain(
       'Treat missed behavior as information about the loop, not as a character flaw.',
     )
+    expect(strength).toContain('competition preparation')
+    expect(strength).toContain('maximal strength')
   })
 
   it('rejects false precision, workout debt, manipulation, and guarantees', async () => {
