@@ -95,6 +95,78 @@ function firstDayKey(...candidates: Array<string | undefined>): string | undefin
   return undefined;
 }
 
+function parseWhoopTimezoneOffsetMinutes(value: unknown): number | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "Z") {
+    return 0;
+  }
+
+  const match = /^([+-])(\d{2}):(\d{2})$/u.exec(trimmed);
+  if (!match) {
+    return undefined;
+  }
+
+  const [, sign, hoursText, minutesText] = match;
+  if (!sign || !hoursText || !minutesText) {
+    return undefined;
+  }
+
+  const hours = Number.parseInt(hoursText, 10);
+  const minutes = Number.parseInt(minutesText, 10);
+
+  if (hours > 23 || minutes > 59) {
+    return undefined;
+  }
+
+  const offsetMinutes = hours * 60 + minutes;
+  return sign === "-" ? -offsetMinutes : offsetMinutes;
+}
+
+function whoopTimezoneOffsetMinutes(source: PlainObject | undefined): number | undefined {
+  return parseWhoopTimezoneOffsetMinutes(source?.timezone_offset ?? source?.timezoneOffset);
+}
+
+function offsetDayKey(candidate: string | undefined, offsetMinutes: number): string | undefined {
+  if (typeof candidate !== "string" || !candidate.trim()) {
+    return undefined;
+  }
+
+  const iso = toIso(candidate);
+  if (!iso) {
+    return undefined;
+  }
+
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+
+  return new Date(timestamp + offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
+function firstWhoopLocalDayKey(
+  offsetSource: PlainObject | undefined,
+  ...candidates: Array<string | undefined>
+): string | undefined {
+  const offsetMinutes = whoopTimezoneOffsetMinutes(offsetSource);
+
+  if (offsetMinutes !== undefined) {
+    for (const candidate of candidates) {
+      const dayKey = offsetDayKey(candidate, offsetMinutes);
+
+      if (dayKey) {
+        return dayKey;
+      }
+    }
+  }
+
+  return firstDayKey(...candidates);
+}
+
 function utcStartOfDay(dayKey: string | undefined): string | undefined {
   return dayKey ? toIso(`${dayKey}T00:00:00.000Z`) : undefined;
 }
@@ -386,11 +458,30 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const cycles = asArray(request.cycles).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const workouts = asArray(request.workouts).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const deletions = asArray(request.deletions).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
+  const sleepsById = new Map<string, PlainObject>();
+  const cyclesById = new Map<string, PlainObject>();
   const events: DeviceEventPayload[] = [];
   const evidenceParts: DeviceEvidencePartPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
     stringId(profile?.user_id ?? profile?.userId ?? profile?.id);
+
+  for (const sleep of sleeps) {
+    const sleepId = stringId(sleep.id);
+
+    if (sleepId) {
+      sleepsById.set(sleepId, sleep);
+    }
+  }
+
+  for (const cycle of cycles) {
+    const cycleId = stringId(cycle.id);
+
+    if (cycleId) {
+      cyclesById.set(cycleId, cycle);
+    }
+  }
+
   const bodyMeasurementDayKey = bodyMeasurement
     ? firstDayKey(firstBodyMeasurementRecordedAt(bodyMeasurement), importedAt)
     : undefined;
@@ -429,7 +520,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(sleep.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(sleep.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
-    const dayKey = firstDayKey(endAt, startAt, recordedAt);
+    const dayKey = firstWhoopLocalDayKey(sleep, endAt, startAt, recordedAt);
     const durationMinutes = minutesBetween(startAt, endAt);
     const sleepRole = `sleep:${sleepId}`;
     const sleepRef = makeExternalRef("sleep", sleepId, version);
@@ -494,17 +585,24 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   }
 
   for (const recovery of recoveries) {
-    const sleepId = stringId(recovery.sleep_id) ?? stringId(recovery.cycle_id) ?? `recovery-${events.length + 1}`;
-    const recoveryRole = `recovery:${sleepId}`;
+    const sleepId = stringId(recovery.sleep_id ?? recovery.sleepId);
+    const cycleId = stringId(recovery.cycle_id ?? recovery.cycleId);
+    const recoveryResourceId = sleepId ?? cycleId ?? `recovery-${events.length + 1}`;
+    const recoveryRole = `recovery:${recoveryResourceId}`;
     const version = toIso(recovery.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(recovery.updated_at), importedAt);
     const occurredAt = recordedAt;
-    const dayKey = firstDayKey(recordedAt);
+    const recoveryCycle = cycleId ? cyclesById.get(cycleId) : undefined;
+    const recoverySleep = sleepId ? sleepsById.get(sleepId) : undefined;
+    const dayKey =
+      firstWhoopLocalDayKey(recoveryCycle, toIso(recoveryCycle?.end), toIso(recoveryCycle?.start)) ??
+      firstWhoopLocalDayKey(recoverySleep, toIso(recoverySleep?.end), toIso(recoverySleep?.start)) ??
+      firstWhoopLocalDayKey(recovery, recordedAt);
     const score = asPlainObject(recovery.score);
 
     pushEvidencePart(
       evidenceParts,
-      createEvidencePart(recoveryRole, `recovery-${sleepId}.json`, recovery),
+      createEvidencePart(recoveryRole, `recovery-${recoveryResourceId}.json`, recovery),
     );
 
     emitObservationMetrics(
@@ -516,7 +614,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         dayKey,
         observationGrain: "summary",
         evidenceRoles: [recoveryRole],
-        externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
+        externalRef: (facet) => makeExternalRef("recovery", recoveryResourceId, version, facet),
       },
       WHOOP_RECOVERY_OBSERVATION_METRICS,
     );
@@ -530,7 +628,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(cycle.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(cycle.updated_at), endAt, startAt, importedAt);
     const occurredAt = endAt ?? startAt ?? recordedAt;
-    const dayKey = firstDayKey(endAt, startAt, recordedAt);
+    const dayKey = firstWhoopLocalDayKey(cycle, endAt, startAt, recordedAt);
     const score = asPlainObject(cycle.score);
 
     pushEvidencePart(
@@ -561,6 +659,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(workout.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(workout.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
+    const dayKey = firstWhoopLocalDayKey(workout, startAt, recordedAt, endAt);
     const durationMinutes = minutesBetween(startAt, endAt);
     const sportName = typeof workout.sport_name === "string" && workout.sport_name.trim()
       ? workout.sport_name.trim()
@@ -579,6 +678,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           kind: "activity_session",
           occurredAt,
           recordedAt,
+          dayKey,
           source: "device",
           title: trimToLength(`WHOOP ${sportName}`, 160),
           evidenceRoles: [workoutRole],

@@ -463,6 +463,84 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.equal(bmiEvent?.dayKey, "2026-03-16");
 });
 
+test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-midnight imports", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-local-day");
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const result = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-local-day-user",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          sleeps: [
+            {
+              id: "sleep-local-24",
+              cycle_id: "cycle-local-24",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              timezone_offset: "-04:00",
+              score: {
+                respiratory_rate: 14.2,
+              },
+            },
+          ],
+          cycles: [
+            {
+              id: "cycle-local-24",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              timezone_offset: "-04:00",
+              score: {
+                strain: 12.4,
+              },
+            },
+          ],
+          workouts: [
+            {
+              id: "workout-local-24",
+              start: "2026-06-25T03:45:00.000Z",
+              end: "2026-06-25T04:15:00.000Z",
+              updated_at: "2026-06-25T04:20:00.000Z",
+              timezone_offset: "-04:00",
+              sport_name: "Run",
+              score: {
+                strain: 6.8,
+              },
+            },
+          ],
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+
+    const workoutEvent = result.events.find((event) => event.kind === "activity_session");
+    const dayStrainEvent = result.events.find(
+      (event) => event.kind === "observation" && event.metric === "day-strain",
+    );
+    const respiratoryEvent = result.events.find(
+      (event) => event.kind === "observation" && event.metric === "respiratory-rate",
+    );
+
+    assert.equal(workoutEvent?.dayKey, "2026-06-24");
+    assert.equal(dayStrainEvent?.dayKey, "2026-06-24");
+    assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonical device payloads", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",
