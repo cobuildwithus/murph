@@ -63,11 +63,11 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // reduction from 233k; 2026-06-24 rollout analysis showed multi-million-token
 // turns where a single user message ran 20+ computer-use tool round-trips
 // and finished without ever crossing 128k (starting ~44k, ending ~59k),
-// because tool-loop context grows in 1-2k chunks per round-trip. 84k fires
-// compaction in the middle of those tool loops instead of after them, while
+// because tool-loop context grows in 1-2k chunks per round-trip. 100k fires
+// compaction in the middle of longer tool loops instead of after them, while
 // staying well above the typical conversational floor so unrelated turns
 // don't compact every message.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 84_000;
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
