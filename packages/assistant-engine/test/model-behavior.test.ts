@@ -736,13 +736,10 @@ describe('assistant consumption lookup guidance', () => {
       'then `vault-cli exercise show <id-or-slug> --format json` for final movements',
     )
     expect(prompt).toContain(
-      'catalog steps, tips, equipment, level, targets, and source-backed safety notes',
+      'catalog steps, tips, equipment, level, targets, images, and source-backed safety notes',
     )
     expect(prompt).toContain(
       'If the catalog has no useful match, say so plainly and keep the suggestion conservative',
-    )
-    expect(prompt).toContain(
-      'Size exercise and session guidance to what is new',
     )
     expect(prompt).toContain(
       'a short reference once the routine is known',
@@ -750,6 +747,21 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).toContain(
       'never assign reporting homework',
     )
+  })
+
+  it('uses image-first guided UX for new exercise instruction', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Movement instruction UX')
+    expect(prompt).toContain('do not dump a long numbered exercise plan')
+    expect(prompt).toContain('attach available catalog images')
+    expect(prompt).toContain('ask whether to walk the user through')
+    expect(prompt).toContain('Use returned catalog `images[]` as response media')
+    expect(prompt).toContain('no catalog image yet')
+    expect(prompt).toContain(
+      'If images are unavailable, keep the first reply to minimal text cues for safety and identification',
+    )
+    expect(prompt).not.toContain('images are unavailable, or safety requires it')
   })
 })
 
@@ -1105,7 +1117,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd1922b3e1eeb662572620de81255491d40318dde5f1de9342104a4cab136ddf2',
+      '66628cae98d552ea21ee912e80b3f5c5d317f7a3781f2a1a8d48899d0aba3156',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
