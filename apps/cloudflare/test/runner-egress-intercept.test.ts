@@ -6538,20 +6538,34 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
   it("rejects unauthorized transcribe requests without calling Workers AI", async () => {
     const aiRun = vi.fn();
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Transcribe without a provider credential must not use write-fence validation.");
+    });
+    const validateProviderEgressToken = vi.fn(async () => {
+      throw new Error("Transcribe without a provider credential must not use provider-token validation.");
+    });
 
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+        },
         method: "POST",
       }),
       createInterceptEnv({
         AI: { run: aiRun },
+        validateRuntimeProviderEgressToken: validateProviderEgressToken,
+        validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(aiRun).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateProviderEgressToken).not.toHaveBeenCalled();
   });
 
   it("fails closed when the Workers AI binding is missing", async () => {

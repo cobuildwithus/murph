@@ -909,18 +909,16 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const startedAt = Date.now();
-  const providerCredential = readBearerCredential(input.request.headers) ?? "";
-  const authorization = providerCredential
-    ? await authorizeNativeHostedProviderCredential({
-        credential: providerCredential,
-        env: input.env,
-        providerKind: "workers_ai_transcribe",
-        request: input.request,
-      })
-    : await authorizeHostedProviderEgress({
-        ...input,
-        providerKind: "workers_ai_transcribe",
-      });
+  const providerCredential = readBearerCredential(input.request.headers);
+  if (!providerCredential) {
+    return disallowedProviderEgress();
+  }
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
+    providerKind: "workers_ai_transcribe",
+    request: input.request,
+  });
   if (!authorization) {
     return disallowedProviderEgress();
   }
