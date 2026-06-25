@@ -85,10 +85,12 @@ override any value explicitly.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
   Uses the same ChatGPT-subscription Codex auth seeding as `dev`.
 - `e2e:stub`: deterministic hosted-local E2E defaults. It runs the real Codex
-  app-server binary against a local scripted Responses API stub (test-only
-  `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider
-  key, so zero provider spend), skips Stripe listener startup, and skips
-  Vercel env pull. It also disables live Linq webhook tunnel registration
+  app-server binary against the production Worker, production RunnerContainer,
+  production UserRunner fence lifecycle, and production provider-egress boundary.
+  External vendors are replaced with deterministic local stubs: the model path
+  uses a test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with
+  a fake provider key, so zero provider spend. The profile skips Stripe listener
+  startup and Vercel env pull. It also disables live Linq webhook tunnel registration
   unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
   Opt-in live Codex scenarios default to `gpt-5.5` unless
@@ -120,17 +122,24 @@ identifiers, payload-like env values, and sensitive command args are redacted.
 1. Root `pnpm hosted-local ...` is the canonical developer and CI entrypoint.
 2. `apps/*/package.json` may expose broad aliases, but not one-off hosted-local
    scenario scripts.
-3. E2E scenario names live in `src/e2e.ts`; scripts pass scenario names to the
+3. Hosted E2E fakes external vendors only. The default CI path must use the
+   production Murph hosted topology: `apps/cloudflare/src/index.ts`, production
+   `RunnerContainer`, production `UserRunnerDurableObject`, production runtime
+   provider fetch, production provider egress, real runner bundle, and real
+   Codex app-server. Scenarios that need fault injection must set the scenario
+   metadata `testControls: true`; that is the only supported path to the
+   hosted-local test Worker entrypoint and test RPCs.
+4. E2E scenario names live in `src/e2e.ts`; scripts pass scenario names to the
    harness instead of hard-coding Vitest files.
-4. Diagnostic E2E scenarios that can intentionally fail while investigating
+5. Diagnostic E2E scenarios that can intentionally fail while investigating
    provider behavior are opt-in by explicit scenario name and are excluded from
    `pnpm hosted-local e2e`.
-5. Programmatic users call `startHostedLocalHarness(...)` or declared
+6. Programmatic users call `startHostedLocalHarness(...)` or declared
    `@murphai/hosted-local-harness/*` package exports, not root scripts or
    package `src/` paths directly.
-6. Every run writes a redacted state file under
+7. Every run writes a redacted state file under
    `.artifacts/hosted-local/<run-id>/state.json`.
-7. Hosted-local E2E always runs the real Codex app-server binary; the only
+8. Hosted-local E2E always runs the real Codex app-server binary; the only
    model substitute is the local scripted Responses API stub owned by the
    `apps/cloudflare` test helpers. Production runtime packages accept only
    neutral, `NODE_ENV=test`-gated overrides
