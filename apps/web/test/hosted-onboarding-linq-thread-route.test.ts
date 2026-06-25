@@ -1,7 +1,10 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, type Prisma } from "@prisma/client";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  ensureHostedThreadContainerRouteTx,
+} from "../src/lib/hosted-routing/thread-container-service";
 import {
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
@@ -37,9 +40,28 @@ vi.mock("../src/lib/hosted-onboarding/linq-daily-state", async (importOriginal) 
   };
 });
 
+vi.mock("../src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/hosted-crypto/domain-root-store")>();
+  return {
+    ...actual,
+    provisionHostedCryptoDomainRootsForUserTx: vi.fn(),
+  };
+});
+
+vi.mock("../src/lib/hosted-onboarding/hosted-member-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/hosted-onboarding/hosted-member-store")>();
+  return {
+    ...actual,
+    createHostedMember: vi.fn(),
+    readHostedMemberCoreState: vi.fn(),
+  };
+});
+
 const mailboxStore = await import("../src/lib/hosted-mailbox/store");
 const usageAllowance = await import("../src/lib/hosted-execution/usage-allowance");
 const linqDailyState = await import("../src/lib/hosted-onboarding/linq-daily-state");
+const domainRootStore = await import("../src/lib/hosted-crypto/domain-root-store");
+const hostedMemberStore = await import("../src/lib/hosted-onboarding/hosted-member-store");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -177,6 +199,118 @@ function createPrisma(input: {
   };
 }
 
+function createStatefulThreadRoutePrisma() {
+  const ownerState = {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2026-06-24T00:00:00.000Z"),
+    id: "member_owner_123",
+    suspendedAt: null,
+    updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+  };
+  const routes: Array<{
+    channel: string;
+    containerMemberId: string;
+    threadLookupKey: string;
+  }> = [];
+  const containers = new Map<string, {
+    monthlyUsageLimitUsdMicros: bigint;
+    ownerMemberId: string;
+  }>();
+  const hostedThreadContainer = {
+    create: vi.fn().mockImplementation(async ({ data }: {
+      data: {
+        memberId: string;
+        monthlyUsageLimitUsdMicros: bigint;
+        ownerMemberId: string;
+      };
+    }) => {
+      containers.set(data.memberId, {
+        monthlyUsageLimitUsdMicros: data.monthlyUsageLimitUsdMicros,
+        ownerMemberId: data.ownerMemberId,
+      });
+      return data;
+    }),
+  };
+  const hostedThreadRoute = {
+    create: vi.fn().mockImplementation(async ({ data }: {
+      data: {
+        channel: string;
+        containerMemberId: string;
+        threadLookupKey: string;
+      };
+    }) => {
+      routes.push(data);
+      return data;
+    }),
+    findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+      const lookupKeys = (where.threadLookupKey as { in?: string[] } | undefined)?.in ?? [];
+      return routes
+        .filter((route) =>
+          route.channel === where.channel
+          && lookupKeys.includes(route.threadLookupKey),
+        )
+        .map((route) => ({
+          channel: route.channel,
+          container: {
+            member: {
+              ...ownerState,
+              id: route.containerMemberId,
+            },
+            owner: {
+              ...ownerState,
+              id: containers.get(route.containerMemberId)?.ownerMemberId ?? ownerState.id,
+            },
+          },
+          containerMemberId: route.containerMemberId,
+          threadLookupKey: route.threadLookupKey,
+        }));
+    }),
+    findUnique: vi.fn().mockImplementation(async ({ where }: {
+      where: {
+        channel_threadLookupKey: {
+          channel: string;
+          threadLookupKey: string;
+        };
+      };
+    }) => {
+      const route = routes.find((candidate) =>
+        candidate.channel === where.channel_threadLookupKey.channel
+        && candidate.threadLookupKey === where.channel_threadLookupKey.threadLookupKey,
+      );
+      if (!route) {
+        return null;
+      }
+
+      return {
+        container: {
+          ownerMemberId: containers.get(route.containerMemberId)?.ownerMemberId ?? ownerState.id,
+        },
+        containerMemberId: route.containerMemberId,
+      };
+    }),
+  };
+  const hostedMemberRouting = {
+    findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+    updateMany: vi.fn(),
+  };
+  const hostedMember = {
+    findUnique: vi.fn().mockResolvedValue(null),
+  };
+  const hostedWorkspace = {
+    upsert: vi.fn().mockResolvedValue({}),
+  };
+
+  return {
+    hostedMember,
+    hostedMemberRouting,
+    hostedThreadContainer,
+    hostedThreadRoute,
+    hostedWorkspace,
+  };
+}
+
 function buildHostedMailboxItem(input: {
   id: string;
   userId: string;
@@ -202,6 +336,112 @@ function buildHostedMailboxItem(input: {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it("creates and reuses a route container before routing Linq ingress", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const owner = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(owner);
+    vi.mocked(hostedMemberStore.createHostedMember).mockResolvedValue({
+      ...owner,
+      id: "member_thread_container_123",
+    });
+    vi.mocked(domainRootStore.provisionHostedCryptoDomainRootsForUserTx)
+      .mockResolvedValue(undefined);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_activation_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_group_123",
+      }),
+    ).resolves.toMatchObject({
+      activationMailboxItemId: "mailbox_activation_123",
+      containerMemberId: "member_thread_container_123",
+      created: true,
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        occurredAt: new Date("2026-06-24T00:01:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_group_123",
+      }),
+    ).resolves.toMatchObject({
+      activationMailboxItemId: null,
+      containerMemberId: "member_thread_container_123",
+      created: false,
+    });
+    expect(hostedMemberStore.createHostedMember).toHaveBeenCalledTimes(1);
+    expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
+
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(plan.wakeUserId).toBe("member_thread_container_123");
+    expect(plan.wakeMailboxItemId).toBe("mailbox_group_123");
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
   it("routes a bound Linq group thread into the container runtime", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
