@@ -1058,6 +1058,83 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
+  test("uses Linq route account lookup and group directness for assistant conversation identity", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-group-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const accountLookupKey = "hbidx:phone:v1:route-account";
+    const contactLookupKey = "hbidx:phone:v1:participant";
+    const decodedWake = createConversationWake({
+      message: {
+        accountLookupKey,
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey,
+        linqMessage: {
+          chatId: "chat_group_identity",
+          from: "+15551110000",
+          isFromMe: false,
+          messageId: "msg_group_identity",
+          parts: [
+            {
+              type: "text",
+              value: "hello group",
+            },
+          ],
+          threadIsDirect: false,
+        },
+        phoneLookupKey: contactLookupKey,
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_linq_group_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const event = listed.events[0];
+    assert.ok(event);
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: accountLookupKey,
+      userId: TEST_USER_ID,
+    });
+    const expectedAccountId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      accountLookupKey,
+    );
+    const unexpectedSenderAccountId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      contactLookupKey,
+    );
+    const expectedThreadId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "chat_group_identity",
+    );
+
+    assert.equal(event.conversation?.accountId, expectedAccountId);
+    assert.notEqual(event.conversation?.accountId, unexpectedSenderAccountId);
+    assert.equal(event.conversation?.source, "linq");
+    assert.equal(event.conversation?.threadId, expectedThreadId);
+    assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(event.replyTarget?.threadId, "chat_group_identity");
+  });
+
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-whatsapp-"));
     tempRoots.push(parentRoot);

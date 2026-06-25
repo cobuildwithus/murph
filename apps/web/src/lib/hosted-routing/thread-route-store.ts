@@ -31,11 +31,13 @@ export interface HostedThreadRouteSnapshot {
 }
 
 export async function readHostedThreadRouteByExternalThread(input: {
+  accountLookupKey: string | null | undefined;
   channel: HostedThreadRouteChannel;
   prisma: HostedOnboardingReadClient;
   threadId: string | number | null | undefined;
 }): Promise<HostedThreadRouteSnapshot | null> {
   const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
+    accountLookupKey: input.accountLookupKey,
     channel: input.channel,
     threadId: input.threadId,
   });

@@ -8,7 +8,7 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
-  readHostedLinqConversationMessageContact,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
@@ -1079,11 +1079,11 @@ function createHostedConversationAssistantInputConversation(
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
   if (isHostedLinqConversationMessageWake(wake)) {
-    const contact = readHostedLinqConversationMessageContact(wake.message);
+    const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(wake.message);
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
-        contact.lookupKey,
+        accountLookupKey,
       ),
       actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1095,7 +1095,9 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         wake.message.linqMessage.chatId,
       ),
-      threadIsDirect: true,
+      threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
+        ? wake.message.linqMessage.threadIsDirect
+        : true,
     };
   }
 
@@ -1162,7 +1164,7 @@ function readHostedConversationAssistantIdentifierSecret(
   wake: HostedExecutionConversationMessageWake,
 ): string {
   if (isHostedLinqConversationMessageWake(wake)) {
-    return readHostedLinqConversationMessageContact(wake.message).lookupKey;
+    return readHostedLinqConversationMessageAccountLookupKey(wake.message);
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {

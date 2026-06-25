@@ -95,6 +95,7 @@ export type HostedExternalThreadChannel =
   (typeof HOSTED_EXTERNAL_THREAD_CHANNELS)[number];
 
 export function createHostedExternalThreadLookupKey(input: {
+  accountLookupKey: string | null | undefined;
   channel: string | null | undefined;
   threadId: string | number | null | undefined;
 }): string | null {
@@ -105,6 +106,7 @@ export function createHostedExternalThreadLookupKey(input: {
 }
 
 export function createHostedExternalThreadLookupKeyReadCandidates(input: {
+  accountLookupKey: string | null | undefined;
   channel: string | null | undefined;
   threadId: string | number | null | undefined;
 }): string[] {
@@ -275,13 +277,17 @@ export function normalizeHostedOpaqueInput(
 }
 
 function normalizeHostedExternalThreadLookupInput(input: {
+  accountLookupKey: string | null | undefined;
   channel: string | null | undefined;
   threadId: string | number | null | undefined;
 }): string | null {
+  const accountLookupKey = normalizeHostedOpaqueInput(input.accountLookupKey);
   const channel = normalizeHostedExternalThreadChannel(input.channel);
   const threadId = normalizeHostedOpaqueInput(input.threadId);
 
-  return channel && threadId ? `${channel}:${threadId}` : null;
+  return accountLookupKey && channel && threadId
+    ? `${channel}:${accountLookupKey}:${threadId}`
+    : null;
 }
 
 function normalizeHostedExternalThreadChannel(

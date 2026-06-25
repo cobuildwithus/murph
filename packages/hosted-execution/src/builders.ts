@@ -143,6 +143,7 @@ export function buildHostedExecutionConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionLinqConversationMessageWake(input: {
+  accountLookupKey?: string | null;
   contactKind?: HostedExecutionLinqConversationContactKind;
   contactLookupKey?: string;
   eventId: string;
@@ -163,6 +164,9 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.accountLookupKey === undefined
+        ? {}
+        : { accountLookupKey: input.accountLookupKey }),
       channel: "linq",
       contactKind,
       contactLookupKey,

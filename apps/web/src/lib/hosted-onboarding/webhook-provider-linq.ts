@@ -66,6 +66,9 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
+  createHostedPhoneLookupKey,
+} from "./contact-privacy";
+import {
   readHostedThreadRouteByExternalThread,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
@@ -121,7 +124,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
+  const threadRouteAccountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
+  if (!threadRouteAccountLookupKey) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("missing-recipient-line"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberMatch: "none",
+        reason: "missing-recipient-line",
+        routeStage: "ignored-missing-recipient-line",
+      }),
+    );
+  }
+
   const explicitThreadRoute = await readHostedThreadRouteByExternalThread({
+    accountLookupKey: threadRouteAccountLookupKey,
     channel: "linq",
     prisma: input.prisma,
     threadId: summary.chatId,
@@ -132,6 +148,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
+      routeAccountLookupKey: threadRouteAccountLookupKey,
     });
   }
 
@@ -552,6 +569,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
+  routeAccountLookupKey: string;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
     messageEvent,
@@ -694,6 +712,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   }
 
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
+    accountLookupKey: input.routeAccountLookupKey,
     eventId: input.event.event_id,
     linqMessage: {
       chatId: summary.chatId,
@@ -704,6 +723,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         parts: messageEvent.data.message.parts,
         service: messageEvent.data.service ?? null,
       }),
+      threadIsDirect: !isHostedLinqGroupChat(messageEvent),
       ...(messageEvent.data.message.reply_to?.message_id === undefined
         ? {}
         : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -946,6 +966,7 @@ function sanitizeHostedOnboardingPlannerLogValue(
 }
 
 function buildHostedLinqConversationWakeForMailbox(input: {
+  accountLookupKey?: string | null;
   eventId: string;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
@@ -954,6 +975,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
   const fullWake = buildHostedExecutionLinqConversationMessageWake({
+    ...(input.accountLookupKey === undefined
+      ? {}
+      : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     linqMessage: {
       ...input.linqMessage,
@@ -972,6 +996,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   }
 
   const compactWake = buildHostedExecutionLinqConversationMessageWake({
+    ...(input.accountLookupKey === undefined
+      ? {}
+      : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     linqMessage: {
       ...input.linqMessage,
@@ -990,6 +1017,9 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   }
 
   return buildHostedExecutionLinqConversationMessageWake({
+    ...(input.accountLookupKey === undefined
+      ? {}
+      : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
     linqMessage: {
       ...input.linqMessage,

@@ -267,6 +267,7 @@ export interface HostedExecutionLinqConversationMessage {
   replyToMessageId?: string | null;
   replyToPartIndex?: number | null;
   service?: string | null;
+  threadIsDirect?: boolean | null;
 }
 
 export const HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS = [
@@ -278,6 +279,7 @@ export type HostedExecutionLinqConversationContactKind =
   (typeof HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS)[number];
 
 interface HostedExecutionLinqConversationMessagePayloadBase {
+  accountLookupKey?: string | null;
   channel: "linq";
   linqMessage: HostedExecutionLinqConversationMessage;
 }
@@ -321,6 +323,14 @@ export function readHostedLinqConversationMessageContact(
   }
 
   throw new TypeError("Hosted Linq conversation message requires a contact lookup key.");
+}
+
+export function readHostedLinqConversationMessageAccountLookupKey(
+  payload: HostedExecutionLinqConversationMessagePayload,
+): string {
+  return typeof payload.accountLookupKey === "string" && payload.accountLookupKey.trim()
+    ? payload.accountLookupKey
+    : readHostedLinqConversationMessageContact(payload).lookupKey;
 }
 
 export interface HostedExecutionTelegramConversationMessagePayload {

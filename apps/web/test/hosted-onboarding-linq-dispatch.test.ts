@@ -3658,7 +3658,7 @@ https://join.example.test/join/code_first_text`);
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "unknown-home-line",
+      reason: "missing-recipient-line",
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();

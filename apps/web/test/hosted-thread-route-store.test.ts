@@ -6,7 +6,13 @@ import {
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
   createHostedExternalThreadLookupKey,
+  createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
+
+const LINQ_ACCOUNT_LOOKUP_KEY = createHostedPhoneLookupKey("+15550000000");
+if (!LINQ_ACCOUNT_LOOKUP_KEY) {
+  throw new Error("Expected test Linq account lookup key.");
+}
 
 function createPrismaMock() {
   const hostedThreadRoute = {
@@ -50,6 +56,7 @@ describe("hosted thread route store", () => {
 
     await expect(
       readHostedThreadRouteByExternalThread({
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
         channel: "linq",
         prisma,
         threadId: "chat_group_abc",
@@ -68,6 +75,7 @@ describe("hosted thread route store", () => {
           threadLookupKey: {
             in: expect.arrayContaining([
               createHostedExternalThreadLookupKey({
+                accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
                 channel: "linq",
                 threadId: "chat_group_abc",
               }),
@@ -106,6 +114,7 @@ describe("hosted thread route store", () => {
 
     await expect(
       readHostedThreadRouteByExternalThread({
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
         channel: "linq",
         prisma,
         threadId: "chat_group_abc",
@@ -153,6 +162,7 @@ describe("hosted thread route store", () => {
 
     await expect(
       readHostedThreadRouteByExternalThread({
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
         channel: "linq",
         prisma,
         threadId: "chat_group_abc",

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedExternalThreadLookupKey,
+  createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
   planHostedOnboardingLinqWebhook,
@@ -50,9 +51,11 @@ function buildLinqMessageReceivedEvent(input: {
   isFromMe?: boolean;
   isGroup?: boolean;
   messageId?: string;
+  recipient?: string;
   sender?: string;
   text?: string;
 }) {
+  const recipient = input.recipient ?? "+15550000000";
   return {
     api_version: "2026-01-01",
     created_at: "2026-06-24T12:00:00.000Z",
@@ -61,7 +64,7 @@ function buildLinqMessageReceivedEvent(input: {
         id: input.chatId ?? "chat_group_123",
         is_group: input.isGroup ?? true,
         owner_handle: {
-          handle: "+15550000000",
+          handle: recipient,
           id: "owner_handle_123",
           is_me: true,
           service: "iMessage",
@@ -83,7 +86,7 @@ function buildLinqMessageReceivedEvent(input: {
             ],
       },
       preferred_service: "iMessage",
-      recipient_phone: "+15550000000",
+      recipient_phone: recipient,
       received_at: "2026-06-24T12:00:00.000Z",
       sender_handle: {
         handle: input.sender ?? "+15551112222",
@@ -99,10 +102,14 @@ function buildLinqMessageReceivedEvent(input: {
 }
 
 function createPrisma(input: {
+  routeAccountPhone?: string;
   routeContainerMemberId?: string | null;
   routeContainerActive?: boolean;
   routeOwnerActive?: boolean;
 } = {}) {
+  const routeAccountLookupKey = createHostedPhoneLookupKey(
+    input.routeAccountPhone ?? "+15550000000",
+  );
   const routeContainerMemberId = input.routeContainerMemberId ?? null;
   const routeContainerActive = input.routeContainerActive ?? true;
   const routeOwnerActive = input.routeOwnerActive ?? true;
@@ -113,6 +120,7 @@ function createPrisma(input: {
       }
       const lookupKeys = (where.threadLookupKey as { in?: string[] } | undefined)?.in ?? [];
       const expected = createHostedExternalThreadLookupKey({
+        accountLookupKey: routeAccountLookupKey,
         channel: "linq",
         threadId: "chat_group_123",
       });
@@ -243,11 +251,13 @@ describe("Linq explicit external-thread routing", () => {
         eventId: "evt_group_123",
         kind: "conversation.message",
         message: expect.objectContaining({
+          accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
           channel: "linq",
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
             from: "+15551112222",
             messageId: "msg_group_123",
+            threadIsDirect: false,
           }),
         }),
         userId: "member_thread_container_123",
@@ -256,6 +266,27 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not match a routed thread for another Linq recipient line with the same chat id", async () => {
+    const prisma = createPrisma({
+      routeAccountPhone: "+15550000000",
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        recipient: "+15559999999",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("uses the existing Linq daily quota gate for routed thread traffic", async () => {

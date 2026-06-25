@@ -455,6 +455,14 @@ function parseHostedExecutionLinqConversationMessagePayload(
       "Hosted execution conversation.message wake payload contactLookupKey",
     );
     return {
+      ...(record.accountLookupKey === undefined
+        ? {}
+        : {
+            accountLookupKey: readOptionalNullableString(
+              record.accountLookupKey,
+              "Hosted execution conversation.message wake payload accountLookupKey",
+            ),
+          }),
       channel,
       contactKind,
       contactLookupKey,
@@ -475,6 +483,14 @@ function parseHostedExecutionLinqConversationMessagePayload(
     "Hosted execution conversation.message wake payload phoneLookupKey",
   );
   return {
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            "Hosted execution conversation.message wake payload accountLookupKey",
+          ),
+        }),
     channel,
     contactKind: "phone",
     contactLookupKey: phoneLookupKey,
@@ -593,6 +609,13 @@ function parseHostedExecutionLinqConversationMessage(
       ? {}
       : {
           service: readOptionalNullableString(record.service, `${label} service`),
+        }),
+    ...(record.threadIsDirect === undefined
+      ? {}
+      : {
+          threadIsDirect: record.threadIsDirect === null
+            ? null
+            : requireBoolean(record.threadIsDirect, `${label} threadIsDirect`),
         }),
   };
 }
