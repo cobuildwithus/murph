@@ -260,6 +260,14 @@ export const MURPH_FAMILY_PLAN_TOOL = {
         type: 'object',
         additionalProperties: false,
         properties: {
+          targetEmail: {
+            anyOf: [
+              { type: 'string', minLength: 3, maxLength: 320 },
+              { type: 'null' },
+            ],
+            default: null,
+            description: 'Email address for an email-bound web invite when the user provided one.',
+          },
           targetLabel: {
             anyOf: [
               { type: 'string', minLength: 1, maxLength: 80 },
@@ -663,6 +671,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('start_checkout'),
       invite: z.object({
+        targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
         targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
@@ -671,6 +680,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
+        targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
         targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
@@ -683,10 +693,10 @@ const familyPlanArgumentsSchema = z
       : value.action === 'start_checkout'
         ? value.invite
         : null
-    if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername) {
+    if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Family invite requires a phone number or Telegram username.',
+        message: 'Family invite requires a phone number, Telegram username, or email.',
         path: ['invite'],
       })
     }
@@ -2253,6 +2263,9 @@ function parseFamilyPlanArguments(
         ? {
             action: 'start_checkout',
             invite: {
+              ...(parsed.data.invite.targetEmail
+                ? { targetEmail: parsed.data.invite.targetEmail }
+                : {}),
               targetLabel: parsed.data.invite.targetLabel,
               targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
               targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
@@ -2269,6 +2282,9 @@ function parseFamilyPlanArguments(
     request: {
       action: 'create_invite',
       invite: {
+        ...(parsed.data.invite.targetEmail
+          ? { targetEmail: parsed.data.invite.targetEmail }
+          : {}),
         targetLabel: parsed.data.invite.targetLabel,
         targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
         targetTelegramUsername: parsed.data.invite.targetTelegramUsername,

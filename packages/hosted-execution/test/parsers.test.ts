@@ -405,16 +405,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
       invite: {
+        targetEmail: "dad@example.com",
         targetLabel: "dad",
-        targetPhoneNumber: "+48 600 000 000",
-        targetTelegramUsername: "dad_username",
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
       },
     })).toEqual({
       action: "create_invite",
       invite: {
+        targetEmail: "dad@example.com",
         targetLabel: "dad",
-        targetPhoneNumber: "+48 600 000 000",
-        targetTelegramUsername: "dad_username",
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
       },
     });
 
@@ -425,7 +427,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           targetLabel: "dad",
         },
       })
-    ).toThrow(/phone number or Telegram username/u);
+    ).toThrow(/phone number, Telegram username, or email/u);
 
     expect(() =>
       parseHostedRuntimeFamilyPlanToolRequest({
@@ -434,7 +436,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           targetLabel: "dad",
         },
       })
-    ).toThrow(/phone number or Telegram username/u);
+    ).toThrow(/phone number, Telegram username, or email/u);
   });
 
   it("parses family plan status responses with sanitized member and invite fields", () => {

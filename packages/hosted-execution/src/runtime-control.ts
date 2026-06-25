@@ -743,6 +743,7 @@ export type HostedRuntimeFamilyPlanToolAction =
   | "start_checkout";
 
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
+  targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
   targetTelegramUsername?: string | null;

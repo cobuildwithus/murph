@@ -1109,6 +1109,18 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
+  const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
+    eventCreatedAt,
+    group,
+    tx: input.tx,
+  });
+  if (!eventFreshUnderOwnerLock) {
+    return {
+      activations: [],
+      groupId: group.id,
+    };
+  }
+
   const activeMembershipCount = await input.tx.hostedAccountGroupMembership.count({
     where: {
       groupId: group.id,
@@ -1873,6 +1885,7 @@ export async function issueHostedFamilyInviteTx(input: {
 export async function issueHostedFamilyInviteFromOwnerTx(input: {
   now?: Date;
   ownerMemberId: string;
+  targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
   targetTelegramUsername?: string | null;
@@ -1888,18 +1901,21 @@ export async function issueHostedFamilyInviteFromOwnerTx(input: {
     groupId: group.id,
     invitedByMemberId: input.ownerMemberId,
     now,
+    targetEmail: input.targetEmail ?? null,
     targetLabel: input.targetLabel ?? null,
     targetPhoneNumber: input.targetPhoneNumber ?? null,
     targetTelegramUsername: input.targetTelegramUsername ?? null,
     tx: input.tx,
   });
+  const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
 
   return {
     group,
     invite,
     replyText: buildHostedFamilyInviteReplyText({
       invite,
-      telegramBotUsername: readHostedOnboardingEnvironment().telegramBotUsername,
+      publicBaseUrl,
+      telegramBotUsername,
     }),
   };
 }
@@ -2531,8 +2547,9 @@ export function buildHostedFamilyInviteAcceptUrl(input: {
 
 export function buildHostedFamilyInviteReplyText(input: {
   invite: Pick<HostedAccountGroupInvitePrivateSnapshot,
-    "inviteCode" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber"
+    "inviteCode" | "targetEmail" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber"
   >;
+  publicBaseUrl?: string | null;
   telegramBotUsername?: string | null;
 }): string {
   const targetLabel = input.invite.targetLabel ?? "your family member";
@@ -2549,6 +2566,17 @@ export function buildHostedFamilyInviteReplyText(input: {
     lines.push(
       "They need to send this token to Murph from that phone number, for example on WhatsApp.",
     );
+  } else if (input.invite.targetEmail) {
+    const acceptUrl = buildHostedFamilyInviteAcceptUrl({
+      inviteCode: input.invite.inviteCode,
+      publicBaseUrl: input.publicBaseUrl ?? null,
+    });
+    if (acceptUrl) {
+      lines.push(`Forward this Family invite link to ${targetLabel}: ${acceptUrl}`);
+      lines.push("They need to open it and sign in with that email address.");
+    } else {
+      lines.push(`Family invite code for ${input.invite.targetEmail}: ${inviteToken}`);
+    }
   } else if (telegramBotUsername) {
     lines.push(
       `Forward this Telegram invite link to ${targetLabel}: ${buildHostedFamilyTelegramInviteUrl({
@@ -3185,8 +3213,29 @@ async function findHostedAccountGroupForStripeObject(input: {
   return null;
 }
 
+async function lockHostedFamilyBillingReconciliationTx(input: {
+  eventCreatedAt: Date | null;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
+  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
+    select: {
+      lastStripeEventCreatedAt: true,
+    },
+    where: {
+      groupId: input.group.id,
+    },
+  });
+
+  return !isHostedFamilyStripeEventStale({
+    billingRef,
+    eventCreatedAt: input.eventCreatedAt,
+  });
+}
+
 function isHostedFamilyStripeEventStale(input: {
-  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  billingRef: Pick<HostedAccountGroupBillingRefSnapshot, "lastStripeEventCreatedAt"> | null;
   eventCreatedAt: Date | null;
 }): boolean {
   return Boolean(

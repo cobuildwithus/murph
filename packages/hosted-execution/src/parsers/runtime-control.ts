@@ -760,8 +760,12 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   const invite = requireObject(value, label);
   assertAllowedObjectKeys(
     invite,
-    new Set(["targetLabel", "targetPhoneNumber", "targetTelegramUsername"]),
+    new Set(["targetEmail", "targetLabel", "targetPhoneNumber", "targetTelegramUsername"]),
     label,
+  );
+  const targetEmail = readOptionalNullableString(
+    invite.targetEmail,
+    "Hosted runtime family plan invite targetEmail",
   );
   const targetLabel = readOptionalNullableString(
     invite.targetLabel,
@@ -775,13 +779,14 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
     invite.targetTelegramUsername,
     "Hosted runtime family plan invite targetTelegramUsername",
   );
-  if (!targetPhoneNumber && !targetTelegramUsername) {
+  if (!targetPhoneNumber && !targetTelegramUsername && !targetEmail) {
     throw new TypeError(
-      "Hosted runtime family plan invite requires a phone number or Telegram username.",
+      "Hosted runtime family plan invite requires a phone number, Telegram username, or email.",
     );
   }
 
   return {
+    ...(targetEmail === undefined ? {} : { targetEmail }),
     targetLabel,
     targetPhoneNumber,
     targetTelegramUsername,

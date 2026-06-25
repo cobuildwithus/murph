@@ -298,9 +298,70 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
       ownerMemberId: "member_owner",
+      targetEmail: null,
       targetLabel: "Adam",
       targetPhoneNumber: null,
       targetTelegramUsername: "adam_username",
+      tx: {
+        label: "tx",
+      },
+    });
+  });
+
+  it("creates an email-bound invite from structured runtime input", async () => {
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+      billingActive: true,
+      billingStatus: "active",
+      invites: [
+        {
+          acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
+          expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+          id: "hbagi_adam",
+          status: "pending",
+          targetLabel: "Adam",
+          targetPhoneHint: null,
+          telegramInviteUrl: null,
+        },
+      ],
+      seats: {
+        active: 2,
+        billed: 4,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 3,
+      },
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "create_invite",
+        invite: {
+          targetEmail: "adam@example.com",
+          targetLabel: "Adam",
+          targetPhoneNumber: null,
+          targetTelegramUsername: null,
+        },
+      },
+    })).resolves.toMatchObject({
+      action: "create_invite",
+      result: {
+        invite: {
+          acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
+          status: "pending",
+          targetLabel: "Adam",
+        },
+      },
+    });
+
+    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
+      ownerMemberId: "member_owner",
+      targetEmail: "adam@example.com",
+      targetLabel: "Adam",
+      targetPhoneNumber: null,
+      targetTelegramUsername: null,
       tx: {
         label: "tx",
       },

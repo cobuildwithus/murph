@@ -115,6 +115,36 @@ describe("assistant family plan tool", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("Murph Family invite");
   });
 
+  it("parses email-only family invite requests", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "create_invite",
+          invite: {
+            targetEmail: "dad@example.com",
+            targetLabel: "dad",
+            targetPhoneNumber: null,
+            targetTelegramUsername: null,
+          },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })).toEqual({
+      kind: "family-plan",
+      request: {
+        action: "create_invite",
+        invite: {
+          targetEmail: "dad@example.com",
+          targetLabel: "dad",
+          targetPhoneNumber: null,
+          targetTelegramUsername: null,
+        },
+      },
+    });
+  });
+
   it("parses and executes Family checkout requests with optional next invite context", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -216,7 +246,7 @@ describe("assistant family plan tool", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("checkout.stripe.test/family");
   });
 
-  it("rejects invite requests without a phone number or Telegram username", () => {
+  it("rejects invite requests without a phone number, Telegram username, or email", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {

@@ -51,6 +51,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   return await getPrisma().$transaction(async (tx) => {
     const invite = await issueHostedFamilyInviteFromOwnerTx({
       ownerMemberId: input.memberId,
+      targetEmail: request.invite.targetEmail ?? null,
       targetLabel: request.invite.targetLabel ?? null,
       targetPhoneNumber: request.invite.targetPhoneNumber ?? null,
       targetTelegramUsername: request.invite.targetTelegramUsername ?? null,
@@ -94,6 +95,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
       const prepared = await prisma.$transaction(async (tx) => {
         return await issueHostedFamilyInviteFromOwnerTx({
           ownerMemberId: memberId,
+          targetEmail: inviteRequest.targetEmail ?? null,
           targetLabel: inviteRequest.targetLabel ?? null,
           targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
           targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,

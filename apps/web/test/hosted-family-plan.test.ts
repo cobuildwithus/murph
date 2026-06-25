@@ -244,12 +244,29 @@ describe("hosted Family plan", () => {
     expect(buildHostedFamilyInviteReplyText({
       invite: {
         inviteCode: "invite_123",
+        targetEmail: null,
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
       },
       telegramBotUsername: "@withmurph_bot",
     })).toContain("Forward this Telegram invite link to Dad: https://t.me/withmurph_bot?start=family_invite_123");
+  });
+
+  it("uses the web accept link for email-bound family invite replies", () => {
+    expect(buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_email",
+        targetEmail: "dad@example.com",
+        targetLabel: "Dad",
+        targetPhoneHint: null,
+        targetPhoneNumber: null,
+      },
+      publicBaseUrl: "https://local.withmurph.ai:3443",
+      telegramBotUsername: "@withmurph_bot",
+    })).toContain(
+      "Forward this Family invite link to Dad: https://local.withmurph.ai:3443/family/accept/invite_email",
+    );
   });
 
   it("lets only the owner issue a phone or Telegram-hinted invite", async () => {
@@ -1182,6 +1199,50 @@ describe("hosted Family plan", () => {
       },
     });
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
+  it("derives active Family billing from the locked membership count", async () => {
+    const tx = createTxMock();
+    let ownerLocked = false;
+    tx.$queryRaw.mockImplementation(async () => {
+      ownerLocked = true;
+      return [];
+    });
+    tx.hostedAccountGroupMembership.count.mockImplementation(async () =>
+      ownerLocked ? 3 : 2
+    );
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: 2,
+      }),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.hostedAccountGroupMembership.count.mock.invocationCallOrder[0],
+    );
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: 2,
+        currentBillingPhase: null,
+      }),
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.unpaid,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -2121,6 +2182,8 @@ function createTxMock(input: {
         inviteCode: data.inviteCode,
         invitedByMemberId: data.invitedByMemberId,
         status: data.status,
+        targetEmailEncrypted: data.targetEmailEncrypted,
+        targetEmailLookupKey: data.targetEmailLookupKey,
         targetLabel: data.targetLabel,
         targetPhoneLookupKey: data.targetPhoneLookupKey,
         targetPhoneNumberEncrypted: data.targetPhoneNumberEncrypted,
@@ -2305,6 +2368,8 @@ function createPendingInvite(overrides: Partial<{
   expiresAt: Date;
   inviteCode: string;
   status: string;
+  targetEmailEncrypted: string | null;
+  targetEmailLookupKey: string | null;
   targetPhoneLookupKey: string | null;
   targetTelegramUsernameEncrypted: string | null;
   targetTelegramUsernameLookupKey: string | null;
@@ -2326,6 +2391,8 @@ function createPendingInvite(overrides: Partial<{
     inviteCode: "invite_phone",
     invitedByMemberId: "member_owner",
     status: "pending",
+    targetEmailEncrypted: null,
+    targetEmailLookupKey: null,
     targetLabel: "Mom",
     targetPhoneLookupKey: null,
     targetPhoneNumberEncrypted: "encrypted:+48600000000",
