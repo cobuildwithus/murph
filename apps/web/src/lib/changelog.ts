@@ -4,8 +4,8 @@ export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
 export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
-export const CHANGELOG_FEATURE_LIMIT_MAX = 20;
-export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 5;
+export const CHANGELOG_FEATURE_LIMIT_MAX = 100;
+export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 25;
 
 const CHANGELOG_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CHANGELOG_TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
