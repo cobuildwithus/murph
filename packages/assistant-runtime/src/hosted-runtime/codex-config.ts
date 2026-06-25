@@ -10,6 +10,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  parseHostedLocalCodexSubscriptionHostAuth,
   parseHostedLocalCodexSubscriptionSeedAuth,
 } from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 import {
@@ -139,7 +140,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
   });
   await chmod(codexHome, 0o700);
   let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
-  if (chatGptAuthKind === "invalid" || chatGptAuthKind === "managed") {
+  if (
+    chatGptAuthKind === "invalid"
+    || (chatGptAuthKind === "managed" && seededChatGptAuthJson !== null)
+  ) {
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
@@ -236,6 +240,7 @@ async function readHostedCodexAuthKind(
       ? Reflect.get(parsed, "auth_mode")
       : null;
     if (authMode === "chatgpt") {
+      parseHostedLocalCodexSubscriptionHostAuth(parsed);
       return "managed";
     }
     if (authMode === "chatgptAuthTokens") {

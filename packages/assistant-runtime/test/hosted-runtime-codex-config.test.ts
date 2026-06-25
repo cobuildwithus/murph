@@ -558,7 +558,7 @@ test("hosted Codex runtime config removes stale subscription auth from a persist
   await assert.rejects(() => readFile(codexAuthPath, "utf8"));
 });
 
-test("hosted Codex runtime config removes managed ChatGPT auth from a persistent home", async () => {
+test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
   const codexAuthPath = path.join(codexHome, "auth.json");
@@ -576,22 +576,21 @@ test("hosted Codex runtime config removes managed ChatGPT auth from a persistent
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_API_KEY: "secret-openai-key",
+      NODE_ENV: "test",
     },
   });
 
-  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
-  assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");
+  assert.equal(await readFile(codexAuthPath, "utf8"), managedAuthJson);
+  assert.equal(result.runtimeEnv.OPENAI_API_KEY, undefined);
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "hosted-openai",
+    "openai",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.doesNotMatch(config, /^cli_auth_credentials_store = "file"$/mu);
-  assert.match(config, /^model_provider = "hosted-openai"$/mu);
-  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
-  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
+  assert.match(config, /^model_provider = "openai"$/mu);
+  assert.doesNotMatch(config, /\[model_providers\./u);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
