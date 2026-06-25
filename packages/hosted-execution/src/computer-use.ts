@@ -244,19 +244,6 @@ export const hostedComputerPauseForUserRequestSchema = z
     suggestedReply: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
-  .superRefine((request, ctx) => {
-    if (
-      request.reason === "final_confirmation"
-      && request.handoffPurpose !== null
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Final confirmation pauses must ask for chat approval and cannot create a browser handoff.",
-        path: ["handoffPurpose"],
-      });
-    }
-  })
   .transform(({ message: _legacyMessage, ...request }) => request);
 
 export const hostedComputerFinishRunRequestSchema = z
