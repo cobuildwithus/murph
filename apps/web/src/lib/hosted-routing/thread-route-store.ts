@@ -2,6 +2,8 @@ import "server-only";
 
 import type {
   HostedExecutionConversationMessageChannel,
+  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 
 import {
@@ -34,12 +36,9 @@ export interface HostedThreadRouteSnapshot {
   owner: HostedMemberCoreState;
 }
 
-export interface HostedThreadRouteEgressAuthority {
-  accountLookupKey: string;
-  channel: HostedThreadRouteChannel;
-  containerMemberId: string;
-  threadId: string;
-}
+export type HostedThreadRouteEgressAuthority = HostedExecutionExternalThreadRouteAuthority;
+export type HostedLinqThreadRouteEgressAuthority =
+  HostedExecutionLinqExternalThreadRouteAuthority;
 
 export async function readHostedThreadRouteByExternalThread(input: {
   accountLookupKey?: string | null | undefined;

@@ -28,7 +28,7 @@ import {
   type HostedLinqMessageSideEffect,
 } from "./webhook-transport";
 import type {
-  HostedThreadRouteEgressAuthority,
+  HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import type {
   HostedOnboardingLinqDirectPlan,
@@ -167,7 +167,7 @@ export function buildAiUsageQuotaReplyResponse(input: {
   messageId: string;
   noticeCode: HostedAiUsageGateNoticeCode;
   occurredAt: string;
-  routeAuthority?: HostedThreadRouteEgressAuthority | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const baseInput = {
@@ -234,7 +234,7 @@ export function buildQuotaReplyResponse(input: {
   memberId: string;
   messageId: string;
   occurredAt: string;
-  routeAuthority?: HostedThreadRouteEgressAuthority | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({

@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
@@ -6,6 +7,7 @@ export interface HostedAssistantLinqDeliveryContext {
   directRecipientPhoneNumber: string | null;
   fromPhoneNumber: string | null;
   replyToMessageId: string | null;
+  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
 }
 
@@ -23,6 +25,7 @@ export function buildHostedAssistantLinqDeliveryContextFromWake(
     directRecipientPhoneNumber: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.from),
     fromPhoneNumber: null,
     replyToMessageId: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.messageId),
+    routeAuthority: wake.message.routeAuthority ?? null,
     target: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.chatId),
   };
 }

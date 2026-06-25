@@ -1,11 +1,11 @@
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
 import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
-import type { HostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
-  linqReadReceiptRouteAuthority?: HostedThreadRouteEgressAuthority;
+  linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
   wakeLinqChatId?: string;

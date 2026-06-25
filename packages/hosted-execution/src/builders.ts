@@ -10,6 +10,8 @@ import type {
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
   HostedExecutionLinqConversationContactKind,
+  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
@@ -48,6 +50,14 @@ function cloneLinqMessage(
   };
 }
 
+function cloneExternalThreadRouteAuthority<TAuthority extends HostedExecutionExternalThreadRouteAuthority>(
+  value: TAuthority,
+): TAuthority {
+  return {
+    ...value,
+  };
+}
+
 function cloneTelegramMessage(value: HostedExecutionTelegramMessage): HostedExecutionTelegramMessage {
   return {
     ...value,
@@ -73,6 +83,13 @@ function cloneConversationMessagePayload(
       return {
         ...value,
         linqMessage: cloneLinqMessage(value.linqMessage),
+        ...(value.routeAuthority === undefined
+          ? {}
+          : {
+              routeAuthority: value.routeAuthority === null
+                ? null
+                : cloneExternalThreadRouteAuthority(value.routeAuthority),
+            }),
       };
     case "telegram":
       return {
@@ -150,6 +167,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
   phoneLookupKey?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
@@ -174,6 +192,13 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
       ...(input.phoneLookupKey === undefined
         ? {}
         : { phoneLookupKey: input.phoneLookupKey }),
+      ...(input.routeAuthority === undefined
+        ? {}
+        : {
+            routeAuthority: input.routeAuthority === null
+              ? null
+              : cloneExternalThreadRouteAuthority(input.routeAuthority),
+          }),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,

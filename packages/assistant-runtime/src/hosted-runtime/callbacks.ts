@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -965,7 +966,7 @@ function hasHostedAssistantVoiceMemoMedia(
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "sendEmail"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -998,12 +999,14 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       telegramEnv,
     }),
     sendLinq: createHostedAssistantLinqSendDependency({
+      effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+      effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
@@ -1425,6 +1428,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
@@ -1440,6 +1444,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
+          effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContext: input.wake
             ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
@@ -1452,6 +1457,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
+          await assertHostedAssistantLinqRouteAuthorityForDelivery({
+            deliveryContext: input.wake
+              ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+              : null,
+            effectsPort: input.effectsPort,
+            signal: input.signal,
+          });
           let reactionProviderDispatchEntered = false;
           const result = await setHostedProviderLinqMessageReaction({
             reaction: request.reaction,
@@ -1689,6 +1701,7 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -1724,6 +1737,12 @@ function createHostedAssistantLinqSendDependency(input: {
       intentId: input.intentId ?? null,
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
+    });
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
@@ -1872,6 +1891,7 @@ function createRetryableHostedVaultFileError(
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
@@ -1892,6 +1912,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq voice memo delivery");
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
+    });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
       attachmentId: request.attachmentId,
@@ -1900,6 +1926,48 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
+}
+
+async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  routeScopedContext?: HostedAssistantLinqDeliveryContext | null;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const routeAuthority = input.deliveryContext?.routeAuthority ?? null;
+  if (!routeAuthority) {
+    if (input.routeScopedContext?.routeAuthority) {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
+        "Hosted Linq route authority does not match the requested delivery target.",
+      );
+    }
+    return;
+  }
+
+  const assertAuthority = requireHostedAssistantLinqRouteAuthorityAssert(
+    input.effectsPort ?? null,
+  );
+  await assertAuthority(routeAuthority, {
+    signal: input.signal,
+  });
+}
+
+function requireHostedAssistantLinqRouteAuthorityAssert(
+  effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null,
+): (
+  authority: HostedExecutionExternalThreadRouteAuthority,
+  context?: { signal?: AbortSignal | null },
+) => Promise<void> {
+  const assertAuthority = effectsPort?.assertLinqThreadRouteAuthority;
+  if (!assertAuthority) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_ROUTE_AUTHORITY_UNAVAILABLE",
+      "Hosted Linq route authority cannot be revalidated before provider delivery.",
+    );
+  }
+
+  return assertAuthority;
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

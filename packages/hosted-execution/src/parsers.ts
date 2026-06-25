@@ -30,6 +30,8 @@ import type {
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionEmailAttachmentSummary,
+  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionWhatsAppConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
@@ -444,6 +446,10 @@ function parseHostedExecutionLinqConversationMessagePayload(
     record.linqMessage,
     "Hosted execution conversation.message wake payload linqMessage",
   );
+  const routeAuthority = parseOptionalHostedExecutionLinqExternalThreadRouteAuthority(
+    record.routeAuthority,
+    "Hosted execution conversation.message wake payload routeAuthority",
+  );
 
   if (record.contactLookupKey !== undefined || record.contactKind !== undefined) {
     const contactKind = parseHostedExecutionLinqConversationContactKind(
@@ -475,6 +481,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
               "Hosted execution conversation.message wake payload phoneLookupKey",
             ),
           }),
+      ...(routeAuthority === undefined ? {} : { routeAuthority }),
     };
   }
 
@@ -496,7 +503,68 @@ function parseHostedExecutionLinqConversationMessagePayload(
     contactLookupKey: phoneLookupKey,
     linqMessage,
     phoneLookupKey,
+    ...(routeAuthority === undefined ? {} : { routeAuthority }),
   };
+}
+
+function parseOptionalHostedExecutionExternalThreadRouteAuthority(
+  value: unknown,
+  label: string,
+): HostedExecutionExternalThreadRouteAuthority | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  return parseHostedExecutionExternalThreadRouteAuthority(value, label);
+}
+
+function parseOptionalHostedExecutionLinqExternalThreadRouteAuthority(
+  value: unknown,
+  label: string,
+): HostedExecutionLinqExternalThreadRouteAuthority | null | undefined {
+  const authority = parseOptionalHostedExecutionExternalThreadRouteAuthority(value, label);
+  if (!authority) {
+    return authority;
+  }
+
+  if (authority.channel !== "linq") {
+    throw new TypeError(`${label} channel must be linq.`);
+  }
+
+  return {
+    ...authority,
+    channel: "linq",
+  };
+}
+
+export function parseHostedExecutionExternalThreadRouteAuthority(
+  value: unknown,
+  label = "Hosted execution external thread route authority",
+): HostedExecutionExternalThreadRouteAuthority {
+  const record = requireObject(value, label);
+  return {
+    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
+    containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
+    threadId: requireString(record.threadId, `${label} threadId`),
+  };
+}
+
+function parseHostedExecutionExternalThreadRouteChannel(
+  value: unknown,
+  label: string,
+): HostedExecutionExternalThreadRouteAuthority["channel"] {
+  const channel = requireString(value, label);
+  switch (channel) {
+    case "email":
+    case "linq":
+    case "telegram":
+      return channel;
+    default:
+      throw new TypeError(`${label} is invalid.`);
+  }
 }
 
 function parseHostedExecutionLinqConversationContactKind(

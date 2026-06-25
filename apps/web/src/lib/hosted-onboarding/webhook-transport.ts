@@ -26,7 +26,7 @@ import {
 } from "./linq";
 import {
   assertHostedThreadRouteEgressAuthority,
-  type HostedThreadRouteEgressAuthority,
+  type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -48,7 +48,7 @@ export type HostedLinqDailyQuotaPayload = {
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
-  routeAuthority?: HostedThreadRouteEgressAuthority | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   template: "daily_quota";
 };
 
@@ -68,7 +68,7 @@ type HostedLinqAiUsageQuotaBasePayload = {
   message: string;
   occurredAt: string;
   replyToMessageId: string | null;
-  routeAuthority?: HostedThreadRouteEgressAuthority | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   sourceEventId: string;
   template: "ai_usage_quota";
 };
@@ -131,7 +131,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       noticeCode: HostedLinqUsageLimitNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
-      routeAuthority?: HostedThreadRouteEgressAuthority | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
@@ -143,7 +143,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       noticeCode: "trial_conversion_pending";
       occurredAt: string;
       replyToMessageId?: string | null;
-      routeAuthority?: HostedThreadRouteEgressAuthority | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
@@ -152,7 +152,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       memberId: string;
       occurredAt: string;
       replyToMessageId?: string | null;
-      routeAuthority?: HostedThreadRouteEgressAuthority | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "daily_quota";
     }

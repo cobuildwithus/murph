@@ -95,6 +95,87 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses routed Linq conversation wakes with durable route authority", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "linq-route-1",
+        kind: "conversation.message",
+        message: {
+          accountLookupKey: "hbidx:phone:v1:account",
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          phoneLookupKey: "hbidx:phone:v1:sender",
+          routeAuthority: {
+            accountLookupKey: "hbidx:phone:v1:account",
+            channel: "linq",
+            containerMemberId: "member_container_123",
+            threadId: "chat_123",
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_container_123",
+      }),
+    ).toMatchObject({
+      message: {
+        routeAuthority: {
+          accountLookupKey: "hbidx:phone:v1:account",
+          channel: "linq",
+          containerMemberId: "member_container_123",
+          threadId: "chat_123",
+        },
+      },
+    });
+  });
+
+  it("rejects routed Linq conversation wakes with non-Linq route authority", () => {
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "linq-route-1",
+        kind: "conversation.message",
+        message: {
+          accountLookupKey: "hbidx:phone:v1:account",
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          phoneLookupKey: "hbidx:phone:v1:sender",
+          routeAuthority: {
+            accountLookupKey: "hbidx:phone:v1:account",
+            channel: "telegram",
+            containerMemberId: "member_container_123",
+            threadId: "chat_123",
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_container_123",
+      })
+    ).toThrow(/channel must be linq/u);
+  });
+
   it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
     expect(
       parseHostedExecutionEvent({

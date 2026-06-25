@@ -89,6 +89,23 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
 export type HostedExecutionConversationMessageChannel =
   (typeof HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS)[number];
 
+export type HostedExecutionExternalThreadRouteChannel = Extract<
+  HostedExecutionConversationMessageChannel,
+  "email" | "linq" | "telegram"
+>;
+
+export interface HostedExecutionExternalThreadRouteAuthority {
+  accountLookupKey: string;
+  channel: HostedExecutionExternalThreadRouteChannel;
+  containerMemberId: string;
+  threadId: string;
+}
+
+export type HostedExecutionLinqExternalThreadRouteAuthority =
+  HostedExecutionExternalThreadRouteAuthority & {
+    channel: "linq";
+  };
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -282,6 +299,7 @@ interface HostedExecutionLinqConversationMessagePayloadBase {
   accountLookupKey?: string | null;
   channel: "linq";
   linqMessage: HostedExecutionLinqConversationMessage;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
 }
 
 export type HostedExecutionLinqConversationMessagePayload =

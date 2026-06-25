@@ -260,6 +260,12 @@ describe("Linq explicit external-thread routing", () => {
             messageId: "msg_group_123",
             threadIsDirect: false,
           }),
+          routeAuthority: expect.objectContaining({
+            accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+            channel: "linq",
+            containerMemberId: "member_thread_container_123",
+            threadId: "chat_group_123",
+          }),
         }),
         userId: "member_thread_container_123",
       }),

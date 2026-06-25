@@ -70,7 +70,7 @@ import {
 } from "./contact-privacy";
 import {
   readHostedThreadRouteByExternalThread,
-  type HostedThreadRouteEgressAuthority,
+  type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 export type {
@@ -743,6 +743,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     occurredAt,
     participantContact,
     rawParts: messageEvent.data.message.parts,
+    routeAuthority,
     userId: input.route.containerMemberId,
   });
 
@@ -782,7 +783,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
   prisma: Prisma.TransactionClient;
-  routeAuthority?: HostedThreadRouteEgressAuthority | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   routeStages: {
     aiUsageDenied: string;
     aiUsageReply: string;
@@ -908,10 +909,10 @@ async function planHostedLinqInboundAdmissionDenied(input: {
 function buildHostedLinqThreadRouteEgressAuthority(input: {
   route: HostedThreadRouteSnapshot;
   threadId: string;
-}): HostedThreadRouteEgressAuthority {
+}): HostedLinqThreadRouteEgressAuthority {
   return {
     accountLookupKey: input.route.accountLookupKey,
-    channel: input.route.channel,
+    channel: "linq",
     containerMemberId: input.route.containerMemberId,
     threadId: input.threadId,
   };
@@ -996,6 +997,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   occurredAt: string;
   participantContact: HostedLinqParticipantContact;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
   const fullWake = buildHostedExecutionLinqConversationMessageWake({
@@ -1013,6 +1015,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
     ...(input.participantContact.kind === "phone"
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(fullWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -1034,6 +1037,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
     ...(input.participantContact.kind === "phone"
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(compactWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -1055,6 +1059,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
     ...(input.participantContact.kind === "phone"
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     userId: input.userId,
   });
 }
