@@ -540,7 +540,7 @@ describe("Retell phone-call result handling", () => {
     ]);
   });
 
-  it("keeps call_analyzed persisted when notification enqueue fails so Retell replay can notify", async () => {
+  it("rolls call_analyzed back when notification enqueue fails so Retell replay can notify", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultNotification: vi
@@ -565,12 +565,9 @@ describe("Retell phone-call result handling", () => {
     })).rejects.toThrow("mailbox unavailable");
 
     expect(store.currentCall()).toMatchObject({
-      analyzedAt: expect.any(Date),
-      resultJson: {
-        outcome: "completed",
-        summary: "Booked.",
-      },
-      status: "completed",
+      analyzedAt: null,
+      resultJson: null,
+      status: "starting",
     });
 
     await handleRetellCallAnalyzed({
@@ -585,7 +582,7 @@ describe("Retell phone-call result handling", () => {
     expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
   });
 
-  it("finalizes call_analyzed when no result notification route is available", async () => {
+  it("does not finalize call_analyzed when no result notification route is available", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultNotification: async () => {
@@ -608,12 +605,9 @@ describe("Retell phone-call result handling", () => {
     })).rejects.toThrow("result notification route unavailable");
 
     expect(store.currentCall()).toMatchObject({
-      analyzedAt: expect.any(Date),
-      resultJson: {
-        outcome: "completed",
-        summary: "Booked.",
-      },
-      status: "completed",
+      analyzedAt: null,
+      resultJson: null,
+      status: "starting",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
   });
