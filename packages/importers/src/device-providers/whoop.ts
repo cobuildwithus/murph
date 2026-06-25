@@ -508,6 +508,11 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const bodyMeasurementRecordedAt = bodyMeasurement
     ? bodyMeasurementObservedAt ?? importedAt
     : undefined;
+  const bodyMeasurementOccurredAt = bodyMeasurement
+    ? bodyMeasurementObservedAt ??
+      (bodyMeasurementExplicitDayKey ? `${bodyMeasurementExplicitDayKey}T00:00:00.000Z` : undefined) ??
+      bodyMeasurementRecordedAt
+    : undefined;
   const bodyMeasurementDayKey = bodyMeasurement
     ? bodyMeasurementExplicitDayKey ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
     : undefined;
@@ -520,7 +525,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
   pushEvidencePart(evidenceParts, createEvidencePart("body-measurement", "body-measurement.json", bodyMeasurement));
 
-  if (bodyMeasurement && bodyMeasurementRecordedAt) {
+  if (bodyMeasurement && bodyMeasurementOccurredAt && bodyMeasurementRecordedAt) {
     emitObservationMetrics(
       events,
       {
@@ -528,7 +533,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           measurement: bodyMeasurement,
           bmi: bodyMeasurementBmi,
         },
-        occurredAt: bodyMeasurementRecordedAt,
+        occurredAt: bodyMeasurementOccurredAt,
         recordedAt: bodyMeasurementRecordedAt,
         dayKey: bodyMeasurementDayKey,
         observationGrain: "summary",

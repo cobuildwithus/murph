@@ -2023,10 +2023,86 @@ test("prepareDeviceProviderSnapshotImport keeps date-only WHOOP body measurement
   const firstWeightEvent = firstPayload.events?.find((event) => event.fields?.metric === "weight");
   const secondWeightEvent = secondPayload.events?.find((event) => event.fields?.metric === "weight");
 
+  assert.equal(firstWeightEvent?.occurredAt, "2026-06-24T00:00:00.000Z");
+  assert.equal(secondWeightEvent?.occurredAt, firstWeightEvent?.occurredAt);
+  assert.equal(firstWeightEvent?.recordedAt, "2026-06-25T12:00:00.000Z");
+  assert.equal(secondWeightEvent?.recordedAt, "2026-06-26T12:00:00.000Z");
   assert.equal(firstWeightEvent?.dayKey, "2026-06-24");
   assert.equal(secondWeightEvent?.dayKey, "2026-06-24");
   assert.equal(firstWeightEvent?.externalRef?.resourceId, "2026-06-24");
   assert.equal(secondWeightEvent?.externalRef?.resourceId, firstWeightEvent?.externalRef?.resourceId);
+});
+
+test("importDeviceProviderSnapshot replays date-only WHOOP body measurements idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-02T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const firstWeight = firstImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const replayWeight = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const [eventShardPath] = firstImport.eventShardPaths;
+    assert.ok(eventShardPath);
+    const records = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: eventShardPath,
+    });
+    const weightRecords = records.filter(
+      (record) => record.kind === "observation" && record.metric === "weight",
+    );
+
+    assert.equal(firstWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(firstWeight?.recordedAt, "2026-07-01T12:00:00.000Z");
+    assert.equal(replayWeight?.id, firstWeight?.id);
+    assert.equal(replayWeight?.occurredAt, firstWeight?.occurredAt);
+    assert.equal(replayWeight?.recordedAt, firstWeight?.recordedAt);
+    assert.equal(weightRecords.length, 1);
+    assert.equal(weightRecords[0]?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(weightRecords[0]?.recordedAt, "2026-07-01T12:00:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {
