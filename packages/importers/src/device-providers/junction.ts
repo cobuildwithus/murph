@@ -1677,14 +1677,16 @@ function pushSleepCycle(
     }
 
     const intervalTimestamp = resolveRecordTimestamp(intervalEntry, context, resourceContext.sourceProviderSlug);
+    const originEntry: PlainObject = { ...entry, ...intervalEntry };
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
       occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: extractIsoDatePrefix(resolvedStartAt) ?? intervalTimestamp.dayKey ?? parentTimestamp.dayKey,
+      dayKey: resolveJunctionLocalDayKey(originEntry, startAtRaw, resolvedStartAt)
+        ?? intervalTimestamp.dayKey
+        ?? parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });
-    const originEntry: PlainObject = { ...entry, ...intervalEntry };
 
     context.samples.push(stripUndefined({
       stream: "sleep_stage",
@@ -1742,7 +1744,7 @@ function pushWorkoutSummary(
   const workoutTimestamp = occurredAt
     ? withTimestampOverride(timestamp, {
       occurredAt,
-      dayKey: extractIsoDatePrefix(occurredAt) ?? undefined,
+      dayKey: resolveJunctionLocalDayKey(entry, startAtRaw, occurredAt) ?? timestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? occurredAt,
     })
     : timestamp;
@@ -1750,7 +1752,7 @@ function pushWorkoutSummary(
     return;
   }
 
-  const dayKey = extractIsoDatePrefix(occurredAt) ?? timestamp.dayKey;
+  const dayKey = workoutTimestamp.dayKey;
   const rawSport = firstStringFromPaths(entry, ["sport.slug", "sportSlug", "sport_slug", "sport.type", "sportType", "sport_type", "sport.name", "sportName", "sport_name", "sport"]);
   const sportName = trimOptionalToLength(
     firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name", "sport.type", "sportType", "sport_type", "sport"]),
@@ -2303,7 +2305,7 @@ function resolveJunctionMealTimestamp(
     occurredAt,
     timestamp: withTimestampOverride(timestamp, {
       occurredAt,
-      dayKey: calendarDayKey ?? timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined,
+      dayKey: calendarDayKey ?? timestamp.dayKey,
       observedAtRaw: timestamp.observedAtRaw ?? calendarDayKey ?? occurredAt,
     }),
   };
@@ -3172,10 +3174,45 @@ function resolveRecordTimestamp(
   return stripUndefined({
     occurredAt,
     recordedAt,
-    dayKey: extractIsoDatePrefix(rawObservedAt) ?? extractIsoDatePrefix(occurredAt) ?? undefined,
+    dayKey: resolveJunctionLocalDayKey(entry, rawObservedAt, occurredAt, timestampSemantics),
     observedAtRaw: rawObservedAt,
     timestampSemantics,
   });
+}
+
+function resolveJunctionLocalDayKey(
+  entry: PlainObject,
+  rawTimestampValue: unknown,
+  resolvedTimestamp: string | undefined,
+  timestampSemanticsOverride?: TimestampSemantics,
+): string | undefined {
+  const rawTimestamp = stringId(rawTimestampValue);
+  const rawDayKey = extractIsoDatePrefix(rawTimestamp) ?? undefined;
+  if (!rawTimestamp) {
+    return undefined;
+  }
+
+  const timestampSemantics = timestampSemanticsOverride
+    ?? firstTimestampSemantics(entry)
+    ?? inferTimestampSemantics(rawTimestamp);
+
+  if (timestampSemantics === "floating" || isDateOnlyJunctionTimestamp(rawTimestamp)) {
+    return rawDayKey;
+  }
+
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (offsetSeconds !== null && offsetSeconds !== undefined && resolvedTimestamp) {
+    const offsetDayKey = extractLocalDayKeyFromUtcOffset(resolvedTimestamp, offsetSeconds);
+    if (offsetDayKey) {
+      return offsetDayKey;
+    }
+  }
+
+  if (timestampSemantics === "offset") {
+    return rawDayKey;
+  }
+
+  return undefined;
 }
 
 function buildConnectionsByKey(connections: readonly PlainObject[]): ReadonlyMap<string, PlainObject> {
@@ -3572,23 +3609,99 @@ function extractLocalDayKeyFromUtcOffset(timestamp: string, offsetSeconds: numbe
 }
 
 function readJunctionTimeZoneOffsetMinutes(entry: PlainObject): number | null | undefined {
-  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  const minuteValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS,
+    "minutes",
+  );
   if (minuteValue !== undefined) {
     return minuteValue;
   }
 
-  const secondValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
+  const secondValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS,
+    "seconds",
+  );
 
   return secondValue === undefined || secondValue === null ? secondValue : secondValue / 60;
 }
 
 function readJunctionTimeZoneOffsetSeconds(entry: PlainObject): number | null | undefined {
-  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  const minuteValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS,
+    "minutes",
+  );
   if (minuteValue !== undefined) {
     return minuteValue === null ? null : minuteValue * 60;
   }
 
-  return firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
+  return firstNullableJunctionTimeZoneOffsetValueFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS, "seconds");
+}
+
+function firstNullableJunctionTimeZoneOffsetValueFromPaths(
+  source: PlainObject,
+  paths: readonly string[],
+  unit: "minutes" | "seconds",
+): number | null | undefined {
+  for (const path of paths) {
+    const value = readPath(source, path);
+
+    if (value === undefined) {
+      continue;
+    }
+
+    if (value === null) {
+      return null;
+    }
+
+    const numeric = finiteNumber(value);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const offsetMinutes = parseJunctionTimeZoneOffsetMinutes(trimmed);
+    if (offsetMinutes !== undefined) {
+      return unit === "minutes" ? offsetMinutes : offsetMinutes * 60;
+    }
+
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function parseJunctionTimeZoneOffsetMinutes(value: string): number | undefined {
+  if (value.toUpperCase() === "Z") {
+    return 0;
+  }
+
+  const match = /^([+-])(\d{2}):?(\d{2})$/u.exec(value);
+  if (!match) {
+    return undefined;
+  }
+
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours > 24 || minutes > 59) {
+    return undefined;
+  }
+
+  const sign = match[1] === "-" ? -1 : 1;
+  return sign * (hours * 60 + minutes);
 }
 
 function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {

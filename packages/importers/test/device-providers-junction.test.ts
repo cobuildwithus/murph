@@ -610,6 +610,82 @@ test("Junction normalizer keeps floating stress timestamps on their raw day desp
   assert.equal(stressEvents.some((event) => event.dayKey === "2026-04-22"), false);
 });
 
+test("Junction WHOOP workout summaries use provider offset local day across UTC midnight", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-offset-local-24",
+        start: "2026-06-25T03:45:00.000Z",
+        end: "2026-06-25T04:15:00.000Z",
+        updated_at: "2026-06-25T04:20:00.000Z",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+        workout_strain: 6.8,
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  assert.equal(workoutEvent?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries without provider offset defer canonical day to vault timezone", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-local-day-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        workouts: [{
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          id: "junction-whoop-run-no-offset-local-24",
+          start: "2026-06-25T03:45:00.000Z",
+          end: "2026-06-25T04:15:00.000Z",
+          updated_at: "2026-06-25T04:20:00.000Z",
+          sport_name: "Run",
+          strain: 5.9,
+        }],
+      },
+    };
+    const payload = normalizeJunctionSnapshot(snapshot);
+    const normalizedWorkout = payload.events?.find((event) => event.kind === "activity_session");
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const workoutEvent = result.events.find((event) => event.kind === "activity_session");
+
+    assert.equal(normalizedWorkout?.dayKey, undefined);
+    assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction snapshot adapter fails closed on glucose values outside the mmol/L window", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",

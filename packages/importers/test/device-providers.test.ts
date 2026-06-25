@@ -492,6 +492,15 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
                 respiratory_rate: 14.2,
               },
             },
+            {
+              id: "sleep-recovery-local-24",
+              cycle_id: "cycle-recovery-no-offset",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              timezone_offset: "-04:00",
+              score: {},
+            },
           ],
           cycles: [
             {
@@ -502,6 +511,23 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
               timezone_offset: "-04:00",
               score: {
                 strain: 12.4,
+              },
+            },
+            {
+              id: "cycle-recovery-no-offset",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {},
+            },
+          ],
+          recoveries: [
+            {
+              sleep_id: "sleep-recovery-local-24",
+              cycle_id: "cycle-recovery-no-offset",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                recovery_score: 72,
               },
             },
           ],
@@ -547,11 +573,15 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     const respiratoryEvent = result.events.find(
       (event) => event.kind === "observation" && event.metric === "respiratory-rate",
     );
+    const recoveryEvent = result.events.find(
+      (event) => event.kind === "observation" && event.metric === "recovery-score",
+    );
 
     assert.equal(workoutEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetWorkoutEvent?.dayKey, "2026-06-24");
     assert.equal(dayStrainEvent?.dayKey, "2026-06-24");
     assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(recoveryEvent?.dayKey, "2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

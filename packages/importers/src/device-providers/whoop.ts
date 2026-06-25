@@ -611,9 +611,16 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const occurredAt = recordedAt;
     const recoveryCycle = cycleId ? cyclesById.get(cycleId) : undefined;
     const recoverySleep = sleepId ? sleepsById.get(sleepId) : undefined;
+    const recoveryCycleEndAt = toIso(recoveryCycle?.end);
+    const recoveryCycleStartAt = toIso(recoveryCycle?.start);
+    const recoverySleepEndAt = toIso(recoverySleep?.end);
+    const recoverySleepStartAt = toIso(recoverySleep?.start);
     const dayKey =
-      firstWhoopLocalDayKey(recoveryCycle, toIso(recoveryCycle?.end), toIso(recoveryCycle?.start)) ??
-      firstWhoopLocalDayKey(recoverySleep, toIso(recoverySleep?.end), toIso(recoverySleep?.start)) ??
+      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recoveryCycle), recoveryCycleEndAt, recoveryCycleStartAt) ??
+      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recoverySleep), recoverySleepEndAt, recoverySleepStartAt) ??
+      firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(recovery), recordedAt) ??
+      firstWhoopLocalDayKey(recoveryCycle, recoveryCycleEndAt, recoveryCycleStartAt) ??
+      firstWhoopLocalDayKey(recoverySleep, recoverySleepEndAt, recoverySleepStartAt) ??
       firstWhoopLocalDayKey(recovery, recordedAt);
     const score = asPlainObject(recovery.score);
 
