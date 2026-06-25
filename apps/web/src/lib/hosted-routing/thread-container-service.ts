@@ -123,6 +123,7 @@ export async function createHostedThreadContainerRuntimeTx(input: {
   await createHostedThreadContainerTx({
     memberId: containerMemberId,
     monthlyUsageLimitUsdMicros: input.monthlyUsageLimitUsdMicros ?? null,
+    ownerMemberId: input.createdByMemberId,
     prisma: input.prisma,
   });
 
@@ -152,7 +153,6 @@ export async function createHostedThreadContainerRouteTx(input: {
   channel: HostedThreadRouteChannel;
   containerMemberId: string;
   prisma: Prisma.TransactionClient;
-  source: string;
   threadId: string | number;
 }): Promise<void> {
   await ensureHostedThreadRouteTx(input);

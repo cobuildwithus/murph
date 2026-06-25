@@ -11,6 +11,9 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
+import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import type {
@@ -32,7 +35,6 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
-  source: string;
 }
 
 export async function readHostedThreadRouteByExternalThread(input: {
@@ -64,10 +66,18 @@ export async function readHostedThreadRouteByExternalThread(input: {
               updatedAt: true,
             },
           },
+          owner: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
         },
       },
       containerMemberId: true,
-      source: true,
     },
     where: {
       channel: input.channel,
@@ -105,17 +115,24 @@ export async function readHostedThreadRouteByExternalThread(input: {
     });
   }
 
+  if (
+    !hasHostedMemberActiveAccess(row.container.member)
+    || !hasHostedMemberActiveAccess(row.container.owner)
+  ) {
+    return null;
+  }
+
   return {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
-    source: row.source,
   };
 }
 
 export async function createHostedThreadContainerTx(input: {
   memberId: string;
   monthlyUsageLimitUsdMicros?: bigint | null;
+  ownerMemberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   const monthlyUsageLimitUsdMicros = normalizeHostedThreadContainerUsageLimit(
@@ -126,6 +143,7 @@ export async function createHostedThreadContainerTx(input: {
     data: {
       memberId: input.memberId,
       monthlyUsageLimitUsdMicros,
+      ownerMemberId: input.ownerMemberId,
     },
   });
 }
@@ -134,7 +152,6 @@ export async function ensureHostedThreadRouteTx(input: {
   channel: HostedThreadRouteChannel;
   containerMemberId: string;
   prisma: Prisma.TransactionClient;
-  source: string;
   threadId: string | number;
 }): Promise<void> {
   const threadLookupKey = createHostedExternalThreadLookupKey({
@@ -169,17 +186,6 @@ export async function ensureHostedThreadRouteTx(input: {
       });
     }
 
-    await input.prisma.hostedThreadRoute.update({
-      data: {
-        source: input.source,
-      },
-      where: {
-        channel_threadLookupKey: {
-          channel: input.channel,
-          threadLookupKey,
-        },
-      },
-    });
     return;
   }
 
@@ -187,7 +193,6 @@ export async function ensureHostedThreadRouteTx(input: {
     data: {
       channel: input.channel,
       containerMemberId: input.containerMemberId,
-      source: input.source,
       threadLookupKey,
     },
   });

@@ -443,14 +443,20 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
     expect(hostedThreadRoutesMigrationSql).toContain('PRIMARY KEY ("channel", "thread_lookup_key")');
+    expect(hostedThreadRoutesMigrationSql).toContain('"owner_member_id" TEXT NOT NULL');
     expect(hostedThreadRoutesMigrationSql).toContain('"monthly_usage_limit_usd_micros" BIGINT NOT NULL DEFAULT 4500000');
     expect(hostedThreadRoutesMigrationSql).toContain('REFERENCES "hosted_thread_container"("member_id")');
     expect(hostedThreadRoutesMigrationSql).toContain(
       'REFERENCES "hosted_member"("id")\n  ON DELETE CASCADE',
     );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'CONSTRAINT "hosted_thread_container_owner_member_id_fkey"',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain("ON DELETE RESTRICT");
     expect(hostedThreadRoutesMigrationSql).not.toContain("group_chat");
     expect(hostedThreadRoutesMigrationSql).not.toContain("linq_group");
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
+    expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");

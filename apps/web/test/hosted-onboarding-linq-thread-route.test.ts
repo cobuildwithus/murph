@@ -100,9 +100,11 @@ function buildLinqMessageReceivedEvent(input: {
 function createPrisma(input: {
   routeContainerMemberId?: string | null;
   routeContainerActive?: boolean;
+  routeOwnerActive?: boolean;
 } = {}) {
   const routeContainerMemberId = input.routeContainerMemberId ?? null;
   const routeContainerActive = input.routeContainerActive ?? true;
+  const routeOwnerActive = input.routeOwnerActive ?? true;
   const hostedThreadRoute = {
     findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
       if (!routeContainerMemberId) {
@@ -129,9 +131,17 @@ function createPrisma(input: {
               suspendedAt: null,
               updatedAt: new Date("2026-06-24T00:00:00.000Z"),
             },
+            owner: {
+              billingStatus: routeOwnerActive
+                ? HostedBillingStatus.active
+                : HostedBillingStatus.paused,
+              createdAt: new Date("2026-06-24T00:00:00.000Z"),
+              id: "member_owner_123",
+              suspendedAt: null,
+              updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+            },
           },
           containerMemberId: routeContainerMemberId,
-          source: "operator-recorded-group-thread",
         },
       ];
     }),
@@ -277,7 +287,26 @@ describe("Linq explicit external-thread routing", () => {
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "thread-container-inactive",
+      reason: "group-chat",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("ignores routed thread traffic when the route owner is inactive", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: false,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
