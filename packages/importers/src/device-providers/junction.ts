@@ -327,6 +327,12 @@ const JUNCTION_MEAL_CALENDAR_DATE_PATHS = [
   "date",
   "day",
 ] as const;
+const JUNCTION_LOCAL_CALENDAR_DATE_PATHS = [
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
+] as const;
 const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
   "data",
   "foods",
@@ -1615,11 +1621,9 @@ function pushSleepSummary(
       millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
     ) ??
     normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
-  const sleepTimestamp = timestamp.dayKey
-    ? timestamp
-    : withTimestampOverride(timestamp, {
-      occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
-    });
+  const sleepTimestamp = withTimestampOverride(timestamp, {
+    occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
+  });
 
   if (startAt && endAt && durationMinutes !== undefined) {
     const occurredAt = sleepTimestamp.occurredAt ?? startAt;
@@ -3198,6 +3202,7 @@ function resolveRecordTimestamp(
     "bedtimeStart",
     "bedtime_start",
   ]);
+  const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
   const timestampSemantics = hasSourceSpecificFloatingTime
@@ -3220,7 +3225,7 @@ function resolveRecordTimestamp(
   return stripUndefined({
     occurredAt,
     recordedAt,
-    dayKey: resolveJunctionLocalDayKey(entry, rawObservedAt, occurredAt, timestampSemantics),
+    dayKey: localCalendarDayKey ?? resolveJunctionLocalDayKey(entry, rawObservedAt, occurredAt, timestampSemantics),
     observedAtRaw: rawObservedAt,
     timestampSemantics,
   });

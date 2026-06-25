@@ -785,6 +785,80 @@ test("Junction workout summaries without provider offset defer canonical day to 
   }
 });
 
+test("Junction activity summaries trust calendar_date over midnight UTC date offsets", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "fixture-id-65",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "watch",
+          steps: 1234,
+          timezone_offset: -14400,
+          updated_at: "2026-09-28T06:11:08.000Z",
+        },
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-garmin-calendar-date-activity",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          steps: 5678,
+          timezone_offset: -14400,
+          updated_at: "2026-09-28T06:11:08.000Z",
+        },
+      ],
+    },
+  });
+
+  const stepEvents = payload.events?.filter((event) => event.fields?.metric === "daily-steps") ?? [];
+
+  assert.equal(stepEvents.length, 2);
+  assert.deepEqual(
+    stepEvents.map((event) => [event.dataOrigin?.sourceProviderSlug, event.dayKey]).sort(),
+    [
+      ["garmin", "2026-09-27"],
+      ["whoop-v2", "2026-09-27"],
+    ],
+  );
+});
+
+test("Junction sleep summaries trust calendar_date and anchor occurrence to sleep end", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      sleep: [{
+        average_hrv: 62.77,
+        bedtime_start: "2026-09-28T05:12:22.000Z",
+        bedtime_stop: "2026-09-28T14:42:48.000Z",
+        calendar_date: "2026-09-28",
+        date: "2026-09-28T00:00:00.000Z",
+        duration: 34225,
+        id: "fixture-id-73",
+        recovery_readiness_score: 65,
+        score: 93,
+        sourceProviderSlug: "whoop_v2",
+        sourceType: "unknown",
+        timezone_offset: -14400,
+        updated_at: "2026-09-28T15:03:43.000Z",
+      }],
+    },
+  });
+
+  const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
+  const sleepScore = payload.events?.find((event) => event.fields?.metric === "sleep-score");
+  const readinessScore = payload.events?.find((event) => event.fields?.metric === "recovery-score");
+
+  assert.equal(sleepSession?.dayKey, "2026-09-28");
+  assert.equal(sleepSession?.occurredAt, "2026-09-28T14:42:48.000Z");
+  assert.equal(sleepScore?.dayKey, "2026-09-28");
+  assert.equal(sleepScore?.occurredAt, "2026-09-28T14:42:48.000Z");
+  assert.equal(readinessScore?.dayKey, "2026-09-28");
+});
+
 test("Junction sleep summaries without provider offset derive canonical day from sleep end", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sleep-local-day-import");
   try {
