@@ -125,6 +125,86 @@ describe("createHostedPhoneCall", () => {
     expect(store.updateManyCalls).toEqual([]);
   });
 
+  it("keeps fresh duplicate unstarted reservations active without starting another provider call", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(),
+    });
+    const store = createPhoneCallStore({
+      createError: createUniqueRequestKeyError(["requestKey"]),
+      existing,
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    });
+
+    expect(response).toEqual({
+      phoneCallId: "hpc_existing",
+      status: "starting",
+    });
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("fails stale duplicate unstarted reservations instead of replaying starting forever", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({
+      createError: createUniqueRequestKeyError(["requestKey"]),
+      existing,
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    });
+
+    expect(response).toEqual({
+      phoneCallId: "hpc_existing",
+      status: "failed",
+    });
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: "hpc_existing",
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
+    expect(store.currentCall()).toMatchObject({
+      resultJson: {
+        outcome: "not_completed",
+        summary: "Murph could not start the phone call.",
+      },
+      status: "failed",
+    });
+  });
+
   it("fails closed when a duplicate request key carries a different brief", async () => {
     const existing = buildHostedPhoneCall({
       briefJson: VALID_BRIEF,
@@ -456,7 +536,7 @@ function createPhoneCallStore(input: {
   const createCalls: PhoneCallCreateInput[] = [];
   const findCalls: PhoneCallFindInput[] = [];
   const updateManyCalls: PhoneCallUpdateManyInput[] = [];
-  let current = input.created ?? buildHostedPhoneCall();
+  let current = input.created ?? input.existing ?? buildHostedPhoneCall();
   const existing = input.existing ?? current;
 
   const prisma: PhoneCallStore = {

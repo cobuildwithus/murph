@@ -72,6 +72,10 @@ interface RetellWebhookCallTarget {
   };
 }
 
+const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
+const HOSTED_PHONE_CALL_RESULT_FOLLOW_UP_MAX_LENGTH = 1_000;
+const HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER = " [truncated]";
+
 export async function handleRetellCallEnded(input: {
   call: RetellCallPayload;
   prisma?: HostedPhoneCallWebhookStore;
@@ -304,10 +308,19 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
   const customAnalysis = readRecord(call.call_analysis?.custom_analysis_data);
   const outcome = readOutcome(customAnalysis?.outcome);
   const summary =
-    readNonEmptyString(customAnalysis?.result)
-    ?? readNonEmptyString(call.call_analysis?.call_summary)
+    readBoundedNonEmptyString(
+      customAnalysis?.result,
+      HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH,
+    )
+    ?? readBoundedNonEmptyString(
+      call.call_analysis?.call_summary,
+      HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH,
+    )
     ?? "The call ended, but Retell did not return a final result.";
-  const followUp = readNonEmptyString(customAnalysis?.follow_up);
+  const followUp = readBoundedNonEmptyString(
+    customAnalysis?.follow_up,
+    HOSTED_PHONE_CALL_RESULT_FOLLOW_UP_MAX_LENGTH,
+  );
 
   return hostedPhoneCallResultSchema.parse({
     ...(followUp ? { followUp } : {}),
@@ -395,6 +408,19 @@ function readOutcome(value: unknown): HostedPhoneCallResult["outcome"] {
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readBoundedNonEmptyString(value: unknown, maxLength: number): string | null {
+  const text = readNonEmptyString(value);
+  if (!text) {
+    return null;
+  }
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  const prefixLength = Math.max(0, maxLength - HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER.length);
+  return `${text.slice(0, prefixLength).trimEnd()}${HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER}`;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

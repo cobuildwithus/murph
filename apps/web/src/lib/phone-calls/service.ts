@@ -21,6 +21,8 @@ import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 import type { PhoneCallRuntime } from "./types";
 
+const HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS = 2 * 60 * 1_000;
+
 interface HostedPhoneCallStore {
   hostedPhoneCall: {
     create(input: {
@@ -116,9 +118,13 @@ export async function createHostedPhoneCall(input: {
       actual: existing.briefJson,
       expected: input.brief,
     });
+    const replayed = await failStaleUnstartedPhoneCallReservation({
+      call: existing,
+      prisma,
+    });
     return {
-      phoneCallId: existing.id,
-      status: toStartResponseStatus(existing.status),
+      phoneCallId: replayed.id,
+      status: toStartResponseStatus(replayed.status),
     };
   }
 
@@ -220,6 +226,50 @@ function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
     || call.providerCallId !== null
     || call.endedAt !== null
     || call.analyzedAt !== null;
+}
+
+async function failStaleUnstartedPhoneCallReservation(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallStore;
+}): Promise<HostedPhoneCall> {
+  const resultJson: HostedPhoneCallResult = {
+    outcome: "not_completed",
+    summary: "Murph could not start the phone call.",
+  };
+  if (
+    input.call.status !== "starting"
+    || input.call.providerCallId !== null
+    || input.call.endedAt !== null
+    || input.call.analyzedAt !== null
+    || Date.now() - input.call.updatedAt.getTime() < HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS
+  ) {
+    return input.call;
+  }
+
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
+    data: {
+      resultJson,
+      status: "failed",
+    },
+    where: {
+      analyzedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: "starting",
+    },
+  });
+  if (updated.count === 0) {
+    return input.prisma.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+  }
+
+  return {
+    ...input.call,
+    resultJson,
+    status: "failed",
+  };
 }
 
 function isRequestKeyUniqueConstraintError(error: unknown): boolean {

@@ -381,6 +381,44 @@ describe("Retell phone-call result handling", () => {
     ]);
   });
 
+  it("bounds oversized Retell analysis text before finalizing the call", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+
+    await handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            follow_up: "Follow up. ".repeat(200),
+            outcome: "needs_user",
+            result: "Booked with details. ".repeat(200),
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    });
+
+    const result = store.currentCall()?.resultJson as {
+      followUp?: string;
+      outcome: string;
+      summary: string;
+    } | null;
+    expect(result).toMatchObject({
+      outcome: "needs_user",
+    });
+    expect(result?.summary.length).toBeLessThanOrEqual(2_000);
+    expect(result?.summary.endsWith(" [truncated]")).toBe(true);
+    expect(result?.followUp?.length).toBeLessThanOrEqual(1_000);
+    expect(result?.followUp?.endsWith(" [truncated]")).toBe(true);
+    expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
+    expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
+      "hpc_123",
+    ]);
+  });
+
   it("rejects call_analyzed before persistence when Retell reports non-basic storage mode", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
