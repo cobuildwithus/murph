@@ -10,10 +10,12 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 import { describe, expect, it } from "vitest";
 
-import { createHostedPhoneCall } from "@/src/lib/phone-calls/service";
+import {
+  createHostedPhoneCall as createHostedPhoneCallImpl,
+} from "@/src/lib/phone-calls/service";
 import type { PhoneCallRuntime } from "@/src/lib/phone-calls/types";
 
-type CreateHostedPhoneCallInput = Parameters<typeof createHostedPhoneCall>[0];
+type CreateHostedPhoneCallInput = Parameters<typeof createHostedPhoneCallImpl>[0];
 type PhoneCallStore = NonNullable<CreateHostedPhoneCallInput["prisma"]>;
 type PhoneCallCreateInput = Parameters<PhoneCallStore["hostedPhoneCall"]["create"]>[0];
 type PhoneCallFindInput = Parameters<PhoneCallStore["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
@@ -195,6 +197,43 @@ describe("createHostedPhoneCall", () => {
     })).rejects.toThrow("provider unavailable");
 
     const createdCallId = store.createCalls[0]!.data.id;
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
+  });
+
+  it("fails before provider start when no result notification route is available", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      resultNotificationRouteResolver: async () => {
+        throw new Error("result notification route unavailable");
+      },
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).rejects.toThrow("result notification route unavailable");
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([{
       data: {
         resultJson: {
@@ -401,6 +440,13 @@ describe("createHostedPhoneCall", () => {
     }]);
   });
 });
+
+function createHostedPhoneCall(input: CreateHostedPhoneCallInput) {
+  return createHostedPhoneCallImpl({
+    resultNotificationRouteResolver: async () => {},
+    ...input,
+  });
+}
 
 function createPhoneCallStore(input: {
   createError?: unknown;

@@ -14,6 +14,9 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 
 import { getPrisma } from "../prisma";
+import {
+  requireHostedPhoneCallResultNotificationRoute,
+} from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 import type { PhoneCallRuntime } from "./types";
@@ -62,6 +65,9 @@ export async function createHostedPhoneCall(input: {
   memberId: string;
   prisma?: HostedPhoneCallStore;
   requestKey: string;
+  resultNotificationRouteResolver?: (resolverInput: {
+    memberId: string;
+  }) => Promise<void>;
   runtime?: PhoneCallRuntime;
   transferNumberResolver?: (resolverInput: {
     memberId: string;
@@ -71,6 +77,13 @@ export async function createHostedPhoneCall(input: {
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
+  const requireResultNotificationRoute: NonNullable<
+    typeof input.resultNotificationRouteResolver
+  > =
+    input.resultNotificationRouteResolver
+    ?? (async ({ memberId }) => {
+      await requireHostedPhoneCallResultNotificationRoute({ memberId });
+    });
 
   let call: HostedPhoneCall;
   try {
@@ -111,6 +124,9 @@ export async function createHostedPhoneCall(input: {
 
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
+    await requireResultNotificationRoute({
+      memberId: input.memberId,
+    });
     started = await runtime.start({
       brief: input.brief,
       id: call.id,

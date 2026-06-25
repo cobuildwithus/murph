@@ -15,13 +15,12 @@ import {
   appendHostedMailboxEnvelopeTx,
 } from "../hosted-mailbox/store";
 import {
-  readHostedMemberSnapshot,
-} from "../hosted-onboarding/hosted-member-store";
-import {
-  resolveHostedMemberAssistantNotificationRoute,
-  resolveHostedMemberMessagingState,
-} from "../hosted-onboarding/messaging-state";
+  hostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
+import {
+  requireHostedPhoneCallResultNotificationRoute,
+} from "./notification-route";
 import {
   readRetellMurphPhoneCallId,
   type RetellCallPayload,
@@ -158,42 +157,32 @@ async function appendPhoneCallResultNotificationTx(input: {
 }): Promise<void> {
   const call = input.call;
   if (!call?.resultJson) {
-    return;
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_REQUIRED",
+      "Hosted phone call result notification requires a stored result.",
+    );
   }
 
   const result = hostedPhoneCallResultSchema.safeParse(call.resultJson);
   if (!result.success) {
-    return;
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_INVALID",
+      "Hosted phone call result notification requires a valid stored result.",
+    );
   }
 
   const brief = hostedPhoneCallBriefSchema.safeParse(call.briefJson);
   if (!brief.success) {
-    return;
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_BRIEF_INVALID",
+      "Hosted phone call result notification requires a valid stored brief.",
+    );
   }
 
-  const member = await readHostedMemberSnapshot({
+  const route = await requireHostedPhoneCallResultNotificationRoute({
     memberId: call.memberId,
     prisma: input.prisma,
   });
-  if (!member) {
-    return;
-  }
-
-  const messaging = resolveHostedMemberMessagingState({
-    identity: member.identity,
-    routing: member.routing,
-  });
-  const route = resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: member.routing?.linqChatId ?? member.routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey: member.routing?.pendingLinqParticipantContact?.lookupKey ?? null,
-    linqRecipientPhone: member.routing?.linqRecipientPhone ?? member.routing?.pendingLinqRecipientPhone ?? null,
-    memberId: call.memberId,
-    memberPhoneNumber: member.identity?.phoneNumber ?? null,
-    messaging,
-  });
-  if (!route) {
-    return;
-  }
 
   const instructions = buildPhoneCallResultNotificationInstructions({
     brief: brief.data,
@@ -217,6 +206,18 @@ async function appendPhoneCallResultNotificationTx(input: {
       occurredAt: new Date().toISOString(),
     }),
     tx: input.prisma,
+  });
+}
+
+function hostedPhoneCallResultNotificationError(
+  code: string,
+  message: string,
+): Error {
+  return hostedOnboardingError({
+    code,
+    httpStatus: 409,
+    message,
+    retryable: true,
   });
 }
 

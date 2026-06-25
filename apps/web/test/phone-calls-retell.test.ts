@@ -351,6 +351,35 @@ describe("Retell phone-call result handling", () => {
     ]);
     expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
   });
+
+  it("does not finalize call_analyzed when no result notification route is available", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      appendResultNotification: async () => {
+        throw new Error("result notification route unavailable");
+      },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+      },
+      prisma: store.prisma,
+    })).rejects.toThrow("result notification route unavailable");
+
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      resultJson: null,
+      status: "starting",
+    });
+    expect(store.appendResultNotificationCalls).toHaveLength(1);
+  });
 });
 
 describe("consultPhoneCall", () => {
