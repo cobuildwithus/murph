@@ -532,6 +532,7 @@ export async function sendAssistantMessageLocal(
           ? createAssistantHostedToolContext({
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
+              phoneCalls: hostedExecutionContext.phoneCalls ?? null,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

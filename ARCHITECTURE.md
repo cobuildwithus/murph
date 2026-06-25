@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-24
+Last verified: 2026-06-25
 
 ## Hosted Connected Apps
 
@@ -20,6 +20,21 @@ and automatic reauthentication are enabled for managed connections, session
 recording is disabled, and account deletion removes connections before the
 profile.
 
+## Hosted Phone Calls
+
+Outbound hosted phone calls are a web-owned Retell side effect reached through
+one bounded hosted runtime port. The assistant may expose
+`murph.create_phone_call` only when a hosted phone-call port is present, and
+the tool accepts only a compact call brief with an E.164 destination, explicit
+goal, timezone, success criteria, and user-approved shareable facts. Cloudflare
+may call only the signed `web-control.worker` callback for
+`POST /api/internal/phone-calls` with the active runtime write fence; Retell API
+keys, from numbers, agent ids/versions, and transfer numbers remain in
+`apps/web` env and never enter runner env, prompts, diagnostics, or workspace
+state. `apps/web` stores member-bound `HostedPhoneCall` rows for request-key
+idempotency, provider call id, status, bounded call brief, and final analysis;
+Murph does not persist raw Retell transcripts or call audio.
+
 ## Module Map
 
 Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. All other `packages/*` entries remain workspace-private owner packages. When a public package still needs one of those private workspace packages at runtime, the release flow bundles that private dependency into the public tarball instead of publishing it as a standalone npm package.
@@ -35,7 +50,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - When tightening a package boundary, update the matching package-shape or boundary guard tests in the same change so future drift fails mechanically instead of relying on memory.
 
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
-- `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
+- `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, phone-call start contracts, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
 - `packages/hosted-orchestrator-temporal`: workspace-private Temporal worker package for hosted runtime orchestration. It owns the per-user workflow, the global device-sync scheduled-wake reconciler workflow, pointer-only signals, Activity retry boundaries, Temporal Schedule/client helpers, and the worker process entrypoint used by the root Render Background Worker Blueprint. Its production build pre-bundles Workflow code for `workflowBundle` startup, while local/dev startup keeps `workflowsPath`; the production worker also sets an explicit shutdown grace policy bounded by Render's shutdown-delay window. It must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents in Temporal workflow state.
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, with an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, an explicit `@murphai/runtime-state/node/assistant-state-fs` subpath for assistant runtime-state write/audit/repair permission policy, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams
 - `packages/core`: workspace-private canonical mutation owner for live local-vault evolution, with current-format canonical reads/writes failing closed on non-current `formatVersion` values; it also owns the shared raw-attachment staging/manifests and canonical event attachment metadata used by document, meal, workout, and measurement writes, the dedicated `addActivitySession` and `addBodyMeasurement` seams for workout-session and body-measurement persistence, provider-agnostic wearable storage repair primitives for proven legacy/debug telemetry bloat, and the shared event-spine envelope assembly used by generic events and health-event writes over the single `ledger/events` seam, with blood tests staying canonical `kind: "test"` records behind a projected user-facing view

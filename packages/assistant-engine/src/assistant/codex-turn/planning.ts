@@ -550,6 +550,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+    phoneCallsAvailable: input.hostedToolContext?.phoneCalls != null,
     voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
     vaultFileSendAvailable:
       input.hostedToolContext?.vaultFileSendAvailable === true,

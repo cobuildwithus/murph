@@ -20,6 +20,7 @@ import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
 import { createHostedWebRuntimeLogPort } from "./log-port.ts";
 import { createHostedWebVaultSharePort } from "./vault-share-port.ts";
+import { createHostedWebPhoneCallPort } from "./phone-calls-port.ts";
 import { createHostedWebMailboxPort } from "./mailbox-port.ts";
 import {
   createCloudflareHostedInternalFetch,
@@ -122,6 +123,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           connectedApps: createHostedWebConnectedAppsPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          phoneCalls: createHostedWebPhoneCallPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

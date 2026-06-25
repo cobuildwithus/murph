@@ -144,6 +144,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedPhoneCall",
   "HostedProductFeedback",
   "HostedWebSession",
   "HostedMailboxItem",
@@ -373,6 +374,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedPhoneCallsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260625000100_hosted_phone_calls/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -429,6 +437,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624090000_hosted_sensitive_action_challenge",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
+      "20260625000100_hosted_phone_calls",
       "migration_lock.toml",
     ]);
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
@@ -448,6 +457,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
     expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
     expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_phone_call_request_key_key" ON "hosted_phone_call"("request_key")',
+    );
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedPhoneCallsMigrationSql).not.toMatch(/transcript|audio/iu);
     expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
     expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
     expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");

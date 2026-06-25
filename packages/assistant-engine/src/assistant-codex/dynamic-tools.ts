@@ -68,6 +68,12 @@ import {
   parseGenerateVoiceMemoArguments,
 } from './dynamic-tools/generate-voice-memo.js'
 import {
+  createPhoneCallRequestKey,
+  MURPH_CREATE_PHONE_CALL_TOOL,
+  readPhoneCallDynamicToolRequest,
+  type PhoneCallDynamicToolRequest,
+} from './dynamic-tools/phone-calls.js'
+import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -467,6 +473,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
+  MURPH_CREATE_PHONE_CALL_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -493,6 +500,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
+  phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
 }
@@ -522,6 +530,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
+    [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -840,6 +849,7 @@ export type MurphDynamicToolRequest =
       kind: 'computer-finish-run'
       args: HostedComputerFinishRunRequest & { runId: string }
     }
+  | PhoneCallDynamicToolRequest
   | {
       kind: 'send-vault-file'
       ref: string
@@ -931,6 +941,14 @@ export function readMurphDynamicToolRequest(
   })
   if (connectedAppsRequest) {
     return connectedAppsRequest
+  }
+
+  const phoneCallRequest = readPhoneCallDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (phoneCallRequest) {
+    return phoneCallRequest
   }
 
   switch (request.tool) {
@@ -1239,6 +1257,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid response media arguments')
     case 'invalid-send-vault-file-arguments':
       return toolTextResult(false, 'invalid vault file arguments')
+    case 'invalid-phone-call-arguments':
+      return toolTextResult(false, 'invalid phone-call arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media':
@@ -1297,6 +1317,31 @@ export async function executeMurphDynamicToolRequest(input: {
         }
       } catch {
         return toolTextResult(false, 'secure vault-file delivery could not be queued')
+      }
+    }
+    case 'create-phone-call': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const phoneCalls = hostedToolContext?.phoneCalls ?? null
+      if (!hostedToolContext || !phoneCalls) {
+        return toolTextResult(
+          false,
+          'phone calling is unavailable without hosted phone-call transport',
+        )
+      }
+
+      try {
+        const result = await phoneCalls.start({
+          brief: input.request.brief,
+          requestKey: createPhoneCallRequestKey({
+            brief: input.request.brief,
+            scope: hostedToolContext.currentHostedToolRequestKeyScope(),
+          }),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
+      } catch {
+        return toolTextResult(false, 'phone call could not be started')
       }
     }
     case 'submit-product-feedback':

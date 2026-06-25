@@ -33,6 +33,7 @@ export type {
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
+  HostedRuntimePhoneCallPort,
   HostedRuntimeProviderFileResponse,
   HostedRuntimeProviderTargetKind,
   HostedRuntimeTelegramChatActionRequest,

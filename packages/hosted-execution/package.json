@@ -50,6 +50,10 @@
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"
     },
+    "./phone-calls": {
+      "types": "./dist/phone-calls.d.ts",
+      "default": "./dist/phone-calls.js"
+    },
     "./dashboard-replica": {
       "types": "./dist/dashboard-replica.d.ts",
       "default": "./dist/dashboard-replica.js"

@@ -8,10 +8,22 @@ import type {
 import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
+import type {
+  AssistantPhoneCallPort,
+} from './execution-context.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
   recipientKey: string | null
+}
+
+export interface AssistantHostedToolRequestKeyScope {
+  assistantTurnOrdinal: string
+  acceptedInputIds: readonly string[]
+  conversationId: string | null
+  inboundMailboxItemIds: readonly string[]
+  recipientKey: string | null
+  turnId: string
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -27,8 +39,10 @@ export type AssistantHostedVaultFileSendResult =
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
+  readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentHostedToolRequestKeyScope(): AssistantHostedToolRequestKeyScope
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -42,8 +56,11 @@ type AssistantHostedToolDeliveryContext = {
 export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
   computerToolsAvailable?: boolean
+  getAcceptedInputIds?: () => readonly string[]
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getTurnId?: () => string
   messageInput: AssistantMessageInput
+  phoneCalls?: AssistantPhoneCallPort | null
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -54,6 +71,7 @@ export function createAssistantHostedToolContext(input: {
 
   return {
     connectedApps: input.connectedApps ?? null,
+    phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
@@ -68,6 +86,18 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
+    },
+    currentHostedToolRequestKeyScope: () => {
+      const deliveryContext = readDeliveryContext()
+      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
+      return {
+        assistantTurnOrdinal: String(context?.assistantTurnOrdinal ?? 'unscoped'),
+        acceptedInputIds: [...(input.getAcceptedInputIds?.() ?? [])],
+        conversationId: context?.conversationId ?? null,
+        inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],
+        recipientKey: context?.recipientKey ?? null,
+        turnId: input.getTurnId?.() ?? 'unscoped',
+      }
     },
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

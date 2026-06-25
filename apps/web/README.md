@@ -73,6 +73,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
 - bounded hosted product-feedback rows for explicit structured product feedback
+- member-bound hosted phone-call attempt rows for web-owned Retell starts
 - Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -130,6 +131,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
+- `HostedPhoneCall` owns member-bound Retell phone-call start attempts with a
+  bounded call brief, provider call id, status, and final analysis result;
+  Retell credentials stay in web env and raw transcripts/audio are not stored in Murph.
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
