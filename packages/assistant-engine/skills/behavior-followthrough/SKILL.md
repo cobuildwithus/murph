@@ -180,9 +180,20 @@ Use existing Murph surfaces:
 - experiment setup answers for protocol-linked support details when supported
 - experiment sessions/context/progress/outcomes for experiment behavior
 - intervention, workout, meal, event, journal, memory, or automation records for non-experiment support as appropriate
+- goal records for the desired outcome/window when useful
+- regimen records with `kind=habit` as the canonical plan record for accepted non-experiment repeated behaviors, routines, ramps, and habit plans
+- automation records only for reminders, check-ins, and bounded support
 - knowledge only for durable synthesized patterns, not one-off reminder details
 
+For accepted non-experiment habit, routine, or ramp plans, do not leave the only copy of the plan in chat history, automation instructions, assistant runtime state, memory, or knowledge. Save the concrete plan into the habit regimen note. Include known baseline/current state, target and target date, explicit ladder or ramp schedule, standard/tiny/fallback versions, anchor or action window, support style/privacy boundary, review point, and off-ramp.
+
+Memory is for durable user preferences or broad context, not the source of truth for the active plan. Knowledge is for synthesized patterns, not the operational state of a short habit plan.
+
+When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
+
 When creating automations, make instructions context-aware. A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.
+
+Automation instructions may duplicate the compact support loop so scheduled turns have local context, but the habit regimen remains the source of truth.
 
 Automation instructions should include:
 - target behavior

@@ -1,0 +1,800 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://murph.example/schemas/rehab-case-state.schema.json",
+  "title": "Murph Physical Therapy Episode State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "episode_id",
+    "status",
+    "opened_at",
+    "last_reviewed_at",
+    "scope",
+    "goal",
+    "presentation",
+    "safety",
+    "baselines",
+    "working_hypotheses",
+    "plan",
+    "follow_ups",
+    "external_clinician_context",
+    "privacy"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "intake",
+        "self-management",
+        "referred",
+        "paused",
+        "completed"
+      ]
+    },
+    "opened_at": {
+      "type": "string",
+      "format": "date"
+    },
+    "last_reviewed_at": {
+      "type": "string",
+      "format": "date"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population",
+        "pathway",
+        "out_of_scope_reasons"
+      ],
+      "properties": {
+        "population": {
+          "type": "string"
+        },
+        "pathway": {
+          "enum": [
+            "self-management",
+            "clinician-directed-support",
+            "triage-only",
+            "undetermined"
+          ]
+        },
+        "out_of_scope_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "context_reuse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retrieved_at",
+        "related_episode_ids",
+        "facts_used",
+        "conflicts",
+        "decision_changing_unknowns",
+        "last_question_asked"
+      ],
+      "properties": {
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "related_episode_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "facts_used": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contextFact"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision_changing_unknowns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "last_question_asked": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_activity",
+        "desired_outcome",
+        "priority",
+        "time_constraint"
+      ],
+      "properties": {
+        "target_activity": {
+          "type": "string"
+        },
+        "desired_outcome": {
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "primary",
+            "secondary"
+          ]
+        },
+        "time_constraint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_label",
+        "primary_location",
+        "side",
+        "distribution",
+        "qualities",
+        "onset",
+        "mechanism",
+        "time_course",
+        "stability",
+        "irritability",
+        "aggravating_factors",
+        "easing_factors",
+        "dose_threshold",
+        "later_day_response",
+        "next_morning_response",
+        "associated_features",
+        "load_context_changes",
+        "health_context"
+      ],
+      "properties": {
+        "user_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary_location": {
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right",
+            "bilateral",
+            "midline",
+            "not-applicable",
+            "unknown"
+          ]
+        },
+        "distribution": {
+          "type": "string"
+        },
+        "qualities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "onset": {
+          "type": "string"
+        },
+        "mechanism": {
+          "type": "string"
+        },
+        "time_course": {
+          "enum": [
+            "improving",
+            "stable",
+            "fluctuating",
+            "worsening",
+            "unknown"
+          ]
+        },
+        "stability": {
+          "enum": [
+            "stable",
+            "evolving",
+            "unstable",
+            "unknown"
+          ]
+        },
+        "irritability": {
+          "enum": [
+            "low",
+            "moderate",
+            "high",
+            "unknown"
+          ]
+        },
+        "aggravating_factors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "easing_factors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dose_threshold": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "later_day_response": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "next_morning_response": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "associated_features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "load_context_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "health_context": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "care_level",
+        "positive_findings",
+        "relevant_negative_findings",
+        "reasoning_summary",
+        "instructions_given",
+        "last_screened_at"
+      ],
+      "properties": {
+        "care_level": {
+          "enum": [
+            "emergency",
+            "same-day",
+            "prompt-in-person",
+            "routine-clinician",
+            "self-management",
+            "undetermined"
+          ]
+        },
+        "positive_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourcedFinding"
+          }
+        },
+        "relevant_negative_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourcedFinding"
+          }
+        },
+        "reasoning_summary": {
+          "type": "string"
+        },
+        "instructions_given": {
+          "type": "string"
+        },
+        "last_screened_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "domain",
+          "measure",
+          "value",
+          "unit_or_scale",
+          "conditions",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "domain": {
+            "enum": [
+              "symptom",
+              "function",
+              "activity-threshold",
+              "confidence",
+              "participation"
+            ]
+          },
+          "measure": {
+            "type": "string"
+          },
+          "value": {},
+          "unit_or_scale": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "user-reported",
+              "clinician-reported",
+              "remote-observation",
+              "device-data"
+            ]
+          }
+        }
+      }
+    },
+    "working_hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pattern",
+          "confidence",
+          "supports",
+          "against_or_missing",
+          "cannot_miss_alternatives",
+          "next_data_needed",
+          "self_management_suitability",
+          "source_type"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "low",
+              "moderate",
+              "relatively-high"
+            ]
+          },
+          "supports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "against_or_missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cannot_miss_alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_data_needed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "self_management_suitability": {
+            "enum": [
+              "yes",
+              "no",
+              "unclear"
+            ]
+          },
+          "source_type": {
+            "const": "assistant-inference"
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "education_summary",
+        "load_decision",
+        "items",
+        "traffic_light_rules",
+        "review_trigger",
+        "off_ramp",
+        "catalog_gaps"
+      ],
+      "properties": {
+        "education_summary": {
+          "type": "string"
+        },
+        "load_decision": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "catalog_exercise_id",
+              "catalog_version",
+              "name",
+              "role",
+              "purpose",
+              "dose",
+              "acceptable_response",
+              "hard_stops",
+              "regression",
+              "progression",
+              "change_criterion"
+            ],
+            "properties": {
+              "catalog_exercise_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "catalog_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "dose": {
+                "type": "string"
+              },
+              "acceptable_response": {
+                "type": "string"
+              },
+              "hard_stops": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "regression": {
+                "type": "string"
+              },
+              "progression": {
+                "type": "string"
+              },
+              "change_criterion": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "traffic_light_rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "green",
+            "yellow",
+            "red"
+          ],
+          "properties": {
+            "green": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "yellow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "red": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "review_trigger": {
+          "type": "string"
+        },
+        "off_ramp": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "catalog_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "follow_ups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "date",
+          "exposure_completed",
+          "during_response",
+          "later_day_response",
+          "next_morning_response",
+          "baseline_changes",
+          "new_findings",
+          "barriers",
+          "decision",
+          "change_made"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "exposure_completed": {
+            "type": "string"
+          },
+          "during_response": {
+            "type": "string"
+          },
+          "later_day_response": {
+            "type": "string"
+          },
+          "next_morning_response": {
+            "type": "string"
+          },
+          "baseline_changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "new_findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "barriers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "enum": [
+              "progress",
+              "continue",
+              "regress",
+              "substitute",
+              "revise-hypothesis",
+              "refer",
+              "complete"
+            ]
+          },
+          "change_made": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "external_clinician_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "diagnoses",
+        "restrictions_or_protocols"
+      ],
+      "properties": {
+        "diagnoses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/clinicianFact"
+          }
+        },
+        "restrictions_or_protocols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/clinicianFact"
+          }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "minimum_necessary",
+        "media_consent",
+        "retention_note"
+      ],
+      "properties": {
+        "classification": {
+          "const": "private-health"
+        },
+        "minimum_necessary": {
+          "type": "boolean"
+        },
+        "media_consent": {
+          "enum": [
+            "not-requested",
+            "declined",
+            "granted",
+            "revoked"
+          ]
+        },
+        "retention_note": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sourcedFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding",
+        "source",
+        "recorded_at"
+      ],
+      "properties": {
+        "finding": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "user-reported",
+            "clinician-reported",
+            "remote-observation",
+            "device-data"
+          ]
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "clinicianFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement",
+        "source",
+        "source_date"
+      ],
+      "properties": {
+        "statement": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        }
+      }
+    },
+    "contextFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement",
+        "source",
+        "recorded_at",
+        "freshness",
+        "decision_use"
+      ],
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "enum": [
+            "current-user",
+            "vault-user",
+            "clinician",
+            "device",
+            "remote-observation",
+            "assistant-inference"
+          ]
+        },
+        "recorded_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "freshness": {
+          "enum": [
+            "current",
+            "historical-stable",
+            "historical-dynamic",
+            "unknown"
+          ]
+        },
+        "decision_use": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

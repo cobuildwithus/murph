@@ -49,6 +49,30 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Use when the user asks for a PDF or when a substantial health-relevant report is best delivered as one. Follow the skill and use the installed Typst CLI.',
   },
+  {
+    slug: 'chronic-illness-support',
+    name: 'chronic-illness-support',
+    triggerHint:
+      'Use for chronic illness, fluctuating disability, symptom flares, treatment burden, medical invalidation, low-capacity self-management, longitudinal support, care preparation, and caregiver coordination. This skill should reason, recommend, and help the user act—not merely validate or refer.',
+  },
+  {
+    slug: 'chronic-pain-support',
+    name: 'chronic-pain-support',
+    triggerHint:
+      'Use when persistent or recurring pain affects relief, function, sleep, confidence, work, relationships, or participation. Provide a working pain formulation, recommend the best immediate or next-step intervention, and use personalized experiments when appropriate.',
+  },
+  {
+    slug: 'self-management-experiments',
+    name: 'self-management-experiments',
+    triggerHint:
+      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes.',
+  },
+  {
+    slug: 'physical-therapy',
+    name: 'physical-therapy',
+    triggerHint:
+      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before suggesting exercises for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']
