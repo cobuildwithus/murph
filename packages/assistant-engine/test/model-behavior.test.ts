@@ -1457,6 +1457,13 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(prompt).toContain('competition-training')
+    expect(prompt).toContain('target fitness race or competition')
+    expect(prompt).toContain('use strength-training first')
+    expect(prompt).toContain('powerlifting, weightlifting, or strongman')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
+    )
     expect(prompt).toContain('strength-training')
     expect(prompt).toContain('strength or resistance training plans')
     expect(prompt).toContain(

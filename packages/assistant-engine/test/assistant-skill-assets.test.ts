@@ -157,6 +157,9 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('competition-training')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
+    )
     expect(buildAssistantSkillFileRef('strength-training')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
     )
