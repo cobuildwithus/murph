@@ -391,9 +391,8 @@ reply when direct takeover is needed, or finish without reply when no additional
 user-visible message is useful.
 If the user asks to see, inspect, or control the current paused browser page,
 call `computer_pause_for_user` with `handoffPurpose: "manual_browser_help"` to
-create or refresh a normal live browser handoff URL. Do not use
-`handoffPurpose: "screen_inspection"`; static screenshot previews are retired.
-Do not restart the browser task just to get a handoff link.
+create or refresh a normal live browser handoff URL. Do not restart the browser
+task just to get a handoff link.
 
 A handoff with `handoffPurpose: "managed_login"` opens Kernel's secure
 hosted login flow. Every other handoff purpose opens a live view of the

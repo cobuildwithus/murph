@@ -40,7 +40,6 @@ const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
-const COMPUTER_HANDOFF_SCREENSHOT_TIMEOUT_MS = 8_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -132,14 +131,6 @@ export type ComputerHandoffPageState =
       kind: "open";
       liveViewUrl: string;
       purpose: HostedComputerHandoffPurpose;
-      suggestedReply: string | null;
-    }
-  | {
-      handoffId: string;
-      interaction: "view_only";
-      kind: "open";
-      purpose: HostedComputerHandoffPurpose;
-      screenshotDataUrl: string;
       suggestedReply: string | null;
     };
 
@@ -510,14 +501,6 @@ export class ComputerUseService {
       };
     }
 
-    if (input.handoffPurpose === "screen_inspection") {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_SCREEN_INSPECTION_UNAVAILABLE",
-        message: "Screen inspection is only available for a paused computer run.",
-        retryable: true,
-      });
-    }
-
     if (run.status !== "running") {
       throw computerUseConflictError({
         code: "HOSTED_COMPUTER_RUN_NOT_RUNNING",
@@ -723,16 +706,6 @@ export class ComputerUseService {
       };
     }
 
-    if (isOptionalFinalConfirmationHandoff(run, handoff)) {
-      return {
-        handoffId: handoff.id,
-        interaction: "view_only",
-        kind: "open",
-        purpose: handoff.purpose,
-        screenshotDataUrl: await this.readHandoffScreenshotDataUrl(run),
-        suggestedReply: handoff.suggestedReply,
-      };
-    }
     const liveViewUrl = await this.crypto.decryptRunSecret({
       field: "kernel-live-view-url",
       memberId: run.memberId,
@@ -1507,17 +1480,6 @@ export class ComputerUseService {
       return null;
     }
 
-    if (
-      input.handoffPurpose === "screen_inspection" &&
-      input.run.awaitingReason !== "final_confirmation"
-    ) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_SCREEN_INSPECTION_UNAVAILABLE",
-        message: "Screen inspection is only available for final confirmation.",
-        retryable: true,
-      });
-    }
-
     if (!doesResumeContextMatchCheckpoint({
       expected: input.run.checkpointContext,
       received: input.pauseDeliveryContext,
@@ -1553,11 +1515,11 @@ export class ComputerUseService {
     }
 
     let run = input.run;
-    // Interactive handoff links stay interactive once issued. Managed-login and
-    // screen-inspection links are non-interactive, so they can be replaced by
-    // the purpose requested by the latest pause.
+    // Interactive handoff links stay interactive once issued. Managed-login
+    // links are non-interactive, so they can be replaced by the purpose
+    // requested by the latest pause.
     const replacementPurpose =
-      existing.purpose === "managed_login" || existing.purpose === "screen_inspection"
+      existing.purpose === "managed_login"
         ? input.handoffPurpose
         : existing.purpose;
     if (
@@ -1774,19 +1736,6 @@ export class ComputerUseService {
     });
 
     return readBrowserStateResult(response.result);
-  }
-
-  private async readHandoffScreenshotDataUrl(run: ComputerRunRecord): Promise<string> {
-    const response = await this.requireKernel().executePlaywright({
-      code: [
-        "const bytes = await page.screenshot({ type: 'jpeg', quality: 82, fullPage: false, animations: 'disabled' });",
-        "return `data:image/jpeg;base64,${bytes.toString('base64')}`;",
-      ].join("\n"),
-      sessionId: requireKernelSessionId(run),
-      timeoutMs: COMPUTER_HANDOFF_SCREENSHOT_TIMEOUT_MS,
-    });
-
-    return readHandoffScreenshotDataUrlResult(response.result);
   }
 
   private async navigateKernelBrowserToUrl(input: {
@@ -2022,7 +1971,6 @@ export class ComputerUseService {
       });
     }
     const pausedAt = run.pausedAt;
-    let optionalInspectionHandoff: ComputerHandoffRecord | null = null;
 
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
@@ -2079,39 +2027,35 @@ export class ComputerUseService {
               message: "Computer run expired.",
             });
           }
-          if (isOptionalFinalConfirmationHandoff(run, pendingHandoff)) {
-            optionalInspectionHandoff = pendingHandoff;
-          } else {
-            if (isExpiredHandoff(pendingHandoff, input.now)) {
-              if (pendingHandoff.status !== "expired") {
-                await store.markHandoffExpired({
-                  expectedStatus: pendingHandoff.status === "checkpointing"
-                    ? "checkpointing"
-                    : "open",
-                  expectedUpdatedAt: pendingHandoff.updatedAt,
-                  handoffId: pendingHandoff.id,
-                  now: input.now,
-                });
-              }
-              throw computerUseConflictError({
-                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-                message: "Computer handoff expired.",
-              });
-            }
-            if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
+          if (isExpiredHandoff(pendingHandoff, input.now)) {
+            if (pendingHandoff.status !== "expired") {
               await store.markHandoffExpired({
-                expectedStatus: "checkpointing",
+                expectedStatus: pendingHandoff.status === "checkpointing"
+                  ? "checkpointing"
+                  : "open",
                 expectedUpdatedAt: pendingHandoff.updatedAt,
                 handoffId: pendingHandoff.id,
                 now: input.now,
               });
-              throw computerUseConflictError({
-                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-                message: "Computer handoff expired.",
-              });
             }
-            return runHandle(run, true);
+            throw computerUseConflictError({
+              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+              message: "Computer handoff expired.",
+            });
           }
+          if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
+            await store.markHandoffExpired({
+              expectedStatus: "checkpointing",
+              expectedUpdatedAt: pendingHandoff.updatedAt,
+              handoffId: pendingHandoff.id,
+              now: input.now,
+            });
+            throw computerUseConflictError({
+              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+              message: "Computer handoff expired.",
+            });
+          }
+          return runHandle(run, true);
         }
       } else if (!run.kernelSessionId) {
         if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -2148,23 +2092,11 @@ export class ComputerUseService {
     });
     const resumed = await store.markRunRunning({
       awaitingReason: run.awaitingReason,
-      expectedHandoffStatus: optionalInspectionHandoff?.status ?? null,
-      expectedHandoffUpdatedAt: optionalInspectionHandoff?.updatedAt ?? null,
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,
       now: input.now,
       runId: run.id,
     });
-    if (optionalInspectionHandoff) {
-      await store.markHandoffExpired({
-        expectedStatus: "open",
-        expectedUpdatedAt: optionalInspectionHandoff.updatedAt,
-        handoffId: optionalInspectionHandoff.id,
-        now: input.now,
-      }).catch(() => {
-        // The run is no longer awaiting this optional inspection link.
-      });
-    }
     return runHandle(resumed, true);
   }
 
@@ -3254,22 +3186,6 @@ function readBrowserStateResult(value: unknown): {
   };
 }
 
-function readHandoffScreenshotDataUrlResult(value: unknown): string {
-  if (
-    typeof value === "string" &&
-    /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/u.test(value)
-  ) {
-    return value;
-  }
-
-  throw computerUseError({
-    code: "HOSTED_COMPUTER_SCREENSHOT_INVALID",
-    httpStatus: 502,
-    message: "Computer screenshot was not available.",
-    retryable: true,
-  });
-}
-
 function readRequiredBrowserActionStateResult(value: unknown): {
   result: unknown;
   title: string | null;
@@ -3362,15 +3278,6 @@ function isExpiredHandoff(
   now: Date,
 ): boolean {
   return handoff.status === "expired" || handoff.expiresAt <= now;
-}
-
-function isOptionalFinalConfirmationHandoff(
-  run: ComputerRunRecord,
-  handoff: ComputerHandoffRecord,
-): boolean {
-  return run.awaitingReason === "final_confirmation" &&
-    handoff.purpose === "screen_inspection" &&
-    (handoff.status === "open" || handoff.status === "expired");
 }
 
 function isStaleCheckpointingHandoff(

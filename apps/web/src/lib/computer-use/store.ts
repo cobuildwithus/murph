@@ -1345,7 +1345,6 @@ function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
     case "card":
     case "captcha":
     case "manual_browser_help":
-    case "screen_inspection":
       return value;
     default:
       throw new TypeError("Stored computer handoff purpose is unsupported.");
