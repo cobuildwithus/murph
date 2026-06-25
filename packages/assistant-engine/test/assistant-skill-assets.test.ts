@@ -157,6 +157,9 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('strength-training')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
     expect(buildAssistantSkillFileRef('running-cardio')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
     )
@@ -401,6 +404,60 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('If the user is ambivalent, do not schedule repeated support yet.')
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
+  })
+
+  it('keeps strength training guidance in the package skill route', async () => {
+    const strengthTrainingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'strength-training',
+    )
+    expect(strengthTrainingSkill).toBeTruthy()
+    if (!strengthTrainingSkill) {
+      return
+    }
+
+    expect(strengthTrainingSkill.triggerHint).toContain(
+      'strength or resistance training plans',
+    )
+    expect(strengthTrainingSkill.triggerHint).toContain(
+      'Do not use for diagnosis, rehabilitation, medical clearance',
+    )
+
+    const raw = await readSkillFile(strengthTrainingSkill)
+
+    expect(raw).toContain('# Strength Training')
+    expect(raw).toContain('Load only what the task needs')
+    expect(raw).toContain('references/programming.md')
+    expect(raw).toContain('references/coaching.md')
+    expect(raw).toContain('references/safety.md')
+    expect(raw).toContain('references/evidence.md')
+    expect(raw).toContain(
+      "Murph's available response-media or image support only if the current runtime exposes it",
+    )
+    expect(raw).not.toContain('$murph-exercise-images')
+    expect(raw).not.toContain('/tmp/')
+    expect(raw).not.toContain('.codex-hosted')
+
+    const referenceTexts = await Promise.all(
+      ['coaching.md', 'evidence.md', 'programming.md', 'safety.md'].map(
+        (referenceFile) =>
+          readFile(
+            path.join(
+              resolveAssistantSkillsRoot(),
+              strengthTrainingSkill.slug,
+              'references',
+              referenceFile,
+            ),
+            'utf8',
+          ),
+      ),
+    )
+    const referenceText = referenceTexts.join('\n')
+
+    expect(referenceText).toContain(
+      "Murph's available response-media or image support only if the current runtime exposes it",
+    )
+    expect(referenceText).not.toContain('$murph-exercise-images')
+    expect(referenceText).not.toContain('exercise-image skill')
   })
 
   it('keeps Murph onboarding details in the skill file, not the prompt', async () => {

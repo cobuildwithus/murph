@@ -1457,6 +1457,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(prompt).toContain('strength-training')
+    expect(prompt).toContain('strength or resistance training plans')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
     expect(prompt).toContain('running-cardio')
     expect(prompt).toContain(
       'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
@@ -1481,6 +1486,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
     )
+    expect(prompt).not.toContain('One composable engine')
     expect(prompt).not.toContain('/tmp/')
     expect(prompt).not.toContain('.codex-hosted')
   })

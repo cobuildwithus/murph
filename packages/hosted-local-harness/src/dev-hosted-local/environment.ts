@@ -275,6 +275,9 @@ export function mergeCloudflareLocalEnv(input: {
   const hostedLogFingerprintSecret =
     normalizeOptionalString(resolvedExisting.HOSTED_LOG_FINGERPRINT_SECRET)
     ?? createEnvelopeKey();
+  const hostedProviderEgressCredentialSigningSecret =
+    normalizeOptionalString(resolvedExisting.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET)
+    ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
@@ -338,6 +341,8 @@ export function mergeCloudflareLocalEnv(input: {
     ...hostedLocalR2PresignEnv,
     HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
     HOSTED_LOG_FINGERPRINT_SECRET: hostedLogFingerprintSecret,
+    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+      hostedProviderEgressCredentialSigningSecret,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
@@ -898,6 +903,7 @@ export function buildHostedLocalStateEnvFileText(
       && (
         key.startsWith("HOSTED_CRYPTO_")
         || key === "HOSTED_LOG_FINGERPRINT_SECRET"
+        || key === "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET"
         || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
       )
     ) {

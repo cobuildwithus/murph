@@ -169,6 +169,25 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
   return findings;
 }
 
+function readWorkflowJobBlock(workflow: string, jobId: string): string {
+  const lines = workflow.split("\n");
+  const startIndex = lines.findIndex((line) => line === `  ${jobId}:`);
+  if (startIndex === -1) {
+    throw new Error(`Workflow job not found: ${jobId}`);
+  }
+
+  const blockLines: string[] = [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (/^  [A-Za-z0-9_-]+:\s*$/u.test(line)) {
+      break;
+    }
+    blockLines.push(line);
+  }
+
+  return blockLines.join("\n");
+}
+
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
@@ -530,7 +549,6 @@ describe("hosted deploy automation helpers", () => {
       "printf -- '- Smoke user id: `%s`\\n' \"${DEPLOY_SUMMARY_SMOKE_USER_ID}\"",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
-      'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
       "runs-on: blacksmith-4vcpu-ubuntu-2404",
       "name: Codex cache-prefix E2E gate",
       "skip_predeploy_e2e:",
@@ -626,6 +644,17 @@ describe("hosted deploy automation helpers", () => {
     ]) {
       expect(workflow).toContain(expectedLine);
     }
+
+    expect(readWorkflowJobBlock(workflow, "codex-cache-prefix-gate")).toContain(
+      'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
+    );
+    expect(readWorkflowJobBlock(workflow, "linq-delivery-gate")).toContain(
+      'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
+    );
+    expect(readWorkflowJobBlock(workflow, "linq-scheduled-reminder-gate")).not.toContain(
+      "MURPH_HOSTED_LOCAL_E2E_FAST_GATE",
+    );
+
     expect(workflow).not.toContain("Rebuild deploy artifacts for upload");
     expect(workflow).not.toContain("name: Smoke runner container image");
     expect(workflow).not.toContain("uses: docker/setup-buildx-action@v4");
@@ -973,6 +1002,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
@@ -991,6 +1022,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
@@ -1013,6 +1046,8 @@ describe("hosted deploy automation helpers", () => {
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1031,6 +1066,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1049,6 +1086,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
@@ -1066,6 +1105,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       MURPH_DATA_API_KEY: "data-api-key",
