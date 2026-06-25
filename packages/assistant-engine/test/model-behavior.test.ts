@@ -1149,7 +1149,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '90987a9ee5e6a6d036fba56832ba710b4fdc06f723c65549e36cb66d92e49e6c',
+      '99ac8a63098dffc0afde16319e571ebbabd5ecad41150a262e19018c315943cf',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1411,7 +1411,7 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For general running, walking, cycling, aerobic-base, Zone 2, cardio conditioning, or non-event speed-development requests',
+      'For running, walking, cycling, aerobic-base, Zone 2, cardio conditioning, or non-event speed-development requests',
     )
     expect(prompt).toContain(
       'read the running-cardio skill before planning, ramping, adjusting intensity, or choosing modalities.',
@@ -1420,8 +1420,12 @@ describe('assistant experiment onboarding guidance', () => {
       'Keep pain and return-to-run clearance in physical-therapy first',
     )
     expect(prompt).toContain(
-      'use a dedicated competition-training owner for event or benchmark-specific work when one is registered.',
+      'For named events, qualifying targets, competition categories, or concrete performance benchmarks, use a dedicated competition-training owner when one is registered; otherwise read running-cardio',
     )
+    expect(prompt).toContain(
+      'keep help bounded to general preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
+    )
+    expect(prompt).not.toContain('- competition-training:')
   })
 
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
