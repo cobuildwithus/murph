@@ -25,6 +25,7 @@ import {
   writeAssistantCronStore,
 } from './cron/store.js'
 import {
+  buildAssistantDeviceActivityAuthorityTag,
   buildAssistantDeviceActivityOccurrenceTag,
   buildAssistantDeviceActivityParentAutomationTag,
   isAssistantDeviceActivityReservedTag,
@@ -493,6 +494,9 @@ function buildDeviceActivityAutomationNotificationJob(input: {
         input.automation.continuityPolicy === 'preserve'
           ? buildAssistantDeviceActivityParentAutomationTag(input.automation.automationId)
           : null,
+        buildAssistantDeviceActivityAuthorityTag(
+          buildDeviceActivityAutomationAuthorityKey(input.automation),
+        ),
         buildAssistantDeviceActivityOccurrenceTag(input.occurrenceKey),
       ].filter((tag): tag is string => tag !== null),
     ),
@@ -535,6 +539,22 @@ function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
     .update(input.activity.entityId)
     .update('\0')
     .update(input.activity.triggeredAt)
+    .digest('hex')
+    .slice(0, 40)
+}
+
+function buildDeviceActivityAutomationAuthorityKey(
+  automation: DeviceActivityAutomation,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      activityKind: automation.schedule.activityKind ?? null,
+      automationId: automation.automationId,
+      continuityPolicy: automation.continuityPolicy,
+      instructions: automation.instructions,
+      route: automation.route,
+      source: automation.schedule.source ?? null,
+    }))
     .digest('hex')
     .slice(0, 40)
 }

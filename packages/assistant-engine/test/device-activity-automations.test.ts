@@ -83,6 +83,7 @@ describe('device activity triggered automations', () => {
       tags: [
         'system:assistant-device-activity-parent:auto_other',
         'system:assistant-device-activity-occurrence:stale_occurrence',
+        'system:assistant-device-activity-authority:stale_authority',
         'user-visible',
       ],
     })
@@ -132,8 +133,12 @@ describe('device activity triggered automations', () => {
     )
     expect(jobs[0]?.tags).toContain('user-visible')
     expect(jobs[0]?.tags).toContain('system:assistant-device-activity-parent:auto_walk')
+    expect(jobs[0]?.tags?.some((tag) =>
+      tag.startsWith('system:assistant-device-activity-authority:'),
+    )).toBe(true)
     expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-parent:auto_other')
     expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-occurrence:stale_occurrence')
+    expect(jobs[0]?.tags).not.toContain('system:assistant-device-activity-authority:stale_authority')
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:00:00.000Z',

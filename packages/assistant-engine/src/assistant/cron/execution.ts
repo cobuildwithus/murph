@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
+import { listAutomations, type AutomationQueryRecord } from '@murphai/query'
 import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
@@ -28,7 +29,6 @@ import {
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
-  createAssistantCronCanonicalRuntimeRecord,
   findAssistantCronCanonicalRuntimeRecord,
   removeAssistantCronCanonicalRuntimeRecord,
   upsertAssistantCronCanonicalRuntimeRecord,
@@ -37,7 +37,10 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
-import { readAssistantDeviceActivityParentAutomationTag } from '../device-activity-cron-tags.js'
+import {
+  readAssistantDeviceActivityAuthorityTag,
+  readAssistantDeviceActivityParentAutomationTag,
+} from '../device-activity-cron-tags.js'
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
@@ -73,6 +76,8 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
+  'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
@@ -297,6 +302,10 @@ export async function executeClaimedAssistantCronJob(input: {
       })
     }
 
+    const deviceActivityAuthorityError = await resolveDeviceActivityParentAuthorityError({
+      job: input.job,
+      vault: input.vault,
+    })
     const staleError =
       input.trigger === 'scheduled'
         ? resolveStaleAssistantCronNotificationError({
@@ -306,7 +315,10 @@ export async function executeClaimedAssistantCronJob(input: {
           })
         : null
 
-    if (staleError) {
+    if (deviceActivityAuthorityError !== null) {
+      status = 'skipped'
+      errorText = deviceActivityAuthorityError
+    } else if (staleError) {
       status = 'skipped'
       errorText = staleError
     } else {
@@ -478,13 +490,6 @@ export async function executeClaimedAssistantCronJob(input: {
       }
 
       await writeAssistantCronStore(input.paths, store)
-      await persistDeviceActivityParentCronSession({
-        finishedAt,
-        job: finalizedJob,
-        paths: input.paths,
-        sessionId,
-      })
-
       return {
         job: finalizedJob,
         removedAfterRun,
@@ -849,34 +854,72 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
   )
 }
 
-async function persistDeviceActivityParentCronSession(input: {
-  finishedAt: string
-  job: AssistantCronJob
-  paths: AssistantStatePaths
-  sessionId: string | null
-}): Promise<void> {
-  if (!input.sessionId) {
-    return
+async function resolveDeviceActivityParentAuthorityError(input: {
+  job: ResolvedAssistantCronJob
+  vault: string
+}): Promise<string | null> {
+  if (input.job.kind !== 'local') {
+    return null
   }
 
-  const parentAutomationId = readAssistantDeviceActivityParentAutomationTag(input.job.tags)
+  const parentAutomationId = readAssistantDeviceActivityParentAutomationTag(input.job.job.tags)
   if (!parentAutomationId) {
-    return
+    return null
   }
 
-  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
-  const existing =
-    findAssistantCronCanonicalRuntimeRecord(runtimeStore, parentAutomationId) ??
-    createAssistantCronCanonicalRuntimeRecord({
-      jobId: parentAutomationId,
-      now: input.finishedAt,
-    })
-  upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, {
-    ...existing,
-    sessionId: input.sessionId,
-    updatedAt: input.finishedAt,
-  })
-  await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
+  const expectedAuthorityKey = readAssistantDeviceActivityAuthorityTag(input.job.job.tags)
+  if (!expectedAuthorityKey) {
+    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+  }
+
+  const parentAutomation = (await listAutomations(input.vault, {
+    status: ['active', 'paused', 'archived'],
+  })).find((automation) => automation.automationId === parentAutomationId)
+  if (!parentAutomation || parentAutomation.status !== 'active') {
+    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+  }
+  if (parentAutomation.schedule.kind !== 'deviceActivity') {
+    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+  }
+  if (!assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)) {
+    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+  }
+
+  return buildDeviceActivityAutomationAuthorityKey(parentAutomation) === expectedAuthorityKey
+    ? null
+    : ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+}
+
+function buildDeviceActivityAutomationAuthorityKey(
+  automation: AutomationQueryRecord,
+): string {
+  if (automation.schedule.kind !== 'deviceActivity') {
+    throw new TypeError('Device activity automation authority requires a deviceActivity schedule.')
+  }
+
+  return createHash('sha256')
+    .update(JSON.stringify({
+      activityKind: automation.schedule.activityKind ?? null,
+      automationId: automation.automationId,
+      continuityPolicy: automation.continuityPolicy,
+      instructions: automation.instructions,
+      route: automation.route,
+      source: automation.schedule.source ?? null,
+    }))
+    .digest('hex')
+    .slice(0, 40)
+}
+
+function assistantCronTargetMatchesAutomationRoute(
+  target: AssistantCronJob['target'],
+  route: AutomationQueryRecord['route'],
+): boolean {
+  return target.channel === route.channel &&
+    JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
+    target.deliveryTarget === route.deliveryTarget &&
+    target.identityId === route.identityId &&
+    target.participantId === route.participantId &&
+    target.threadId === route.threadId
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {

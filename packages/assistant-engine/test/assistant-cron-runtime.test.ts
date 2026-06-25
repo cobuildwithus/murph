@@ -1,13 +1,14 @@
+import { createHash } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
+import type { AutomationSchedule } from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
   type AssistantCronJob,
-  type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
@@ -26,7 +27,7 @@ type MockAutomationRecord = {
     participantId: string | null
     threadId: string | null
   }
-  schedule: AssistantCronSchedule
+  schedule: AutomationSchedule
   slug?: string
   status: 'active' | 'paused' | 'archived'
   summary?: string | null
@@ -144,7 +145,10 @@ import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
-import { buildAssistantDeviceActivityParentAutomationTag } from '../src/assistant/device-activity-cron-tags.ts'
+import {
+  buildAssistantDeviceActivityAuthorityTag,
+  buildAssistantDeviceActivityParentAutomationTag,
+} from '../src/assistant/device-activity-cron-tags.ts'
 import {
   completeAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
@@ -325,7 +329,7 @@ beforeEach(() => {
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
       route: MockAutomationRecord['route']
-      schedule: AssistantCronSchedule
+      schedule: AutomationSchedule
       slug?: string
       status: MockAutomationRecord['status']
       summary?: string | null
@@ -1044,14 +1048,41 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('mirrors a device activity local job session to the parent automation runtime state', async () => {
+  it('skips a device activity local job when the parent listener is no longer active', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-device-activity-parent-session-',
+      'assistant-cron-runtime-device-activity-parent-authority-',
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     const parentAutomationId = 'automation-device-activity-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'preserve',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'device-activity-listener',
+      status: 'paused',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
     const localJob = assistantCronJobSchema.parse({
       createdAt: '2026-04-08T08:59:00.000Z',
       enabled: true,
@@ -1077,6 +1108,9 @@ describe('assistant cron runtime orchestration', () => {
       tags: [
         'system:assistant-require-send',
         buildAssistantDeviceActivityParentAutomationTag(parentAutomationId),
+        buildAssistantDeviceActivityAuthorityTag(
+          buildDeviceActivityAuthorityKey(parentAutomation),
+        ),
       ],
       target: {
         alias: null,
@@ -1094,12 +1128,6 @@ describe('assistant cron runtime orchestration', () => {
       version: 1,
       jobs: [localJob],
     })
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      response: 'Completed device activity check-in.',
-      session: {
-        sessionId: 'session-device-activity',
-      },
-    })
 
     await expect(
       processDueAssistantCronJobsLocal({
@@ -1109,13 +1137,27 @@ describe('assistant cron runtime orchestration', () => {
     ).resolves.toEqual({
       failed: 0,
       processed: 1,
-      succeeded: 1,
+      succeeded: 0,
     })
 
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    expect(runtimeStore.jobs.find((job) => job.jobId === parentAutomationId)).toMatchObject({
-      jobId: parentAutomationId,
-      sessionId: 'session-device-activity',
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    const runs = await listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })
+    expect(runs.runs).toEqual([
+      expect.objectContaining({
+        error: expect.stringContaining('parent listener is no longer authorized'),
+        response: null,
+        status: 'skipped',
+      }),
+    ])
+    await expect(getAssistantCronJob(vaultRoot, localJob.jobId)).resolves.toMatchObject({
+      enabled: false,
+      state: expect.objectContaining({
+        lastSucceededAt: '2026-04-08T09:00:00.000Z',
+        nextRunAt: null,
+      }),
     })
   })
 
@@ -4212,6 +4254,24 @@ function getVaultAutomationStore(vault: string): MockAutomationRecord[] {
   const created: MockAutomationRecord[] = []
   cronMocks.automationsByVault.set(vault, created)
   return created
+}
+
+function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): string {
+  if (automation.schedule.kind !== 'deviceActivity') {
+    throw new Error('Expected device activity automation.')
+  }
+
+  return createHash('sha256')
+    .update(JSON.stringify({
+      activityKind: automation.schedule.activityKind ?? null,
+      automationId: automation.automationId,
+      continuityPolicy: automation.continuityPolicy,
+      instructions: automation.instructions,
+      route: automation.route,
+      source: automation.schedule.source ?? null,
+    }))
+    .digest('hex')
+    .slice(0, 40)
 }
 
 function getVaultScheduledLogStore(vault: string): ScheduledLogQueryRecord[] {

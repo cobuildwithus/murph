@@ -309,6 +309,20 @@ describe("markdown document primitives", () => {
     expect(advanced.record.instructions).toBe(created.record.instructions);
     expect(advanced.record.tags).toEqual(["device"]);
 
+    const stale = await advanceAutomationDeviceActivityCursor({
+      vaultRoot,
+      lookup: created.record.automationId,
+      after: "2026-06-07T11:30:00.000Z",
+      afterOccurredAt: "2026-06-07T11:15:00.000Z",
+      afterEntityId: "evt_older",
+      expectedActivityKind: "walk",
+      expectedSource: "whoop",
+      now: new Date("2026-06-07T12:01:30.000Z"),
+    });
+
+    expect(stale.advanced).toBe(false);
+    expect(stale.record.schedule).toEqual(advanced.record.schedule);
+
     const retargeted = await patchAutomation({
       vaultRoot,
       lookup: created.record.automationId,
@@ -336,6 +350,42 @@ describe("markdown document primitives", () => {
 
     expect(skipped.advanced).toBe(false);
     expect(skipped.record.schedule).toEqual(retargeted.record.schedule);
+  });
+
+  it("rejects partial and mixed device activity cursor shapes", async () => {
+    const vaultRoot = await makeVaultRoot();
+
+    await expect(
+      upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          schedule: {
+            kind: "deviceActivity",
+            after: "2026-06-07T11:00:00.000Z",
+            afterOccurredAt: "2026-06-07T10:30:00.000Z",
+          },
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_INPUT",
+    });
+
+    await expect(
+      upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          schedule: {
+            kind: "deviceActivity",
+            after: "2026-06-07T11:00:00.000Z",
+            afterOccurredAt: "2026-06-07T10:30:00.000Z",
+            afterEntityId: "evt_walk",
+            afterEntityIds: ["evt_old"],
+          },
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_INPUT",
+    });
   });
 
   it("clears automation summary when null is provided explicitly", async () => {

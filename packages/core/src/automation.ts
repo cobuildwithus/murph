@@ -222,6 +222,28 @@ function normalizeAutomationDeviceActivityCursorEntityId(value: unknown): string
   return optionalString(value, "schedule.afterEntityId", 240) ?? undefined;
 }
 
+function assertAutomationDeviceActivityCursorShape(input: {
+  afterEntityId?: string;
+  afterEntityIds?: readonly string[];
+  afterOccurredAt?: string;
+}): void {
+  const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
+  const hasScalarEntityId = input.afterEntityId !== undefined;
+  const hasLegacyEntityIds = input.afterEntityIds !== undefined;
+  if (hasScalarOccurredAt !== hasScalarEntityId) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "schedule.afterOccurredAt and schedule.afterEntityId must be provided together.",
+    );
+  }
+  if (hasLegacyEntityIds && (hasScalarOccurredAt || hasScalarEntityId)) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "schedule.afterEntityIds cannot be mixed with schedule.afterOccurredAt or schedule.afterEntityId.",
+    );
+  }
+}
+
 function normalizeDeviceActivityKindToken(value: string): string {
   return value
     .trim()
@@ -304,6 +326,11 @@ function normalizeAutomationSchedule(
         : normalizeAutomationIsoTimestamp(object.afterOccurredAt, "schedule.afterOccurredAt");
       const afterEntityId = normalizeAutomationDeviceActivityCursorEntityId(object.afterEntityId);
       const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(object.afterEntityIds);
+      assertAutomationDeviceActivityCursorShape({
+        afterEntityId,
+        afterEntityIds,
+        afterOccurredAt,
+      });
 
       return {
         kind,
