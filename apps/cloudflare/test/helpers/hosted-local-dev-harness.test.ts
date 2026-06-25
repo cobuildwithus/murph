@@ -390,7 +390,7 @@ it("does not treat recent foreground conversation imports as completion while du
       version: "1",
     },
   } satisfies HostedRunnerStatusResponse;
-  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
     if (String(request).includes("/__test/users/member_local_import/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
@@ -414,9 +414,13 @@ it("does not treat recent foreground conversation imports as completion while du
       timeoutMs: 50,
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import/run-until-idle")
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_local_import/runtime/ensure-processing"
+      && init?.method === "POST"
     )).toBe(true);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_import/")
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -487,7 +491,10 @@ it("waits for durable conversation lag to clear after local import evidence", as
     ],
   } satisfies HostedRunnerStatusResponse;
   let statusRequests = 0;
-  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(request).includes("/runtime/ensure-processing")) {
+      return Response.json({ accepted: true });
+    }
     if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
@@ -527,9 +534,13 @@ it("waits for durable conversation lag to clear after local import evidence", as
     });
 
     expect(statusRequests).toBe(3);
-    expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_wait/run-until-idle")
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_local_import_wait/runtime/ensure-processing"
+      && init?.method === "POST"
     )).toBe(true);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_import_wait/")
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -570,8 +581,11 @@ it("recovers stale in-flight hosted completion by expiring activity and running 
     inFlight: false,
   } satisfies HostedRunnerStatusResponse;
   let statusRequests = 0;
-  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(request);
+    if (url.includes("/runtime/ensure-processing")) {
+      return Response.json({ accepted: true });
+    }
     if (url.includes("/container-activity-expired")) {
       return Response.json({ ok: true });
     }
@@ -602,12 +616,13 @@ it("recovers stale in-flight hosted completion by expiring activity and running 
       userId: "member_stale_in_flight_completion",
     });
 
-    expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/container-activity-expired")
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_stale_in_flight_completion/runtime/ensure-processing"
+      && init?.method === "POST"
     )).toBe(true);
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/run-until-idle")
-    )).toBe(true);
+      String(request).includes("/__test/users/member_stale_in_flight_completion/")
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -662,7 +677,7 @@ it("does not treat processed foreground system imports as completion while durab
       version: "1",
     },
   } satisfies HostedRunnerStatusResponse;
-  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
     if (String(request).includes("/__test/users/member_local_system_import/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
@@ -686,9 +701,13 @@ it("does not treat processed foreground system imports as completion while durab
       timeoutMs: 50,
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_system_import/run-until-idle")
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_local_system_import/runtime/ensure-processing"
+      && init?.method === "POST"
     )).toBe(true);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_system_import/")
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -733,7 +752,7 @@ it("does not treat foreground system imports as completion without a durable che
       version: "0",
     },
   } satisfies HostedRunnerStatusResponse;
-  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
     if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
@@ -757,9 +776,13 @@ it("does not treat foreground system imports as completion without a durable che
       timeoutMs: 50,
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle")
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_local_import_checkpoint/runtime/ensure-processing"
+      && init?.method === "POST"
     )).toBe(true);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_import_checkpoint/")
+    )).toBe(false);
   } finally {
     await harness.stop();
   }
@@ -781,6 +804,7 @@ it("calls the hosted-local alarm test route with the bound user headers", async 
     statusHeaders: (userId) => ({
       [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
     }),
+    testControls: true,
   });
 
   try {
@@ -813,6 +837,7 @@ it("calls the hosted-local activity-expiry route with bound user headers and a t
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
   });
 
   try {
@@ -846,6 +871,7 @@ it("calls the hosted-local active-operation drop route with bound user headers a
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
   });
 
   try {
@@ -879,6 +905,7 @@ it("calls the hosted-local run-until-idle route without an idle checkpoint reaso
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
   });
 
   try {
@@ -915,6 +942,7 @@ it("calls the hosted-local run-until-idle route without an alarm reason", async 
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
   });
 
   try {
