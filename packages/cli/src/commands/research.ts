@@ -7,11 +7,22 @@ import {
 } from '@murphai/vault-usecases'
 import {
   fetchExaResearchScoutCandidates,
+  fetchExaResearchScoutBatchCandidates,
+  DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
+  MAX_RESEARCH_SCOUT_BATCH_LANES,
+  MAX_RESEARCH_SCOUT_CANDIDATES,
+  researchScoutBatchPayloadSchema,
+  researchScoutBatchResultSchema,
   researchScoutProfileSchema,
   researchScoutResultSchema,
+  type ResearchScoutBatchPayload,
   type ResearchScoutProfile,
 } from '../research-scout.js'
-import { registerPayloadSchemaCommand } from './payload-schema-command.js'
+import {
+  createPayloadSchemaResult,
+  payloadSchemaResultSchema,
+  registerPayloadSchemaCommand,
+} from './payload-schema-command.js'
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u
 
@@ -42,6 +53,35 @@ const RESEARCH_SCOUT_PROFILE_EXAMPLE = {
   activeExperiments: [],
 } satisfies ResearchScoutProfile
 
+const RESEARCH_SCOUT_BATCH_EXAMPLE = {
+  lanes: [
+    {
+      label: 'sleep',
+      profile: {
+        topics: ['sleep'],
+        biomarkers: [],
+        behaviors: ['morning light'],
+        supplements: [],
+        conditionsOrConcerns: [],
+        goals: [],
+        activeExperiments: ['screen curfew'],
+      },
+    },
+    {
+      label: 'training recovery',
+      profile: {
+        topics: ['recovery'],
+        biomarkers: [],
+        behaviors: ['resistance training'],
+        supplements: [],
+        conditionsOrConcerns: [],
+        goals: ['better recovery'],
+        activeExperiments: [],
+      },
+    },
+  ],
+} satisfies ResearchScoutBatchPayload
+
 export function registerResearchCommands(cli: Cli.Cli) {
   const research = Cli.create('research', {
     description:
@@ -55,6 +95,24 @@ export function registerResearchCommands(cli: Cli.Cli) {
     schema: researchScoutProfileSchema,
     schemaName: 'ResearchScoutProfile',
     examples: [RESEARCH_SCOUT_PROFILE_EXAMPLE],
+  })
+
+  research.command('scout-batch-payload-schema', {
+    description:
+      'Emit the exact compact lane JSON body schema for research scout-batch --input.',
+    args: z.object({}),
+    options: z.object({}),
+    output: payloadSchemaResultSchema,
+    run() {
+      return createPayloadSchemaResult({
+        command: 'research scout-batch --input',
+        description:
+          'Emit the exact compact lane JSON body schema for research scout-batch --input.',
+        schema: researchScoutBatchPayloadSchema,
+        schemaName: 'ResearchScoutBatchPayload',
+        examples: [RESEARCH_SCOUT_BATCH_EXAMPLE],
+      })
+    },
   })
 
   research.command('scout', {
@@ -75,8 +133,8 @@ export function registerResearchCommands(cli: Cli.Cli) {
         .number()
         .int()
         .min(1)
-        .max(12)
-        .default(12)
+        .max(MAX_RESEARCH_SCOUT_CANDIDATES)
+        .default(MAX_RESEARCH_SCOUT_CANDIDATES)
         .describe('Maximum research candidates to request from Exa.'),
     }),
     examples: [
@@ -118,6 +176,67 @@ export function registerResearchCommands(cli: Cli.Cli) {
     },
   })
 
+  research.command('scout-batch', {
+    description:
+      'Search Exa for bounded health research candidates from multiple compact non-identifying profile lanes without writing vault records.',
+    args: z.object({}),
+    options: z.object({
+      input: inputFileOptionSchema.describe(
+        'Compact lane JSON in @file.json form or - for stdin. Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"]}}]}. Lane profiles use the same bucket fields as research scout and must not include raw labs, names, dates of birth, full notes, or medical records.',
+      ),
+      since: researchScoutTimestampOptionSchema.describe(
+        'Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp.',
+      ),
+      until: researchScoutTimestampOptionSchema.describe(
+        'Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp.',
+      ),
+      maxCandidatesPerLane: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_RESEARCH_SCOUT_CANDIDATES)
+        .default(DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE)
+        .describe('Maximum research candidates to request from Exa for each lane.'),
+    }),
+    examples: [
+      {
+        description: 'Search across a few focused compact research lanes.',
+        options: {
+          input: '@research-lanes.json',
+          since: '2024-06-24',
+          until: '2026-06-24T12:00:00.000Z',
+          maxCandidatesPerLane: DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
+        },
+      },
+    ],
+    hint:
+      `Requires EXA_API_KEY. Pass up to ${MAX_RESEARCH_SCOUT_BATCH_LANES} compact non-identifying lanes only; use research scout-batch-payload-schema for the exact file-body contract. The tool runs the existing research scout request once per lane and returns lane-tagged provider responses. Local vault relevance, deduping, final ranking, and medical framing remain the assistant job.`,
+    output: researchScoutBatchResultSchema,
+    async run({ options }) {
+      const rawPayload = await loadJsonInputObject(
+        options.input,
+        'research scout batch lanes',
+      )
+      const payload = parseResearchScoutBatchCliPayloadInput(rawPayload)
+      const since = normalizeRequiredResearchScoutTimestampOption(
+        options.since,
+        'since',
+      )
+      const until = normalizeRequiredResearchScoutTimestampOption(
+        options.until,
+        'until',
+      )
+      assertResearchScoutWindow(since, until)
+
+      return await fetchExaResearchScoutBatchCandidates({
+        ...payload,
+        since,
+        until,
+        maxCandidatesPerLane: options.maxCandidatesPerLane,
+      })
+    },
+  })
+
   cli.command(research)
 }
 
@@ -143,6 +262,28 @@ export function parseResearchScoutCliProfileInput(
   }
 
   throw invalidResearchScoutProfileError()
+}
+
+export function parseResearchScoutBatchCliPayloadInput(
+  rawInput: unknown,
+): ResearchScoutBatchPayload {
+  const payload = researchScoutBatchPayloadSchema.safeParse(rawInput)
+  if (payload.success) {
+    return payload.data
+  }
+
+  if (isJsonRecord(rawInput) && Object.hasOwn(rawInput, 'lanes')) {
+    const keys = Object.keys(rawInput)
+    if (keys.some((key) =>
+      key === 'since' || key === 'until' || key === 'maxCandidatesPerLane'
+    )) {
+      throw invalidResearchScoutBatchPayloadError(
+        'Put only compact lanes in --input. Pass since, until, and maxCandidatesPerLane as CLI options.',
+      )
+    }
+  }
+
+  throw invalidResearchScoutBatchPayloadError()
 }
 
 export function normalizeResearchScoutTimestampOption(
@@ -216,6 +357,17 @@ function invalidResearchScoutProfileError(extraDetail?: string): VaultCliError {
       extraDetail,
       `research scout --input expects a compact profile with bucket fields: ${fields}.`,
       'Use {"topics":["sleep","recovery"],"behaviors":["exercise"]}; do not use a generic tags field or raw notes.',
+    ].filter(Boolean).join(' '),
+  )
+}
+
+function invalidResearchScoutBatchPayloadError(extraDetail?: string): VaultCliError {
+  return new VaultCliError(
+    'research_scout_invalid_batch_payload',
+    [
+      extraDetail,
+      `research scout-batch --input expects {"lanes":[...]} with 1-${MAX_RESEARCH_SCOUT_BATCH_LANES} compact lane profiles.`,
+      'Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; do not use generic tags, raw notes, raw labs, or full request fields.',
     ].filter(Boolean).join(' '),
   )
 }

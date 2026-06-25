@@ -4335,6 +4335,10 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "scout-batch-payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "scout": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4358,6 +4362,37 @@
                         "maxCandidates": {
                           "default": 12,
                           "description": "Maximum research candidates to request from Exa.",
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 12
+                        }
+                      }
+                    }
+                  }
+                },
+                "scout-batch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles use the same bucket fields as research scout and must not include raw labs, names, dates of birth, full notes, or medical records."
+                        },
+                        "since": {
+                          "type": "string",
+                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
+                        },
+                        "until": {
+                          "type": "string",
+                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
+                        },
+                        "maxCandidatesPerLane": {
+                          "default": 5,
+                          "description": "Maximum research candidates to request from Exa for each lane.",
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 12

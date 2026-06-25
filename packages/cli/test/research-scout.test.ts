@@ -3,6 +3,7 @@ import { Cli } from 'incur'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  parseResearchScoutBatchCliPayloadInput,
   normalizeResearchScoutTimestampOption,
   parseResearchScoutCliProfileInput,
   registerResearchCommands,
@@ -10,9 +11,13 @@ import {
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   buildExaResearchScoutRequest,
+  fetchExaResearchScoutBatchCandidates,
   fetchExaResearchScoutCandidates,
 } from '../src/research-scout-client.js'
-import type { ResearchScoutInput } from '../src/research-scout.js'
+import type {
+  ResearchScoutBatchInput,
+  ResearchScoutInput,
+} from '../src/research-scout.js'
 import {
   requireData,
   runInProcessJsonCli,
@@ -32,6 +37,38 @@ const RESEARCH_SCOUT_INPUT = {
   until: '2026-06-17T00:00:00.000Z',
   maxCandidates: 2,
 } satisfies ResearchScoutInput
+
+const RESEARCH_SCOUT_BATCH_INPUT = {
+  lanes: [
+    {
+      label: 'sleep',
+      profile: {
+        topics: ['sleep'],
+        biomarkers: [],
+        behaviors: ['morning light'],
+        supplements: [],
+        conditionsOrConcerns: [],
+        goals: [],
+        activeExperiments: ['screen curfew'],
+      },
+    },
+    {
+      label: 'training recovery',
+      profile: {
+        topics: ['recovery'],
+        biomarkers: [],
+        behaviors: ['resistance training'],
+        supplements: [],
+        conditionsOrConcerns: [],
+        goals: ['better recovery'],
+        activeExperiments: [],
+      },
+    },
+  ],
+  since: '2024-06-18T00:00:00.000Z',
+  until: '2026-06-17T00:00:00.000Z',
+  maxCandidatesPerLane: 5,
+} satisfies ResearchScoutBatchInput
 
 interface PayloadSchemaResult {
   command: string
@@ -130,6 +167,50 @@ describe('research scout', () => {
       })).toThrow(/Pass since, until, and maxCandidates as CLI options/u)
   })
 
+  it('accepts compact research scout batch lane payloads', () => {
+    expect(parseResearchScoutBatchCliPayloadInput({
+      lanes: [
+        {
+          label: 'sleep',
+          profile: {
+            topics: ['sleep'],
+            behaviors: ['morning light'],
+          },
+        },
+      ],
+    })).toMatchObject({
+      lanes: [
+        {
+          label: 'sleep',
+          profile: {
+            topics: ['sleep'],
+            behaviors: ['morning light'],
+            biomarkers: [],
+            supplements: [],
+            conditionsOrConcerns: [],
+            goals: [],
+            activeExperiments: [],
+          },
+        },
+      ],
+    })
+  })
+
+  it('rejects full request-shaped batch input with actionable CLI guidance', () => {
+    expect(() =>
+      parseResearchScoutBatchCliPayloadInput({
+        lanes: [
+          {
+            label: 'sleep',
+            profile: {
+              topics: ['sleep'],
+            },
+          },
+        ],
+        since: '2024-06-18T00:00:00.000Z',
+      })).toThrow(/Pass since, until, and maxCandidatesPerLane as CLI options/u)
+  })
+
   it('normalizes date-only research scout bounds before provider work', () => {
     const now = new Date('2026-06-24T12:34:56.789Z')
 
@@ -174,11 +255,60 @@ describe('research scout', () => {
     })
   })
 
+  it('emits a discoverable payload schema for research scout batch lanes', async () => {
+    const payloadSchema = requireData(
+      (await runInProcessJsonCli<PayloadSchemaResult>(createResearchCli(), [
+        'research',
+        'scout-batch-payload-schema',
+      ])).envelope,
+    )
+
+    expect(payloadSchema.schemaVersion).toBe('murph.payload-schema.v1')
+    expect(payloadSchema.command).toBe('research scout-batch --input')
+    expect(payloadSchema.schemaName).toBe('ResearchScoutBatchPayload')
+    expect(payloadSchema.schema.properties).toHaveProperty('lanes')
+    const example = payloadSchema.examples?.[0] as {
+      lanes?: Array<{ label?: unknown; profile?: unknown }>
+    } | undefined
+    expect(example?.lanes).toEqual([
+      expect.objectContaining({
+        label: 'sleep',
+        profile: expect.objectContaining({
+          behaviors: ['morning light'],
+          topics: ['sleep'],
+        }),
+      }),
+      expect.objectContaining({
+        label: 'training recovery',
+        profile: expect.objectContaining({
+          behaviors: ['resistance training'],
+          topics: ['recovery'],
+        }),
+      }),
+    ])
+  })
+
   it('requires EXA_API_KEY before making an external request', async () => {
     const fetchImpl = vi.fn<typeof fetch>()
 
     await expect(
       fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+        env: {},
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: 'research_exa_token_missing',
+      name: 'VaultCliError',
+    } satisfies Partial<VaultCliError>)
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('requires EXA_API_KEY before making batch external requests', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      fetchExaResearchScoutBatchCandidates(RESEARCH_SCOUT_BATCH_INPUT, {
         env: {},
         fetchImpl,
       }),
@@ -267,6 +397,101 @@ describe('research scout', () => {
       tokenSource: 'env',
     })
     expect(result.response).toEqual(providerPayload)
+  })
+
+  it('posts one bounded research-paper search for each batch lane', async () => {
+    const providerPayloads = [
+      {
+        output: {
+          content: {
+            candidates: [createStructuredCandidate({ matchedProfileTags: ['sleep'] })],
+          },
+        },
+        results: [{ title: 'Sleep source', url: 'https://example.test/sleep' }],
+      },
+      {
+        output: {
+          content: {
+            candidates: [createStructuredCandidate({ matchedProfileTags: ['recovery'] })],
+          },
+        },
+        results: [{ title: 'Recovery source', url: 'https://example.test/recovery' }],
+      },
+    ]
+    let requestIndex = 0
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      const payload = providerPayloads[requestIndex] ?? providerPayloads[0]
+      requestIndex += 1
+      return jsonResponse(payload)
+    })
+
+    const result = await fetchExaResearchScoutBatchCandidates(RESEARCH_SCOUT_BATCH_INPUT, {
+      env: {
+        EXA_API_KEY: 'exa-test-token',
+      },
+      fetchImpl,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const firstRequest = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      numResults?: unknown
+      query?: unknown
+    }
+    const secondRequest = JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body)) as {
+      numResults?: unknown
+      query?: unknown
+    }
+    expect(firstRequest.numResults).toBe(5)
+    expect(firstRequest.query).toEqual(expect.stringContaining('Topics: sleep'))
+    expect(firstRequest.query).toEqual(expect.stringContaining('Active experiments: screen curfew'))
+    expect(secondRequest.numResults).toBe(5)
+    expect(secondRequest.query).toEqual(expect.stringContaining('Behaviors: resistance training'))
+    expect(result.provider).toEqual({
+      endpoint: 'search',
+      mode: 'deep-reasoning',
+      name: 'exa',
+    })
+    expect(result.privacy.rawVaultValuesSent).toBe(false)
+    expect(result.lanes).toEqual([
+      {
+        label: 'sleep',
+        response: providerPayloads[0],
+      },
+      {
+        label: 'training recovery',
+        response: providerPayloads[1],
+      },
+    ])
+  })
+
+  it('rejects unsafe batch lane profiles before Exa fetches', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      fetchExaResearchScoutBatchCandidates({
+        ...RESEARCH_SCOUT_BATCH_INPUT,
+        lanes: [
+          {
+            label: 'sleep',
+            profile: {
+              topics: ['sleep'],
+              behaviors: ['morning light'],
+              supplements: [],
+              conditionsOrConcerns: [],
+              goals: [],
+              activeExperiments: ['screen curfew'],
+              biomarkers: ['LDL 143 mg/dL'],
+            },
+          },
+        ],
+      }, {
+        env: {
+          EXA_API_KEY: 'exa-test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/non-identifying categories/u)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it.each([
