@@ -30,6 +30,7 @@ import {
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionLookupKeyReadCandidates,
   hostedEmailLookupKeyMatchesValue,
+  hostedLookupKeyMatchesValue,
   hostedPhoneLookupKeyMatchesValue,
   normalizeHostedEmailAddress,
   normalizeHostedTelegramUsernameForLookup,
@@ -100,8 +101,6 @@ export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
-const HOSTED_FAMILY_LEGACY_STRIPE_PRICE_ID_ENV_KEY =
-  "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY";
 const HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/u;
 
 export const HOSTED_ACCOUNT_GROUP_MEMBERSHIP_ROLES = ["owner", "member"] as const;
@@ -1010,11 +1009,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
-  const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
-  if (!familySeatItem) {
-    return buildEmptyHostedFamilyStripeSubscriptionResult();
-  }
-
   const group = await findHostedAccountGroupForStripeSubscription({
     prisma: input.tx,
     subscription: input.subscription,
@@ -1023,7 +1017,32 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
+  const familySeatItem = readHostedFamilyStripeSeatSubscriptionItem(input.subscription);
   const billingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(input.subscription.status);
+  if (!familySeatItem) {
+    const failClosedBillingStatus = billingStatus === HostedBillingStatus.active
+      ? HostedBillingStatus.unpaid
+      : billingStatus;
+    await writeHostedAccountGroupStripeBillingTx({
+      billingStatus: failClosedBillingStatus,
+      currentBillingPhase: null,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
+      billedSeatCount: null,
+      groupId: group.id,
+      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+      stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
+      stripeSubscriptionItemId: null,
+      stripeSubscriptionId: input.subscription.id,
+      tx: input.tx,
+    });
+
+    return {
+      activations: [],
+      groupId: group.id,
+    };
+  }
+
   const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
     currentBillingPhase: input.subscription.status === "active" ? "paid" : null,
@@ -1865,6 +1884,7 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     acceptedMemberId: member.id,
     inviteCode,
     now,
+    telegramUsername: input.telegramUsername ?? null,
     tx: input.tx,
   });
 }
@@ -1983,6 +2003,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   }) => Promise<void>;
   phoneNumber?: string | null;
   requireWebBinding?: boolean;
+  telegramUsername?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const now = input.now ?? new Date();
@@ -2032,6 +2053,21 @@ export async function acceptHostedFamilyInviteTx(input: {
       code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
       httpStatus: 403,
       message: "This family invite was sent to a different email address.",
+    });
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(input, "telegramUsername") &&
+    invite.targetTelegramUsernameLookupKey &&
+    !hostedTelegramUsernameLookupKeyMatchesValue(
+      input.telegramUsername,
+      invite.targetTelegramUsernameLookupKey,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different Telegram username.",
     });
   }
 
@@ -2851,8 +2887,7 @@ function readHostedFamilyStripeTimestamp(
 }
 
 function requireHostedFamilyStripePriceId(): string {
-  const priceId = normalizeNullableString(process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY])
-    ?? normalizeNullableString(process.env[HOSTED_FAMILY_LEGACY_STRIPE_PRICE_ID_ENV_KEY]);
+  const priceId = normalizeNullableString(process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY]);
   if (!priceId) {
     throw hostedOnboardingError({
       code: "STRIPE_PRICE_ID_REQUIRED",
@@ -2862,6 +2897,17 @@ function requireHostedFamilyStripePriceId(): string {
   }
 
   return priceId;
+}
+
+function hostedTelegramUsernameLookupKeyMatchesValue(
+  username: string | null | undefined,
+  expectedLookupKey: string | null | undefined,
+): boolean {
+  return hostedLookupKeyMatchesValue({
+    expectedLookupKey,
+    kind: "telegram-username",
+    normalizedValue: normalizeHostedTelegramUsernameForLookup(username),
+  });
 }
 
 function parseHostedFamilySeatCount(value: unknown): number | null {

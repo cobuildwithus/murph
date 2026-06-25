@@ -76,7 +76,6 @@ import {
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
-const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -1671,9 +1670,8 @@ async function executeHostedComputerPauseForUserTool(input: {
   })
   if (!apiResult.ok) {
     if (apiResult.unknownOutcome) {
-      return await cancelComputerRunAfterUnknownPauseOutcome({
-        ...input,
-        reason: apiResult.errorText,
+      return toolTextResult(false, apiResult.errorText, {
+        computerRunPausedForUser: true,
       })
     }
     return toolTextResult(false, apiResult.errorText)
@@ -1684,37 +1682,6 @@ async function executeHostedComputerPauseForUserTool(input: {
     safeToolPayloadText(readSanitizedComputerPausePayload(apiResult.payload)),
     { computerRunPausedForUser: true },
   )
-}
-
-async function cancelComputerRunAfterUnknownPauseOutcome(input: {
-  abortSignal: AbortSignal | null
-  fetchImpl: typeof fetch
-  finishPath: string
-  reason: string
-}): Promise<MurphDynamicToolExecutionResult> {
-  const cancelResult = await callHostedComputerApi({
-    abortSignal: createHostedComputerCleanupAbortSignal(),
-    body: {
-      outcome: 'failed',
-      summary: null,
-    },
-    fetchImpl: input.fetchImpl,
-    path: input.finishPath,
-    unknownOutcomeOnTransportError: true,
-  })
-
-  return toolTextResult(
-    false,
-    cancelResult.ok
-      ? `${input.reason}; computer run was canceled`
-      : `${input.reason}; computer run cancellation failed: ${cancelResult.errorText}`,
-  )
-}
-
-function createHostedComputerCleanupAbortSignal(): AbortSignal | null {
-  return typeof AbortSignal.timeout === 'function'
-    ? AbortSignal.timeout(HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS)
-    : null
 }
 
 async function executeHostedComputerStartRunTool(input: {

@@ -909,31 +909,17 @@ describe("murph computer dynamic tools", () => {
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
   });
 
-  it("cancels the run if pause transport outcome is unknown before user delivery", async () => {
+  it("does not cancel the run if pause transport outcome is unknown before user delivery", async () => {
     const controller = new AbortController();
     controller.abort();
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
-      init?: RequestInit,
     ): Promise<Response> => {
       if (String(url).endsWith("/pause-for-user")) {
         throw new Error("network timeout");
       }
 
-      expect(String(url)).toBe(
-        "http://web-control.worker/api/internal/computer/runs/run_123/finish",
-      );
-      expect(JSON.parse(String(init?.body))).toEqual({
-        outcome: "failed",
-        summary: null,
-      });
-      expect(init?.signal).not.toBe(controller.signal);
-      expect(init?.signal?.aborted).toBe(false);
-      return jsonResponse({
-        ok: true,
-        runId: "run_123",
-        status: "failed",
-      });
+      throw new Error(`unexpected computer API call: ${String(url)}`);
     });
     const hostedToolContext = createHostedToolContext();
 
@@ -957,11 +943,12 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
+    expect(result.computerRunPausedForUser).toBe(true);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step; computer run was canceled",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step",
     );
     expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled();
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("pauses even when required user-message delivery is unavailable", async () => {

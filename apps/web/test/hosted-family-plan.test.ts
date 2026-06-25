@@ -419,6 +419,33 @@ describe("hosted Family plan", () => {
     ).toBeLessThan(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]);
   });
 
+  it("rejects explicit Telegram tokens from a different bound username", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce({
+        expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+        status: "pending",
+      })
+      .mockResolvedValueOnce(createPendingInvite({
+        inviteCode: "invite_telegram",
+        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Alice_User"),
+      }));
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "bob_user",
+      text: "/start family_invite_telegram",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("falls back to a username-bound pending invite when a Telegram start token is stale", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique
@@ -565,6 +592,27 @@ describe("hosted Family plan", () => {
         prisma: tx,
       }),
     );
+  });
+
+  it("lets a phone-verified invitee accept when the invite also carries a Telegram hint", async () => {
+    const tx = createTxMock();
+
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      status: "active",
+    });
   });
 
   it("accepts email-bound invites only from the invited email address", async () => {
@@ -1038,10 +1086,31 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toEqual({
       activations: [],
-      groupId: null,
+      groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_family_monthly",
+        stripeSubscriptionItemLookupKey: null,
+      }),
+      update: expect.objectContaining({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_family_monthly",
+        stripeSubscriptionItemLookupKey: null,
+      }),
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.unpaid,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -1058,10 +1127,29 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toEqual({
       activations: [],
-      groupId: null,
+      groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        stripeSubscriptionItemLookupKey: null,
+      }),
+      update: expect.objectContaining({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        stripeSubscriptionItemLookupKey: null,
+      }),
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.unpaid,
+      },
+      where: {
+        id: "hbag_family",
+      },
+    });
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
@@ -1237,6 +1325,37 @@ describe("hosted Family plan", () => {
       }],
       mode: "subscription",
     });
+  });
+
+  it("requires the per-seat Family Stripe price env and ignores the old fixed price env", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY = "price_fixed_family";
+    clearHostedOnboardingEnvCache();
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "STRIPE_PRICE_ID_REQUIRED",
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
   });
 
   it("preserves subscription-owned billing fields when late checkout binds ids", async () => {
