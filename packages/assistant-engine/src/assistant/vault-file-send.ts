@@ -133,25 +133,6 @@ export async function requestAssistantVaultFileSend(input: {
   }
 }
 
-export function buildAssistantVaultFileApprovalMessage(input: {
-  approvalUrl: string
-  filename: string
-  expiresAt: string
-}): string {
-  const expiresAt = new Date(input.expiresAt)
-  const expiryText = Number.isNaN(expiresAt.getTime())
-    ? 'This request expires soon.'
-    : `This request expires at ${expiresAt.toISOString()}.`
-  return [
-    `I need your secure approval before sending “${input.filename}” to this iMessage conversation.`,
-    '',
-    `Approve here: ${input.approvalUrl}`,
-    '',
-    'This approval applies only to that file and destination.',
-    expiryText,
-  ].join('\n')
-}
-
 export async function resolveAssistantVaultFileResponseMedia(input: {
   ref: string
   vaultRoot: string

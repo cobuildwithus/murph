@@ -17,10 +17,16 @@ export interface AssistantHostedDeliveryContext {
   recipientKey: string | null
 }
 
-export interface AssistantHostedVaultFileSendResult {
-  filename: string
-  status: 'approved' | 'denied' | 'expired' | 'pending'
-}
+export type AssistantHostedVaultFileSendResult =
+  | {
+      approvalUrl: string
+      filename: string
+      status: 'pending'
+    }
+  | {
+      filename: string
+      status: 'approved' | 'denied' | 'expired'
+    }
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null

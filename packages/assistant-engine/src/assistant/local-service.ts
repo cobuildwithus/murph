@@ -111,7 +111,6 @@ import {
 } from './hosted-tool-context.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
-  buildAssistantVaultFileApprovalMessage,
   requestAssistantVaultFileSend,
 } from './vault-file-send.js'
 import type {
@@ -654,18 +653,10 @@ export async function sendAssistantMessageLocal(
                         vault: currentInput.vault,
                       })
                       if (result.status === 'pending') {
-                        const delivery = await sendRequiredUserMessage(
-                          buildAssistantVaultFileApprovalMessage({
-                            approvalUrl: result.approvalUrl,
-                            expiresAt: result.expiresAt,
-                            filename: result.filename,
-                          }),
-                        )
-                        if (delivery.kind === 'failed') {
-                          throw new VaultCliError(
-                            'ASSISTANT_VAULT_FILE_APPROVAL_LINK_DELIVERY_FAILED',
-                            'The secure approval link could not be delivered.',
-                          )
+                        return {
+                          approvalUrl: result.approvalUrl,
+                          filename: result.filename,
+                          status: 'pending',
                         }
                       }
                       return {
