@@ -275,7 +275,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Each Thursday at 11:30 AM local time, compose one concise personalized in-chat update about what is new in Murph.',
       '',
-      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=20&improvementLimit=5.`,
+      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=50&improvementLimit=10.`,
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
       '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
       '',

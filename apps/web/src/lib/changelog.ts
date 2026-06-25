@@ -60,7 +60,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-25",
     title: "Pain, rehab, and chronic conditions get real help",
     summary:
-      "Murph now reasons like a PT for strains and rehab, offers a best-current-assessment plus a recommended next action for chronic illness and pain instead of only validating or referring, and keeps your accepted goals and habits in working memory so plans don't drift. Exercise intros stay calm — a few movements, real catalog pictures, and a question.",
+      "Clinical-style reasoning for pain and rehab, real recommendations for chronic conditions, and goals that stay pinned across sessions.",
     items: [
       {
         id: "proactive-chronic-support",
