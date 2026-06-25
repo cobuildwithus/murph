@@ -293,7 +293,7 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("finished_browser_step"), false);
   });
 
-  it("renders inspection handoffs as a static screenshot", async () => {
+  it("retires view-only inspection screenshots", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       handoffId: "hch_open",
       interaction: "view_only",
@@ -307,8 +307,9 @@ describe("computer handoff route and page", () => {
       params: Promise.resolve({ token: "handoff-token" }),
     }));
 
-    assert.match(markup, /<img[^>]+alt="Murph private page preview"/);
-    assert.match(markup, /<img[^>]+src="data:image\/jpeg;base64,aW1hZ2U="/);
+    assert.match(markup, /Open a live browser link/);
+    assert.match(markup, /Static page previews are no longer supported/);
+    assert.doesNotMatch(markup, /<img/u);
     assert.doesNotMatch(markup, /<iframe/u);
     assert.doesNotMatch(markup, /<button/u);
     expect(mocks.headers).not.toHaveBeenCalled();
