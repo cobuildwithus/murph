@@ -178,10 +178,6 @@ describe("assistant phone calls", () => {
   });
 
   it("derives phone-call request keys from the eligible phone-call input set", async () => {
-    const broadScope: AssistantHostedToolRequestKeyScope = {
-      ...BASE_SCOPE,
-      acceptedInputIds: ["system_input"],
-    };
     const phoneCallScope: AssistantHostedToolRequestKeyScope = {
       ...BASE_SCOPE,
       acceptedInputIds: ["manual_phone_call_input"],
@@ -212,7 +208,6 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentHostedToolRequestKeyScope: () => broadScope,
         currentPhoneCallToolRequestKeyScope: () => phoneCallScope,
         phoneCalls: { start },
       }),
@@ -244,7 +239,6 @@ function dynamicToolCall(input: {
 }
 
 function createHostedToolContext(input: {
-  currentHostedToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope;
   currentPhoneCallToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
@@ -252,8 +246,6 @@ function createHostedToolContext(input: {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentHostedToolRequestKeyScope:
-      input.currentHostedToolRequestKeyScope ?? (() => BASE_SCOPE),
     currentPhoneCallToolRequestKeyScope: input.currentPhoneCallToolRequestKeyScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {

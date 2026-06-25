@@ -1025,12 +1025,6 @@ function createHostedToolContext(input: {
   return {
     currentHostedDeliveryContext: () => input.deliveryContext ?? null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
-    currentHostedToolRequestKeyScope: () => ({
-      acceptedInputIds: ["input_test"],
-      conversationId: input.deliveryContext?.conversationId ?? null,
-      inboundMailboxItemIds: input.hostedMailboxItemIds ?? [],
-      recipientKey: input.deliveryContext?.recipientKey ?? null,
-    }),
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");

@@ -41,7 +41,6 @@ export interface AssistantHostedToolContext {
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
   currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
-  currentHostedToolRequestKeyScope(): AssistantHostedToolRequestKeyScope
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -55,7 +54,6 @@ type AssistantHostedToolDeliveryContext = {
 export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
   computerToolsAvailable?: boolean
-  getAcceptedInputIds?: () => readonly string[]
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -98,8 +96,6 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
-    currentHostedToolRequestKeyScope: () =>
-      buildRequestKeyScope(input.getAcceptedInputIds?.() ?? []),
     currentPhoneCallToolRequestKeyScope: () => {
       const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
       return acceptedInputIds.length > 0

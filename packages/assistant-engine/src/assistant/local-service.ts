@@ -540,7 +540,6 @@ export async function sendAssistantMessageLocal(
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
-              getAcceptedInputIds: () => acceptedInputIdsForProviderRequest,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
