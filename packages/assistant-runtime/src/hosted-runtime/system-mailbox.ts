@@ -407,6 +407,7 @@ function readHostedSystemMailboxRouteAction(
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "dispatch-assistant-notification"
+    || item.route.action === "seed-managed-automations"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "apply-runtime-control-request"
   ) {

@@ -43,6 +43,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "seed-managed-automations",
+        kind: "assistant.managed-automation.seed-requested",
+        lane: "system",
+      },
+      {
         action: "run-device-sync-wake",
         kind: "device-sync.wake",
         lane: "system",
@@ -99,6 +104,7 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.activated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.managed-automation.seed-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.manual-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.maintenance-requested"), "system");

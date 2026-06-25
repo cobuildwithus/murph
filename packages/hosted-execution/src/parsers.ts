@@ -46,6 +46,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionManagedAutomationSeedRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionConversationMessageWake,
@@ -222,6 +223,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           "Hosted execution wake assistant.notification.requested notification",
         ),
         occurredAt,
+      });
+    case "assistant.managed-automation.seed-requested":
+      return buildHostedExecutionManagedAutomationSeedRequestedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        route: parseHostedExecutionAssistantNotificationRoute(
+          record.route,
+          "Hosted execution wake assistant.managed-automation.seed-requested route",
+        ),
       });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
@@ -731,6 +742,15 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         notification: parseHostedExecutionAssistantNotificationRequestedPayload(
           record.notification,
           "Hosted execution assistant.notification.requested notification",
+        ),
+        userId,
+      };
+    case "assistant.managed-automation.seed-requested":
+      return {
+        kind,
+        route: parseHostedExecutionAssistantNotificationRoute(
+          record.route,
+          "Hosted execution assistant.managed-automation.seed-requested route",
         ),
         userId,
       };

@@ -14,6 +14,7 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-member-activation",
   "apply-member-channels-update",
   "dispatch-assistant-notification",
+  "seed-managed-automations",
   "run-device-sync-wake",
   "apply-runtime-control-request",
   "import-vault-share-delivery",
@@ -57,6 +58,7 @@ const SUPPORTED_MAILBOX_KINDS: readonly string[] = HOSTED_MAILBOX_KINDS;
 const SUPPORTED_MAILBOX_LANES: readonly string[] = HOSTED_MAILBOX_LANES;
 
 const ACTION_BY_KIND = {
+  "assistant.managed-automation.seed-requested": "seed-managed-automations",
   "assistant.notification.requested": "dispatch-assistant-notification",
   "conversation.message": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",

@@ -472,6 +472,7 @@ describe("hosted execution coverage gaps", () => {
       "member.activated",
       "member.channels.updated",
       "assistant.notification.requested",
+      "assistant.managed-automation.seed-requested",
       "device-sync.wake",
       "runtime.manual-requested",
       "runtime.maintenance-requested",

@@ -1,18 +1,24 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
+import type {
+  HostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   hostedWorkspace: {
     count: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
   },
+  readHostedMemberSnapshot: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -30,8 +36,18 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime:
+    mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime:
     mocks.signalHostedRuntimeMaintenanceRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -56,6 +72,7 @@ let opsAccess: OpsAccessModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
   hostedWorkspace: mocks.hostedWorkspace,
+  $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({})),
 };
 
 describe("hosted runtime maintenance ops", () => {
@@ -80,9 +97,22 @@ describe("hosted runtime maintenance ops", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_001",
     });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_001",
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: {
+        id: "mailbox_seed_item",
+      },
+    });
     mocks.hostedWorkspace.count.mockResolvedValue(0);
     mocks.hostedWorkspace.findMany.mockResolvedValue([]);
     mocks.hostedWorkspace.findFirst.mockResolvedValue(null);
+    mocks.readHostedMemberSnapshot.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -218,6 +248,64 @@ describe("hosted runtime maintenance ops", () => {
     });
   });
 
+  it("enqueues managed automation seed wakes with resolved routes", async () => {
+    const route = linqThreadRoute();
+    mocks.hostedWorkspace.count.mockResolvedValue(3);
+    mocks.hostedWorkspace.findMany.mockResolvedValue([
+      workspaceRow("member_001", "10"),
+      workspaceRow("member_002", "11"),
+      workspaceRow("member_003", "12"),
+    ]);
+    const readRepairRoute = vi.fn(async (input: { userId: string }) =>
+      input.userId === "member_002" ? null : route);
+    const appendSeedWake = vi.fn(async (input: { userId: string }) =>
+      mailboxAppendResult(`mailbox_seed_${input.userId}`, input.userId));
+    const signalMailboxAppendRuntime = vi.fn(async (input: { expectedUserId?: string | null }) => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${input.expectedUserId ?? "unknown"}`,
+    }));
+
+    const result = await runtimeMaintenanceService.repairHostedRuntimeManagedAutomationsBatch({
+      appendSeedWake,
+      limit: 3,
+      readRepairRoute,
+      signalMailboxAppendRuntime,
+    });
+
+    expect(result).toMatchObject({
+      limit: 3,
+      nextCursor: null,
+      results: [
+        {
+          inserted: true,
+          mailboxItemId: "mailbox_seed_member_001",
+          status: "enqueued",
+          userId: "member_001",
+          workflowId: "hosted-user-runtime:member_001",
+        },
+        {
+          status: "route_missing",
+          userId: "member_002",
+        },
+        {
+          inserted: true,
+          mailboxItemId: "mailbox_seed_member_003",
+          status: "enqueued",
+          userId: "member_003",
+          workflowId: "hosted-user-runtime:member_003",
+        },
+      ],
+    });
+    expect(readRepairRoute).toHaveBeenCalledTimes(3);
+    expect(appendSeedWake).toHaveBeenCalledTimes(2);
+    expect(signalMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(signalMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_001",
+      mailboxItemId: "mailbox_seed_member_001",
+      prisma,
+    });
+  });
+
   it("requires an active checkpointed workspace for explicit user wakes", async () => {
     mocks.hostedWorkspace.findFirst.mockResolvedValue(null);
 
@@ -272,6 +360,91 @@ describe("hosted runtime maintenance ops", () => {
           workflowId: "hosted-user-runtime:member_002",
         },
       ],
+    });
+  });
+
+  it("seeds managed automations for an explicit workspace through the ops route", async () => {
+    mocks.hostedWorkspace.findFirst.mockResolvedValue(workspaceRow("member_002", "11"));
+    mocks.readHostedMemberSnapshot.mockResolvedValue(hostedMemberSnapshot("member_002"));
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue(
+      mailboxAppendResult("mailbox_seed_member_002", "member_002"),
+    );
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValueOnce({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_002",
+    });
+
+    const request = new Request("https://join.example.test/api/ops/runtime-maintenance", {
+      body: JSON.stringify({
+        action: "seed-managed-automations",
+        userId: "member_002",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+    const response = await runtimeMaintenanceRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
+      memberId: "member_002",
+      prisma,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        kind: "assistant.managed-automation.seed-requested",
+        route: expect.objectContaining({
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_chat_member_002",
+          },
+        }),
+        userId: "member_002",
+      }),
+    }));
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_002",
+      mailboxItemId: "mailbox_seed_member_002",
+      prisma,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      limit: 1,
+      results: [
+        {
+          mailboxItemId: "mailbox_seed_member_002",
+          status: "enqueued",
+          userId: "member_002",
+          workflowId: "hosted-user-runtime:member_002",
+        },
+      ],
+    });
+  });
+
+  it("rejects unsupported runtime maintenance actions", async () => {
+    const response = await runtimeMaintenanceRoute.POST(
+      new Request("https://join.example.test/api/ops/runtime-maintenance", {
+        body: JSON.stringify({
+          action: "not-a-real-action",
+          userId: "member_002",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_RUNTIME_MAINTENANCE_ACTION_UNSUPPORTED",
+      },
     });
   });
 
@@ -418,5 +591,69 @@ function workspaceRow(userId: string, version: string) {
     updatedAt: new Date("2026-06-01T12:05:00.000Z"),
     userId,
     version: BigInt(version),
+  };
+}
+
+function linqThreadRoute(): HostedExecutionAssistantNotificationRoute {
+  return {
+    actorId: "actor_member",
+    channel: "linq",
+    delivery: {
+      kind: "thread",
+      target: "linq_chat_member",
+    },
+    identityId: "identity_member",
+    threadId: "thread_member",
+    threadIsDirect: true,
+  };
+}
+
+function mailboxAppendResult(id: string, userId: string) {
+  return {
+    dedupeConflict: false,
+    duplicate: false,
+    inserted: true,
+    item: {
+      createdAt: "2026-06-01T12:00:00.000Z",
+      dedupeKey: `dedupe_${id}`,
+      expiresAt: null,
+      id,
+      kind: "assistant.managed-automation.seed-requested" as const,
+      lane: "system" as const,
+      laneSeq: "1",
+      occurredAt: "2026-06-01T12:00:00.000Z",
+      payloadBytes: 256,
+      payloadInlineCiphertext: "ciphertext",
+      payloadRef: null,
+      payloadSchema: "murph.hosted-mailbox-item.v1",
+      updatedAt: "2026-06-01T12:00:00.000Z",
+      userId,
+    },
+  };
+}
+
+function hostedMemberSnapshot(memberId: string) {
+  return {
+    billingRef: null,
+    core: {
+      billingStatus: HostedBillingStatus.active,
+      id: memberId,
+      suspendedAt: null,
+    },
+    emailAuthorization: null,
+    identity: {
+      phoneLookupKey: `phone_lookup_${memberId}`,
+      phoneNumber: "+15550002222",
+    },
+    routing: {
+      linqChatId: `linq_chat_${memberId}`,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    },
   };
 }

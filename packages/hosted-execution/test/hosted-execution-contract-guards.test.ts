@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionManagedAutomationSeedRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -22,6 +23,7 @@ describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
     expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
+    expect(isHostedExecutionWakeKind("assistant.managed-automation.seed-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
@@ -91,6 +93,22 @@ describe("hosted execution wake guards", () => {
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user_guard",
     });
+    const managedAutomationSeedWake = buildHostedExecutionManagedAutomationSeedRequestedWake({
+      eventId: "managed-automation-seed-wake-1",
+      memberId: "user_guard",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      route: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_guard",
+        },
+        identityId: "identity_guard",
+        threadId: "thread_guard",
+        threadIsDirect: true,
+      },
+    });
 
     expect(isHostedConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedConversationMessageWake(telegramWake)).toBe(true);
@@ -117,6 +135,7 @@ describe("hosted execution wake guards", () => {
 
     expect(isHostedSystemWake(systemWake)).toBe(true);
     expect(isHostedSystemWake(controlWake)).toBe(true);
+    expect(isHostedSystemWake(managedAutomationSeedWake)).toBe(true);
     expect(isHostedSystemWake(emailWake)).toBe(false);
   });
 });

@@ -24,6 +24,9 @@ import {
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
 import { executeHostedCodexAuthWake } from "./events/codex-auth.ts";
+import {
+  executeHostedManagedAutomationSeedWake,
+} from "./events/managed-automation-seed.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
   HostedMailboxExecutionMetrics,
@@ -179,6 +182,17 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         }),
         vaultRoot: input.vaultRoot,
+      });
+    case "assistant.managed-automation.seed-requested":
+      return await executeHostedManagedAutomationSeedWake({
+        operatorHomeRoot: input.operatorHomeRoot,
+        runtime: input.runtime,
+        runtimeEnv: input.runtimeEnv,
+        ...(input.shouldYieldDeviceSync
+          ? { shouldYieldBackgroundMaintenance: input.shouldYieldDeviceSync }
+          : {}),
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
       });
     case "device-sync.wake":
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({

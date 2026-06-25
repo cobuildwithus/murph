@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -32,6 +31,7 @@ import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./mailbox-outcome.ts";
+import { buildHostedAssistantAutomationRoute } from "./automation-route.ts";
 import { emitHostedAssistantProviderTraceLog } from "./provider-trace-log.ts";
 
 type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
@@ -210,7 +210,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
-      route: buildOnboardingFollowupAutomationRoute(input.route),
+      route: buildHostedAssistantAutomationRoute(input.route),
       schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
@@ -236,32 +236,6 @@ function didAssistantNotificationAcceptDelivery(
 ): boolean {
   const outcomeKind = result?.deliveryOutcome?.kind;
   return outcomeKind === "sent" || outcomeKind === "queued";
-}
-
-function buildOnboardingFollowupAutomationRoute(
-  route: HostedExecutionAssistantNotificationRoute,
-): AutomationRoute {
-  const delivery = route.delivery;
-  if (route.channel === "linq") {
-    return {
-      channel: route.channel,
-      deliverySource: delivery.source ?? null,
-      deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
-      identityId: route.identityId,
-      participantId: delivery.kind === "participant" ? delivery.target : null,
-      threadId: null,
-    };
-  }
-
-  return {
-    channel: route.channel,
-    deliverySource: delivery.source ?? null,
-    deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
-    identityId: route.identityId,
-    participantId: delivery.kind === "participant" ? delivery.target : null,
-    threadId:
-      route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
-  };
 }
 
 function emitHostedOnboardingFollowupSeedFailureLog(input: {

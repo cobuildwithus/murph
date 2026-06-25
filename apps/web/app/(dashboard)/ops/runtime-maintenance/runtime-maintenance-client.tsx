@@ -5,12 +5,14 @@ import {
   CheckCircle2Icon,
   PlayIcon,
   RefreshCwIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
+import { Input } from "@/src/components/ui/input";
 import {
   Table,
   TableBody,
@@ -20,6 +22,7 @@ import {
   TableRow,
 } from "@/src/components/ui/table";
 import type {
+  HostedRuntimeManagedAutomationRepairResult,
   HostedRuntimeMaintenanceOverview,
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
@@ -31,6 +34,8 @@ interface RuntimeMaintenanceClientProps {
 
 type PendingAction =
   | { kind: "refresh" }
+  | { kind: "seed-batch"; limit: number }
+  | { kind: "seed-user"; userId: string }
   | { kind: "wake-batch"; limit: number }
   | { kind: "wake-user"; userId: string };
 
@@ -39,6 +44,9 @@ export function RuntimeMaintenanceClient({
 }: RuntimeMaintenanceClientProps) {
   const [overview, setOverview] = useState(initialOverview);
   const [currentCursor, setCurrentCursor] = useState<string | null>(null);
+  const [repairResult, setRepairResult] =
+    useState<HostedRuntimeManagedAutomationRepairResult | null>(null);
+  const [repairUserId, setRepairUserId] = useState("");
   const [wakeResult, setWakeResult] = useState<HostedRuntimeMaintenanceWakeResult | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +80,7 @@ export function RuntimeMaintenanceClient({
         "/api/ops/runtime-maintenance",
         {
           body: JSON.stringify({
+            action: "wake-maintenance",
             cursor: currentCursor,
             limit,
           }),
@@ -99,7 +108,10 @@ export function RuntimeMaintenanceClient({
       setWakeResult(await requestJson<HostedRuntimeMaintenanceWakeResult>(
         "/api/ops/runtime-maintenance",
         {
-          body: JSON.stringify({ userId }),
+          body: JSON.stringify({
+            action: "wake-maintenance",
+            userId,
+          }),
           headers: {
             "Content-Type": "application/json",
           },
@@ -112,6 +124,69 @@ export function RuntimeMaintenanceClient({
       }));
     } catch (wakeError) {
       setError(describeClientError(wakeError));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function seedBatch(limit: number): Promise<void> {
+    setPending({ kind: "seed-batch", limit });
+    setError(null);
+    try {
+      setRepairResult(await requestJson<HostedRuntimeManagedAutomationRepairResult>(
+        "/api/ops/runtime-maintenance",
+        {
+          body: JSON.stringify({
+            action: "seed-managed-automations",
+            cursor: currentCursor,
+            limit,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      ));
+      setOverview(await fetchOverview({
+        cursor: currentCursor,
+        limit: overview.limit,
+      }));
+    } catch (seedError) {
+      setError(describeClientError(seedError));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function seedUser(userId: string): Promise<void> {
+    const normalizedUserId = userId.trim();
+    if (!normalizedUserId) {
+      setError("Enter a hosted user id to seed.");
+      return;
+    }
+
+    setPending({ kind: "seed-user", userId: normalizedUserId });
+    setError(null);
+    try {
+      setRepairResult(await requestJson<HostedRuntimeManagedAutomationRepairResult>(
+        "/api/ops/runtime-maintenance",
+        {
+          body: JSON.stringify({
+            action: "seed-managed-automations",
+            userId: normalizedUserId,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      ));
+      setOverview(await fetchOverview({
+        cursor: currentCursor,
+        limit: overview.limit,
+      }));
+    } catch (seedError) {
+      setError(describeClientError(seedError));
     } finally {
       setPending(null);
     }
@@ -187,8 +262,54 @@ export function RuntimeMaintenanceClient({
               <PlayIcon data-icon="inline-start" />
               {isBatchWakePending(pending, 3) ? "Waking..." : "Wake 3"}
             </Button>
+            <Button
+              disabled={pending !== null}
+              onClick={() => seedBatch(1)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <WrenchIcon data-icon="inline-start" />
+              {isBatchSeedPending(pending, 1) ? "Seeding..." : "Seed 1"}
+            </Button>
+            <Button
+              disabled={pending !== null}
+              onClick={() => seedBatch(3)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <WrenchIcon data-icon="inline-start" />
+              {isBatchSeedPending(pending, 3) ? "Seeding..." : "Seed 3"}
+            </Button>
           </div>
         </div>
+        <form
+          className="flex max-w-2xl flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void seedUser(repairUserId);
+          }}
+        >
+          <Input
+            aria-label="Hosted user id"
+            className="font-mono text-xs"
+            disabled={pending !== null}
+            onChange={(event) => setRepairUserId(event.target.value)}
+            placeholder="hbm_..."
+            value={repairUserId}
+          />
+          <Button
+            className="shrink-0"
+            disabled={pending !== null}
+            size="sm"
+            type="submit"
+            variant="outline"
+          >
+            <WrenchIcon data-icon="inline-start" />
+            Seed user
+          </Button>
+        </form>
         <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
           {pendingLabel}
         </div>
@@ -202,6 +323,10 @@ export function RuntimeMaintenanceClient({
 
         {wakeResult ? (
           <WakeResultPanel result={wakeResult} />
+        ) : null}
+
+        {repairResult ? (
+          <RepairResultPanel result={repairResult} />
         ) : null}
       </section>
 
@@ -239,10 +364,10 @@ export function RuntimeMaintenanceClient({
         <Table className="text-[13px]">
           <TableHeader>
             <TableRow>
-            <TableHead>User</TableHead>
-            <TableHead>Version</TableHead>
-            <TableHead>Checkpointed</TableHead>
-            <TableHead>Updated</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Checkpointed</TableHead>
+              <TableHead>Updated</TableHead>
               <TableHead className="text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
@@ -252,8 +377,10 @@ export function RuntimeMaintenanceClient({
                   <WorkspaceRow
                     key={workspace.userId}
                     disabled={pending !== null}
+                    onSeed={() => seedUser(workspace.userId)}
                     onWake={() => wakeUser(workspace.userId)}
-                    pending={isUserWakePending(pending, workspace.userId)}
+                    seedPending={isUserSeedPending(pending, workspace.userId)}
+                    wakePending={isUserWakePending(pending, workspace.userId)}
                     workspace={workspace}
                   />
                 ))
@@ -337,15 +464,93 @@ function WakeResultPanel({
   );
 }
 
+function RepairResultPanel({
+  result,
+}: {
+  result: HostedRuntimeManagedAutomationRepairResult;
+}) {
+  const enqueuedCount = result.results.filter((entry) => entry.status === "enqueued").length;
+  const routeMissingCount =
+    result.results.filter((entry) => entry.status === "route_missing").length;
+  const failedCount = result.results.filter((entry) => entry.status === "failed").length;
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/90">
+      <div className="flex flex-col gap-2 border-b border-border/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+            Seed result
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Generated {formatDateTime(result.generatedAt)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="secondary">{formatInteger(enqueuedCount)} enqueued</Badge>
+          {routeMissingCount > 0 ? (
+            <Badge variant="outline">{formatInteger(routeMissingCount)} no route</Badge>
+          ) : null}
+          {failedCount > 0 ? (
+            <Badge variant="destructive">{formatInteger(failedCount)} failed</Badge>
+          ) : null}
+        </div>
+      </div>
+      <Table className="text-[13px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Status</TableHead>
+            <TableHead>User</TableHead>
+            <TableHead>Version</TableHead>
+            <TableHead>Detail</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {result.results.map((entry) => (
+            <TableRow key={entry.userId}>
+              <TableCell>
+                {entry.status === "enqueued" ? (
+                  <Badge variant="secondary">
+                    <CheckCircle2Icon data-icon="inline-start" />
+                    Enqueued
+                  </Badge>
+                ) : entry.status === "route_missing" ? (
+                  <Badge variant="outline">
+                    <AlertCircleIcon data-icon="inline-start" />
+                    No route
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <AlertCircleIcon data-icon="inline-start" />
+                    Failed
+                  </Badge>
+                )}
+              </TableCell>
+              <TableCell className="font-mono text-xs text-foreground">{entry.userId}</TableCell>
+              <TableCell className="font-mono text-xs">{entry.version}</TableCell>
+              <TableCell className="max-w-[32rem] whitespace-normal break-words text-sm text-muted-foreground">
+                {renderRepairResultDetail(entry)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function WorkspaceRow({
   disabled,
+  onSeed,
   onWake,
-  pending,
+  seedPending,
+  wakePending,
   workspace,
 }: {
   disabled: boolean;
+  onSeed: () => void;
   onWake: () => void;
-  pending: boolean;
+  seedPending: boolean;
+  wakePending: boolean;
   workspace: HostedRuntimeMaintenanceWorkspace;
 }) {
   return (
@@ -357,16 +562,28 @@ function WorkspaceRow({
       </TableCell>
       <TableCell className="font-mono text-xs">{formatDateTime(workspace.updatedAt)}</TableCell>
       <TableCell className="text-right">
-        <Button
-          disabled={disabled}
-          onClick={onWake}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <PlayIcon data-icon="inline-start" />
-          {pending ? "Waking..." : "Wake"}
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button
+            disabled={disabled}
+            onClick={onSeed}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <WrenchIcon data-icon="inline-start" />
+            {seedPending ? "Seeding..." : "Seed"}
+          </Button>
+          <Button
+            disabled={disabled}
+            onClick={onWake}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <PlayIcon data-icon="inline-start" />
+            {wakePending ? "Waking..." : "Wake"}
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -445,15 +662,41 @@ function describePendingAction(pending: PendingAction | null): string {
   if (pending.kind === "wake-batch") {
     return `Waking ${formatInteger(pending.limit)} workspace${pending.limit === 1 ? "" : "s"}.`;
   }
-  return `Waking ${pending.userId}.`;
+  if (pending.kind === "wake-user") {
+    return `Waking ${pending.userId}.`;
+  }
+  if (pending.kind === "seed-batch") {
+    return `Seeding ${formatInteger(pending.limit)} workspace${pending.limit === 1 ? "" : "s"}.`;
+  }
+  return `Seeding ${pending.userId}.`;
+}
+
+function isBatchSeedPending(pending: PendingAction | null, limit: number): boolean {
+  return pending?.kind === "seed-batch" && pending.limit === limit;
 }
 
 function isBatchWakePending(pending: PendingAction | null, limit: number): boolean {
   return pending?.kind === "wake-batch" && pending.limit === limit;
 }
 
+function isUserSeedPending(pending: PendingAction | null, userId: string): boolean {
+  return pending?.kind === "seed-user" && pending.userId === userId;
+}
+
 function isUserWakePending(pending: PendingAction | null, userId: string): boolean {
   return pending?.kind === "wake-user" && pending.userId === userId;
+}
+
+function renderRepairResultDetail(
+  entry: HostedRuntimeManagedAutomationRepairResult["results"][number],
+): string {
+  if (entry.status === "enqueued") {
+    return `${entry.workflowId} / ${entry.inserted ? "inserted" : "deduped"} / ${entry.mailboxItemId}`;
+  }
+  if (entry.status === "route_missing") {
+    return "No hosted delivery route could be resolved.";
+  }
+  return entry.errorMessage;
 }
 
 function formatInteger(value: number): string {

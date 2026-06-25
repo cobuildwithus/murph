@@ -14,7 +14,6 @@ import type {
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  applyMurphManagedAutomations,
   getAssistantCronStatus,
   readAssistantOutboxIntent,
   readAssistantInputEvent,
@@ -63,6 +62,9 @@ import {
   runHostedDeviceSyncWakeLane,
   resolveHostedDeviceSyncNextWakeAt,
 } from "./maintenance.ts";
+import {
+  seedHostedManagedAutomationsBestEffort,
+} from "./managed-automation-seeding.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
@@ -710,81 +712,24 @@ async function applyHostedManagedAutomationsBestEffort(input: {
   defaultRoute?: AutomationRoute | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
-  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
-    return null;
-  }
-
-  try {
-    const result = await applyMurphManagedAutomations({
-      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
-      operatorHomeRoot: input.input.restored.operatorHomeRoot,
-      ...(input.defaultRoute !== undefined
-        ? { defaultRoute: input.defaultRoute }
-        : {}),
-      routeValidationProfile: "hosted",
-      runtimeEnv: input.input.runtimeEnv,
-      vaultRoot: input.input.restored.vaultRoot,
-    });
-    const changed = result.created + result.updated;
-    if (changed === 0) {
-      return null;
-    }
-
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields({
-          attemptId: input.input.request.attemptId,
-          leaseGeneration: input.input.request.leaseGeneration,
-          workspaceVersion: input.input.request.workspaceVersion,
-        }),
-        component: "runtime",
-        eventCode: "assistant.pass_finished",
-        level: "info",
-        phase: "invoke",
-        redactedJson: {
-          murphManagedAutomationCreated: result.created,
-          murphManagedAutomationSkipped: result.skipped,
-          murphManagedAutomationUpdated: result.updated,
-        },
+  return await seedHostedManagedAutomationsBestEffort({
+    ...(input.defaultRoute !== undefined
+      ? { defaultRoute: input.defaultRoute }
+      : {}),
+    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+    operatorHomeRoot: input.input.restored.operatorHomeRoot,
+    runtimeEnv: input.input.runtimeEnv,
+    runtimeLog: {
+      context: {
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
       },
       platform: input.input.runtime.platform,
-    });
-
-    return {
-      checkpointReason: "assistant_runtime_commit",
-      progressed: true,
-      redactedStatus: {
-        murphManagedAutomationCreated: result.created,
-        murphManagedAutomationSkipped: result.skipped,
-        murphManagedAutomationUpdated: result.updated,
-      },
-    };
-  } catch (error) {
-    const failure = buildHostedRuntimeFailureDiagnostics(
-      error,
-      "Hosted managed automation setup failed.",
-    );
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields({
-          attemptId: input.input.request.attemptId,
-          leaseGeneration: input.input.request.leaseGeneration,
-          workspaceVersion: input.input.request.workspaceVersion,
-        }),
-        component: "runtime",
-        errorCode: failure.errorCode,
-        eventCode: "runner.error",
-        level: "warn",
-        phase: "error",
-        redactedJson: {
-          ...failure.redactedJson,
-          murphManagedAutomationFailed: true,
-        },
-      },
-      platform: input.input.runtime.platform,
-    });
-    return null;
-  }
+    },
+    shouldYieldBackgroundMaintenance: input.input.shouldYieldBackgroundMaintenance ?? null,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
 }
 
 function withFreshHostedManagedAutomationsAfterCheckpoint(input: {

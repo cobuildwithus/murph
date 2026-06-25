@@ -310,6 +310,15 @@ can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
+Managed automation repair uses the same operator surface with a distinct
+`assistant.managed-automation.seed-requested` system-mailbox wake. Web owns the
+route lookup from hosted member routing facts, appends the encrypted mailbox
+item, and signals Temporal by mailbox pointer only. The assistant runtime then
+converts that route into the existing `AutomationRoute` and runs the same
+hosted managed-automation seeding primitive used by idle maintenance. The wake
+must not put route payloads, prompts, transcripts, provider responses, or
+secrets into Temporal workflow state.
+
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
 deploy, set `HOSTED_OPS_MEMBER_IDS`, open `/ops/runtime-maintenance`, wake a

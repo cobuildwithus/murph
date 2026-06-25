@@ -47,6 +47,7 @@ export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "dispatch-assistant-notification"
+  | "seed-managed-automations"
   | "run-device-sync-wake"
   | "apply-runtime-control-request";
 
@@ -404,6 +405,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
     || value === "dispatch-assistant-notification"
+    || value === "seed-managed-automations"
     || value === "run-device-sync-wake"
     || value === "apply-runtime-control-request"
   ) {

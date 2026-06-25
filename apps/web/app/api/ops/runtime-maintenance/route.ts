@@ -1,8 +1,10 @@
 import {
   readHostedRuntimeMaintenanceOverview,
+  repairHostedRuntimeManagedAutomationsBatch,
   signalHostedRuntimeMaintenanceBatch,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
   readHostedOnboardingJsonObject,
@@ -35,11 +37,25 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Hosted runtime maintenance request body is too large.",
   });
 
-  return jsonOk(await signalHostedRuntimeMaintenanceBatch({
+  const action = readOptionalStringField(body, "action") ?? "wake-maintenance";
+  const maintenanceRequest = {
     cursor: readOptionalStringField(body, "cursor"),
     limit: readOptionalLimitField(body),
     userId: readOptionalStringField(body, "userId"),
-  }));
+  };
+
+  switch (action) {
+    case "wake-maintenance":
+      return jsonOk(await signalHostedRuntimeMaintenanceBatch(maintenanceRequest));
+    case "seed-managed-automations":
+      return jsonOk(await repairHostedRuntimeManagedAutomationsBatch(maintenanceRequest));
+    default:
+      throw hostedOnboardingError({
+        code: "HOSTED_RUNTIME_MAINTENANCE_ACTION_UNSUPPORTED",
+        httpStatus: 400,
+        message: "Unsupported hosted runtime maintenance action.",
+      });
+  }
 });
 
 function readOptionalStringField(

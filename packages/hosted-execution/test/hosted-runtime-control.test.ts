@@ -105,6 +105,7 @@ describe("hosted runtime control contracts", () => {
       "member.activated",
       "member.channels.updated",
       "assistant.notification.requested",
+      "assistant.managed-automation.seed-requested",
       "device-sync.wake",
       "vault-share.delivery",
       "runtime.manual-requested",

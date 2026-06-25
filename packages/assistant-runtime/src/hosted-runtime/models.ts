@@ -170,6 +170,7 @@ export type HostedMailboxLane =
   | "assistant-notification"
   | "conversation-message"
   | "device-sync"
+  | "managed-automation-seed"
   | "member-activated"
   | "member-channels-updated"
   | "runtime-control";

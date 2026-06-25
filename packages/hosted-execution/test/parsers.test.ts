@@ -219,6 +219,40 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses managed automation seed requests with delivery routes", () => {
+    expect(
+      parseHostedExecutionEvent({
+        kind: "assistant.managed-automation.seed-requested",
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_home_123",
+          threadIsDirect: true,
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      kind: "assistant.managed-automation.seed-requested",
+      route: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "thread_home_123",
+        threadIsDirect: true,
+      },
+      userId: "user-1",
+    });
+  });
+
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {
     expect(
       parseHostedExecutionEvent({
@@ -390,6 +424,44 @@ describe("parseHostedExecutionWake", () => {
       eventId: "evt_runtime_control",
       kind: "runtime.maintenance-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user-1",
+    });
+  });
+
+  it("parses managed automation seed request wakes", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "assistant.managed-automation.seed-requested:user-1:route:1",
+        kind: "assistant.managed-automation.seed-requested",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_home_123",
+          threadIsDirect: true,
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      eventId: "assistant.managed-automation.seed-requested:user-1:route:1",
+      kind: "assistant.managed-automation.seed-requested",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      route: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "thread_home_123",
+        threadIsDirect: true,
+      },
       userId: "user-1",
     });
   });

@@ -52,6 +52,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "member.channels.updated",
   "assistant.notification.requested",
+  "assistant.managed-automation.seed-requested",
   "device-sync.wake",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
@@ -68,6 +69,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.activated",
   "member.channels.updated",
   "assistant.notification.requested",
+  "assistant.managed-automation.seed-requested",
   "device-sync.wake",
   "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -166,6 +168,12 @@ export interface HostedExecutionAssistantNotificationRequestedEvent
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
+export interface HostedExecutionManagedAutomationSeedRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "assistant.managed-automation.seed-requested";
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
 export const HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA =
   "murph.hosted-telegram-message.v1";
 
@@ -223,6 +231,7 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
+  | HostedExecutionManagedAutomationSeedRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
@@ -391,6 +400,12 @@ export interface HostedExecutionAssistantNotificationRequestedWake
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
+export interface HostedExecutionManagedAutomationSeedRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "assistant.managed-automation.seed-requested";
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
 export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutionBaseWake {
   kind: "member.channels.updated";
   memberChannels: HostedExecutionMemberChannels;
@@ -433,6 +448,7 @@ export type HostedExecutionWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
+  | HostedExecutionManagedAutomationSeedRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionRuntimeControlWake;

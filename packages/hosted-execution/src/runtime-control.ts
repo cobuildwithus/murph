@@ -33,6 +33,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.activated",
   "member.channels.updated",
   "assistant.notification.requested",
+  "assistant.managed-automation.seed-requested",
   "device-sync.wake",
   "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,

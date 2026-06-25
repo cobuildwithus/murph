@@ -1,12 +1,30 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import {
+  buildHostedExecutionManagedAutomationSeedRequestedWake,
+  type HostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution";
 
 import {
+  signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
   type HostedRuntimeSignalResult,
 } from "../hosted-orchestration/signal-runtime";
+import {
+  appendHostedMailboxEnvelopeTx,
+  type AppendHostedMailboxItemResult,
+} from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  readHostedMemberSnapshot,
+} from "../hosted-onboarding/hosted-member-store";
+import {
+  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberMessagingState,
+} from "../hosted-onboarding/messaging-state";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_READ_LIMIT = 20;
@@ -37,6 +55,13 @@ export interface HostedRuntimeMaintenanceWakeResult {
   results: HostedRuntimeMaintenanceWakeUserResult[];
 }
 
+export interface HostedRuntimeManagedAutomationRepairResult {
+  generatedAt: string;
+  limit: number;
+  nextCursor: string | null;
+  results: HostedRuntimeManagedAutomationRepairUserResult[];
+}
+
 export type HostedRuntimeMaintenanceWakeUserResult =
   | {
       checkpointedAt: string | null;
@@ -56,8 +81,50 @@ export type HostedRuntimeMaintenanceWakeUserResult =
       version: string;
     };
 
+export type HostedRuntimeManagedAutomationRepairUserResult =
+  | {
+      checkpointedAt: string | null;
+      inserted: boolean;
+      mailboxItemId: string;
+      status: "enqueued";
+      updatedAt: string;
+      userId: string;
+      version: string;
+      workflowId: string;
+    }
+  | {
+      checkpointedAt: string | null;
+      status: "route_missing";
+      updatedAt: string;
+      userId: string;
+      version: string;
+    }
+  | {
+      checkpointedAt: string | null;
+      errorMessage: string;
+      errorName: string;
+      status: "failed";
+      updatedAt: string;
+      userId: string;
+      version: string;
+    };
+
 type HostedRuntimeMaintenanceSignal =
   (input: Parameters<typeof signalHostedRuntimeMaintenanceRuntime>[0]) => Promise<HostedRuntimeSignalResult>;
+
+type HostedManagedAutomationSeedAppender = (input: {
+  prisma: PrismaClient;
+  route: HostedExecutionAssistantNotificationRoute;
+  userId: string;
+}) => Promise<AppendHostedMailboxItemResult>;
+
+type HostedRuntimeMailboxAppendSignal =
+  (input: Parameters<typeof signalHostedMailboxAppendRuntime>[0]) => Promise<HostedRuntimeSignalResult>;
+
+type HostedManagedAutomationRepairRouteReader = (input: {
+  prisma: PrismaClient;
+  userId: string;
+}) => Promise<HostedExecutionAssistantNotificationRoute | null>;
 
 export async function readHostedRuntimeMaintenanceOverview(input: {
   cursor?: string | null;
@@ -174,6 +241,159 @@ export async function signalHostedRuntimeMaintenanceBatch(input: {
   };
 }
 
+export async function repairHostedRuntimeManagedAutomationsBatch(input: {
+  appendSeedWake?: HostedManagedAutomationSeedAppender;
+  cursor?: string | null;
+  limit?: number | string | null;
+  prisma?: PrismaClient;
+  readRepairRoute?: HostedManagedAutomationRepairRouteReader;
+  signalMailboxAppendRuntime?: HostedRuntimeMailboxAppendSignal;
+  userId?: string | null;
+} = {}): Promise<HostedRuntimeManagedAutomationRepairResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const appendSeedWake = input.appendSeedWake ?? appendHostedManagedAutomationSeedWake;
+  const readRepairRoute = input.readRepairRoute ?? readHostedManagedAutomationRepairRoute;
+  const signalMailboxAppendRuntime =
+    input.signalMailboxAppendRuntime ?? signalHostedMailboxAppendRuntime;
+  const explicitUserId = normalizeOptionalIdentifier(input.userId);
+  const limit = explicitUserId
+    ? 1
+    : normalizePositiveInteger(
+        input.limit,
+        HOSTED_RUNTIME_MAINTENANCE_DEFAULT_WAKE_LIMIT,
+        HOSTED_RUNTIME_MAINTENANCE_MAX_WAKE_LIMIT,
+      );
+  const overview = explicitUserId
+    ? null
+    : await readHostedRuntimeMaintenanceOverview({
+        cursor: input.cursor,
+        limit,
+        prisma,
+      });
+  const candidates = explicitUserId
+    ? [await readHostedRuntimeMaintenanceCandidateForUser({
+        prisma,
+        userId: explicitUserId,
+      })]
+    : overview?.candidates ?? [];
+  const results: HostedRuntimeManagedAutomationRepairUserResult[] = [];
+
+  for (const candidate of candidates) {
+    try {
+      const route = await readRepairRoute({
+        prisma,
+        userId: candidate.userId,
+      });
+      if (!route) {
+        results.push({
+          checkpointedAt: candidate.checkpointedAt,
+          status: "route_missing",
+          updatedAt: candidate.updatedAt,
+          userId: candidate.userId,
+          version: candidate.version,
+        });
+        continue;
+      }
+
+      const append = await appendSeedWake({
+        prisma,
+        route,
+        userId: candidate.userId,
+      });
+      const signal = await signalMailboxAppendRuntime({
+        expectedUserId: candidate.userId,
+        mailboxItemId: append.item.id,
+        prisma,
+      });
+      results.push({
+        checkpointedAt: candidate.checkpointedAt,
+        inserted: append.inserted,
+        mailboxItemId: append.item.id,
+        status: "enqueued",
+        updatedAt: candidate.updatedAt,
+        userId: candidate.userId,
+        version: candidate.version,
+        workflowId: signal.workflowId,
+      });
+    } catch (error) {
+      results.push({
+        checkpointedAt: candidate.checkpointedAt,
+        errorMessage: describeManagedAutomationRepairError(error),
+        errorName: error instanceof Error ? error.name : typeof error,
+        status: "failed",
+        updatedAt: candidate.updatedAt,
+        userId: candidate.userId,
+        version: candidate.version,
+      });
+      break;
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    limit,
+    nextCursor: overview?.nextCursor ?? null,
+    results,
+  };
+}
+
+export async function appendHostedManagedAutomationSeedWake(input: {
+  now?: Date;
+  prisma: PrismaClient;
+  route: HostedExecutionAssistantNotificationRoute;
+  userId: string;
+}): Promise<AppendHostedMailboxItemResult> {
+  const wake = buildHostedManagedAutomationSeedWake({
+    now: input.now ?? new Date(),
+    route: input.route,
+    userId: input.userId,
+  });
+
+  return await input.prisma.$transaction((tx) =>
+    appendHostedMailboxEnvelopeTx({
+      envelope: wake,
+      tx,
+    }));
+}
+
+export async function readHostedManagedAutomationRepairRoute(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<HostedExecutionAssistantNotificationRoute | null> {
+  const member = await readHostedMemberSnapshot({
+    memberId: input.userId,
+    prisma: input.prisma,
+  });
+  if (
+    !member
+    || member.core.billingStatus !== HostedBillingStatus.active
+    || member.core.suspendedAt
+  ) {
+    return null;
+  }
+
+  const routing = member.routing;
+  const messaging = resolveHostedMemberMessagingState({
+    identity: member.identity,
+    routing,
+  });
+  const linqContactLookupKey =
+    member.identity?.phoneLookupKey
+    ?? routing?.pendingLinqParticipantContact?.lookupKey
+    ?? member.emailAuthorization?.verifiedEmail?.lookupKey
+    ?? null;
+
+  return resolveHostedMemberAssistantNotificationRoute({
+    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
+    linqContactLookupKey,
+    linqRecipientPhone:
+      routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null,
+    memberId: input.userId,
+    memberPhoneNumber: member.identity?.phoneNumber ?? null,
+    messaging,
+  });
+}
+
 async function readHostedRuntimeMaintenanceCandidateForUser(input: {
   prisma: PrismaClient;
   userId: string;
@@ -235,6 +455,26 @@ function projectHostedRuntimeMaintenanceWorkspace(row: {
   };
 }
 
+function buildHostedManagedAutomationSeedWake(input: {
+  now: Date;
+  route: HostedExecutionAssistantNotificationRoute;
+  userId: string;
+}) {
+  const bucketMs = Math.floor(input.now.getTime() / 60_000) * 60_000;
+  const routeFingerprint = createHash("sha256")
+    .update(JSON.stringify(input.route))
+    .digest("hex")
+    .slice(0, 16);
+
+  return buildHostedExecutionManagedAutomationSeedRequestedWake({
+    eventId:
+      `assistant.managed-automation.seed-requested:${input.userId}:${routeFingerprint}:${bucketMs}`,
+    memberId: input.userId,
+    occurredAt: new Date(bucketMs).toISOString(),
+    route: input.route,
+  });
+}
+
 function normalizePositiveInteger(
   value: number | string | null | undefined,
   fallback: number,
@@ -265,4 +505,10 @@ function describeMaintenanceSignalError(error: unknown): string {
   return error instanceof Error
     ? "Maintenance signal failed. Check server logs for details."
     : "Maintenance signal failed.";
+}
+
+function describeManagedAutomationRepairError(error: unknown): string {
+  return error instanceof Error
+    ? "Managed automation repair failed. Check server logs for details."
+    : "Managed automation repair failed.";
 }

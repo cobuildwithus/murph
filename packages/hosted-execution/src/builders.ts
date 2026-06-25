@@ -2,7 +2,9 @@ import type {
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
+  HostedExecutionManagedAutomationSeedRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionEmailConversationMessagePayload,
@@ -102,6 +104,7 @@ function cloneConversationMessagePayload(
 
 type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
+  | HostedExecutionManagedAutomationSeedRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionVaultShareDeliveryWake;
@@ -316,8 +319,8 @@ function cloneAssistantNotificationPayload(
 }
 
 function cloneAssistantNotificationRoute(
-  value: HostedExecutionAssistantNotificationRequestedPayload["route"],
-): HostedExecutionAssistantNotificationRequestedPayload["route"] {
+  value: HostedExecutionAssistantNotificationRoute,
+): HostedExecutionAssistantNotificationRoute {
   return {
     ...value,
     delivery: {
@@ -347,6 +350,23 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
       occurredAt: input.occurredAt,
     }),
     notification: cloneAssistantNotificationPayload(input.notification),
+  };
+}
+
+export function buildHostedExecutionManagedAutomationSeedRequestedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  route: HostedExecutionAssistantNotificationRoute;
+}): HostedExecutionManagedAutomationSeedRequestedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "assistant.managed-automation.seed-requested",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    route: cloneAssistantNotificationRoute(input.route),
   };
 }
 

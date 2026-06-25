@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionManagedAutomationSeedRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
 } from "@murphai/hosted-execution";
@@ -15,6 +16,8 @@ import {
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
+  applyMurphManagedAutomations: vi.fn(),
+  getAssistantCronStatus: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   prepareHostedWakeContext: vi.fn(),
   sendAssistantNotification: vi.fn(),
@@ -33,6 +36,8 @@ vi.mock("@murphai/assistant-engine", async () => {
 
   return {
     ...actual,
+    applyMurphManagedAutomations: mocks.applyMurphManagedAutomations,
+    getAssistantCronStatus: mocks.getAssistantCronStatus,
     sendAssistantNotification: mocks.sendAssistantNotification,
     upsertAssistantCronAutomation: mocks.upsertAssistantCronAutomation,
   };
@@ -2516,6 +2521,78 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
       nextWakeAt: null,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+  });
+
+  it("seeds managed automations from route-aware repair wakes", async () => {
+    const nextWakeAt = "2026-07-09T14:00:00.000Z";
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: nextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
+    const wake = buildHostedExecutionManagedAutomationSeedRequestedWake({
+      eventId: "assistant.managed-automation.seed-requested:member_123:route:1",
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      route: {
+        actorId: "hid_linq_actor_123",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "thread_123",
+        },
+        identityId: "hid_linq_identity_123",
+        threadId: "hid_linq_thread_123",
+        threadIsDirect: true,
+      },
+    });
+    const runtime = createRuntime();
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      operatorHomeRoot: "/tmp/operator-home",
+      runtime,
+      runtimeEnv: {
+        OPENAI_API_KEY: "secret",
+      },
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
+      defaultRoute: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "thread_123",
+        identityId: "hid_linq_identity_123",
+        participantId: null,
+        threadId: null,
+      },
+      now: expect.any(Date),
+      operatorHomeRoot: "/tmp/operator-home",
+      routeValidationProfile: "hosted",
+      runtimeEnv: {
+        OPENAI_API_KEY: "secret",
+      },
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledWith("/tmp/assistant-runtime-events");
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "managed-automation-seed",
+      nextWakeAt,
+      nextWakeReason: "assistant",
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
