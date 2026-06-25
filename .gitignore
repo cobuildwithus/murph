@@ -46,12 +46,6 @@ apps/web/next-env.d.ts
 !/.agents/skills/research-supplements/scripts/*.mjs
 !/.agents/skills/research-supplements/scripts/*.d.mts
 !/.agents/skills/research-supplements/scripts/*.py
-!/.agents/skills/strength-training/
-!/.agents/skills/strength-training/SKILL.md
-!/.agents/skills/strength-training/agents/
-!/.agents/skills/strength-training/agents/openai.yaml
-!/.agents/skills/strength-training/references/
-!/.agents/skills/strength-training/references/*.md
 .claude/
 .windsurf/
 /skills/

@@ -146,7 +146,7 @@ Early plans should create evidence that the user can repeat the process:
 
 Do not equate exhaustion, soreness, sweat, or maximal effort with training quality.
 
-For RIR learning, compare the estimate with the next set and keep calibration approximate. Do not demand precision that the user cannot yet possess. When a visual would resolve uncertainty, use the existing exercise-image skill rather than building a parallel media workflow.
+For RIR learning, compare the estimate with the next set and keep calibration approximate. Do not demand precision that the user cannot yet possess. When a visual would resolve uncertainty, use Murph's available response-media or image support only if the current runtime exposes it. Otherwise give compact form cues in text rather than inventing a parallel media workflow.
 
 ## Choice without menus
 
