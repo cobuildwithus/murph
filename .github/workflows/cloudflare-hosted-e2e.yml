@@ -103,11 +103,9 @@ jobs:
       matrix:
         include:
           - name: Codex image media delivery E2E
-            fastGate: "0"
             slug: codex-image-media-delivery
             scenarios: codex-image-media-delivery
           - name: Linq scheduled reminder E2E
-            fastGate: "0"
             slug: linq-scheduled-reminder
             scenarios: linq-scheduled-reminder
           - name: Linq delivery + Temporal orchestration E2E
@@ -115,7 +113,6 @@ jobs:
             slug: linq-delivery-temporal-orchestration
             scenarios: linq-delivery temporal-orchestration
           - name: Telegram + idle checkpoint E2E
-            fastGate: "0"
             slug: telegram-idle-checkpoint
             scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put
           # linq-webhook gates the Worker-mediated Workers AI transcription
@@ -124,7 +121,6 @@ jobs:
           # egress handler with a deterministic fake AI binding from the
           # hosted-local test entrypoint.
           - name: Linq webhook media + device connect E2E
-            fastGate: "0"
             slug: linq-webhook-device-connect
             scenarios: linq-webhook device-connect
     services:
@@ -194,7 +190,7 @@ jobs:
 
       - name: Run hosted E2E scenarios
         env:
-          MURPH_HOSTED_LOCAL_E2E_FAST_GATE: ${{ matrix.fastGate }}
+          MURPH_HOSTED_LOCAL_E2E_FAST_GATE: ${{ matrix.fastGate || '0' }}
         shell: bash
         run: |
           set -euo pipefail
