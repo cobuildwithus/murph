@@ -37,6 +37,9 @@ import {
   createHostedProviderEgressCredential,
 } from "../hosted-provider-egress-credential.js";
 import {
+  readHostedProviderCredentialDiagnosticKind,
+} from "../hosted-provider-credential-diagnostics.js";
+import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../runner-job-transport.js";
@@ -635,6 +638,9 @@ export class RuntimeInvocationService {
       throw new Error("Hosted runner container identity did not match the runtime invocation user.");
     }
     const runnerContainerName = runnerContainerIdentity.runnerContainerName;
+    const openAiCredentialBeforeMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    let openAiProviderCredentialMinted = false;
     if (
       isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
       && typeof forwardedEnv.OPENAI_API_KEY === "string"
@@ -646,7 +652,10 @@ export class RuntimeInvocationService {
         source: this.input.runnerRuntimeEnvSource,
         userId: input.userId,
       });
+      openAiProviderCredentialMinted = true;
     }
+    const openAiCredentialAfterMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource,
       forwardedEnv,
@@ -693,6 +702,9 @@ export class RuntimeInvocationService {
             forwardedEnv,
             userEnv,
           }),
+        openAiCredentialAfterMintKind,
+        openAiCredentialBeforeMintKind,
+        openAiProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
