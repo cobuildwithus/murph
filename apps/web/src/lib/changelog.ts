@@ -56,6 +56,59 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-25",
+    publishedOn: "2026-06-25",
+    title: "Pain, rehab, and chronic conditions get real help",
+    summary:
+      "Murph now reasons like a PT for strains and rehab, offers a best-current-assessment plus a recommended next action for chronic illness and pain instead of only validating or referring, and keeps your accepted goals and habits in working memory so plans don't drift. Exercise intros stay calm — a few movements, real catalog pictures, and a question.",
+    items: [
+      {
+        id: "proactive-chronic-support",
+        kind: "feature",
+        priority: 5,
+        title: "Recommendations for chronic illness and pain, not just referrals",
+        summary:
+          "For chronic illness, chronic pain, and at-home self-management experiments, Murph now gives a best-current-assessment plus a recommended next action — not just validation or a pointer to a clinician. Pain or symptom reduction counts as a real outcome.",
+        details:
+          "Low-risk experiments can go forward without clinician pre-approval. Hard stops still hold for prescription changes, dangerous provocation, fixed graded activity when PEM is in play, emergencies, and direct death-wish language.",
+        relevanceTags: ["assistant", "health", "chronic-illness", "chronic-pain", "experiments"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "physical-therapy-skill",
+        kind: "feature",
+        priority: 4,
+        title: "Murph thinks like a PT for pain and rehab",
+        summary:
+          "Mention a strain, an ache, or a rehab program and Murph routes through clinical-reasoning steps — triage and red flags, exercise selection and dosing, follow-up and progression — instead of generic advice.",
+        details:
+          "Remote-observation cues let Murph make the most of whatever you describe or send. Symptom-free workout programming stays on the regular exercise path, not this one.",
+        relevanceTags: ["assistant", "health", "rehab", "pain"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "active-plan-context",
+        kind: "improvement",
+        priority: 4,
+        title: "Goals and habits Murph keeps in working memory",
+        summary:
+          "When you accept a habit, ramp, or non-experiment plan, it now lands on a canonical goal-and-regimen surface — and Murph reads that surface back at the start of each turn, so baselines, ladders, and targets don't get stranded in chat.",
+        relevanceTags: ["assistant", "goals", "habits", "memory"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "exercise-image-walkthroughs",
+        kind: "improvement",
+        priority: 4,
+        title: "Calmer exercise intros, with pictures",
+        summary:
+          "When Murph introduces movements you haven't seen before, it now picks 2-4, attaches catalog images, gives only the immediate safety stop rule, and asks whether to walk you through them — instead of dumping a long numbered plan.",
+        relevanceTags: ["assistant", "exercise", "images", "polish"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-06-24",
     publishedOn: "2026-06-24",
     title: "Songs, PDFs, and a tap to approve",
