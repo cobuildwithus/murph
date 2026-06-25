@@ -458,7 +458,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
     expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
     expect(hostedPhoneCallsMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_phone_call_request_key_key" ON "hosted_phone_call"("request_key")',
+      'CREATE UNIQUE INDEX "hosted_phone_call_member_id_request_key_key" ON "hosted_phone_call"("member_id", "request_key")',
     );
     expect(hostedPhoneCallsMigrationSql).toContain(
       'REFERENCES "hosted_member"("id") ON DELETE CASCADE',

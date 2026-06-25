@@ -195,7 +195,7 @@ async function appendPhoneCallResultNotificationTx(input: {
     return;
   }
 
-  const text = renderPhoneCallResultNotification({
+  const instructions = buildPhoneCallResultNotificationInstructions({
     brief: brief.data,
     result: result.data,
   });
@@ -208,14 +208,9 @@ async function appendPhoneCallResultNotificationTx(input: {
         deliveryDedupeToken: notificationKey,
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: notificationKey,
-        instructions: [
-          "Send the final result of the completed Murph phone call.",
-          "Use the exact user-facing text in responsePolicy.",
-          "If the result describes a completed appointment and connected calendar tools are available, create or update the calendar only through the normal assistant policy after this notification is handled.",
-        ].join("\n\n"),
+        instructions,
         responsePolicy: {
-          kind: "require_send_exact_text",
-          text,
+          kind: "require_send",
         },
         route,
       },
@@ -320,22 +315,29 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
   });
 }
 
-function renderPhoneCallResultNotification(input: {
+function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
   result: HostedPhoneCallResult;
 }): string {
+  const target = input.brief.to.label?.trim() || "the requested phone number";
   const lines = [
-    `I called ${input.brief.to.label ?? input.brief.to.phoneNumber}.`,
-    input.result.summary,
+    "Notify the user of the final result of the Murph phone call.",
+    "Use normal Murph wording; do not send a hard-coded template.",
+    "Do not claim a new call was made. This is the result of a call Murph already placed.",
+    `Call target: ${target}`,
+    `Call goal: ${input.brief.goal}`,
+    `Outcome: ${input.result.outcome}`,
+    `Result summary: ${input.result.summary}`,
   ];
-  if (input.result.outcome === "needs_user" && input.result.followUp) {
-    lines.push(input.result.followUp);
-  } else if (input.result.followUp) {
-    lines.push(`Follow-up: ${input.result.followUp}`);
+  if (input.result.followUp) {
+    lines.push(`Follow-up needed: ${input.result.followUp}`);
   }
-  if (!input.result.followUp && input.result.outcome === "completed") {
-    lines.push("No follow-up is needed.");
+  if (input.result.outcome === "completed" && !input.result.followUp) {
+    lines.push("Tell the user that no follow-up is needed.");
   }
+  lines.push(
+    "If the result describes a completed appointment and connected calendar tools are available, create or update the calendar only through the normal assistant policy after this notification is handled.",
+  );
 
   return lines.join("\n\n");
 }

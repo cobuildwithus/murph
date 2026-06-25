@@ -117,7 +117,7 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
     case 'manual':
       return true
     case 'initial':
-      return true
+      return false
     case 'system':
       return false
   }

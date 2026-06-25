@@ -65,7 +65,7 @@ describe("assistant phone calls", () => {
     expect(resolveAssistantPhoneCallAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: null,
-    })).toEqual(["initial_user", "assistant_input", "manual_input"]);
+    })).toEqual(["assistant_input", "manual_input"]);
     expect(resolveAssistantPhoneCallAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-cron",
