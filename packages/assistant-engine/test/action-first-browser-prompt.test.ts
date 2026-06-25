@@ -41,6 +41,20 @@ describe('action-first browser prompt contract', () => {
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
     )
   })
+
+  it('keeps final confirmation handoff links optional', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'ask for approval in chat so a simple "yes" or "go ahead" can resume the run',
+    )
+    expect(prompt).toContain(
+      'A handoff link may be included for optional inspection or takeover',
+    )
+    expect(prompt).toContain(
+      'do not require the user to open it or instruct them to click the final site control',
+    )
+  })
 })
 
 function createCommonCodexPromptInput(
