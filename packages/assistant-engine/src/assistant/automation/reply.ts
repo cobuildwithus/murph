@@ -54,6 +54,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
+  findAssistantAutoReplyDeliveryIntentIds,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
@@ -607,7 +608,10 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
       ? { checkpointRequired: true }
       : {}),
     currentTurnDeliveryIntentIds:
-      collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
+      await collectAssistantAutoReplyOutcomeDeliveryIntentIds({
+        outcome: input.outcome,
+        vault: input.vault,
+      }),
     failed: input.outcome.summary.failed,
     lastInputCursor: input.context.lastInputCursor,
     nextWakeAt: input.outcome.nextWakeAt,
@@ -642,14 +646,54 @@ async function writeDeferredAssistantAutoReplySuppressionEvidence(input: {
   return true
 }
 
-function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
-  outcome: AssistantAutoReplyGroupOutcome,
-): string[] {
+async function collectAssistantAutoReplyOutcomeDeliveryIntentIds(input: {
+  outcome: AssistantAutoReplyGroupOutcome
+  vault: string
+}): Promise<string[]> {
   const result =
-    outcome.artifact.kind === 'result' || outcome.artifact.kind === 'deferred'
-      ? outcome.artifact.result
+    input.outcome.artifact.kind === 'result' || input.outcome.artifact.kind === 'deferred'
+      ? input.outcome.artifact.result
       : null
-  return result?.deliveryIntentId ? [result.deliveryIntentId] : []
+  if (!result?.deliveryIntentId) {
+    return []
+  }
+
+  const fallbackIntentIds = [result.deliveryIntentId]
+  try {
+    const intents = await listAssistantOutboxIntents(input.vault)
+    const currentIntent = intents.find(
+      (intent) => intent.intentId === result.deliveryIntentId,
+    )
+    if (!currentIntent) {
+      return fallbackIntentIds
+    }
+    const currentTurnIntents = intents
+      .filter((intent) => intent.turnId === currentIntent.turnId)
+      .sort(compareAssistantAutoReplyCurrentTurnOutboxIntentOrder)
+    const matchedIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
+      intents: currentTurnIntents.map((intent) => ({
+        intentId: intent.intentId,
+        turnId: intent.turnId,
+      })),
+      vault: input.vault,
+    })
+    const currentTurnDeliveryIntentIds = currentTurnIntents
+      .map((intent) => intent.intentId)
+      .filter((intentId) => matchedIntentIds.has(intentId))
+    return currentTurnDeliveryIntentIds.length > 0
+      ? currentTurnDeliveryIntentIds
+      : fallbackIntentIds
+  } catch {
+    return fallbackIntentIds
+  }
+}
+
+function compareAssistantAutoReplyCurrentTurnOutboxIntentOrder(
+  left: AssistantAutoReplyOutboxIntent,
+  right: AssistantAutoReplyOutboxIntent,
+): number {
+  return left.createdAt.localeCompare(right.createdAt) ||
+    left.intentId.localeCompare(right.intentId)
 }
 
 async function writeAssistantAutoReplyOutcomeArtifacts(input: {

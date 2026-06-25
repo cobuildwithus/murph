@@ -492,6 +492,7 @@ export async function runHostedAssistantAutomation(
           afterState.autoReply,
         ),
         cronProcessed: result.cronProcessed,
+        currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         nextWakeAt,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
