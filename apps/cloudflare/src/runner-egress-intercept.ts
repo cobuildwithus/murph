@@ -75,6 +75,9 @@ import {
   verifyHostedProviderEgressCredential,
 } from "./hosted-provider-egress-credential.ts";
 import {
+  readHostedProviderCredentialDiagnosticKind,
+} from "./hosted-provider-credential-diagnostics.ts";
+import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
   isAllowedElevenLabsRequest,
@@ -3965,6 +3968,9 @@ function emitHostedProviderEgressDiagnostic(input: {
 }): void {
   const errorCode = input.error ? deriveHostedExecutionErrorCode(input.error) : null;
   const errorName = input.error ? readHostedExecutionSafeErrorName(input.error) : null;
+  const providerBearerCredentialKind = input.providerKind === "openai"
+    ? readHostedProviderCredentialDiagnosticKind(readBearerCredential(input.request.headers))
+    : null;
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
@@ -3979,6 +3985,9 @@ function emitHostedProviderEgressDiagnostic(input: {
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
       activeContainerIdentitySource: input.authorization.activeContainerIdentitySource,
+      ...(providerBearerCredentialKind
+        ? { providerBearerCredentialKind }
+        : {}),
       providerEgressCredentialPresent:
         input.authorization.mode === "provider_egress_credential",
       providerEgressTokenPresent: input.authorization.providerEgressTokenPresent,

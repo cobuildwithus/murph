@@ -56,6 +56,7 @@ import {
 import {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
+  listHostedRuntimeLogsForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -67,6 +68,7 @@ import {
   type HostedJunctionDeviceSyncReplaySeedInput,
   type HostedJunctionDeviceSyncReplaySeedResult,
   type HostedMailboxAppendForTestResponse,
+  type HostedRuntimeLogForTestRow,
 } from "#hosted-web-testing";
 
 const execFileAsync = promisify(execFile);
@@ -96,6 +98,12 @@ type HostedJunctionDeviceSyncConnectionSeedArgs =
 
 export interface HostedLocalFullStackScenario {
   assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
+  assertHealthyHostedRun(
+    userId: string,
+    input?: {
+      expectAssistantProviderRequest?: boolean;
+    },
+  ): Promise<void>;
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
@@ -164,6 +172,7 @@ export async function startHostedLocalFullStackScenario(input: {
   assistantProviderResponses?: readonly HostedLocalAssistantProviderScriptedResponse[];
   assistantProviderStubModelId?: string;
   assistantProviderStubUsageMode?: HostedLocalAssistantProviderStubUsageMode;
+  enableWorkersAiBinding?: boolean;
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -174,6 +183,7 @@ export async function startHostedLocalFullStackScenario(input: {
   scenarioLabel: string;
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
+  testControls?: boolean;
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
@@ -186,6 +196,7 @@ export async function startHostedLocalFullStackScenario(input: {
     scenarioPrefix: input.persistDirPrefix,
   });
   const localDatabaseUrl = localDatabase.url;
+  const testControls = resolveHostedLocalScenarioTestControls(input);
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
   const assistantProviderMode =
     input.assistantProviderMode ?? resolveHostedAssistantProviderMode(baseEnvironment);
@@ -253,6 +264,10 @@ export async function startHostedLocalFullStackScenario(input: {
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+      // Automated hosted E2E fakes external vendors, not Murph internals. Keep
+      // Workers AI off by default so the production Worker graph starts without
+      // a remote dev binding; transcription/fault scenarios can opt in.
+      MURPH_DEV_SKIP_WORKERS_AI: input.enableWorkersAiBinding === true ? "0" : "1",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_TEMPORAL_PORT: String(temporalPort),
       ...(input.additionalEnv ?? {}),
@@ -267,7 +282,7 @@ export async function startHostedLocalFullStackScenario(input: {
       HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
       MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: testControls ? "1" : "0",
       MURPH_HOSTED_LOCAL_PROFILE: assistantProviderMode === "live" ? "e2e:live" : "e2e:stub",
       MURPH_DEV_FORCE_RESET_LOCAL_DB: input.resetLocalDatabase === false ? "0" : "1",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
@@ -289,6 +304,7 @@ export async function startHostedLocalFullStackScenario(input: {
       }),
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
+      testControls,
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
@@ -350,6 +366,14 @@ export async function startHostedLocalFullStackScenario(input: {
           `stderr tail: ${sanitizeHostedFailureText(scenarioHarness.stderrTail())}`,
         ].join("\n");
       },
+      assertHealthyHostedRun: async (userId, assertInput = {}) =>
+        await assertHostedRunNoProviderEgressAuthFailures({
+          assistantProviderRequests,
+          environment: scenarioRuntimeEnv,
+          expectAssistantProviderRequest:
+            assertInput.expectAssistantProviderRequest === true,
+          userId,
+        }),
       runtimeEnv: scenarioRuntimeEnv,
       queueAssistantResponses: (responses) => {
         for (const response of responses) {
@@ -451,8 +475,16 @@ export async function startHostedLocalFullStackScenario(input: {
           throw new AggregateError(failures, "Hosted local scenario cleanup failed.");
         }
       },
-      waitForHostedCompletion: async (userId, waitInput) =>
-        await scenarioHarness.waitForHostedCompletion(userId, waitInput),
+      waitForHostedCompletion: async (userId, waitInput) => {
+        const status = await scenarioHarness.waitForHostedCompletion(userId, waitInput);
+        await assertHostedRunNoProviderEgressAuthFailures({
+          assistantProviderRequests,
+          environment: scenarioRuntimeEnv,
+          expectAssistantProviderRequest: false,
+          userId,
+        });
+        return status;
+      },
       waitForHostedIdle: async (userId, waitInput) =>
         await scenarioHarness.waitForHostedIdle(userId, waitInput),
       waitForLatestPendingWake: async (userId) =>
@@ -468,6 +500,84 @@ export async function startHostedLocalFullStackScenario(input: {
     await localDatabase.cleanup().catch(() => {});
     throw error;
   }
+}
+
+function resolveHostedLocalScenarioTestControls(input: {
+  additionalEnv?: NodeJS.ProcessEnv;
+  testControls?: boolean;
+}): boolean {
+  if (input.testControls !== undefined) {
+    return input.testControls;
+  }
+  return input.additionalEnv?.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1"
+    || process.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1";
+}
+
+export async function assertHostedRunNoProviderEgressAuthFailures(input: {
+  assistantProviderRequests?: readonly HostedLocalAssistantProviderStubRequest[];
+  environment: NodeJS.ProcessEnv;
+  expectAssistantProviderRequest?: boolean;
+  userId: string;
+}): Promise<void> {
+  if (
+    input.expectAssistantProviderRequest === true
+    && (input.assistantProviderRequests?.length ?? 0) === 0
+  ) {
+    throw new Error(`Hosted run for ${input.userId} completed without any assistant provider request.`);
+  }
+
+  const logs = await listHostedRuntimeLogsForTest({
+    environment: input.environment,
+    limit: 1_500,
+    userId: input.userId,
+  });
+  const failures = logs.filter(isHostedRuntimeEgressAuthFailureLog);
+  if (failures.length === 0) {
+    return;
+  }
+
+  throw new Error([
+    `Hosted run for ${input.userId} recorded provider-egress/auth failures.`,
+    `failures: ${JSON.stringify(failures.map(summarizeHostedRuntimeAuthFailureLog))}`,
+  ].join("\n"));
+}
+
+function isHostedRuntimeEgressAuthFailureLog(log: HostedRuntimeLogForTestRow): boolean {
+  const serialized = JSON.stringify(log.redactedJson ?? {});
+  if (log.eventCode === "ASSISTANT_CODEX_FAILED") {
+    return serialized.includes("401 Unauthorized");
+  }
+  if (log.eventCode !== "runner.provider_egress_diagnostic") {
+    return serialized.includes("active_user_context_missing")
+      || serialized.includes("missing_identity");
+  }
+  const details = log.redactedJson ?? {};
+  const providerKind = readHostedRuntimeLogString(details, "providerKind");
+  if (providerKind !== "openai") {
+    return false;
+  }
+  return readHostedRuntimeLogString(details, "writeFenceValidationMode") === "missing_identity"
+    || readHostedRuntimeLogString(details, "writeFenceValidationRejectReason") === "active_user_context_missing"
+    || details.responseStatus === 401
+    || serialized.includes("401 Unauthorized");
+}
+
+function summarizeHostedRuntimeAuthFailureLog(log: HostedRuntimeLogForTestRow): Record<string, unknown> {
+  return {
+    at: log.at,
+    component: log.component,
+    eventCode: log.eventCode,
+    phase: log.phase,
+    providerKind: log.redactedJson?.providerKind ?? null,
+    responseStatus: log.redactedJson?.responseStatus ?? null,
+    writeFenceValidationMode: log.redactedJson?.writeFenceValidationMode ?? null,
+    writeFenceValidationRejectReason: log.redactedJson?.writeFenceValidationRejectReason ?? null,
+  };
+}
+
+function readHostedRuntimeLogString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" ? value : null;
 }
 
 function fingerprintProviderRequestBody(value: string, secret: string): string {
