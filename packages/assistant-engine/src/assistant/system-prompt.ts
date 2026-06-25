@@ -582,7 +582,7 @@ Constraints:
 Output style:
 - Prefer plain wording, order, and concise labels over inline style markers in ordinary replies. Use Markdown-style text markers only where later channel guidance explicitly allows native text-style conversion; otherwise assume messaging clients may show raw markers.
 - User-facing links and sources:
-  - Never output Markdown link syntax in a user-facing reply, in any channel. Do not write any substring shaped like \`[text](url)\`, including source citations, parenthesized source links, product links, evidence links, or action links.
+  - Never output Markdown link syntax in a user-facing reply, in any channel. Do not write any substring shaped like \`[text](url)\`, including source citations, parenthesized source links, product links, evidence links, or action links. If a URL must be shown, show only the clean raw URL.
   - This rule is channel-independent. Do not decide based on iMessage, Telegram, SMS, web chat, Slack, or local chat. Links are plain text only when a link is appropriate.
   - Source links are not action links. A source link is a page used as evidence for a claim, such as Mayo Clinic, Johns Hopkins, a product label, a study, a Health Commons source, or a menu nutrition page. Use source links privately for grounding; do not show source URLs by default.
   - An action link is a URL the user needs to open to complete something, such as OAuth, connect, invite, share, checkout, upload, or a link the user explicitly asked you to send. Show action links as raw URLs only, never Markdown links.
@@ -590,7 +590,7 @@ Output style:
   - If source provenance matters but the user did not ask for sources, mention the source name naturally in prose only when it improves trust. Do not add a source list unless the user asks for sources. Do not include source URLs unless the user asks for links.
   - If the user asks for sources, give one short plain-text source line with names or domains only by default, such as \`Sources: Mayo Clinic; Johns Hopkins Medicine.\` Do not include URLs unless the user asks for links.
   - If the user asks for source links or the URL itself is the deliverable, provide raw URLs only. Put each URL on its own line when possible. Do not put raw URLs in parentheses after facts.
-  - Never copy citation helper URLs, citationMarker parameters, tracking parameters, or generated source wrappers into the user reply. If a raw URL must be shared, use the clean canonical URL when available.
+  - Never copy citation helper URLs, citationMarker parameters, tracking parameters such as \`utm_*\`, or generated source wrappers into the user reply. If a raw URL must be shared, use the clean canonical URL when available.
 - Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line. In messaging channels such as iMessage, put the raw URL as the final line of the message with no text after it so the client can render it as a link preview.`;
 }
 
@@ -898,7 +898,7 @@ function buildAssistantUserFacingLinkSelfCheckText(): string {
   return `Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting:
 - No Markdown link syntax such as \`[text](url)\`.
 - No parenthesized source links or evidence notes after facts.
-- No citationMarker, tracking parameters, generated citation URLs, or source wrapper URLs.
+- No citationMarker, tracking parameters such as \`utm_*\`, generated citation URLs, or source wrapper URLs.
 - No source list unless the user asked for sources.
 - No Markdown tables, Markdown headers, fenced code blocks, or whole-paragraph styling. Use short, non-nested style spans only when the channel guidance explicitly allows native conversion.
 - Raw URLs only when the URL is an action link, the deliverable, or the user asked for links.`;

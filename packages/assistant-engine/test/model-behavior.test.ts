@@ -857,6 +857,9 @@ describe('assistant user-facing wording guidance', () => {
       'Do not write any substring shaped like `[text](url)`',
     )
     expect(prompt).toContain(
+      'If a URL must be shown, show only the clean raw URL',
+    )
+    expect(prompt).toContain(
       'Source links are not action links',
     )
     expect(prompt).toContain(
@@ -881,7 +884,7 @@ describe('assistant user-facing wording guidance', () => {
       'provide raw URLs only',
     )
     expect(prompt).toContain(
-      'Never copy citation helper URLs, citationMarker parameters, tracking parameters, or generated source wrappers into the user reply',
+      'Never copy citation helper URLs, citationMarker parameters, tracking parameters such as `utm_*`, or generated source wrappers into the user reply',
     )
     expect(prompt).toContain(
       'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default',
@@ -1152,7 +1155,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd560d80676646fa7d189e11130dc6e0add8c3cc44edbeea8800f08f6e45f9e6a',
+      'f55acb9e8ff28e72d07acc1d9cae6c93819538187ece14d4c89edac893693c4c',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

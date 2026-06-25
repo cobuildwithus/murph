@@ -23,6 +23,17 @@ type OpenMarkdownDecoration = MarkdownDecorationToken & {
   content: string
 }
 
+const TRACKING_QUERY_PARAMETER_NAMES = new Set([
+  'fbclid',
+  'gclid',
+  'gbraid',
+  'mc_cid',
+  'mc_eid',
+  'msclkid',
+  'wbraid',
+])
+const RAW_HTTP_URL_START_PATTERN = /https?:\/\//giu
+
 // Keep longer markers before their prefixes so `**bold**` is not read as `*italic*`.
 const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
   { marker: '**', style: 'bold' },
@@ -33,6 +44,8 @@ const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
 ]
 
 export function renderMarkdownMessageText(value: string): DecoratedMessageText {
+  value = sanitizeUserFacingMessageLinks(value)
+
   let text = ''
   const decorations: MessageTextDecoration[] = []
   let index = 0
@@ -91,6 +104,204 @@ export function renderMarkdownMessageText(value: string): DecoratedMessageText {
     decorations,
     text,
   }
+}
+
+export function sanitizeUserFacingMessageLinks(value: string): string {
+  if (!value) {
+    return value
+  }
+
+  return unwrapParenthesizedRawUrls(
+    cleanRawUrls(replaceMarkdownLinksWithRawUrls(value)),
+  )
+}
+
+function replaceMarkdownLinksWithRawUrls(value: string): string {
+  let result = ''
+  let index = 0
+
+  while (index < value.length) {
+    const markdownLink = readMarkdownLink(value, index)
+    if (markdownLink) {
+      result += markdownLink.url
+      index = markdownLink.end
+      continue
+    }
+
+    result += value[index]
+    index += 1
+  }
+
+  return result
+}
+
+function readMarkdownLink(
+  value: string,
+  index: number,
+): { end: number; url: string } | null {
+  const labelStart = value[index] === '!' && value[index + 1] === '['
+    ? index + 1
+    : index
+  if (value[labelStart] !== '[') {
+    return null
+  }
+
+  const labelEnd = value.indexOf(']', labelStart + 1)
+  if (labelEnd < 0 || value[labelEnd + 1] !== '(') {
+    return null
+  }
+
+  let urlStart = labelEnd + 2
+  while (isWhitespace(value[urlStart] ?? '')) {
+    urlStart += 1
+  }
+
+  if (!/^https?:\/\//iu.test(value.slice(urlStart))) {
+    return null
+  }
+
+  const urlEnd = readRawHttpUrlEnd(value, urlStart)
+  const rawUrl = value.slice(urlStart, urlEnd)
+  let markdownLinkEnd = urlEnd
+  while (isWhitespace(value[markdownLinkEnd] ?? '')) {
+    markdownLinkEnd += 1
+  }
+
+  if (value[markdownLinkEnd] !== ')') {
+    return null
+  }
+
+  return {
+    end: markdownLinkEnd + 1,
+    url: cleanUserFacingUrl(rawUrl),
+  }
+}
+
+function cleanRawUrls(value: string): string {
+  let result = ''
+  let index = 0
+
+  while (index < value.length) {
+    const urlStart = findRawHttpUrlStart(value, index)
+    if (urlStart < 0) {
+      result += value.slice(index)
+      break
+    }
+
+    result += value.slice(index, urlStart)
+    const urlEnd = readRawHttpUrlEnd(value, urlStart)
+    const { trailing, url } = splitTrailingUrlPunctuation(
+      value.slice(urlStart, urlEnd),
+    )
+    result += `${cleanUserFacingUrl(url)}${trailing}`
+    index = urlEnd
+  }
+
+  return result
+}
+
+function unwrapParenthesizedRawUrls(value: string): string {
+  let result = ''
+  let index = 0
+
+  while (index < value.length) {
+    const urlStart = index + 1
+    if (
+      value[index] === '(' &&
+      /^https?:\/\//iu.test(value.slice(urlStart))
+    ) {
+      const urlEnd = readRawHttpUrlEnd(value, urlStart)
+      if (value[urlEnd] === ')') {
+        result += cleanUserFacingUrl(value.slice(urlStart, urlEnd))
+        index = urlEnd + 1
+        continue
+      }
+    }
+
+    result += value[index]
+    index += 1
+  }
+
+  return result
+}
+
+function findRawHttpUrlStart(value: string, index: number): number {
+  RAW_HTTP_URL_START_PATTERN.lastIndex = index
+  return RAW_HTTP_URL_START_PATTERN.exec(value)?.index ?? -1
+}
+
+function readRawHttpUrlEnd(value: string, start: number): number {
+  let index = start
+  let openParentheses = 0
+
+  while (index < value.length) {
+    const character = value[index]
+    if (isRawHttpUrlTerminator(character)) {
+      break
+    }
+
+    if (character === '(') {
+      openParentheses += 1
+    } else if (character === ')') {
+      if (openParentheses === 0) {
+        break
+      }
+      openParentheses -= 1
+    }
+
+    index += 1
+  }
+
+  return index
+}
+
+function isRawHttpUrlTerminator(value: string): boolean {
+  return isWhitespace(value) || /[<>"'`[\]{}]/u.test(value)
+}
+
+function splitTrailingUrlPunctuation(value: string): {
+  trailing: string
+  url: string
+} {
+  let url = value
+  let trailing = ''
+
+  while (url.length > 0 && /[.,;:!?]/u.test(url.at(-1) ?? '')) {
+    trailing = `${url.at(-1)}${trailing}`
+    url = url.slice(0, -1)
+  }
+
+  return {
+    trailing,
+    url,
+  }
+}
+
+function cleanUserFacingUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return value
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return value
+  }
+
+  for (const name of Array.from(parsed.searchParams.keys())) {
+    if (isTrackingQueryParameterName(name)) {
+      parsed.searchParams.delete(name)
+    }
+  }
+
+  return parsed.toString()
+}
+
+function isTrackingQueryParameterName(value: string): boolean {
+  const normalized = value.toLowerCase()
+  return normalized.startsWith('utm_') ||
+    TRACKING_QUERY_PARAMETER_NAMES.has(normalized)
 }
 
 export function splitDecoratedMessageText(
