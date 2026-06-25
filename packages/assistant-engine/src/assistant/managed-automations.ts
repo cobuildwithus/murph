@@ -290,6 +290,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
       '',
       'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
+      'If the user has not received one of these announcement automations before, let them know what the announcement is for at a high level before diving in (eg cool new features, helps us make Murph better for you every week if you give us good feedback).',
       'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
