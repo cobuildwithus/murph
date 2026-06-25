@@ -106,6 +106,14 @@ function normalizeDeviceActivityCursorEntityIds(value: unknown): string[] | unde
   return entityIds.length > 0 ? entityIds : undefined;
 }
 
+function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireStringValue(value, "schedule.afterEntityId");
+}
+
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
   if (Object.hasOwn(object, "timeZone")) {
     throw new Error("schedule.timeZone is not supported for canonical automation schedules.");
@@ -219,12 +227,21 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       if (Number.isNaN(Date.parse(after))) {
         throw new Error("schedule.after must be a valid ISO timestamp.");
       }
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : requireStringValue(object.afterOccurredAt, "schedule.afterOccurredAt");
+      if (afterOccurredAt && Number.isNaN(Date.parse(afterOccurredAt))) {
+        throw new Error("schedule.afterOccurredAt must be a valid ISO timestamp.");
+      }
+      const afterEntityId = normalizeDeviceActivityCursorEntityId(object.afterEntityId);
       const source = normalizeDeviceActivitySource(object.source);
       const activityKind = normalizeDeviceActivityKind(object.activityKind);
       const afterEntityIds = normalizeDeviceActivityCursorEntityIds(object.afterEntityIds);
       return {
         kind,
         after,
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),

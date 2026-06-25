@@ -27,6 +27,7 @@ import {
 import {
   buildAssistantDeviceActivityOccurrenceTag,
   buildAssistantDeviceActivityParentAutomationTag,
+  isAssistantDeviceActivityReservedTag,
   readAssistantDeviceActivityOccurrenceTag,
 } from './device-activity-cron-tags.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -550,10 +551,13 @@ function buildDeviceActivityAutomationNotificationTarget(input: {
   automation: DeviceActivityAutomation
   existingJob: AssistantCronJob | null
 }): AssistantCronJob['target'] {
-  const preservedSessionId = input.automation.continuityPolicy === 'preserve'
+  const canPreserveSession = input.automation.continuityPolicy === 'preserve' &&
+    input.existingJob !== null &&
+    assistantCronTargetMatchesAutomationRoute(input.existingJob.target, input.automation.route)
+  const preservedSessionId = canPreserveSession
     ? input.existingJob?.target.sessionId ?? null
     : null
-  const preservedAlias = input.automation.continuityPolicy === 'preserve'
+  const preservedAlias = canPreserveSession
     ? input.existingJob?.target.alias ?? null
     : null
 
@@ -567,6 +571,18 @@ function buildDeviceActivityAutomationNotificationTarget(input: {
     participantId: input.automation.route.participantId,
     threadId: input.automation.route.threadId,
   })
+}
+
+function assistantCronTargetMatchesAutomationRoute(
+  target: AssistantCronJob['target'],
+  route: DeviceActivityAutomation['route'],
+): boolean {
+  return target.channel === route.channel &&
+    JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
+    target.deliveryTarget === route.deliveryTarget &&
+    target.identityId === route.identityId &&
+    target.participantId === route.participantId &&
+    target.threadId === route.threadId
 }
 
 async function advanceDeviceActivityAutomationCursor(input: {
@@ -586,7 +602,8 @@ async function advanceDeviceActivityAutomationCursor(input: {
     vaultRoot: input.vault,
     lookup: input.automation.automationId,
     after: cursor.after,
-    afterEntityIds: cursor.afterEntityIds,
+    afterOccurredAt: cursor.afterOccurredAt,
+    afterEntityId: cursor.afterEntityId,
     expectedActivityKind: input.automation.schedule.activityKind,
     expectedSource: input.automation.schedule.source,
   })
@@ -595,7 +612,7 @@ async function advanceDeviceActivityAutomationCursor(input: {
 function resolveNextDeviceActivityCursor(input: {
   activities: readonly MatchedDeviceActivity[]
   schedule: DeviceActivitySchedule
-}): { after: string; afterEntityIds: string[] } | null {
+}): { after: string; afterOccurredAt: string; afterEntityId: string } | null {
   return resolveNextDeviceActivityCoverageCursor({
     cursor: input.schedule,
     keys: input.activities,
@@ -624,7 +641,10 @@ function mergeAutomationTags(
   existing: readonly string[],
   added: readonly string[],
 ): string[] {
-  return [...new Set([...existing, ...added])]
+  return [...new Set([
+    ...existing.filter((tag) => !isAssistantDeviceActivityReservedTag(tag)),
+    ...added,
+  ])]
 }
 
 function readString(value: unknown): string | null {

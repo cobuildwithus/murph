@@ -8,7 +8,9 @@ import {
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
+  compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  resolveNextDeviceActivityCoverageCursor,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -118,7 +120,8 @@ export interface PatchAutomationInput {
 
 export interface AdvanceAutomationDeviceActivityCursorInput {
   after: string;
-  afterEntityIds: string[];
+  afterEntityId: string;
+  afterOccurredAt: string;
   expectedActivityKind?: AutomationDeviceActivityKind;
   expectedSource?: AutomationDeviceActivitySource;
   lookup: string;
@@ -215,6 +218,10 @@ function normalizeAutomationDeviceActivityCursorEntityIds(value: unknown): strin
   return entityIds.length > 0 ? entityIds : undefined;
 }
 
+function normalizeAutomationDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  return optionalString(value, "schedule.afterEntityId", 240) ?? undefined;
+}
+
 function normalizeDeviceActivityKindToken(value: string): string {
   return value
     .trim()
@@ -292,11 +299,17 @@ function normalizeAutomationSchedule(
     case "deviceActivity": {
       const source = normalizeAutomationDeviceActivitySource(object.source);
       const activityKind = normalizeAutomationDeviceActivityKind(object.activityKind);
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : normalizeAutomationIsoTimestamp(object.afterOccurredAt, "schedule.afterOccurredAt");
+      const afterEntityId = normalizeAutomationDeviceActivityCursorEntityId(object.afterEntityId);
       const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(object.afterEntityIds);
 
       return {
         kind,
         after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(afterEntityIds ? { afterEntityIds } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
@@ -422,6 +435,8 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         after: schedule.after,
+        ...(schedule.afterOccurredAt ? { afterOccurredAt: schedule.afterOccurredAt } : {}),
+        ...(schedule.afterEntityId ? { afterEntityId: schedule.afterEntityId } : {}),
         ...(schedule.afterEntityIds ? { afterEntityIds: schedule.afterEntityIds } : {}),
         ...(schedule.source ? { source: schedule.source } : {}),
         ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
@@ -684,7 +699,8 @@ export async function advanceAutomationDeviceActivityCursor(
   input: AdvanceAutomationDeviceActivityCursorInput,
 ): Promise<AdvanceAutomationDeviceActivityCursorResult> {
   const after = normalizeAutomationIsoTimestamp(input.after, "after");
-  const afterEntityIds = normalizeAutomationDeviceActivityCursorEntityIds(input.afterEntityIds) ?? [];
+  const afterOccurredAt = normalizeAutomationIsoTimestamp(input.afterOccurredAt, "afterOccurredAt");
+  const afterEntityId = requireString(input.afterEntityId, "afterEntityId");
 
   return withAutomationRegistryLock(input.vaultRoot, async () => {
     const records = await loadAutomationRecords(input.vaultRoot);
@@ -708,9 +724,12 @@ export async function advanceAutomationDeviceActivityCursor(
 
     const cursor = resolveAdvancedDeviceActivityCursor({
       currentAfter: existingRecord.schedule.after,
+      currentAfterEntityId: existingRecord.schedule.afterEntityId,
       currentAfterEntityIds: existingRecord.schedule.afterEntityIds,
+      currentAfterOccurredAt: existingRecord.schedule.afterOccurredAt,
       nextAfter: after,
-      nextAfterEntityIds: afterEntityIds,
+      nextAfterEntityId: afterEntityId,
+      nextAfterOccurredAt: afterOccurredAt,
     });
     if (!cursor) {
       return {
@@ -728,7 +747,9 @@ export async function advanceAutomationDeviceActivityCursor(
       schedule: {
         ...existingRecord.schedule,
         after: cursor.after,
-        afterEntityIds: cursor.afterEntityIds,
+        afterOccurredAt: cursor.afterOccurredAt,
+        afterEntityId: cursor.afterEntityId,
+        afterEntityIds: undefined,
       },
       slug: existingRecord.slug,
       status: existingRecord.status,
@@ -759,41 +780,38 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
 
 function resolveAdvancedDeviceActivityCursor(input: {
   currentAfter: string;
+  currentAfterEntityId?: string;
   currentAfterEntityIds?: readonly string[];
+  currentAfterOccurredAt?: string;
   nextAfter: string;
-  nextAfterEntityIds: readonly string[];
-}): { after: string; afterEntityIds: string[] } | null {
-  const comparison = compareIsoTimestamps(input.nextAfter, input.currentAfter);
-  if (comparison < 0) {
-    return null;
-  }
-
-  if (comparison > 0) {
-    return {
-      after: input.nextAfter,
-      afterEntityIds: [...new Set(input.nextAfterEntityIds)].sort(),
-    };
-  }
-
-  const afterEntityIds = [
-    ...new Set([...(input.currentAfterEntityIds ?? []), ...input.nextAfterEntityIds]),
-  ].sort();
-  if (arraysEqual(afterEntityIds, input.currentAfterEntityIds ?? [])) {
-    return null;
-  }
-
-  return {
-    after: input.nextAfter,
-    afterEntityIds,
+  nextAfterEntityId: string;
+  nextAfterOccurredAt: string;
+}): { after: string; afterOccurredAt: string; afterEntityId: string } | null {
+  const nextKey = {
+    entityId: input.nextAfterEntityId,
+    occurredAt: input.nextAfterOccurredAt,
+    triggeredAt: input.nextAfter,
   };
-}
+  const cursor = resolveNextDeviceActivityCoverageCursor({
+    cursor: {
+      after: input.currentAfter,
+      ...(input.currentAfterOccurredAt ? { afterOccurredAt: input.currentAfterOccurredAt } : {}),
+      ...(input.currentAfterEntityId ? { afterEntityId: input.currentAfterEntityId } : {}),
+      ...(input.currentAfterEntityIds ? { afterEntityIds: input.currentAfterEntityIds } : {}),
+    },
+    keys: [nextKey],
+  });
+  if (!cursor) {
+    return null;
+  }
 
-function compareIsoTimestamps(left: string, right: string): number {
-  return Date.parse(left) - Date.parse(right);
-}
-
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+  return compareDeviceActivityCoverageKeys(nextKey, {
+    entityId: cursor.afterEntityId,
+    occurredAt: cursor.afterOccurredAt,
+    triggeredAt: cursor.after,
+  }) === 0
+    ? cursor
+    : null;
 }
 
 async function upsertAutomationWithLatestRegistry(

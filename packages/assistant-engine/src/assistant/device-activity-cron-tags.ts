@@ -31,7 +31,16 @@ function readTagSuffix(
   tags: readonly string[] | null | undefined,
   prefix: string,
 ): string | null {
-  const tag = tags?.find((entry) => entry.startsWith(prefix))
-  const suffix = tag?.slice(prefix.length).trim() ?? ''
+  const matches = tags?.filter((entry) => entry.startsWith(prefix)) ?? []
+  if (matches.length !== 1) {
+    return null
+  }
+
+  const suffix = matches[0]?.slice(prefix.length).trim() ?? ''
   return suffix.length > 0 ? suffix : null
+}
+
+export function isAssistantDeviceActivityReservedTag(tag: string): boolean {
+  return tag.startsWith(ASSISTANT_DEVICE_ACTIVITY_PARENT_AUTOMATION_TAG_PREFIX) ||
+    tag.startsWith(ASSISTANT_DEVICE_ACTIVITY_OCCURRENCE_TAG_PREFIX)
 }
