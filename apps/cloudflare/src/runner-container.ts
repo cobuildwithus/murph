@@ -2331,14 +2331,6 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
   }
   if (hasNonEmptyHostedRunnerContainerString(record.errorDetail)) {
     metadata.errorDetailPresent = true;
-    const errorDetail = typeof record.errorDetail === "string"
-      ? readHostedRunnerContainerDiagnosticFragment(record.errorDetail, {
-          redactEnvKeys: true,
-        })
-      : null;
-    if (errorDetail) {
-      metadata.safeErrorDetail = errorDetail;
-    }
   }
   if (hasNonEmptyHostedRunnerContainerString(record.errorCause)) {
     metadata.errorCausePresent = true;
@@ -3122,13 +3114,9 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   if (!details) {
     return {};
   }
-  const safeErrorDetail = readHostedRunnerContainerDiagnosticFragment(details.safeErrorDetail, {
-    redactEnvKeys: true,
-  });
 
   return {
     runnerResponseDetailsKeys: Object.keys(details).sort(),
-    ...(safeErrorDetail ? { runnerResponseSafeErrorDetail: safeErrorDetail } : {}),
   };
 }
 

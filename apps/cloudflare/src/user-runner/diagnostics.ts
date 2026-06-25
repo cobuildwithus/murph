@@ -135,7 +135,6 @@ export function buildHostedRunnerRedactedErrorJson(
   error: unknown,
 ): HostedRuntimeRedactedJson {
   const details = buildHostedRunnerMetadataOnlyErrorDetails(error);
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
   const redacted: HostedRuntimeRedactedJson = {};
   for (const [key, value] of Object.entries(details)) {
     // `errorCodeDetail` is read from raw `.code`-shaped error properties and is
@@ -166,16 +165,6 @@ export function buildHostedRunnerRedactedErrorJson(
       redacted[redactedKey] = value;
     }
   }
-  if (
-    typeof diagnostics?.errorDetail === "string" &&
-    diagnostics.errorDetail.trim().length > 0
-  ) {
-    redacted.safeErrorDetail = diagnostics.errorDetail;
-  }
-  const nestedSafeErrorDetail = readNestedSafeErrorDetail(error);
-  if (nestedSafeErrorDetail) {
-    redacted.safeErrorDetail = nestedSafeErrorDetail;
-  }
   return redacted;
 }
 
@@ -198,22 +187,6 @@ export function buildHostedRunnerMetadataOnlyErrorDetails(
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
-}
-
-function readNestedSafeErrorDetail(error: unknown): string | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-  const details = (error as { details?: unknown }).details;
-  if (!details || typeof details !== "object" || Array.isArray(details)) {
-    return null;
-  }
-  const value = (details as { safeErrorDetail?: unknown }).safeErrorDetail;
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length > 0 ? normalized.slice(0, 512) : null;
 }
 
 export function safeCleanupErrorCode(error: unknown): string {
