@@ -1155,7 +1155,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '0cd3fb397e9e25fa72400a898c333906ebc476c9dc90689c688465b702e8e01e',
+      '9bc3fd71a8785e25a79376fe2b66720df0c529fe56c9b1ea2ef7080a4250e41d',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1400,6 +1400,9 @@ describe('assistant experiment onboarding guidance', () => {
       'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
     )
     expect(prompt).toContain(
+      'When stress, overload, acute activation, winding down, or symptom fear is the immediate bottleneck, use the stress-regulation skill',
+    )
+    expect(prompt).toContain(
       'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
     )
     expect(prompt).toContain(
@@ -1443,6 +1446,17 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('- competition-training: Use when a user is preparing')
   })
 
+  it('routes acute stress support through the Murph stress skill', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Use `stress-regulation` when stress or overload is the immediate bottleneck and the useful answer is a brief safety-aware downshift, load adjustment, or handoff.',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
+    )
+  })
+
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
@@ -1481,6 +1495,11 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
+    )
+    expect(prompt).toContain('stress-regulation')
+    expect(prompt).toContain('stress or overload is the immediate bottleneck')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
     )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',

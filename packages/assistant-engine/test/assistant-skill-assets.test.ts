@@ -166,6 +166,9 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('running-cardio')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('stress-regulation')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
+    )
     expect(buildAssistantSkillFileRef('computer-use')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
