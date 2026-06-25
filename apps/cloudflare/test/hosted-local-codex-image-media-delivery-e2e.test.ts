@@ -136,6 +136,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
+      phoneCallsAvailable: false,
       vaultFileSendAvailable: true,
     });
   }, 300_000);

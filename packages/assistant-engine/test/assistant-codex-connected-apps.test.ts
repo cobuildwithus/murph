@@ -322,7 +322,6 @@ function createHostedToolContext(
       conversationId: null,
       inboundMailboxItemIds: [],
       recipientKey: null,
-      turnId: "turn_test",
     }),
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");

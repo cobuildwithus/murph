@@ -78,6 +78,7 @@ describe("Retell ask_murph route", () => {
     });
     expect(mocks.getHostedPhoneCallForConsultation).toHaveBeenCalledWith({
       callId: "hpc_123",
+      providerCallId: "retell_call_123",
     });
     expect(mocks.consultPhoneCall).toHaveBeenCalledWith({
       call: expect.objectContaining({

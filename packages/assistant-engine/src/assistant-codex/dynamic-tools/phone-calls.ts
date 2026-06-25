@@ -88,7 +88,6 @@ export function createPhoneCallRequestKey(input: {
       inboundMailboxItemIds: [...input.scope.inboundMailboxItemIds],
       recipientKey: input.scope.recipientKey,
       schema: 'murph.create-phone-call.request-key.v1',
-      turnId: input.scope.turnId,
     }))
     .digest('hex')
   return `phone_call_${digest}`

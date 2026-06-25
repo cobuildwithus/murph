@@ -23,7 +23,6 @@ export interface AssistantHostedToolRequestKeyScope {
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
   recipientKey: string | null
-  turnId: string
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -60,7 +59,6 @@ export function createAssistantHostedToolContext(input: {
   getAcceptedInputIds?: () => readonly string[]
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getPhoneCallAcceptedInputIds?: () => readonly string[]
-  getTurnId?: () => string
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
@@ -81,7 +79,6 @@ export function createAssistantHostedToolContext(input: {
       conversationId: context?.conversationId ?? null,
       inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],
       recipientKey: context?.recipientKey ?? null,
-      turnId: input.getTurnId?.() ?? 'unscoped',
     }
   }
 

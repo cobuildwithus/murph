@@ -550,7 +550,6 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),
-              getTurnId: () => currentUserTurn.turnId,
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {

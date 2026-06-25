@@ -138,6 +138,7 @@ export function expectAdvertisedMurphDynamicTools(
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     messageReactionsAvailable?: boolean;
+    phoneCallsAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
   } = {},
 ): void {
@@ -170,6 +171,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.vaultFileSendAvailable !== true
         && name === "murph.send_vault_file"
+      ) {
+        return false;
+      }
+
+      if (
+        options.phoneCallsAvailable !== true
+        && name === "murph.create_phone_call"
       ) {
         return false;
       }

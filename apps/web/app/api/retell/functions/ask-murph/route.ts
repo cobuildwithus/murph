@@ -40,6 +40,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const call = await getHostedPhoneCallForConsultation({
     callId: murphCallId,
+    providerCallId: payload.call.call_id,
   });
   const advice = await consultPhoneCall({
     call,

@@ -6,6 +6,7 @@ import {
   type HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
 
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
 
@@ -19,24 +20,45 @@ export interface HostedPhoneCallForConsultation {
 
 interface HostedPhoneCallConsultationStore {
   hostedPhoneCall: {
-    findUniqueOrThrow(input: {
+    findUnique(input: {
       where: {
         id: string;
       };
-    }): Promise<HostedPhoneCall>;
+    }): Promise<HostedPhoneCall | null>;
   };
 }
 
 export async function getHostedPhoneCallForConsultation(input: {
   callId: string;
+  providerCallId: string;
   prisma?: HostedPhoneCallConsultationStore;
 }): Promise<HostedPhoneCallForConsultation> {
   const prisma = input.prisma ?? getPrisma();
-  const call = await prisma.hostedPhoneCall.findUniqueOrThrow({
+  const call = await prisma.hostedPhoneCall.findUnique({
     where: {
       id: input.callId,
     },
   });
+
+  if (!call) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PHONE_CALL_NOT_FOUND",
+      httpStatus: 404,
+      message: "Murph phone call was not found.",
+    });
+  }
+
+  if (
+    call.provider !== "retell"
+    || call.providerCallId !== input.providerCallId
+    || !isHostedPhoneCallLiveForConsultation(call.status)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PHONE_CALL_CALLBACK_NOT_ACTIVE",
+      httpStatus: 409,
+      message: "Retell phone call callback does not match an active Murph phone call.",
+    });
+  }
 
   return {
     brief: hostedPhoneCallBriefSchema.parse(call.briefJson),
@@ -45,6 +67,10 @@ export async function getHostedPhoneCallForConsultation(input: {
     providerCallId: call.providerCallId,
     status: call.status,
   };
+}
+
+function isHostedPhoneCallLiveForConsultation(status: HostedPhoneCall["status"]): boolean {
+  return status === "starting" || status === "calling";
 }
 
 export async function consultPhoneCall(input: {
