@@ -460,7 +460,7 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.deepEqual(workoutObservationMetrics, []);
   assert.equal(hrvEvent?.fields?.value, 42.5);
   assert.equal(hrvEvent?.externalRef?.facet, "hrv");
-  assert.equal(bmiEvent?.dayKey, "2026-03-16");
+  assert.equal(bmiEvent?.dayKey, undefined);
 });
 
 test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-midnight imports", async () => {
@@ -480,6 +480,10 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
         snapshot: {
           accountId: "whoop-local-day-user",
           importedAt: "2026-06-25T12:00:00.000Z",
+          bodyMeasurements: {
+            measured_at: "2026-06-25T03:30:00.000Z",
+            weight_kilogram: 78.2,
+          },
           sleeps: [
             {
               id: "sleep-local-24",
@@ -630,6 +634,12 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
         && event.metric === "recovery-score"
         && event.externalRef?.resourceId === "sleep-no-offset-local-24",
     );
+    const noOffsetBodyWeightEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "weight"
+        && event.externalRef?.resourceType === "body-measurement",
+    );
 
     assert.equal(workoutEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetWorkoutEvent?.dayKey, "2026-06-24");
@@ -639,6 +649,7 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
     assert.equal(noOffsetRespiratoryEvent?.dayKey, "2026-06-24");
     assert.equal(recoveryEvent?.dayKey, "2026-06-24");
     assert.equal(noOffsetRecoveryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetBodyWeightEvent?.dayKey, "2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1913,7 +1924,7 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
     ),
   );
   assert.equal(payload.provenance?.whoopUserId, undefined);
-  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
+  assert.equal(payload.provenance?.bodyMeasurementDay, undefined);
 });
 
 test("prepareDeviceProviderSnapshotImport prefers WHOOP measurement timestamps over generic update timestamps", async () => {
@@ -1935,8 +1946,32 @@ test("prepareDeviceProviderSnapshotImport prefers WHOOP measurement timestamps o
 
   assert.equal(weightEvent?.occurredAt, "2026-03-16T07:00:00.000Z");
   assert.equal(weightEvent?.recordedAt, "2026-03-16T07:00:00.000Z");
-  assert.equal(weightEvent?.dayKey, "2026-03-16");
-  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
+  assert.equal(weightEvent?.dayKey, undefined);
+  assert.equal(weightEvent?.externalRef?.resourceId, "2026-03-16");
+  assert.equal(payload.provenance?.bodyMeasurementDay, undefined);
+});
+
+test("prepareDeviceProviderSnapshotImport preserves WHOOP body measurement offset day keys", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      bodyMeasurements: {
+        height_meter: 1.82,
+        weight_kilogram: 78.2,
+        measured_at: "2026-06-25T03:30:00.000Z",
+        timezone_offset: "-04:00",
+      },
+    },
+  });
+
+  const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(weightEvent?.occurredAt, "2026-06-25T03:30:00.000Z");
+  assert.equal(weightEvent?.dayKey, "2026-06-24");
+  assert.equal(weightEvent?.externalRef?.resourceId, "2026-06-25");
+  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-06-24");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {

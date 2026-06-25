@@ -174,10 +174,6 @@ function firstWhoopOffsetDayKey(
   return undefined;
 }
 
-function utcStartOfDay(dayKey: string | undefined): string | undefined {
-  return dayKey ? toIso(`${dayKey}T00:00:00.000Z`) : undefined;
-}
-
 function millisecondsToMinutes(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
@@ -200,6 +196,20 @@ function firstBodyMeasurementRecordedAt(bodyMeasurement: PlainObject | undefined
     toIso(bodyMeasurement.recordedAt),
     toIso(bodyMeasurement.updated_at),
     toIso(bodyMeasurement.updatedAt),
+  );
+}
+
+function firstBodyMeasurementExplicitDayKey(bodyMeasurement: PlainObject | undefined): string | undefined {
+  if (!bodyMeasurement) {
+    return undefined;
+  }
+
+  return firstDayKey(
+    stringId(bodyMeasurement.day),
+    stringId(bodyMeasurement.date),
+    stringId(bodyMeasurement.measurement_day ?? bodyMeasurement.measurementDay),
+    stringId(bodyMeasurement.measured_date ?? bodyMeasurement.measuredDate),
+    stringId(bodyMeasurement.recorded_date ?? bodyMeasurement.recordedDate),
   );
 }
 
@@ -489,13 +499,13 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     }
   }
 
-  const bodyMeasurementDayKey = bodyMeasurement
-    ? firstDayKey(firstBodyMeasurementRecordedAt(bodyMeasurement), importedAt)
-    : undefined;
   const bodyMeasurementRecordedAt = bodyMeasurement
-    ? firstBodyMeasurementRecordedAt(bodyMeasurement) ?? utcStartOfDay(bodyMeasurementDayKey)
+    ? firstBodyMeasurementRecordedAt(bodyMeasurement) ?? importedAt
     : undefined;
-  const bodyMeasurementResourceId = bodyMeasurementDayKey ?? "current";
+  const bodyMeasurementDayKey = bodyMeasurement
+    ? firstBodyMeasurementExplicitDayKey(bodyMeasurement) ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
+    : undefined;
+  const bodyMeasurementResourceId = firstDayKey(bodyMeasurementRecordedAt) ?? "current";
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
