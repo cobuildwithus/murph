@@ -27,6 +27,7 @@ export type HostedThreadRouteChannel = Extract<
 >;
 
 export interface HostedThreadRouteSnapshot {
+  accountLookupKey: string;
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
@@ -41,13 +42,18 @@ export interface HostedThreadRouteEgressAuthority {
 }
 
 export async function readHostedThreadRouteByExternalThread(input: {
-  accountLookupKey: string | null | undefined;
+  accountLookupKey?: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadRouteChannel;
   prisma: HostedOnboardingReadClient;
   threadId: string | number | null | undefined;
 }): Promise<HostedThreadRouteSnapshot | null> {
-  const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
+  const {
+    accountLookupKeyByThreadLookupKey,
+    threadLookupKeys,
+  } = createHostedThreadRouteLookupKeyReadCandidates({
     accountLookupKey: input.accountLookupKey,
+    accountLookupKeys: input.accountLookupKeys,
     channel: input.channel,
     threadId: input.threadId,
   });
@@ -83,6 +89,7 @@ export async function readHostedThreadRouteByExternalThread(input: {
         },
       },
       containerMemberId: true,
+      threadLookupKey: true,
     },
     where: {
       channel: input.channel,
@@ -111,6 +118,16 @@ export async function readHostedThreadRouteByExternalThread(input: {
   }
 
   const row = rows[0]!;
+  const accountLookupKey = accountLookupKeyByThreadLookupKey.get(row.threadLookupKey);
+  if (!accountLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_LOOKUP_KEY_INVALID",
+      httpStatus: 500,
+      message: "External thread route matched an untracked lookup key.",
+      retryable: false,
+    });
+  }
+
   if (!isHostedExternalThreadChannel(row.channel)) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_ROUTE_CHANNEL_INVALID",
@@ -121,6 +138,7 @@ export async function readHostedThreadRouteByExternalThread(input: {
   }
 
   return {
+    accountLookupKey,
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
@@ -154,4 +172,47 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
     message: "External thread route egress is no longer authorized.",
     retryable: false,
   });
+}
+
+function createHostedThreadRouteLookupKeyReadCandidates(input: {
+  accountLookupKey?: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
+  channel: HostedThreadRouteChannel;
+  threadId: string | number | null | undefined;
+}): {
+  accountLookupKeyByThreadLookupKey: Map<string, string>;
+  threadLookupKeys: string[];
+} {
+  const accountLookupKeys = normalizeHostedThreadRouteAccountLookupKeys([
+    ...(input.accountLookupKeys ?? []),
+    input.accountLookupKey,
+  ]);
+  const accountLookupKeyByThreadLookupKey = new Map<string, string>();
+
+  for (const accountLookupKey of accountLookupKeys) {
+    const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
+      accountLookupKey,
+      channel: input.channel,
+      threadId: input.threadId,
+    });
+
+    for (const threadLookupKey of threadLookupKeys) {
+      accountLookupKeyByThreadLookupKey.set(threadLookupKey, accountLookupKey);
+    }
+  }
+
+  return {
+    accountLookupKeyByThreadLookupKey,
+    threadLookupKeys: [...accountLookupKeyByThreadLookupKey.keys()],
+  };
+}
+
+function normalizeHostedThreadRouteAccountLookupKeys(
+  values: readonly (string | null | undefined)[],
+): string[] {
+  const normalized = values
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0);
+
+  return [...new Set(normalized)];
 }

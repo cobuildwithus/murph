@@ -151,6 +151,7 @@ function createPrisma(input: {
             },
           },
           containerMemberId: routeContainerMemberId,
+          threadLookupKey: expected,
         },
       ];
     }),

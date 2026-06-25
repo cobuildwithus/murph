@@ -1441,6 +1441,7 @@ https://join.example.test/join/code_first_text`);
                 },
               },
               containerMemberId: "member_thread_container_123",
+              threadLookupKey: routeLookupKey,
             },
           ])
           .mockResolvedValueOnce([]),

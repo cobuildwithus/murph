@@ -66,7 +66,7 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
-  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import {
   readHostedThreadRouteByExternalThread,
@@ -125,8 +125,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
-  const threadRouteAccountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
-  if (!threadRouteAccountLookupKey) {
+  const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    recipientPhoneNumber,
+  );
+  if (threadRouteAccountLookupKeys.length === 0) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("missing-recipient-line"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -138,7 +140,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   const explicitThreadRoute = await readHostedThreadRouteByExternalThread({
-    accountLookupKey: threadRouteAccountLookupKey,
+    accountLookupKeys: threadRouteAccountLookupKeys,
     channel: "linq",
     prisma: input.prisma,
     threadId: summary.chatId,
@@ -149,7 +151,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
-      routeAccountLookupKey: threadRouteAccountLookupKey,
     });
   }
 
@@ -570,7 +571,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
-  routeAccountLookupKey: string;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
     messageEvent,
@@ -652,7 +652,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
     route: input.route,
-    routeAccountLookupKey: input.routeAccountLookupKey,
     threadId: summary.chatId,
   });
 
@@ -721,7 +720,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   }
 
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
-    accountLookupKey: input.routeAccountLookupKey,
+    accountLookupKey: input.route.accountLookupKey,
     eventId: input.event.event_id,
     linqMessage: {
       chatId: summary.chatId,
@@ -908,11 +907,10 @@ async function planHostedLinqInboundAdmissionDenied(input: {
 
 function buildHostedLinqThreadRouteEgressAuthority(input: {
   route: HostedThreadRouteSnapshot;
-  routeAccountLookupKey: string;
   threadId: string;
 }): HostedThreadRouteEgressAuthority {
   return {
-    accountLookupKey: input.routeAccountLookupKey,
+    accountLookupKey: input.route.accountLookupKey,
     channel: input.route.channel,
     containerMemberId: input.route.containerMemberId,
     threadId: input.threadId,
