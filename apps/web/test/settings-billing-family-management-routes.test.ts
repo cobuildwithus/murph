@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
   hostedAccountGroupFindUnique: vi.fn(),
-  hasActiveHostedFamilyAccess: vi.fn(),
   issueHostedFamilyInviteTx: vi.fn(),
   readHostedOnboardingEnvironment: vi.fn(),
   removeHostedFamilyMemberTx: vi.fn(),
@@ -34,7 +33,6 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   buildHostedFamilyInviteAcceptUrl: mocks.buildHostedFamilyInviteAcceptUrl,
   buildHostedFamilyTelegramInviteUrl: mocks.buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess: mocks.hasActiveHostedFamilyAccess,
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
@@ -69,7 +67,6 @@ beforeEach(async () => {
     publicBaseUrl: "https://app.murph.test",
     telegramBotUsername: "withmurph_bot",
   });
-  mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
   mocks.ensureHostedAccountGroupForOwnerTx.mockResolvedValue({
     id: "hbag_family",
     ownerMemberId: "member_owner",
@@ -203,8 +200,14 @@ test("rejects an empty invite target", async () => {
   expect(mocks.issueHostedFamilyInviteTx).not.toHaveBeenCalled();
 });
 
-test("rejects a sponsored member before issuing an invite", async () => {
-  mocks.hasActiveHostedFamilyAccess.mockResolvedValueOnce(true);
+test("delegates sponsored-member rejection to the owner group service before issuing an invite", async () => {
+  mocks.ensureHostedAccountGroupForOwnerTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      httpStatus: 409,
+      message: "This member is already in another active family plan.",
+    }),
+  );
 
   const response = await inviteRoute.POST(inviteRequest({ targetLabel: "Mom" }));
 
@@ -212,7 +215,15 @@ test("rejects a sponsored member before issuing an invite", async () => {
   await expect(response.json()).resolves.toMatchObject({
     error: { code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED" },
   });
-  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).toHaveBeenCalledWith({
+    ownerMemberId: "member_owner",
+    tx: {
+      hostedAccountGroup: {
+        findUnique: mocks.hostedAccountGroupFindUnique,
+      },
+    },
+  });
+  expect(mocks.issueHostedFamilyInviteTx).not.toHaveBeenCalled();
 });
 
 test("rejects cross-origin invite before reading the session", async () => {

@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
-  hasActiveHostedFamilyAccess: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
 }));
 
@@ -26,7 +25,6 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess: mocks.hasActiveHostedFamilyAccess,
 }));
 
 type BillingFamilyCheckoutRouteModule =
@@ -51,7 +49,6 @@ beforeEach(async () => {
     id: "hbag_family",
     ownerMemberId: "member_owner",
   });
-  mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
   mocks.createHostedFamilyBillingCheckout.mockResolvedValue({
     alreadyActive: false,
     url: "https://checkout.stripe.test/family",
@@ -80,10 +77,6 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     tx: {
       label: "tx",
     },
-  });
-  expect(mocks.hasActiveHostedFamilyAccess).toHaveBeenCalledWith({
-    memberId: "member_owner",
-    prisma: expect.any(Object),
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
     groupId: "hbag_family",
@@ -137,8 +130,14 @@ test("rejects cross-origin Family checkout before reading the session", async ()
   expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 
-test("rejects sponsored members before creating Family checkout", async () => {
-  mocks.hasActiveHostedFamilyAccess.mockResolvedValueOnce(true);
+test("delegates sponsored-member rejection to the owner group service", async () => {
+  mocks.ensureHostedAccountGroupForOwnerTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      httpStatus: 409,
+      message: "This member is already in another active family plan.",
+    }),
+  );
 
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
@@ -155,7 +154,12 @@ test("rejects sponsored members before creating Family checkout", async () => {
       code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
     },
   });
-  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).toHaveBeenCalledWith({
+    ownerMemberId: "member_owner",
+    tx: {
+      label: "tx",
+    },
+  });
   expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 

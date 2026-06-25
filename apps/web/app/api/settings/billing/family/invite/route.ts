@@ -5,7 +5,6 @@ import {
   buildHostedFamilyInviteAcceptUrl,
   buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess,
   issueHostedFamilyInviteTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -19,14 +18,6 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
   assertHostedMemberNotSuspended(auth.member);
-
-  if (await hasActiveHostedFamilyAccess({ memberId: auth.member.id, prisma })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
-      httpStatus: 409,
-      message: "You are in another family plan. Leave it before inviting your own family.",
-    });
-  }
 
   const body = await readOptionalJsonObject(request, { limitBytes: 2_048 });
   const targetLabel = typeof body.targetLabel === "string" ? body.targetLabel : null;

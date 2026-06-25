@@ -3,9 +3,7 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import {
   createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
@@ -21,17 +19,6 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request, {
     limitBytes: 1_024,
   });
-
-  if (await hasActiveHostedFamilyAccess({
-    memberId: auth.member.id,
-    prisma,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
-      httpStatus: 409,
-      message: "You already have sponsored Family access. Leave that Family plan before starting your own.",
-    });
-  }
 
   const group = await prisma.$transaction((tx) =>
     ensureHostedAccountGroupForOwnerTx({
