@@ -161,7 +161,6 @@ async function startScenario(): Promise<void> {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
@@ -171,6 +170,7 @@ async function startScenario(): Promise<void> {
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted stale deferred invocation e2e",
     streamLogs: streamDevLogs,
+    testControls: true,
   });
 }
 

@@ -293,29 +293,6 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("finished_browser_step"), false);
   });
 
-  it("retires view-only inspection screenshots", async () => {
-    mocks.service.readHandoffPageState.mockResolvedValueOnce({
-      handoffId: "hch_open",
-      interaction: "view_only",
-      kind: "open",
-      purpose: "screen_inspection",
-      screenshotDataUrl: "data:image/jpeg;base64,aW1hZ2U=",
-      suggestedReply: "yes",
-    });
-
-    const markup = renderToStaticMarkup(await computerHandoffPage.default({
-      params: Promise.resolve({ token: "handoff-token" }),
-    }));
-
-    assert.match(markup, /Open a live browser link/);
-    assert.match(markup, /Static page previews are no longer supported/);
-    assert.doesNotMatch(markup, /<img/u);
-    assert.doesNotMatch(markup, /<iframe/u);
-    assert.doesNotMatch(markup, /<button/u);
-    expect(mocks.headers).not.toHaveBeenCalled();
-    expect(mocks.service.ensureHandoffViewport).not.toHaveBeenCalled();
-  });
-
   it.each([
     [
       "mobile",

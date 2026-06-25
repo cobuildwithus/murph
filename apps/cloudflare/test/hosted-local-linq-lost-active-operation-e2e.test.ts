@@ -59,7 +59,6 @@ describe("hosted local Linq lost active-operation e2e", () => {
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         OPENAI_API_KEY: "stub-local-openai-key",
       },
       assistantProviderStubModelId: assistantModel,
@@ -69,6 +68,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Local hosted Linq lost active-operation e2e",
       streamLogs: streamDevLogs,
+      testControls: true,
     });
   }, 300_000);
 

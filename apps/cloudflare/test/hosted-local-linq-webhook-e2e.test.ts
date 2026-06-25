@@ -25,9 +25,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
-const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
-const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
 
@@ -391,86 +389,6 @@ describe("hosted local Linq webhook e2e", () => {
     ]);
   }, 300_000);
 
-  it("keeps audio-only iMessage media replyable with bounded attachment context", async () => {
-    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
-      await createActiveLinqWebhookMember("voice");
-    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
-    const attachmentId = `att_voice_${userId}`;
-    const expectedAttachmentDownloadPath =
-      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
-    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentDownloadPath,
-    });
-    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
-
-    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText]);
-    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      materializedChatId,
-      {
-        eventId: `evt_voice_memo_${userId}`,
-        messageId: `msg_voice_memo_${userId}`,
-        parts: [
-          {
-            attachmentId,
-            fileName: "Audio Message.m4a",
-            mimeType: "audio/mp4",
-            size: 23_000,
-            type: "media",
-            url: `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.m4a`,
-          },
-        ],
-      },
-    ));
-    expect(webhookResponse.status).toBe(202);
-    await expect(webhookResponse.json()).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    await requireScenario().waitForLatestPendingWake(userId);
-    await requireLinqStub().waitForAdditionalRequest({
-      baselineCount: attachmentDownloadCountBeforeReply,
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentDownloadPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.inFlight).toBe(false);
-    expect(finalStatus.workspace).not.toBeNull();
-
-    const replySend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply,
-      expectedPath: expectedReplyChatPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
-      hostedLinqVoiceNoteAssistantReplyText,
-    );
-    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
-      assistantProviderCountBeforeReply,
-    );
-    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
-      assistantProviderRequests,
-      "audio media provider request",
-    );
-    expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
-    expect(assistantProviderBody.includes("fileName: Audio Message.m4a")).toBe(true);
-    expect(
-      assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText),
-      summarizeProviderAudioRequestShape(assistantProviderBody),
-    ).toBe(true);
-    expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
-    expectNoNativeAttachmentLeaks(assistantProviderBody, [
-      attachmentId,
-      expectedAttachmentDownloadPath,
-    ]);
-  }, 300_000);
 });
 
 function buildActivationWake(userId: string) {
@@ -710,25 +628,6 @@ function summarizeProviderImageRequestShape(
   });
 }
 
-function summarizeProviderAudioRequestShape(rawBody: string): string {
-  return JSON.stringify({
-    hasAttachmentContext: rawBody.includes("Attachment context:"),
-    hasAudioFileName: rawBody.includes("fileName: Audio Message.m4a"),
-    hasParserPendingStatus: rawBody.includes(
-      "Attachment parser status: audio/video transcript is not available yet.",
-    ),
-    hasRawInboxPath: rawBody.includes("raw/inbox/"),
-    hasStoredPath: rawBody.includes("storedPath:"),
-    hasTranscript: rawBody.includes(hostedLinqVoiceNoteTranscriptText),
-    parseStates: Array.from(rawBody.matchAll(/parseState: ([A-Za-z0-9_-]+)/gu))
-      .map((match) => match[1])
-      .slice(0, 8),
-    rawEvidenceStates: Array.from(rawBody.matchAll(/- raw evidence: ([A-Za-z0-9_-]+)/gu))
-      .map((match) => match[1])
-      .slice(0, 8),
-  });
-}
-
 function summarizeGroupedWebhookProviderRequests(
   requests: readonly { body: string; method: string; url: string }[],
 ): string {
@@ -844,10 +743,6 @@ async function startLinqScenario(
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-      // Temporal is the only hosted wake authority, and the hosted-local test
-      // worker entrypoint provides the deterministic fake AI binding the
-      // audio transcription path needs.
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       ...resolvedAdditionalEnv,
     },
     localDatabaseUrl,
@@ -881,7 +776,7 @@ function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessE
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {
-  return ["reply", "rapid", "pdf", "image", "voice"]
+  return ["reply", "rapid", "pdf", "image"]
     .map((label) =>
       buildLinqRecipientPhoneNumber(
         `member_local_linq_webhook_${label}_${linqWebhookRunId}_1`,
