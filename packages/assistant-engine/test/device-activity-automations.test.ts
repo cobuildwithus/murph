@@ -1,4 +1,8 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import {
+  afterEach,
   beforeEach,
   describe,
   expect,
@@ -15,8 +19,8 @@ import {
 
 const deviceActivityMocks = vi.hoisted(() => ({
   automations: [] as AutomationQueryRecord[],
+  patchAutomation: vi.fn(),
   readModel: null as VaultReadModel | null,
-  upsertAutomation: vi.fn(),
 }))
 
 vi.mock('@murphai/core', () => ({
@@ -25,7 +29,7 @@ vi.mock('@murphai/core', () => ({
       timezone: 'UTC',
     },
   })),
-  upsertAutomation: deviceActivityMocks.upsertAutomation,
+  patchAutomation: deviceActivityMocks.patchAutomation,
 }))
 
 vi.mock('@murphai/query', async (importOriginal) => {
@@ -45,18 +49,27 @@ vi.mock('@murphai/query', async (importOriginal) => {
 
 import { scheduleDeviceActivityTriggeredAutomations } from '../src/assistant/device-activity-automations.ts'
 import { listCanonicalAssistantCronRecords } from '../src/assistant/cron/canonical-jobs.ts'
+import { readAssistantCronStore } from '../src/assistant/cron/store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 describe('device activity triggered automations', () => {
-  beforeEach(() => {
+  let vaultRoot: string
+
+  beforeEach(async () => {
+    vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-activity-'))
     deviceActivityMocks.automations = []
     deviceActivityMocks.readModel = createVaultReadModel({
       entities: [],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
-    deviceActivityMocks.upsertAutomation.mockReset()
-    deviceActivityMocks.upsertAutomation.mockResolvedValue({
+    deviceActivityMocks.patchAutomation.mockReset()
+    deviceActivityMocks.patchAutomation.mockResolvedValue({
       created: false,
     })
+  })
+
+  afterEach(async () => {
+    await rm(vaultRoot, { recursive: true, force: true })
   })
 
   it('schedules the first matching walk activity for assistant delivery', async () => {
@@ -81,13 +94,13 @@ describe('device activity triggered automations', () => {
           workoutType: 'walking',
         }),
       ],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
 
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
         now: () => '2026-06-07T12:01:00.000Z',
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 1,
@@ -95,17 +108,28 @@ describe('device activity triggered automations', () => {
       scheduled: 1,
     })
 
-    expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]).toEqual(
       expect.objectContaining({
-        automationId: 'auto_walk',
-        instructions: expect.stringContaining('Lunch walk'),
+        enabled: true,
+        keepAfterRun: false,
+        prompt: expect.stringContaining('Lunch walk'),
         schedule: {
           kind: 'at',
           at: '2026-06-07T12:01:00.000Z',
         },
-        status: 'active',
         tags: ['system:assistant-require-send'],
-        vaultRoot: '/vault',
+      }),
+    )
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_walk',
+        schedule: expect.objectContaining({
+          kind: 'deviceActivity',
+          after: '2026-06-07T12:00:00.000Z',
+        }),
+        vaultRoot,
       }),
     )
   })
@@ -155,13 +179,13 @@ describe('device activity triggered automations', () => {
           },
         }),
       ],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
 
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
         now: () => '2026-06-07T13:01:00.000Z',
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 3,
@@ -169,18 +193,15 @@ describe('device activity triggered automations', () => {
       scheduled: 3,
     })
 
-    const scheduled = deviceActivityMocks.upsertAutomation.mock.calls.map(([input]) => input)
-    expect(scheduled.map((input) => input.automationId)).toEqual([
-      'auto_basketball',
-      'auto_dancing',
-      'auto_surf',
-    ])
-    expect(scheduled[0]?.instructions).toContain('Kind: basketball')
-    expect(scheduled[0]?.instructions).toContain('Pickup basketball')
-    expect(scheduled[1]?.instructions).toContain('Kind: dancing')
-    expect(scheduled[1]?.instructions).toContain('Dance class')
-    expect(scheduled[2]?.instructions).toContain('Kind: surf')
-    expect(scheduled[2]?.instructions).toContain('Morning surf')
+    const scheduled = await readQueuedCronJobs(vaultRoot)
+    expect(scheduled).toHaveLength(3)
+    expect(scheduled[0]?.prompt).toContain('Kind: basketball')
+    expect(scheduled[0]?.prompt).toContain('Pickup basketball')
+    expect(scheduled[1]?.prompt).toContain('Kind: dancing')
+    expect(scheduled[1]?.prompt).toContain('Dance class')
+    expect(scheduled[2]?.prompt).toContain('Kind: surf')
+    expect(scheduled[2]?.prompt).toContain('Morning surf')
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledTimes(3)
   })
 
   it('schedules WHOOP sleep sessions when the activity kind is sleep or a sleep alias', async () => {
@@ -208,13 +229,13 @@ describe('device activity triggered automations', () => {
           title: 'Junction sleep',
         }),
       ],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
 
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
         now: () => '2026-06-07T12:01:00.000Z',
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 2,
@@ -222,22 +243,17 @@ describe('device activity triggered automations', () => {
       scheduled: 2,
     })
 
-    expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
+    const scheduled = await readQueuedCronJobs(vaultRoot)
+    expect(scheduled).toHaveLength(2)
+    expect(scheduled[0]?.prompt).toContain('Kind: sleep')
+    expect(scheduled[0]?.prompt).toContain('Junction sleep')
+    expect(scheduled[1]?.prompt).toContain('Kind: sleep-cycle')
+    expect(scheduled[1]?.prompt).toContain('Junction sleep')
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
-        automationId: 'auto_sleep',
-        instructions: expect.stringContaining('Kind: sleep'),
-        schedule: {
-          kind: 'at',
-          at: '2026-06-07T12:01:00.000Z',
-        },
-        status: 'active',
+        lookup: 'auto_sleep',
       }),
     )
-    const scheduled = deviceActivityMocks.upsertAutomation.mock.calls.map(([input]) => input)
-    expect(scheduled.map((input) => input.automationId)).toEqual(['auto_sleep', 'auto_sleep_cycle'])
-    expect(scheduled[0]?.instructions).toContain('Junction sleep')
-    expect(scheduled[1]?.instructions).toContain('Kind: sleep-cycle')
-    expect(scheduled[1]?.instructions).toContain('Junction sleep')
   })
 
   it('uses the recorded import time for trigger windows and accepts workout selectors', async () => {
@@ -259,13 +275,13 @@ describe('device activity triggered automations', () => {
           workoutType: 'Cycling',
         }),
       ],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
 
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
         now: () => '2026-06-07T12:06:00.000Z',
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 1,
@@ -273,19 +289,81 @@ describe('device activity triggered automations', () => {
       scheduled: 1,
     })
 
-    expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
+    const [job] = await readQueuedCronJobs(vaultRoot)
+    expect(job).toEqual(
       expect.objectContaining({
-        automationId: 'auto_workout',
-        instructions: expect.stringContaining('Recorded at: 2026-06-07T12:05:00.000Z'),
+        prompt: expect.stringContaining('Recorded at: 2026-06-07T12:05:00.000Z'),
         schedule: {
           kind: 'at',
           at: '2026-06-07T12:06:00.000Z',
         },
       }),
     )
-    const instructions = deviceActivityMocks.upsertAutomation.mock.calls[0]?.[0].instructions
+    const instructions = job?.prompt ?? ''
     expect(instructions).toContain('Occurred at: 2026-06-07T11:30:00.000Z')
     expect(instructions).toContain('Late imported ride')
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_workout',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T12:05:00.000Z',
+        }),
+      }),
+    )
+  })
+
+  it('queues every new matching activity and advances the listener cursor once', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_run',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_1',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Morning run',
+          workoutType: 'Running',
+        }),
+        createActivityEntity({
+          entityId: 'evt_run_2',
+          occurredAt: '2026-06-07T13:00:00.000Z',
+          title: 'Afternoon run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T13:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 2,
+      nextWakeAt: '2026-06-07T13:01:00.000Z',
+      scheduled: 2,
+    })
+
+    const scheduled = await readQueuedCronJobs(vaultRoot)
+    expect(scheduled).toHaveLength(2)
+    expect(scheduled[0]?.prompt).toContain('Morning run')
+    expect(scheduled[1]?.prompt).toContain('Afternoon run')
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledTimes(1)
+    expect(deviceActivityMocks.patchAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookup: 'auto_run',
+        schedule: expect.objectContaining({
+          after: '2026-06-07T13:00:00.000Z',
+          kind: 'deviceActivity',
+        }),
+      }),
+    )
   })
 
   it('returns an assistant wake for an already due activity reminder handoff', async () => {
@@ -298,7 +376,7 @@ describe('device activity triggered automations', () => {
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
         now: () => '2026-06-07T12:02:00.000Z',
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 0,
@@ -306,7 +384,52 @@ describe('device activity triggered automations', () => {
       scheduled: 0,
     })
 
-    expect(deviceActivityMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(deviceActivityMocks.patchAutomation).not.toHaveBeenCalled()
+  })
+
+  it('returns an assistant wake for a due local device activity occurrence', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'walk',
+        after: '2026-06-07T11:00:00.000Z',
+        source: 'whoop',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_walk',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Lunch walk',
+          workoutType: 'walking',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await scheduleDeviceActivityTriggeredAutomations({
+      now: () => '2026-06-07T12:01:00.000Z',
+      vault: vaultRoot,
+    })
+    deviceActivityMocks.automations = []
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [],
+      vaultRoot,
+    })
+    deviceActivityMocks.patchAutomation.mockReset()
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:02:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: '2026-06-07T12:02:00.000Z',
+      scheduled: 0,
+    })
+
+    expect(deviceActivityMocks.patchAutomation).not.toHaveBeenCalled()
   })
 
   it('does not fire when a walk filter only sees non-walk activity', async () => {
@@ -326,12 +449,12 @@ describe('device activity triggered automations', () => {
           workoutType: 'strength',
         }),
       ],
-      vaultRoot: '/vault',
+      vaultRoot,
     })
 
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
-        vault: '/vault',
+        vault: vaultRoot,
       }),
     ).resolves.toEqual({
       matched: 0,
@@ -339,7 +462,8 @@ describe('device activity triggered automations', () => {
       scheduled: 0,
     })
 
-    expect(deviceActivityMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(await readQueuedCronJobs(vaultRoot)).toEqual([])
+    expect(deviceActivityMocks.patchAutomation).not.toHaveBeenCalled()
   })
 
   it('does not project device activity automations into assistant cron jobs', async () => {
@@ -350,9 +474,14 @@ describe('device activity triggered automations', () => {
       }),
     ]
 
-    await expect(listCanonicalAssistantCronRecords('/vault')).resolves.toEqual([])
+    await expect(listCanonicalAssistantCronRecords(vaultRoot)).resolves.toEqual([])
   })
 })
+
+async function readQueuedCronJobs(vaultRoot: string) {
+  const store = await readAssistantCronStore(resolveAssistantStatePaths(vaultRoot))
+  return store.jobs
+}
 
 function createDueRequireSendAutomation(input: {
   at: string

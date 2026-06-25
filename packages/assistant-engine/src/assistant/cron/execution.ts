@@ -638,11 +638,19 @@ function resolveAssistantCronTurnServiceTier(input: {
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
-  return job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    job.source.tags.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+  return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
+}
+
+function listAssistantCronNotificationTags(
+  job: ResolvedAssistantCronJob,
+): readonly string[] {
+  if (job.kind === 'canonical' && job.source.kind === 'automation') {
+    return job.source.tags
+  }
+
+  return job.job.tags ?? []
 }
 
 function finalizeAssistantCronJobAfterRun(input: {

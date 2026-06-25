@@ -1,4 +1,5 @@
-import { upsertAutomation } from '@murphai/core'
+import { createHash } from 'node:crypto'
+import { patchAutomation } from '@murphai/core'
 import {
   listAutomations,
   readVaultRawTolerant,
@@ -6,7 +7,21 @@ import {
   type VaultReadModel,
 } from '@murphai/query'
 import type { AutomationSchedule } from '@murphai/contracts'
+import {
+  assistantCronJobSchema,
+  assistantCronTargetSchema,
+  type AssistantCronJob,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
+import { withAssistantCronWriteLock } from './cron/locking.js'
+import {
+  ensureAssistantCronState,
+  isAssistantCronJobDue,
+  readAssistantCronStore,
+  sortAssistantCronJobs,
+  writeAssistantCronStore,
+} from './cron/store.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
 
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
@@ -54,10 +69,12 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
   input: ScheduleDeviceActivityTriggeredAutomationsInput & { nowIso: string },
 ): Promise<ScheduleDeviceActivityTriggeredAutomationsResult> {
   const automations = await listAutomations(input.vault, { status: ['active'] })
-  const hasDueScheduledActivityReminder = hasDueAssistantRequireSendAutomation({
-    automations,
-    nowIso: input.nowIso,
-  })
+  const hasDueScheduledActivityReminder =
+    hasDueAssistantRequireSendAutomation({
+      automations,
+      nowIso: input.nowIso,
+    }) ||
+    await hasDueAssistantRequireSendCronJob(input)
   const deviceActivityAutomations = automations.filter(isDeviceActivityAutomation)
 
   if (deviceActivityAutomations.length === 0) {
@@ -78,28 +95,48 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
       break
     }
 
-    const activity = findMatchingDeviceActivity({
+    const activities = listMatchingDeviceActivities({
       automation,
       candidates: activityCandidates,
     })
 
-    if (!activity) {
+    if (activities.length === 0) {
       continue
     }
 
-    matched += 1
-    await scheduleDeviceActivityAutomationNotification({
-      activity,
+    const processedActivities: MatchedDeviceActivity[] = []
+    for (const activity of activities) {
+      if (input.signal?.aborted) {
+        break
+      }
+
+      const enqueued = await scheduleDeviceActivityAutomationNotification({
+        activity,
+        automation,
+        nowIso: input.nowIso,
+        vault: input.vault,
+      })
+      processedActivities.push(activity)
+      if (enqueued) {
+        scheduled += 1
+      }
+    }
+
+    if (processedActivities.length === 0) {
+      continue
+    }
+
+    matched += processedActivities.length
+    await advanceDeviceActivityAutomationCursor({
+      activities: processedActivities,
       automation,
-      nowIso: input.nowIso,
       vault: input.vault,
     })
-    scheduled += 1
   }
 
   return {
     matched,
-    nextWakeAt: scheduled > 0 || hasDueScheduledActivityReminder
+    nextWakeAt: scheduled > 0 || matched > 0 || hasDueScheduledActivityReminder
       ? input.nowIso
       : null,
     scheduled,
@@ -132,6 +169,19 @@ function hasDueAssistantRequireSendAutomation(input: {
   })
 }
 
+async function hasDueAssistantRequireSendCronJob(input: {
+  nowIso: string
+  vault: string
+}): Promise<boolean> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  const store = await readAssistantCronStore(paths)
+
+  return store.jobs.some((job) =>
+    job.tags?.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG) === true &&
+    isAssistantCronJobDue(job, input.nowIso)
+  )
+}
+
 function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCandidate[] {
   return vault.events
     .filter(isDeviceActivityEventEntity)
@@ -153,17 +203,25 @@ function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCand
     })
 }
 
-function findMatchingDeviceActivity(input: {
+function listMatchingDeviceActivities(input: {
   automation: DeviceActivityAutomation
   candidates: readonly DeviceActivityCandidate[]
-}): MatchedDeviceActivity | null {
-  const [candidate] = input.candidates
+}): MatchedDeviceActivity[] {
+  return input.candidates
     .filter((entry) => Date.parse(entry.triggeredAt) > Date.parse(input.automation.schedule.after))
     .filter((entry) => deviceActivitySourceMatches(entry, input.automation.schedule.source))
     .filter((entry) => deviceActivityKindMatches(entry, input.automation.schedule.activityKind))
-    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt))
+    .sort(compareDeviceActivityCandidates)
+    .map((candidate) => buildMatchedDeviceActivity(input.automation, candidate))
+}
 
-  return candidate ? buildMatchedDeviceActivity(input.automation, candidate) : null
+function compareDeviceActivityCandidates(
+  left: DeviceActivityCandidate,
+  right: DeviceActivityCandidate,
+): number {
+  return Date.parse(left.triggeredAt) - Date.parse(right.triggeredAt)
+    || Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
+    || left.entityId.localeCompare(right.entityId)
 }
 
 function buildMatchedDeviceActivity(
@@ -331,23 +389,124 @@ async function scheduleDeviceActivityAutomationNotification(input: {
   automation: DeviceActivityAutomation
   nowIso: string
   vault: string
-}): Promise<void> {
-  await upsertAutomation({
-    vaultRoot: input.vault,
-    automationId: input.automation.automationId,
-    continuityPolicy: input.automation.continuityPolicy,
-    instructions: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
-    route: input.automation.route,
+}): Promise<boolean> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantCronState(paths)
+  const job = buildDeviceActivityAutomationNotificationJob(input)
+
+  return await withAssistantCronWriteLock(paths, async () => {
+    const store = await readAssistantCronStore(paths)
+    if (store.jobs.some((existing) => existing.jobId === job.jobId)) {
+      return false
+    }
+
+    store.jobs = sortAssistantCronJobs([...store.jobs, job])
+    await writeAssistantCronStore(paths, store)
+    return true
+  })
+}
+
+function buildDeviceActivityAutomationNotificationJob(input: {
+  activity: MatchedDeviceActivity
+  automation: DeviceActivityAutomation
+  nowIso: string
+}): AssistantCronJob {
+  const jobId = buildDeviceActivityAutomationNotificationJobId(input)
+  return assistantCronJobSchema.parse({
+    schema: 'murph.assistant-cron-job.v1',
+    jobId,
+    name: buildDeviceActivityAutomationNotificationJobName(input, jobId),
+    enabled: true,
+    keepAfterRun: false,
+    prompt: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
     schedule: {
       kind: 'at',
       at: input.nowIso,
     },
-    slug: input.automation.slug,
-    status: 'active',
-    ...(input.automation.summary ? { summary: input.automation.summary } : {}),
     tags: mergeAutomationTags(input.automation.tags, [ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG]),
-    title: input.automation.title,
+    target: buildDeviceActivityAutomationNotificationTarget(input.automation),
+    createdAt: input.nowIso,
+    updatedAt: input.nowIso,
+    state: {
+      nextRunAt: input.nowIso,
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      consecutiveFailures: 0,
+      lastError: null,
+      runningAt: null,
+      runningPid: null,
+    },
   })
+}
+
+function buildDeviceActivityAutomationNotificationJobId(input: {
+  activity: MatchedDeviceActivity
+  automation: DeviceActivityAutomation
+}): string {
+  const digest = createHash('sha256')
+    .update(input.automation.automationId)
+    .update('\0')
+    .update(input.activity.entityId)
+    .update('\0')
+    .update(input.activity.triggeredAt)
+    .digest('hex')
+    .slice(0, 40)
+  return `cron_device_activity_${digest}`
+}
+
+function buildDeviceActivityAutomationNotificationJobName(input: {
+  activity: MatchedDeviceActivity
+  automation: DeviceActivityAutomation
+}, jobId: string): string {
+  const suffix = jobId.slice(-8)
+  return `${input.automation.title} (${input.activity.activityKind} at ${input.activity.occurredAt}, ${suffix})`
+}
+
+function buildDeviceActivityAutomationNotificationTarget(
+  automation: DeviceActivityAutomation,
+): AssistantCronJob['target'] {
+  return assistantCronTargetSchema.parse({
+    sessionId: null,
+    alias: null,
+    channel: automation.route.channel,
+    deliverySource: automation.route.deliverySource,
+    deliveryTarget: automation.route.deliveryTarget,
+    identityId: automation.route.identityId,
+    participantId: automation.route.participantId,
+    threadId: automation.route.threadId,
+  })
+}
+
+async function advanceDeviceActivityAutomationCursor(input: {
+  activities: readonly MatchedDeviceActivity[]
+  automation: DeviceActivityAutomation
+  vault: string
+}): Promise<void> {
+  const after = resolveLatestDeviceActivityTriggeredAt(input.activities)
+  if (!after || after === input.automation.schedule.after) {
+    return
+  }
+
+  await patchAutomation({
+    vaultRoot: input.vault,
+    lookup: input.automation.automationId,
+    schedule: {
+      ...input.automation.schedule,
+      after,
+    },
+  })
+}
+
+function resolveLatestDeviceActivityTriggeredAt(
+  activities: readonly MatchedDeviceActivity[],
+): string | null {
+  return activities.reduce<string | null>((latest, activity) => {
+    if (!latest || Date.parse(activity.triggeredAt) > Date.parse(latest)) {
+      return activity.triggeredAt
+    }
+    return latest
+  }, null)
 }
 
 function buildDeviceActivityAutomationInstructions(

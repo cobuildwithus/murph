@@ -1133,6 +1133,7 @@ export const assistantCronJobSchema = z
     keepAfterRun: z.boolean(),
     prompt: z.string().min(1),
     schedule: assistantCronScheduleSchema,
+    tags: z.array(z.string().min(1)).optional(),
     target: assistantCronTargetSchema,
     scheduledLog: assistantCronScheduledLogSchema.optional(),
     createdAt: isoTimestampSchema,
