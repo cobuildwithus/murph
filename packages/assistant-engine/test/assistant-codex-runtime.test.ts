@@ -10051,13 +10051,10 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('releases the final turn when current-channel progress never settles', async () => {
+  it('keeps the final turn pending while current-channel progress remains unsettled', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-drain-timeout-')
     const stalledProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
     const progressDelivery = {
-      close: vi.fn(() => {
-        stalledProgress.resolve(sentProgressResult())
-      }),
       send: vi.fn(async (_text: string) => {
         void _text
         return await stalledProgress.promise
@@ -10136,10 +10133,13 @@ describe('assistant codex runtime', () => {
       return child
     })
 
+    let settled = false
     const turnPromise = executeCodexAppServerTurn({
       prompt: 'answer with stalled progress',
       progressDelivery,
       workingDirectory,
+    }).finally(() => {
+      settled = true
     })
 
     for (
@@ -10154,12 +10154,15 @@ describe('assistant codex runtime', () => {
       { source: 'model' },
     )
 
+    await new Promise((resolve) => setTimeout(resolve, 2_100))
+    expect(settled).toBe(false)
+
+    stalledProgress.resolve(sentProgressResult())
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after stalled progress.',
       sessionId: 'thread-progress-drain-timeout',
       turnId: 'turn-progress-drain-timeout',
     })
-    expect(progressDelivery.close).toHaveBeenCalledTimes(1)
   })
 
   it('returns unavailable for progress tool calls when no progress sink exists', async () => {
