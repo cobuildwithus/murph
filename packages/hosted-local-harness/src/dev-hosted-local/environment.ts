@@ -952,11 +952,11 @@ export function buildWranglerLocalDevConfig(
     }
   }
 
-  const requiredSecrets = [
+  const requiredSecrets = [...new Set([
     ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
     ...HOSTED_WORKER_OPTIONAL_SECRET_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
     ...WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
-  ];
+  ])];
   const runnerContainerImage = toWranglerConfigRelativePath(
     configDir,
     path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
