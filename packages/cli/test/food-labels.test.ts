@@ -7,6 +7,7 @@ import {
 } from '../src/food-labels.js'
 
 const hostedRuntimeEnv = {
+  MURPH_DATA_API_KEY: 'signed-murph-data-api-credential',
   MURPH_HOSTED_RUNTIME_PROCESS: '1',
 }
 
@@ -117,7 +118,7 @@ const yogurtContaminants = {
 }
 
 describe('searchFoodLabels', () => {
-  it('calls the internal foods API without local authorization headers or hosted web config', async () => {
+  it('calls the internal foods API with the hosted provider credential', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [
         {
@@ -182,9 +183,9 @@ describe('searchFoodLabels', () => {
       : init?.headers
     assert.equal(
       headers && !Array.isArray(headers)
-        ? Object.hasOwn(headers, 'authorization')
-        : false,
-      false,
+        ? headers.authorization
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
     )
   })
 
@@ -453,9 +454,9 @@ describe('searchFoodLabelsBatch', () => {
       : init?.headers
     assert.equal(
       headers && !Array.isArray(headers)
-        ? Object.hasOwn(headers, 'authorization')
-        : false,
-      false,
+        ? headers.authorization
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
     )
     assert.equal(
       headers && !Array.isArray(headers)

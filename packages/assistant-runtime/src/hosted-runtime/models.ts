@@ -33,6 +33,7 @@ export type HostedAssistantRuntimeParserToolName =
   | "whisper";
 
 export interface HostedAssistantRuntimeParserToolConfig {
+  authorizationHeader?: string;
   command?: string;
   endpoint?: string;
   modelPath?: string;

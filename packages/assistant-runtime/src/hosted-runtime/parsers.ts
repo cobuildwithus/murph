@@ -244,6 +244,15 @@ function parseHostedAssistantRuntimeParserToolConfig(
   const record = requireObject(value, label);
   const config: HostedAssistantRuntimeParserToolConfig = {};
 
+  if (record.authorizationHeader !== undefined) {
+    config.authorizationHeader = requireString(
+      record.authorizationHeader,
+      `${label}.authorizationHeader`,
+    ).trim();
+    if (config.authorizationHeader.length === 0) {
+      throw new TypeError(`${label}.authorizationHeader must be a non-empty string.`);
+    }
+  }
   if (record.command !== undefined) {
     config.command = parseAbsoluteToolPath(record.command, `${label}.command`);
   }

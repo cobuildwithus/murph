@@ -1,3 +1,4 @@
+import type { HostedLinqFirstContactAdmissionRequest } from "./linq-first-contact-admission";
 import type { HostedLinqMessageSideEffect } from "./webhook-transport";
 import type { HostedWebhookPlan } from "./webhook-service-types";
 
@@ -11,4 +12,5 @@ export type HostedOnboardingLinqWebhookResponse = {
 };
 
 export type HostedOnboardingLinqDirectPlan =
-  HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>;
+  HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>
+  & { firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest };

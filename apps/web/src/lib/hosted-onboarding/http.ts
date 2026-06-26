@@ -32,6 +32,10 @@ const HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN =
 const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
   "code",
   "operationName",
+  "providerErrorCode",
+  "providerErrorMessage",
+  "providerErrorType",
+  "providerRequestIdPresent",
   "requestIdPresent",
   "stripeParam",
   "statusCode",

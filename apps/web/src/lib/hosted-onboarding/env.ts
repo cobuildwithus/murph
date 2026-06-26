@@ -19,6 +19,10 @@ export interface HostedContactPrivacyKeyring {
   readVersions: readonly string[];
 }
 
+export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
+
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.4-nano";
+
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];
   contactPrivacyKeyring: HostedContactPrivacyKeyring;
@@ -27,6 +31,9 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
+  linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
+  linqFirstContactAdmissionModel: string;
+  linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
@@ -63,6 +70,13 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqFirstContactAdmissionMode: readHostedLinqFirstContactAdmissionMode(source),
+    linqFirstContactAdmissionModel:
+      readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL")
+      ?? DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL,
+    linqFirstContactAdmissionOpenAiApiKey:
+      readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
+      ?? readEnv(source, "OPENAI_API_KEY"),
     linqLocalAllowedInboundPhoneNumbers:
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
@@ -349,6 +363,24 @@ function readHostedLinqLocalAllowedInboundPhoneNumbers(
     configured,
     "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS",
     false,
+  );
+}
+
+function readHostedLinqFirstContactAdmissionMode(
+  source: HostedOnboardingEnvSource,
+): HostedLinqFirstContactAdmissionMode {
+  const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE");
+  if (!configured) {
+    return "off";
+  }
+
+  const normalized = configured.trim().toLowerCase();
+  if (normalized === "enforce" || normalized === "off") {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE must be either \"off\" or \"enforce\".",
   );
 }
 
