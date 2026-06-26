@@ -206,7 +206,7 @@ async function connectHostedCodexManagedAccount(input: {
     action: "connect",
     codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
     codexHome: input.codexHome,
-    env: { ...input.runtimeEnv },
+    env: buildCodexManagedAccountOperationEnv(input.runtimeEnv),
     onDeviceCode: async ({ userCode, verificationUrl }) => {
       await input.platform.codexAuthPort?.update({
         attemptId: input.wake.attemptId,
@@ -234,7 +234,7 @@ async function disconnectHostedCodexManagedAccountBestEffort(input: {
       action: "disconnect",
       codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
       codexHome: input.codexHome,
-      env: { ...input.runtimeEnv },
+      env: buildCodexManagedAccountOperationEnv(input.runtimeEnv),
       workingDirectory: input.vaultRoot,
     });
   } catch (error) {
@@ -256,4 +256,14 @@ async function disconnectHostedCodexManagedAccountBestEffort(input: {
   } catch (error) {
     throw new HostedCodexAuthLocalDeleteError(error);
   }
+}
+
+function buildCodexManagedAccountOperationEnv(
+  runtimeEnv: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...runtimeEnv };
+  // Codex account management must inspect stored ChatGPT auth, not provider
+  // egress credentials that are valid only for normal hosted OpenAI calls.
+  delete env.OPENAI_API_KEY;
+  return env;
 }
