@@ -2201,7 +2201,7 @@ test("importDeviceProviderSnapshot keys current WHOOP body snapshots by vault lo
   }
 });
 
-test("importDeviceProviderSnapshot supersedes direct WHOOP body measurements keyed by UTC day", async () => {
+test("importDeviceProviderSnapshot supersedes date-only direct WHOOP body measurements keyed by UTC day", async () => {
   const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-legacy-ref");
   try {
     await coreRuntime.initializeVault({
@@ -2217,8 +2217,8 @@ test("importDeviceProviderSnapshot supersedes direct WHOOP body measurements key
       importedAt: "2026-06-25T12:00:00.000Z",
       events: [{
         kind: "observation",
-        occurredAt: "2026-06-25T03:30:00.000Z",
-        recordedAt: "2026-06-25T03:30:00.000Z",
+        occurredAt: "2026-06-25T12:00:00.000Z",
+        recordedAt: "2026-06-25T12:00:00.000Z",
         dayKey: "2026-06-25",
         title: "WHOOP weight",
         externalRef: {
@@ -2243,7 +2243,7 @@ test("importDeviceProviderSnapshot supersedes direct WHOOP body measurements key
           accountId: "whoop-user-1",
           importedAt: "2026-06-25T12:00:00.000Z",
           bodyMeasurements: {
-            measured_at: "2026-06-25T03:30:00.000Z",
+            date: "2026-06-24",
             updated_at: "2026-06-25T12:00:00.000Z",
             weight_kilogram: 78.2,
           },
@@ -2271,8 +2271,8 @@ test("importDeviceProviderSnapshot supersedes direct WHOOP body measurements key
     );
 
     assert.equal(replayWeight?.id, legacyWeight?.id);
-    assert.equal(replayWeight?.occurredAt, "2026-06-25T03:30:00.000Z");
-    assert.equal(replayWeight?.recordedAt, "2026-06-25T03:30:00.000Z");
+    assert.equal(replayWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(replayWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
     assert.equal(replayWeight?.dayKey, "2026-06-24");
     assert.equal(replayWeight?.externalRef?.resourceId, "date:2026-06-24");
     assert.equal(liveWeightRecords.length, 1);

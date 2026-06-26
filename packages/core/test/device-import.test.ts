@@ -17,6 +17,7 @@ import {
   readIntegrationIngestById,
   readJsonlRecords,
   repairJunctionWorkoutHeartRateZones,
+  upsertEvent,
   VaultError,
 } from "../src/index.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
@@ -3693,6 +3694,113 @@ test("importDeviceBatch repairs proven legacy refs after a no-externalRef edit",
   assert.equal(repaired.events[0]?.id, eventId);
   assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
   assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
+});
+
+test("importDeviceBatch repairs proven legacy refs after no-externalRef edits move shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-cross-shard");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-stress-level",
+    resourceId: "2026-06-01:stress_level:daily:garmin:watch",
+    facet: "stress-level",
+  };
+  const currentExternalRef = {
+    ...legacyExternalRef,
+    resourceId: "2026-05-31:stress_level:daily:garmin:watch",
+  };
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    observedAtRaw: "2026-06-01:stress_level:daily",
+    timestampSemantics: "offset" as const,
+  };
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-01T12:00:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-01T01:30:00.000Z",
+      recordedAt: "2026-06-01T01:30:00.000Z",
+      dayKey: "2026-06-01",
+      title: "Junction stress level",
+      externalRef: legacyExternalRef,
+      dataOrigin,
+      fields: {
+        metric: "stress-level",
+        observationGrain: "summary",
+        value: 44,
+        unit: "score",
+      },
+    }],
+  });
+  const eventId = first.events[0]?.id as string;
+  const edited = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: eventId,
+      kind: "observation",
+      occurredAt: "2026-05-31T23:30:00.000Z",
+      recordedAt: "2026-06-01T12:30:00.000Z",
+      dayKey: "2026-05-31",
+      title: "Junction stress level",
+      note: "user-added context",
+      metric: "stress-level",
+      observationGrain: "summary",
+      value: 44,
+      unit: "score",
+    } satisfies Record<string, unknown>,
+  });
+  const repaired = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-01T13:00:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-05-31T23:30:00.000Z",
+      recordedAt: "2026-06-01T13:00:00.000Z",
+      dayKey: "2026-05-31",
+      title: "Junction stress level",
+      externalRef: currentExternalRef,
+      legacyExternalRefs: [legacyExternalRef],
+      dataOrigin: {
+        ...dataOrigin,
+        observedAtRaw: "2026-05-31:stress_level:daily",
+      },
+      fields: {
+        metric: "stress-level",
+        observationGrain: "summary",
+        value: 44,
+        unit: "score",
+      },
+    }],
+  });
+  const records = (
+    await Promise.all(
+      [...new Set([
+        ...first.eventShardPaths,
+        edited.ledgerFile,
+        ...repaired.eventShardPaths,
+      ])].map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
+    )
+  ).flat() as EventRecord[];
+  const stressIds = new Set(
+    records
+      .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+      .map((record) => record.id),
+  );
+
+  assert.equal(repaired.events[0]?.id, eventId);
+  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
+  assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
+  assert.deepEqual([...stressIds], [eventId]);
 });
 
 test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {

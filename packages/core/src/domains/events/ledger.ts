@@ -305,7 +305,6 @@ export async function findEventByExternalRef(
     extension: ".jsonl",
   });
   const candidateIds = new Set<string>();
-  const latestById = new Map<string, MatchedEventRecord>();
 
   for (const relativePath of relativePaths) {
     const records = await readJsonlRecords({
@@ -315,12 +314,6 @@ export async function findEventByExternalRef(
 
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-      const entry = { relativePath, record };
-      const latest = latestById.get(record.id);
-
-      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
-        latestById.set(record.id, entry);
-      }
 
       if (externalRefMatches(record, input)) {
         candidateIds.add(record.id);
@@ -328,16 +321,34 @@ export async function findEventByExternalRef(
     }
   }
 
-  const matches: MatchedEventRecord[] = [];
-  for (const candidateId of candidateIds) {
-    const latest = latestById.get(candidateId);
+  if (candidateIds.size === 0) {
+    return null;
+  }
 
-    if (latest && externalRefMatches(latest.record, input)) {
-      matches.push(latest);
+  const latestByCandidateId = new Map<string, MatchedEventRecord>();
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    });
+
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (!candidateIds.has(record.id)) {
+        continue;
+      }
+
+      const entry = { relativePath, record };
+      const latest = latestByCandidateId.get(record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
+        latestByCandidateId.set(record.id, entry);
+      }
     }
   }
 
-  const latest = selectLatestEventSpineEntry(matches);
+  const latest = selectLatestEventSpineEntry(
+    [...latestByCandidateId.values()].filter((entry) => externalRefMatches(entry.record, input)),
+  );
   if (!latest || isDeletedEventSpineRecord(latest.record)) {
     return null;
   }
