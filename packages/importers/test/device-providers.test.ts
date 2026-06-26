@@ -2201,7 +2201,7 @@ test("importDeviceProviderSnapshot keys current WHOOP body snapshots by vault lo
   }
 });
 
-test("importDeviceProviderSnapshot does not auto-alias timestamp-less cross-day WHOOP legacy refs", async () => {
+test("importDeviceProviderSnapshot supersedes direct WHOOP body measurements keyed by UTC day", async () => {
   const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-legacy-ref");
   try {
     await coreRuntime.initializeVault({
@@ -2217,8 +2217,8 @@ test("importDeviceProviderSnapshot does not auto-alias timestamp-less cross-day 
       importedAt: "2026-06-25T12:00:00.000Z",
       events: [{
         kind: "observation",
-        occurredAt: "2026-06-25T12:00:00.000Z",
-        recordedAt: "2026-06-25T12:00:00.000Z",
+        occurredAt: "2026-06-25T03:30:00.000Z",
+        recordedAt: "2026-06-25T03:30:00.000Z",
         dayKey: "2026-06-25",
         title: "WHOOP weight",
         externalRef: {
@@ -2243,7 +2243,7 @@ test("importDeviceProviderSnapshot does not auto-alias timestamp-less cross-day 
           accountId: "whoop-user-1",
           importedAt: "2026-06-25T12:00:00.000Z",
           bodyMeasurements: {
-            date: "2026-06-24",
+            measured_at: "2026-06-25T03:30:00.000Z",
             updated_at: "2026-06-25T12:00:00.000Z",
             weight_kilogram: 78.2,
           },
@@ -2270,15 +2270,14 @@ test("importDeviceProviderSnapshot does not auto-alias timestamp-less cross-day 
       (record) => record.kind === "observation" && record.metric === "weight",
     );
 
-    assert.notEqual(replayWeight?.id, legacyWeight?.id);
-    assert.equal(replayWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
-    assert.equal(replayWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
+    assert.equal(replayWeight?.id, legacyWeight?.id);
+    assert.equal(replayWeight?.occurredAt, "2026-06-25T03:30:00.000Z");
+    assert.equal(replayWeight?.recordedAt, "2026-06-25T03:30:00.000Z");
+    assert.equal(replayWeight?.dayKey, "2026-06-24");
     assert.equal(replayWeight?.externalRef?.resourceId, "date:2026-06-24");
-    assert.equal(liveWeightRecords.length, 2);
-    assert.deepEqual(
-      liveWeightRecords.map((record) => storedExternalRefResourceId(record)).sort(),
-      ["2026-06-25", "date:2026-06-24"],
-    );
+    assert.equal(liveWeightRecords.length, 1);
+    assert.equal(liveWeightRecords[0]?.id, legacyWeight?.id);
+    assert.equal(storedExternalRefResourceId(liveWeightRecords[0]), "date:2026-06-24");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

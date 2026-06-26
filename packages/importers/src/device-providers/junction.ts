@@ -1822,7 +1822,7 @@ function pushWorkoutSummary(
     source: "device",
     title,
     evidenceRoles: resourceContext.evidenceRoles,
-    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
+    externalRef: makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session"),
     dataOrigin: buildDataOrigin(entry, resourceContext, workoutTimestamp),
     fields: stripUndefined({
       durationMinutes,

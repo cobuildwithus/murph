@@ -1088,7 +1088,7 @@ test("Junction workout summaries keep id-less fallback identity stable when corr
       resourceSlug: "workouts",
       sourceProviderSlug: "whoop",
       sourceType: "wearable",
-      observedAtRaw: endAt,
+      observedAtRaw: startAt,
     });
     const legacyImport = await coreRuntime.importDeviceBatch({
       vaultRoot,

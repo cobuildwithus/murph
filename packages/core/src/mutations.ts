@@ -1693,6 +1693,13 @@ function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): b
     existing.observationGrain === incoming.observationGrain;
 }
 
+function isSameObservationValue(existing: EventRecord, incoming: EventRecord): boolean {
+  return isSameObservationFacet(existing, incoming) &&
+    existing.kind === "observation" &&
+    incoming.kind === "observation" &&
+    existing.value === incoming.value;
+}
+
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
   incoming: DeviceDataOrigin | undefined,
@@ -1727,10 +1734,12 @@ function hasStableLegacyOccurrenceProof(
     return false;
   }
 
-  return deviceDataOriginSourceMatches(
-    existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin,
-    incoming.dataOrigin,
-  );
+  const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
+  if (existingDataOrigin || incoming.dataOrigin) {
+    return deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+  }
+
+  return isSameObservationValue(existing.record, incoming);
 }
 
 function isCompatibleLegacyExternalRefMatch(
