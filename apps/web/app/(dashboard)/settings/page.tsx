@@ -4,13 +4,11 @@ import { redirect } from "next/navigation";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
-import { HostedChatGptSettings } from "@/src/components/settings/hosted-chatgpt-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { readHostedCodexAuthConnectionView } from "@/src/lib/codex-auth/store";
 import {
   readHostedAccountSettingsSnapshot,
   withServerApprovedPrivyAccountHints,
@@ -41,7 +39,7 @@ export default async function SettingsPage() {
   }
 
   const prisma = getPrisma();
-  const [routing, account, billingRef, freshPrivySession, chatGptConnection] = authenticatedMember
+  const [routing, account, billingRef, freshPrivySession] = authenticatedMember
     ? await Promise.all([
         readHostedMemberRoutingState({
           memberId: authenticatedMember.id,
@@ -55,12 +53,8 @@ export default async function SettingsPage() {
           prisma,
         }),
         getHostedPrivySession().catch(() => null),
-        readHostedCodexAuthConnectionView({
-          memberId: authenticatedMember.id,
-          prisma,
-        }),
       ])
-    : [null, null, null, null, null];
+    : [null, null, null, null];
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
   const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
@@ -143,16 +137,6 @@ export default async function SettingsPage() {
           <Watch className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           Manage wearables
         </Link>
-      </section>
-
-      <section className="flex flex-col gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          AI
-        </div>
-        <HostedChatGptSettings
-          authenticated={authenticated}
-          initialConnection={chatGptConnection}
-        />
       </section>
 
       {privyAppId ? (

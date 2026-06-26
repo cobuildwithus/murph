@@ -62,7 +62,7 @@ describe('assistant outbox retry policy', () => {
     expect(shouldBeginAssistantOutboxDispatch(staleSending, now, false)).toBe(true)
   })
 
-  it('detects retryable delivery errors from context, direct flags, and normalized fallback signals', () => {
+  it('detects retryable delivery errors from context, direct flags, failure-class hints, and normalized fallback signals', () => {
     expect(isAssistantOutboxRetryableError({ context: { retryable: true } })).toBe(true)
     expect(
       isAssistantOutboxRetryableError({
@@ -73,16 +73,32 @@ describe('assistant outbox retry policy', () => {
     expect(isAssistantOutboxRetryableError({ retryable: false })).toBe(false)
     expect(
       isAssistantOutboxRetryableError({
+        context: { assistantDeliveryFailureClass: 'transient' },
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        context: { assistantDeliveryFailureClass: 'blocked' },
+        retryable: true,
+      }),
+    ).toBe(false)
+    expect(
+      isAssistantOutboxRetryableError({
+        context: { assistantDeliveryFailureClass: 'terminal' },
+      }),
+    ).toBe(false)
+    expect(
+      isAssistantOutboxRetryableError({
         code: 'assistant_delivery_failed',
         message: 'temporary network issue',
       }),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       isAssistantOutboxRetryableError({
         code: 'assistant_request_failed',
         message: 'bad gateway',
       }),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       isAssistantOutboxRetryableError({
         code: 'assistant_channel_required',

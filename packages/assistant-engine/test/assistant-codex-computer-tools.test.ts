@@ -10,6 +10,7 @@ import {
   MURPH_DYNAMIC_TOOLS,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
+  type MurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 import type {
   AssistantHostedToolContext,
@@ -338,7 +339,23 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("rejects computer requests when hosted computer transport is unavailable", async () => {
+  it.each([
+    ["computer-start-run", {
+      args: {
+        startUrl: null,
+      },
+      kind: "computer-start-run" as const,
+    } satisfies MurphDynamicToolRequest],
+    ["computer-os-control", {
+      args: {
+        action: "pressKey",
+        durationMs: 0,
+        keys: ["Return"],
+        runId: "run_123",
+      },
+      kind: "computer-os-control" as const,
+    } satisfies MurphDynamicToolRequest],
+  ])("rejects %s when hosted computer transport is unavailable", async (_kind, request) => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "running" })
     );
@@ -349,12 +366,7 @@ describe("murph computer dynamic tools", () => {
       hostedToolContext: null,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
-      request: {
-        args: {
-          startUrl: null,
-        },
-        kind: "computer-start-run",
-      },
+      request,
     });
 
     expect(result.rpcResult.success).toBe(false);

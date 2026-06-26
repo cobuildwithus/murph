@@ -391,7 +391,7 @@ describe("computer handoff route and page", () => {
 
     assert.match(markup, /All set/);
     assert.match(markup, /Reply to Murph to continue\./);
-    assert.match(markup, /Reply in Messages/);
+    assert.match(markup, /Reply to Murph/);
     assert.equal(markup.includes("Reply in Telegram"), false);
     assert.equal(markup.includes("Reply in Email"), false);
     assert.equal(markup.includes("Suggested reply"), false);
@@ -405,7 +405,7 @@ describe("computer handoff route and page", () => {
     });
   });
 
-  it("renders all contact CTAs for legacy completed handoffs without a source kind", async () => {
+  it("renders a single Reply to Murph CTA for legacy completed handoffs without a source kind", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       kind: "completed",
       returnContactKind: null,
@@ -418,16 +418,13 @@ describe("computer handoff route and page", () => {
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
     }));
-    const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
 
-    assert.match(markup, /Reply in Messages/);
-    assert.match(markup, /Reply in Telegram/);
-    assert.match(markup, /Reply in Gmail/);
-    assert.equal(hrefs[0], "sms:+15550100001?body=Done");
-    assert.equal(hrefs[1], "https://t.me/withmurph_bot?text=Done");
-    expect(hrefs[2]).toMatch(/^https:\/\/mail\.google\.com\/mail\/u\/0\/?/u);
-    expect(hrefs[2]).toContain("to=murph%2Balias123%40mail.withmurph.ai");
-    expect(hrefs[2]).toContain("body=Done");
+    assert.match(markup, /All set/);
+    assert.match(markup, /Reply to Murph/);
+    assert.equal(markup.includes("Reply in Messages"), false);
+    assert.equal(markup.includes("Reply in Telegram"), false);
+    assert.equal(markup.includes("Reply in Gmail"), false);
+    expect(mocks.getHostedMurphContactContext).toHaveBeenCalledOnce();
   });
 
   it("renders only the literal Done fallback when a source channel is unavailable", async () => {

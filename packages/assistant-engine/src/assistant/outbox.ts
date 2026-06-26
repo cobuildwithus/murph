@@ -157,6 +157,11 @@ export type {
   AssistantOutboxIntentMirrorState,
 } from './outbox/dispatch-state.js'
 
+export type AssistantOutboxDispatchPreflightResult =
+  | { action: 'continue' }
+  | { action: 'defer'; intent: AssistantOutboxIntent }
+  | { action: 'stop'; intent: AssistantOutboxIntent }
+
 export interface AssistantOutboxDispatchHooks {
   clearPreparedIntent?: (input: {
     intent: AssistantOutboxIntent
@@ -167,6 +172,16 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<void>
+  /**
+   * Runs before an outbox intent is claimed as `sending`. Preflight owns
+   * local/security/control-plane prerequisites that must not increment
+   * delivery attempt counters or enter timed provider retry.
+   */
+  preflightDispatchIntent?: (input: {
+    intent: AssistantOutboxIntent
+    now: Date
+    vault: string
+  }) => Promise<AssistantOutboxDispatchPreflightResult | void>
   prepareDispatchIntent?: (input: {
     intent: AssistantOutboxIntent
     vault: string
@@ -505,7 +520,7 @@ export async function listAssistantOutboxIntentsLocal(
   return listAssistantOutboxIntentsLocalStore(vault)
 }
 
-export async function dispatchAssistantOutboxIntent(input: {
+export interface DispatchAssistantOutboxIntentInput {
   allowPreparedSending?: boolean
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
@@ -519,6 +534,19 @@ export async function dispatchAssistantOutboxIntent(input: {
   }
   signal?: AbortSignal
   vault: string
+}
+
+export async function dispatchAssistantOutboxIntent(
+  input: DispatchAssistantOutboxIntentInput,
+): Promise<DispatchAssistantOutboxIntentResult> {
+  return dispatchAssistantOutboxIntentInternal({
+    ...input,
+    preflightCompleted: false,
+  })
+}
+
+async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOutboxIntentInput & {
+  preflightCompleted: boolean
 }): Promise<DispatchAssistantOutboxIntentResult> {
   const now = input.now ?? new Date()
   const prepared = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -567,6 +595,14 @@ export async function dispatchAssistantOutboxIntent(input: {
     if (shouldReconcileAssistantOutboxIntent(intent)) {
       return {
         action: 'reconcile' as const,
+        intent,
+        intentPath,
+      }
+    }
+
+    if (!input.preflightCompleted && input.dispatchHooks?.preflightDispatchIntent) {
+      return {
+        action: 'preflight' as const,
         intent,
         intentPath,
       }
@@ -621,6 +657,30 @@ export async function dispatchAssistantOutboxIntent(input: {
       deliveryError: prepared.intent.lastError,
       session: null,
     }
+  }
+
+  if (prepared.action === 'preflight') {
+    const preflight = await input.dispatchHooks?.preflightDispatchIntent?.({
+      intent: prepared.intent,
+      now,
+      vault: input.vault,
+    })
+    if (preflight?.action === 'defer' || preflight?.action === 'stop') {
+      await repairAssistantOutboxReceiptForIntent({
+        intent: preflight.intent,
+        vault: input.vault,
+      })
+      return {
+        intent: preflight.intent,
+        deliveryError: preflight.intent.lastError,
+        session: null,
+      }
+    }
+
+    return dispatchAssistantOutboxIntentInternal({
+      ...input,
+      preflightCompleted: true,
+    })
   }
 
   if (prepared.action === 'recover-stale-non-idempotent') {
@@ -1000,6 +1060,7 @@ export async function deliverAssistantOutboxMessage(input: {
   }
 
   if (
+    dispatched.intent.status === 'awaiting_approval' ||
     dispatched.intent.status === 'pending' ||
     dispatched.intent.status === 'retryable' ||
     dispatched.intent.status === 'sending'
@@ -1117,6 +1178,7 @@ export async function deliverAssistantOutboxReaction(input: {
   }
 
   if (
+    dispatched.intent.status === 'awaiting_approval' ||
     dispatched.intent.status === 'pending' ||
     dispatched.intent.status === 'retryable' ||
     dispatched.intent.status === 'sending'

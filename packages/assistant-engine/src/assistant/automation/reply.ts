@@ -1,4 +1,7 @@
 import type { InboxServices } from '@murphai/inbox-services'
+import {
+  readAssistantDeliveryFailureClass,
+} from '@murphai/operator-config/assistant/delivery-failure'
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -2666,6 +2669,14 @@ function resolveAssistantAutoReplySendResult(input: {
         writable: true,
       })
     }
+    if (input.result.deliveryError?.diagnosticContext) {
+      Object.defineProperty(error, 'context', {
+        configurable: true,
+        enumerable: false,
+        value: input.result.deliveryError.diagnosticContext,
+        writable: true,
+      })
+    }
     throw markAssistantAutoReplyDeliveryFailure(error)
   }
 
@@ -2794,6 +2805,16 @@ function classifyAssistantAutoReplyFailure(input: {
   }
 
   const detail = errorMessage(input.error)
+  const failureClass = readAssistantDeliveryFailureClass(input.error)
+  if (failureClass === 'blocked' || failureClass === 'terminal') {
+    return createSkippedGroupOutcome({
+      inputCount: input.inputCount,
+      reason: detail,
+      stopScanning: true,
+      terminalSuppression: true,
+    })
+  }
+
   if (isAssistantProviderConnectionLostError(input.error)) {
     return createDeferredGroupOutcome({
       inputCount: input.inputCount,

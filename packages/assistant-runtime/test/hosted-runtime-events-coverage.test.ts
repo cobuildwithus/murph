@@ -10,6 +10,9 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
@@ -467,6 +470,8 @@ describe("hosted runtime event coverage", () => {
       runtime,
       runtimeEnv: {
         NODE_ENV: "test",
+        OPENAI_API_KEY: "test-provider-egress-credential",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/codex-app-server",
       },
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake,
@@ -490,7 +495,12 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.executeCodexManagedAccountOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "connect",
+        codexCommand: "/tmp/codex-app-server",
         codexHome: "/tmp/assistant-runtime-events-operator/.codex-hosted",
+        env: {
+          NODE_ENV: "test",
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/codex-app-server",
+        },
         workingDirectory: "/tmp/assistant-runtime-events-coverage",
       }),
     );

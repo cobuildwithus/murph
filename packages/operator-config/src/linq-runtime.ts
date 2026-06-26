@@ -26,6 +26,9 @@ import {
   type MessageTextDecoration,
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import {
+  createAssistantDeliveryBlockedError,
+} from './assistant/delivery-failure.js'
 import type {
   AssistantMessageReaction,
 } from './assistant-cli-contracts.js'
@@ -801,10 +804,14 @@ function createLinqConfigurationError(
   code: 'LINQ_API_TOKEN_REQUIRED' | 'LINQ_UNAVAILABLE',
   message: string,
   details: LinqSafeRequestDetails,
-): VaultCliError {
-  return new VaultCliError(code, message, {
-    ...details,
-    failureStage: 'configuration',
+): VaultCliError & { retryable: false } {
+  return createAssistantDeliveryBlockedError(code, message, {
+    blockKind: 'linq_configuration',
+    details: {
+      ...details,
+      failureStage: 'configuration',
+    },
+    resume: 'deploy_or_config_change',
   })
 }
 

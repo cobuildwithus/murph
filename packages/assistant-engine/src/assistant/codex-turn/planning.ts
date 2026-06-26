@@ -86,6 +86,9 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
+  resolveAssistantPhoneCallAcceptedInputIds,
+} from '../../assistant-codex/dynamic-tools/phone-calls.js'
+import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
@@ -553,6 +556,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
+  const phoneCallAcceptedInputIds = resolveAssistantPhoneCallAcceptedInputIds({
+    acceptedInputItems: input.acceptedInputItems ?? [],
+    turnTrigger: input.input.turnTrigger ?? null,
+  })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   const dynamicTools = resolveMurphDynamicTools({
@@ -565,6 +572,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+    phoneCallsAvailable:
+      phoneCallAcceptedInputIds.length > 0 &&
+      input.hostedToolContext?.phoneCalls != null,
     voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
     vaultFileSendAvailable:
       input.hostedToolContext?.vaultFileSendAvailable === true,

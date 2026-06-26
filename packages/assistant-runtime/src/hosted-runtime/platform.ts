@@ -53,6 +53,10 @@ import type {
   HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import type {
+  HostedPhoneCallStartRequest,
+  HostedPhoneCallStartResponse,
+} from "@murphai/hosted-execution/phone-calls";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -293,6 +297,15 @@ export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
 
+export interface HostedRuntimePhoneCallPort {
+  start(
+    request: HostedPhoneCallStartRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStartResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   // Optional for deploy-window compatibility with older platform builds.
   // Advances the durable per-lane consumed watermark after a clean pass;
@@ -422,6 +435,7 @@ export interface HostedRuntimePlatform {
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
+  phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;

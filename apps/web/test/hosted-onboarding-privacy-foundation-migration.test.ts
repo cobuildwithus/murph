@@ -149,6 +149,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedPhoneCall",
   "HostedProductFeedback",
   "HostedWebSession",
   "HostedMailboxItem",
@@ -385,6 +386,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedPhoneCallsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260625000100_hosted_phone_calls/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLinqObservabilityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026062500_hosted_linq_observability/migration.sql",
@@ -477,6 +485,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
+      "20260625000100_hosted_phone_calls",
       "2026062500_hosted_linq_observability",
       "2026062501_hosted_linq_egress_engagement",
       "20260625150000_hosted_action_approval_consumed_at",
@@ -528,6 +537,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
     expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
     expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_phone_call_member_id_request_key_key" ON "hosted_phone_call"("member_id", "request_key")',
+    );
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedPhoneCallsMigrationSql).not.toMatch(/transcript|audio/iu);
     expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
     expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
     expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");

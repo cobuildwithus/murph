@@ -320,6 +320,15 @@ enum HostedComputerHandoffStatus {
   expired
 }
 
+enum HostedPhoneCallStatus {
+  starting
+  calling
+  ended
+  completed
+  needs_user
+  failed
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -354,6 +363,7 @@ model HostedMember {
   codexAuthConnection            HostedCodexAuthConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  phoneCalls                     HostedPhoneCall[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
@@ -518,6 +528,27 @@ model HostedComputerHandoff {
   @@index([runId, status])
   @@index([expiresAt])
   @@map("hosted_computer_handoff")
+}
+
+model HostedPhoneCall {
+  id             String                @id
+  memberId       String                @map("member_id")
+  requestKey     String                @map("request_key")
+  provider       String                @default("retell")
+  providerCallId String?               @unique @map("provider_call_id")
+  status         HostedPhoneCallStatus @default(starting)
+  briefJson      Json                  @map("brief_json")
+  resultJson     Json?                 @map("result_json")
+  endedAt        DateTime?             @map("ended_at")
+  analyzedAt     DateTime?             @map("analyzed_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, requestKey])
+  @@index([memberId, createdAt])
+  @@index([status, updatedAt])
+  @@map("hosted_phone_call")
 }
 
 model HostedMemberIdentity {

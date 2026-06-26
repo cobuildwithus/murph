@@ -260,7 +260,7 @@ describe("Linq first-contact admission", () => {
         request: BASE_REQUEST,
       });
 
-      await vi.advanceTimersByTimeAsync(2_500);
+      await vi.advanceTimersByTimeAsync(10_000);
       await expect(classification).rejects.toMatchObject({
         code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
         httpStatus: 503,

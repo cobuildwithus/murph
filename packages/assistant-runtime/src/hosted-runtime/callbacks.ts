@@ -43,6 +43,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
+  type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
@@ -60,6 +61,10 @@ import {
   assistantChannelDeliverySchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  createAssistantDeliveryBlockedError,
+  createAssistantDeliveryTerminalError,
+} from "@murphai/operator-config/assistant/delivery-failure";
 
 import type {
   HostedAssistantDeliveryErrorDetails,
@@ -153,6 +158,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
       intent,
+      missingApprovalPort: "skip",
       now,
       vaultRoot: request.vaultRoot,
     });
@@ -270,9 +276,9 @@ export async function collectHostedAssistantDeliverySideEffects(
 }
 
 /**
- * Bounds the set of intents reconciled per collect. The dispatch-time gate in
- * `preloadApprovedHostedAssistantVaultFiles` is the security invariant; this
- * pass exists only so freshly-decided approvals transition out of
+ * Bounds the set of intents reconciled per collect. The dispatch preflight
+ * gate is the security invariant; this pass exists only so freshly-decided
+ * approvals transition out of
  * `awaiting_approval` promptly. Reconciling every stored intent would add an
  * O(n) sequence of web-control round trips to the foreground delivery path.
  */
@@ -299,6 +305,7 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
 async function reconcileHostedAssistantVaultFileApproval(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   intent: AssistantOutboxIntent;
+  missingApprovalPort: "block" | "skip";
   now: Date;
   vaultRoot: string;
 }): Promise<{ blocked: boolean; intent: AssistantOutboxIntent }> {
@@ -329,6 +336,13 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
   }
 
   if (!input.actionApprovalPort) {
+    if (input.missingApprovalPort === "skip") {
+      return {
+        blocked: true,
+        intent: input.intent,
+      };
+    }
+
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
       now: input.now,
@@ -343,11 +357,37 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     };
   }
 
+  if (
+    file.approvalId
+    && file.approvalGeneration
+    && input.intent.status !== "awaiting_approval"
+  ) {
+    return { blocked: false, intent: input.intent };
+  }
+
+  let approvalRequest: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>;
+  try {
+    approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
+  } catch (error) {
+    const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      error: createAssistantDeliveryTerminalError(
+        "ASSISTANT_VAULT_FILE_APPROVAL_TARGET_INVALID",
+        "Secure vault-file approval could not be requested because the delivery target is invalid.",
+        { cause: error instanceof Error ? error.message : String(error) },
+      ),
+      intentId: input.intent.intentId,
+      status: "failed",
+      vault: input.vaultRoot,
+    });
+    return {
+      blocked: true,
+      intent: failed ?? input.intent,
+    };
+  }
+
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(
-      buildAssistantVaultFileSendApprovalRequest(input.intent),
-    );
+    approval = await input.actionApprovalPort.request(approvalRequest);
   } catch {
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
@@ -378,6 +418,29 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
       approval.status !== "approved"
       || persisted.status === "awaiting_approval",
     intent: persisted,
+  };
+}
+
+async function preflightHostedAssistantVaultFileDispatch(input: {
+  actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  intent: AssistantOutboxIntent;
+  now: Date;
+  vaultRoot: string;
+}): Promise<AssistantOutboxDispatchPreflightResult> {
+  const reconciled = await reconcileHostedAssistantVaultFileApproval({
+    actionApprovalPort: input.actionApprovalPort,
+    intent: input.intent,
+    missingApprovalPort: "block",
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!reconciled.blocked) {
+    return { action: "continue" };
+  }
+
+  return {
+    action: reconciled.intent.status === "awaiting_approval" ? "defer" : "stop",
+    intent: reconciled.intent,
   };
 }
 
@@ -949,16 +1012,23 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
-  return effect.payload.transportIdempotent
-    || isHostedAssistantReactionOnlyEffect(effect)
-    || hasHostedAssistantVoiceMemoMedia(effect.payload)
-    || isHostedSignupWelcomeDeliveryPayload(effect.payload);
+  return !hasHostedAssistantVaultFileMedia(effect.payload)
+    && (effect.payload.transportIdempotent
+      || isHostedAssistantReactionOnlyEffect(effect)
+      || hasHostedAssistantVoiceMemoMedia(effect.payload)
+      || isHostedSignupWelcomeDeliveryPayload(effect.payload));
 }
 
 function hasHostedAssistantVoiceMemoMedia(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
   return payload.media.some((item) => item.kind === "voice_memo");
+}
+
+function hasHostedAssistantVaultFileMedia(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.media.some((item) => item.kind === "vault_file");
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
@@ -1218,10 +1288,17 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   effect: HostedAssistantDeliveryEffect;
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
-  return input.effect.deliveryPhase === "foreground_current_turn"
-    && !isHostedAssistantReactionOnlyEffect(input.effect)
-    && input.outcome.deliveryStatus !== "sent"
-    && input.outcome.retryable === true;
+  if (input.effect.deliveryPhase !== "foreground_current_turn") {
+    return false;
+  }
+  if (isHostedAssistantReactionOnlyEffect(input.effect)) {
+    return false;
+  }
+  if (input.outcome.deliveryStatus === "sent") {
+    return false;
+  }
+  return input.outcome.retryable === true
+    || input.outcome.deliveryStatus === "pending";
 }
 
 function isHostedLinqTransportFailure(error: unknown): boolean {
@@ -1345,6 +1422,15 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       return disabledAutoReplyOutcome;
     }
     const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
+          preflightHostedAssistantVaultFileDispatch({
+            actionApprovalPort: input.actionApprovalPort,
+            intent,
+            now: preflightNow,
+            vaultRoot: vault,
+          }),
+      },
       dependencies: {
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
@@ -1837,14 +1923,13 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   if (
     vaultFiles.length !== 1
     || input.media.length !== 1
-    || !input.actionApprovalPort
     || !input.expectedDedupeKey
     || !input.intentId
     || !input.vaultRoot
   ) {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
-      "Secure approval could not be verified before vault-file delivery.",
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file delivery reached provider dispatch without complete approval prerequisites.",
     );
   }
 
@@ -1872,6 +1957,13 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
     );
   }
 
+  if (!input.actionApprovalPort) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file delivery reached provider dispatch without an approval boundary.",
+    );
+  }
+
   let approval: HostedActionApprovalResult;
   try {
     approval = await input.actionApprovalPort.consume({
@@ -1879,20 +1971,21 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
       consumerId: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
       request: buildAssistantVaultFileSendApprovalRequest(intent),
     });
-  } catch {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
-      "Secure approval could not be verified before vault-file delivery.",
+  } catch (error) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file approval could not be consumed at provider dispatch.",
+      { cause: error instanceof Error ? error.message : String(error) },
     );
   }
   if (approval.status === "pending") {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_PENDING",
-      "Vault-file delivery is still awaiting secure approval.",
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Vault-file delivery reached provider dispatch while approval was still pending.",
     );
   }
   if (approval.status !== "approved") {
-    throw new VaultCliError(
+    throw createAssistantDeliveryTerminalError(
       approval.status === "denied"
         ? "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"
         : "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED",
@@ -1929,15 +2022,6 @@ function buildHostedVaultFileMediaIdentity(input: {
     input.approvalId ?? null,
     input.approvalGeneration ?? null,
   ]);
-}
-
-function createRetryableHostedVaultFileError(
-  code: string,
-  message: string,
-): VaultCliError & { retryable: true } {
-  return Object.assign(new VaultCliError(code, message), {
-    retryable: true as const,
-  });
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
@@ -2088,9 +2172,13 @@ function requireHostedAssistantLinqRouteAuthorityAssert(
 ) => Promise<void> {
   const assertAuthority = effectsPort?.assertLinqThreadRouteAuthority;
   if (!assertAuthority) {
-    throw new VaultCliError(
-      "ASSISTANT_LINQ_ROUTE_AUTHORITY_UNAVAILABLE",
+    throw createAssistantDeliveryBlockedError(
+      "ASSISTANT_LINQ_ROUTE_AUTHORITY_ASSERT_BLOCKED",
       "Hosted Linq route authority cannot be revalidated before provider delivery.",
+      {
+        blockKind: "linq_route_authority_assert_missing",
+        resume: "deploy_or_config_change",
+      },
     );
   }
 
@@ -2471,6 +2559,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     | "failed"
     | "failed_ambiguous"
     | "missing-result"
+    | "pending"
     | "retryable"
     | "sending";
   wake: HostedRuntimeEvent;
@@ -2558,6 +2647,24 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
         deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "failed",
+        effect: assistantDeliveryEffect,
+        retryable: false,
+      });
+    case "awaiting_approval":
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError,
+        deliveryErrorDetails,
+        deliveryStatus: "pending",
+        wake: input.wake,
+        effect: assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
+        deliveryErrorMessage: deliveryError.message,
+        deliveryStatus: "pending",
         effect: assistantDeliveryEffect,
         retryable: false,
       });

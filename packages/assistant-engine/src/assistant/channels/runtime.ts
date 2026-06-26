@@ -41,6 +41,9 @@ import {
 } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  createAssistantDeliveryTransientError,
+} from '@murphai/operator-config/assistant/delivery-failure'
+import {
   renderMarkdownMessageText,
   splitDecoratedMessageText,
   type MessageTextDecoration,
@@ -2089,25 +2092,32 @@ function resolveTelegramSendAttemptOutcome(input: {
     }
   }
 
-  const failure = new VaultCliError(
-    'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-    errorContext.description ??
-      `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`,
-    {
-      errorCode: errorContext.errorCode,
-      migrateToChatId: errorContext.migrateToChatId,
-      operation: input.operation,
-      status: input.result.response.status,
-      target: input.targetLabel,
-    },
+  const retryable = shouldRetryTelegramSend(
+    input.result.response.status,
+    errorContext.errorCode,
   )
-
-  if (
-    shouldRetryTelegramSend(
-      input.result.response.status,
-      errorContext.errorCode,
+  const failureMessage = errorContext.description ??
+    `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`
+  const failureContext = {
+    errorCode: errorContext.errorCode,
+    migrateToChatId: errorContext.migrateToChatId,
+    operation: input.operation,
+    status: input.result.response.status,
+    target: input.targetLabel,
+  }
+  const failure = retryable
+    ? createAssistantDeliveryTransientError(
+      'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+      failureMessage,
+      failureContext,
     )
-  ) {
+    : new VaultCliError(
+      'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+      failureMessage,
+      failureContext,
+    )
+
+  if (retryable) {
     return {
       kind: 'retry',
       failure,

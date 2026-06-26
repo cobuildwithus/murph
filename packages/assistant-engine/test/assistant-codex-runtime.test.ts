@@ -8441,6 +8441,17 @@ describe('assistant codex runtime', () => {
     await expect(operation).resolves.toEqual({
       kind: 'connected',
     })
+    expect(codexMocks.spawn).toHaveBeenCalledWith(
+      'codex',
+      [
+        '--config',
+        'model_provider="openai"',
+        '--config',
+        'cli_auth_credentials_store="file"',
+        'app-server',
+      ],
+      expect.any(Object),
+    )
   })
 
   it('preserves Codex managed ChatGPT login completion errors', async () => {

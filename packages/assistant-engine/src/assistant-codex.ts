@@ -159,6 +159,10 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
+const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
+  'model_provider="openai"',
+  'cli_auth_credentials_store="file"',
+] as const
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -1468,7 +1472,9 @@ export async function executeCodexManagedAccountOperation(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const args = buildCodexAppServerArgs({})
+  const args = buildCodexAppServerArgs({
+    configOverrides: CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES,
+  })
   const launchKey = buildCodexAppServerLaunchKey({
     args,
     codexCommand,
