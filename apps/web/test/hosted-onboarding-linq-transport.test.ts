@@ -23,6 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
   claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+  readHostedLinqDailyState: vi.fn(),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
   resolveHostedLinqDayUtc: vi.fn((value: Date | string) => {
@@ -60,6 +61,7 @@ import {
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  readHostedLinqDailyState,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
@@ -572,6 +574,9 @@ describe("hosted Linq webhook transport", () => {
 
   it("consumes invite signup effects without sending when another request already delivered them", async () => {
     vi.mocked(claimHostedLinqOnboardingLinkNotice).mockResolvedValueOnce(false);
+    vi.mocked(readHostedLinqDailyState).mockResolvedValueOnce({
+      onboardingLinkSentAt: new Date("2026-03-26T12:00:00.500Z"),
+    } as never);
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
@@ -603,6 +608,11 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeUndefined();
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(readHostedLinqDailyState).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
     expect(prisma.hostedLinqFirstContactEventReceipt.upsert).toHaveBeenCalledWith({
       create: {
         eventId: "event-1",
@@ -615,6 +625,45 @@ describe("hosted Linq webhook transport", () => {
         eventId: "event-1",
       },
     });
+  });
+
+  it("does not consume skipped invite signup effects from stale invite delivery proof", async () => {
+    vi.mocked(claimHostedLinqOnboardingLinkNotice).mockResolvedValueOnce(false);
+    vi.mocked(readHostedLinqDailyState).mockResolvedValueOnce({
+      onboardingLinkSentAt: new Date("2026-03-26T12:00:00.500Z"),
+    } as never);
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          sentAt: new Date("2026-03-25T12:00:00.000Z"),
+        }),
+      },
+      hostedLinqFirstContactEventReceipt: {
+        upsert: vi.fn(),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "invite_signup",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      retryable: true,
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqFirstContactEventReceipt.upsert).not.toHaveBeenCalled();
   });
 
   it("releases invite signup notice claims when delivery fails", async () => {

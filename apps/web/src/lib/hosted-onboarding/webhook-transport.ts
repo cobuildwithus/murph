@@ -15,6 +15,7 @@ import { buildHostedInviteUrl } from "./invite-service";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  readHostedLinqDailyState,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
   resolveHostedLinqDayUtc,
@@ -260,6 +261,19 @@ async function recordSkippedHostedLinqInviteSignupSideEffectConsumed(
     },
   });
   if (!invite?.sentAt) {
+    throw buildHostedLinqFirstContactEventProcessingError({
+      eventId: effect.payload.sourceEventId,
+    });
+  }
+  const dailyState = await readHostedLinqDailyState({
+    memberId: effect.payload.memberId,
+    occurredAt: effect.payload.occurredAt,
+    prisma,
+  });
+  if (
+    !dailyState?.onboardingLinkSentAt
+    || invite.sentAt.getTime() < dailyState.onboardingLinkSentAt.getTime()
+  ) {
     throw buildHostedLinqFirstContactEventProcessingError({
       eventId: effect.payload.sourceEventId,
     });
