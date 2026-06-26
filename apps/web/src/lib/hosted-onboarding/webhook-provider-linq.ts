@@ -10,7 +10,10 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  acceptHostedFamilyInviteFromPhoneTx,
+  buildHostedFamilyInviteAcceptedReplyText,
   hasHostedMemberEffectiveActiveAccessForMember,
+  parseHostedFamilyInviteStartToken,
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
@@ -59,6 +62,7 @@ import {
   buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
+  buildFamilyInviteAcceptedResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -234,6 +238,56 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "suspended-member",
         routeStage: "ignored-suspended-member",
+      }),
+    );
+  }
+
+  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
+  const familyAcceptance = participantContact.kind === "phone"
+    ? await acceptHostedFamilyInviteFromPhoneTx({
+        now: new Date(occurredAt),
+        phoneNumber: participantContact.value,
+        text: summary.text,
+        tx: input.prisma,
+      })
+    : null;
+
+  if (familyAcceptance) {
+    const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
+      chatId: summary.chatId,
+      memberId: familyAcceptance.memberId,
+      occurredAt,
+      prisma: input.prisma,
+      recipientPhone: recipientPhoneNumber,
+    });
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFamilyInviteAcceptedResponse({
+        chatId: summary.chatId,
+        memberId: familyAcceptance.memberId,
+        message: buildHostedFamilyInviteAcceptedReplyText(),
+        messageId: summary.messageId,
+        occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "family-invite-accepted",
+        routeStage: "family-invite-accepted",
+      }),
+    );
+  }
+
+  if (familyInviteTokenPresent) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("family-invite-not-accepted"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "family-invite-not-accepted",
+        routeStage: "ignored-family-invite-token",
       }),
     );
   }
