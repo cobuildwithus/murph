@@ -1399,7 +1399,7 @@ describe('assistant channels runtime seam', () => {
     await handle.stop()
   })
 
-  it('runs a trailing Linq typing refresh when an explicit activity refresh overlaps an in-flight refresh', async () => {
+  it('serializes explicit Linq typing refreshes after an in-flight refresh', async () => {
     vi.useFakeTimers()
     let resolveInFlightRefresh: () => void = () => {
       throw new Error('in-flight refresh was not started')
@@ -1430,13 +1430,15 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
 
     const explicitRefresh = handle.refreshNow?.()
+    const secondExplicitRefresh = handle.refreshNow?.()
     await Promise.resolve()
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
 
     resolveInFlightRefresh()
     await explicitRefresh
+    await secondExplicitRefresh
 
-    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(4)
     await handle.stop()
   })
 

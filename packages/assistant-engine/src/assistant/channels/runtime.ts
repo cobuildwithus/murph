@@ -736,10 +736,7 @@ export async function startAssistantChannelActivitySession(input: {
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let maxSessionTimer: ReturnType<typeof setTimeout> | null = null
   let refreshFailure: unknown = null
-  let refreshInFlight: Promise<void> | null = null
-  let manualRefreshDrain: Promise<void> | null = null
-  let manualRefreshRequestId = 0
-  let completedManualRefreshRequestId = 0
+  let refreshTail: Promise<void> = Promise.resolve()
   let stopped = false
   let stopPromise: Promise<void> | null = null
 
@@ -754,13 +751,7 @@ export async function startAssistantChannelActivitySession(input: {
   return {
     refreshNow: async () => {
       clearRefreshTimer()
-      manualRefreshRequestId += 1
-      if (!manualRefreshDrain) {
-        manualRefreshDrain = drainManualRefreshes().finally(() => {
-          manualRefreshDrain = null
-        })
-      }
-      await manualRefreshDrain
+      await enqueueRefresh()
       scheduleNextRefresh()
     },
     stop: stopActivity,
@@ -774,52 +765,27 @@ export async function startAssistantChannelActivitySession(input: {
     clearRefreshTimer()
     refreshTimer = setTimeout(() => {
       refreshTimer = null
-      void runRefresh().then(() => {
+      void enqueueRefresh().then(() => {
         scheduleNextRefresh()
       })
     }, refreshMs)
     unrefAssistantChannelActivityTimer(refreshTimer)
   }
 
-  async function runRefresh(): Promise<void> {
-    if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
-      return
-    }
+  function enqueueRefresh(): Promise<void> {
+    refreshTail = refreshTail.then(async () => {
+      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+        return
+      }
 
-    if (!refreshInFlight) {
-      refreshInFlight = refresh(linkedStopSignal.signal)
+      await refresh(linkedStopSignal.signal)
         .catch((error) => {
           if (!linkedStopSignal.signal.aborted) {
             refreshFailure = error
           }
         })
-        .finally(() => {
-          refreshInFlight = null
-        })
-    }
-
-    await refreshInFlight
-  }
-
-  async function drainManualRefreshes(): Promise<void> {
-    while (
-      completedManualRefreshRequestId < manualRefreshRequestId &&
-      !stopped &&
-      !linkedStopSignal.signal.aborted &&
-      !refreshFailure
-    ) {
-      if (refreshInFlight) {
-        await refreshInFlight
-      }
-      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
-        return
-      }
-
-      clearRefreshTimer()
-      const requestId = manualRefreshRequestId
-      await runRefresh()
-      completedManualRefreshRequestId = requestId
-    }
+    })
+    return refreshTail
   }
 
   async function stopActivity(): Promise<void> {
@@ -837,9 +803,7 @@ export async function startAssistantChannelActivitySession(input: {
     linkedStopSignal.controller.abort()
     linkedStopSignal.cleanup()
 
-    if (refreshInFlight) {
-      await refreshInFlight
-    }
+    await refreshTail
 
     let stopFailure: unknown = null
     try {
