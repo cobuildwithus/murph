@@ -5,7 +5,6 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
@@ -448,11 +447,7 @@ function isHostedSignupWelcomeDeliveryPayload(
     return false;
   }
   const tokenTarget = payload.idempotencyKey.slice(prefix.length);
-  return (
-    tokenTarget.length > 0
-    && !tokenTarget.includes(":")
-    && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
-  );
+  return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
