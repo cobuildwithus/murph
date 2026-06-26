@@ -286,18 +286,28 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
-    expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')
-    expect(reviewGptConfig).toContain('attach_artifacts=0')
-    expect(reviewGptConfig).toContain('app_connector="github"')
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'))).toBe(true)
+    expect(reviewGptConfig).toContain('repo_context_url=""')
+    expect(reviewGptConfig).toContain('attach_artifacts=1')
+    expect(reviewGptConfig).toContain('app_connector="current"')
+    expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
+    expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
     const prDeepReviewPrompt = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
     )
-    expect(prDeepReviewPrompt).toContain('Use the connected GitHub repository or attached zip files, if attached, to read:')
+    expect(prDeepReviewPrompt).toContain('Use the attached review artifacts to read the repository context.')
     expect(prDeepReviewPrompt).toContain('Do not review the diff in isolation.')
-    expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files through either the connected repository or attached zip files')
-    expect(prDeepReviewPrompt).toContain('do not review from memory or from the PR description alone')
-    expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
+    expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
+    expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files from the required ZIP/repomix attachments')
+    expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR description alone')
+    const prDeepReviewLoop = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
+      'utf8',
+    )
+    expect(prDeepReviewLoop).toContain('scripts/review-gpt-pr-head-preflight.sh "$pr_url"')
+    expect(prDeepReviewLoop).toContain('confirm the Eragon composer has no selected app connector pill')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

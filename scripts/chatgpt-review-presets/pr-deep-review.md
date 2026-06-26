@@ -8,14 +8,21 @@ Default to deletion and radical simplicity. Before accepting any new code, abstr
 
 Treat the PR's stated intent as the requirement, not its current runtime state. Code that the diff temporarily disables, gates, fail-closes, scrubs, or stubs while wiring is in progress is not evidence the functionality should be deleted — propose deletion only when the same intended behavior can be preserved with materially less code. If the disabled state itself blocks the PR's stated goal, report that as a Critical/High correctness finding, not as a complexity collapse.
 
-Use the connected GitHub repository or attached zip files, if attached, to read:
+Use the attached review artifacts to read the repository context. The required
+artifacts are the guarded source snapshot ZIP (`repo.snapshot.zip`) plus the
+repomix attachment (`repo.repomix.zip`, or the configured repomix artifact name)
+generated for the pushed PR head.
 
 - the full PR diff
 - touched files
 - enough surrounding callers, invariants, state owners, and tests to judge the change in context
 - the baseline invariants doc at `docs/contracts/00-invariants.md` (and any topic-specific contract files it links, e.g. `docs/contracts/06-hosted-workspace-file-count.md`) — read this before reporting so invariant checks are grounded in the current rules, not memory
 
-This preset assumes the package-backed review:gpt `app_connector="github"` config. Treat missing GitHub connector context as a hard stop: do not review from pasted context, memory, files attached out of band, or the PR description alone.
+The PR URL and PR description identify the target and intent, but they are not
+repo-content sources. Do not use app connectors for this preset. Treat missing,
+unreadable, or stale ZIP/repomix attachments as a hard stop: do not review from
+pasted context, memory, files attached out of band, a connected repository, or
+the PR description alone.
 
 Do not review the diff in isolation.
 
@@ -52,7 +59,7 @@ Stop rules:
 Constraints:
 
 - ground every finding in the actual PR diff and surrounding code, not generic best practices
-- if you cannot read the PR diff or the touched files through either the connected repository or attached zip files, say so explicitly and stop; do not review from memory or from the PR description alone
+- if you cannot read the PR diff or the touched files from the required ZIP/repomix attachments, say so explicitly and stop; do not review from memory, a connector, pasted context, or the PR description alone
 - if you see a ChatGPT rate-limit message, do not assume the review failed immediately; a rate-limit dialog can be overlaid on top of an otherwise active chat, so inspect whether the underlying thread still has accessible PR context or a completed response before reporting context failure
 - rank findings by importance: critical/high production bugs first, then complexity collapse opportunities
 - do not report style, naming, or formatting nits unless they hide a real high-impact problem
