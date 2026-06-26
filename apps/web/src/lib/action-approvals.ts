@@ -145,6 +145,7 @@ export async function consumeHostedActionApproval(input: {
     && consumedBy !== null
     && consumedBy === consumeRequest.consumerId
     && approval.consumedAt !== null
+    && approval.expiresAt > prepared.now
     && buildHostedActionApprovalGeneration(approval) === consumeRequest.approvalGeneration
   ) {
     return buildApprovedHostedActionApprovalResult(approval);
@@ -190,6 +191,7 @@ export async function consumeHostedActionApproval(input: {
       current.approvalStatus === "approved"
       && current.consumedAt !== null
       && currentConsumedBy === consumeRequest.consumerId
+      && current.expiresAt > prepared.now
       && buildHostedActionApprovalGeneration(current) === consumeRequest.approvalGeneration
     ) {
       return buildApprovedHostedActionApprovalResult(current);

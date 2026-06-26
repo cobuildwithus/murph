@@ -13598,6 +13598,7 @@ describe('steered final segments', () => {
         event: Record<string, unknown>
       }
     | {
+        expectedSuccess?: boolean
         expectedText: string
         id: number
         kind: 'attach-response-media'
@@ -13697,7 +13698,7 @@ describe('steered final segments', () => {
               await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
                 id: step.id,
                 result: {
-                  success: true,
+                  success: step.expectedSuccess ?? true,
                   contentItems: [
                     {
                       type: 'inputText',
@@ -14124,28 +14125,65 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
-  it('drops attached media when finish_without_reply selects no final response', async () => {
+  it('rejects finish_without_reply after response media is attached', async () => {
+    const media = {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/no-reply.png',
+      alt: 'No-reply media that should still be delivered',
+      source: 'no-reply-media-test',
+    }
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
         kind: 'attach-response-media',
         id: 76,
-        media: [
-          {
-            kind: 'image',
-            url: 'https://cdn.example.test/assistant/no-reply.png',
-            alt: 'No-reply media that should not be delivered',
-            source: 'no-reply-media-test',
-          },
-        ],
+        media: [media],
         expectedText: '1 response image attached',
       },
       {
         kind: 'finish-without-reply',
         id: 77,
-        expectedText: 'finished without reply',
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
       },
       completedItemEvent({
         id: 'assistant-no-reply-media',
+        type: 'assistant_message',
+        message: 'This final text should be delivered.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('This final text should be delivered.')
+    expect(result.responseMedia).toEqual([media])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects response media after finish_without_reply selects no final response', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'finish-without-reply',
+        id: 78,
+        expectedText: 'finished without reply',
+      },
+      {
+        kind: 'attach-response-media',
+        id: 79,
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/no-reply-late.png',
+            alt: 'Late no-reply media that should not be attached',
+            source: 'no-reply-media-test',
+          },
+        ],
+        expectedSuccess: false,
+        expectedText: 'response media unavailable after finish_without_reply',
+      },
+      completedItemEvent({
+        id: 'assistant-no-reply-late-media',
         type: 'assistant_message',
         message: 'This final text should not be delivered.',
       }),

@@ -144,18 +144,23 @@ describe('assistant vault-file send', () => {
       vaultRoot,
     })
 
-    expect(buildAssistantVaultFileSendApprovalRequestForTarget({
+    const directRequest = buildAssistantVaultFileSendApprovalRequestForTarget({
       channel: 'linq',
       file,
       targetFingerprint: 'target_123',
       threadIsDirect: true,
-    }).returnContactKind).toBe('text')
-    expect(buildAssistantVaultFileSendApprovalRequestForTarget({
+    })
+    const groupRequest = buildAssistantVaultFileSendApprovalRequestForTarget({
       channel: 'linq',
       file,
       targetFingerprint: 'target_123',
       threadIsDirect: false,
-    }).returnContactKind).toBeNull()
+    })
+
+    expect(directRequest.returnContactKind).toBe('text')
+    expect(groupRequest.returnContactKind).toBeNull()
+    expect(groupRequest.actionId).not.toBe(directRequest.actionId)
+    expect(groupRequest.actionFingerprint).not.toBe(directRequest.actionFingerprint)
   })
 
   it('refuses to create a vault-file approval without a concrete destination', async () => {

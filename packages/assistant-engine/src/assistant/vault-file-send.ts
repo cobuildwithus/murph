@@ -193,8 +193,11 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     )
   }
   const channel = normalizeNullableString(input.channel)
+  const returnContactKind = resolveAssistantHostedReturnContactKind(channel, {
+    threadIsDirect: input.threadIsDirect ?? null,
+  })
   const actionIdentity = sha256Hex(JSON.stringify([
-    'murph.vault-file-send-action.v2',
+    'murph.vault-file-send-action.v3',
     input.file.ref,
     input.file.sha256,
     input.file.filename,
@@ -202,9 +205,10 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     input.file.sizeBytes,
     channel,
     targetFingerprint,
+    returnContactKind,
   ]))
   const actionFingerprint = sha256Hex(JSON.stringify([
-    'murph.vault-file-send-approval.v2',
+    'murph.vault-file-send-approval.v3',
     actionIdentity,
     input.file.ref,
     input.file.sha256,
@@ -213,6 +217,7 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     input.file.sizeBytes,
     channel,
     targetFingerprint,
+    returnContactKind,
   ]))
 
   return {
@@ -223,9 +228,7 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
       body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
-    returnContactKind: resolveAssistantHostedReturnContactKind(channel, {
-      threadIsDirect: input.threadIsDirect ?? null,
-    }),
+    returnContactKind,
   }
 }
 

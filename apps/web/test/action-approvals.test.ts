@@ -251,6 +251,40 @@ describe("hosted action approvals", () => {
     });
   });
 
+  it("does not idempotently re-consume the same delivery after expiry", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const approved = await approveExistingAction({
+      approvalId: requested.approvalId,
+      deps,
+      expiresAt: new Date("2026-06-25T16:03:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+    });
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(approved, "delivery_retry"),
+    })).resolves.toEqual(approved);
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:04:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(approved, "delivery_retry"),
+    })).resolves.toEqual({
+      approvalId: requested.approvalId,
+      status: "expired",
+    });
+  });
+
   it("only grants one concurrent delivery consumer", async () => {
     const { deps, memberId } = await setup();
     const requested = await requestHostedActionApproval({
