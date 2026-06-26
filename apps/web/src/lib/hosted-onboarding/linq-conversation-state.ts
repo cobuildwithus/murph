@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
 } from "./contact-privacy";
 import {
@@ -22,6 +23,7 @@ export const HOSTED_LINQ_CONVERSATION_HEALTH = {
 
 export async function recordHostedLinqConversationInboundTx(input: {
   chatId: string | null | undefined;
+  linqChatLookupKey?: string | null;
   linePhoneNumber?: string | null;
   linePhoneNumberLookupKey?: string | null;
   memberId: string;
@@ -29,7 +31,8 @@ export async function recordHostedLinqConversationInboundTx(input: {
   prisma: HostedLinqConversationClient;
 }): Promise<void> {
   const occurredAt = normalizeConversationDate(input.occurredAt);
-  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
+  const linqChatLookupKey = normalizeConversationText(input.linqChatLookupKey)
+    ?? createHostedLinqChatLookupKey(input.chatId);
   if (!occurredAt || !linqChatLookupKey) {
     return;
   }
@@ -77,17 +80,69 @@ export async function recordHostedLinqConversationInboundTx(input: {
   });
 }
 
+export async function projectHostedLinqConversationForProviderEventTx(input: {
+  event: ParsedHostedLinqProviderEvent;
+  lineLookupKey: string | null;
+  prisma: HostedLinqConversationClient;
+}): Promise<boolean> {
+  const linqChatLookupKey = input.event.linqChatLookupKey;
+  if (!linqChatLookupKey) {
+    return false;
+  }
+
+  if (input.event.eventType === "message.received") {
+    if (input.event.direction === "outbound") {
+      const updated = await input.prisma.hostedLinqConversationState.updateMany({
+        where: { linqChatLookupKey },
+        data: {
+          lastOutboundAt: input.event.providerCreatedAt,
+          outboundSinceLastInboundCount: { increment: 1 },
+          totalOutboundCount: { increment: 1 },
+        },
+      });
+      return updated.count === 1;
+    }
+
+    const memberId = await resolveConversationMemberIdForProviderEventTx({
+      event: input.event,
+      prisma: input.prisma,
+    });
+    if (!memberId) {
+      return false;
+    }
+
+    await recordHostedLinqConversationInboundTx({
+      chatId: input.event.linqChatId,
+      linqChatLookupKey,
+      linePhoneNumberLookupKey: input.lineLookupKey,
+      memberId,
+      occurredAt: input.event.providerCreatedAt,
+      prisma: input.prisma,
+    });
+    return true;
+  }
+
+  if (input.event.deliveryStatus) {
+    return applyHostedLinqConversationDeliveryReceiptTx({
+      event: input.event,
+      prisma: input.prisma,
+    });
+  }
+
+  return false;
+}
+
 export async function applyHostedLinqConversationDeliveryReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqConversationClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const linqChatLookupKey = input.event.linqChatLookupKey;
   if (!linqChatLookupKey || !input.event.deliveryStatus) {
-    return;
+    return false;
   }
 
   if (input.event.deliveryStatus === "delivered") {
-    await input.prisma.hostedLinqConversationState.updateMany({
+    const updated = await input.prisma.hostedLinqConversationState.updateMany({
       where: {
         linqChatLookupKey,
         OR: buildConversationReceiptOrderingWhere(input.event),
@@ -99,7 +154,7 @@ export async function applyHostedLinqConversationDeliveryReceiptTx(input: {
         lastReceiptEventId: input.event.eventId,
       },
     });
-    return;
+    return updated.count === 1;
   }
 
   const advanced = await input.prisma.hostedLinqConversationState.updateMany({
@@ -116,7 +171,7 @@ export async function applyHostedLinqConversationDeliveryReceiptTx(input: {
     },
   });
   if (advanced.count !== 1) {
-    return;
+    return false;
   }
 
   await input.prisma.hostedLinqConversationState.updateMany({
@@ -134,6 +189,52 @@ export async function applyHostedLinqConversationDeliveryReceiptTx(input: {
       healthStatus: HOSTED_LINQ_CONVERSATION_HEALTH.atRisk,
     },
   });
+  return true;
+}
+
+async function resolveConversationMemberIdForProviderEventTx(input: {
+  event: Pick<ParsedHostedLinqProviderEvent, "linqChatId" | "linqChatLookupKey">;
+  prisma: HostedLinqConversationClient;
+}): Promise<string | null> {
+  if (!input.event.linqChatLookupKey) {
+    return null;
+  }
+
+  const routing = await input.prisma.hostedMemberRouting.findFirst({
+    where: {
+      OR: [
+        { linqChatLookupKey: input.event.linqChatLookupKey },
+        { pendingLinqChatLookupKey: input.event.linqChatLookupKey },
+      ],
+    },
+    select: {
+      memberId: true,
+    },
+  });
+  if (routing) {
+    return routing.memberId;
+  }
+
+  const threadIdentityLookupKeys = createHostedExternalThreadIdentityLookupKeyReadCandidates({
+    channel: "linq",
+    threadId: input.event.linqChatId,
+  });
+  if (threadIdentityLookupKeys.length === 0) {
+    return null;
+  }
+
+  const route = await input.prisma.hostedThreadRoute.findFirst({
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+    select: {
+      containerMemberId: true,
+    },
+  });
+  return route?.containerMemberId ?? null;
 }
 
 function buildConversationReceiptOrderingWhere(

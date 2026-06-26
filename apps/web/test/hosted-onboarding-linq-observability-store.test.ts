@@ -143,6 +143,43 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
+  it("does not claim a failed-message alert when only the line receipt projection is stale", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqLineUpdateMany.mockResolvedValueOnce({ count: 0 });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:00:00.000Z",
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered +15551234567 provider_msg_123 private text",
+        },
+        message_id: "msg_failed_123",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_stale_line",
+      eventType: "message.failed",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalled();
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
   it("counts outbound message.received echoes against line pacing", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildMessageReceivedEvent({
@@ -163,6 +200,89 @@ describe("hosted Linq observability stores", () => {
           lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
           totalOutboundCount: { increment: 1 },
         },
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
+          outboundSinceLastInboundCount: { increment: 1 },
+          totalOutboundCount: { increment: 1 },
+        },
+        where: {
+          linqChatLookupKey: event.linqChatLookupKey,
+        },
+      }),
+    );
+  });
+
+  it("projects inbound message.received events into conversation state from member routing", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedMemberRoutingFindFirst.mockResolvedValueOnce({
+      memberId: "member_123",
+    });
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "inbound",
+      eventId: "evt_inbound_123",
+      isFromMe: false,
+      messageId: "msg_inbound_123",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          linePhoneNumberLookupKey: event.phoneNumberLookupKey,
+          linqChatLookupKey: event.linqChatLookupKey,
+          memberId: "member_123",
+          recipientReplyCount: 1,
+        }),
+        where: {
+          linqChatLookupKey: event.linqChatLookupKey,
+        },
+      }),
+    );
+  });
+
+  it("falls back to explicit thread routes when projecting inbound conversation state", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedThreadRouteFindFirst.mockResolvedValueOnce({
+      containerMemberId: "member_thread",
+    });
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "inbound",
+      eventId: "evt_inbound_thread_123",
+      isFromMe: false,
+      messageId: "msg_inbound_thread_123",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedThreadRouteFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          channel: "linq",
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:external-thread-identity:/u),
+            ]),
+          },
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          linqChatLookupKey: event.linqChatLookupKey,
+          memberId: "member_thread",
+        }),
       }),
     );
   });
@@ -628,6 +748,8 @@ describe("hosted Linq observability stores", () => {
 
 function createObservabilityPrismaFixture() {
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqConversationStateUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqConversationStateUpsert = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
   const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
@@ -646,7 +768,13 @@ function createObservabilityPrismaFixture() {
     }));
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
+  const hostedMemberRoutingFindFirst = vi.fn().mockResolvedValue(null);
+  const hostedThreadRouteFindFirst = vi.fn().mockResolvedValue(null);
   const prisma = {
+    hostedLinqConversationState: {
+      updateMany: hostedLinqConversationStateUpdateMany,
+      upsert: hostedLinqConversationStateUpsert,
+    },
     hostedLinqAlert: {
       createMany: hostedLinqAlertCreateMany,
     },
@@ -668,10 +796,18 @@ function createObservabilityPrismaFixture() {
       createMany: hostedLinqProviderEventCreateMany,
       findFirst: hostedLinqProviderEventFindFirst,
     },
+    hostedMemberRouting: {
+      findFirst: hostedMemberRoutingFindFirst,
+    },
+    hostedThreadRoute: {
+      findFirst: hostedThreadRouteFindFirst,
+    },
   };
 
   return {
     hostedLinqAlertCreateMany,
+    hostedLinqConversationStateUpdateMany,
+    hostedLinqConversationStateUpsert,
     hostedLinqDeliveryCreate,
     hostedLinqDeliveryFindFirst,
     hostedLinqDeliveryFindUnique,
@@ -684,6 +820,8 @@ function createObservabilityPrismaFixture() {
     hostedLinqLineUpsert,
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
+    hostedMemberRoutingFindFirst,
+    hostedThreadRouteFindFirst,
     prisma,
   };
 }
@@ -736,6 +874,7 @@ function buildMessageReceivedEvent(input: {
           service: "iMessage",
         },
       },
+      chat_id: "chat_123",
       direction: input.direction,
       id: input.messageId,
       is_from_me: input.isFromMe,

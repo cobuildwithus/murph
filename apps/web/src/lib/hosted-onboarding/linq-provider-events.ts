@@ -42,6 +42,7 @@ export type ParsedHostedLinqProviderEvent = {
   extractionJson: Prisma.InputJsonValue;
   failureCode: string | null;
   failureReason: string | null;
+  linqChatId: string | null;
   linqChatLookupKey: string | null;
   messageIdSuffix: string | null;
   messageLookupKey: string | null;
@@ -274,6 +275,7 @@ function buildParsedProviderEvent(input: {
   const phoneNumberLookupKey = phoneNumberIsLine ? createHostedPhoneLookupKey(phoneNumber) : null;
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyReadCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
+  const linqChatId = normalizeNullableString(input.chatId);
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
   const payloadShapeJson = toPrismaJson(buildHostedJsonShape(input.event));
 
@@ -289,6 +291,7 @@ function buildParsedProviderEvent(input: {
     }),
     failureCode: normalizeSafeProviderToken(input.failureCode),
     failureReason: normalizeProviderFreeText(input.failureReason),
+    linqChatId,
     linqChatLookupKey,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,

@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { applyHostedLinqDeliveryReceiptTx } from "./linq-delivery-store";
 import {
-  applyHostedLinqConversationDeliveryReceiptTx,
+  projectHostedLinqConversationForProviderEventTx,
 } from "./linq-conversation-state";
 import {
   ensureHostedLinqLineForProviderEventTx,
@@ -70,12 +70,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
     prisma: input.prisma,
   });
   const staleDeliveryReceipt = deliveryReceipt.deliveryId !== null && !deliveryReceipt.advanced;
-  if (!staleDeliveryReceipt) {
-    await applyHostedLinqConversationDeliveryReceiptTx({
-      event: input.event,
-      prisma: input.prisma,
-    });
-  }
   const lineProjectionAdvanced = staleDeliveryReceipt
     ? false
     : await projectHostedLinqLineForProviderEventTx({
@@ -83,7 +77,23 @@ export async function ingestHostedLinqProviderEventTx(input: {
       lineLookupKey,
       prisma: input.prisma,
     });
-  if (staleDeliveryReceipt || isStaleStatusProjection(input.event, lineProjectionAdvanced)) {
+  const staleLineReceipt = isStaleLineReceiptProjection({
+    event: input.event,
+    lineLookupKey,
+    lineProjectionAdvanced,
+  });
+  if (!staleDeliveryReceipt) {
+    await projectHostedLinqConversationForProviderEventTx({
+      event: input.event,
+      lineLookupKey,
+      prisma: input.prisma,
+    });
+  }
+  if (
+    staleDeliveryReceipt
+    || staleLineReceipt
+    || isStaleStatusProjection(input.event, lineProjectionAdvanced)
+  ) {
     return {
       alertIds: [],
       duplicate: false,
@@ -101,6 +111,16 @@ export async function ingestHostedLinqProviderEventTx(input: {
     alertIds,
     duplicate: false,
   };
+}
+
+function isStaleLineReceiptProjection(input: {
+  event: ParsedHostedLinqProviderEvent;
+  lineLookupKey: string | null;
+  lineProjectionAdvanced: boolean;
+}): boolean {
+  return input.event.deliveryStatus !== null
+    && input.lineLookupKey !== null
+    && !input.lineProjectionAdvanced;
 }
 
 function isStaleStatusProjection(
