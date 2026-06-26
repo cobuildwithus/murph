@@ -40,9 +40,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
-  describeHostedOnboardingErrorForLog,
-} from "./http";
-import {
+  buildHostedLinqFirstContactEventProcessingError,
   classifyHostedLinqFirstContactAdmission,
   readHostedLinqFirstContactAdmissionMode,
   readHostedLinqFirstContactEventReceipt,
@@ -421,7 +419,12 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         eventId: input.event.event_id,
         prisma: transaction,
       });
-      if (existingReceipt) {
+      if (existingReceipt?.status === "processing") {
+        throw buildHostedLinqFirstContactEventProcessingError({
+          eventId: input.event.event_id,
+        });
+      }
+      if (existingReceipt?.status === "consumed") {
         const plan = await planHostedOnboardingLinqWebhookForRecordedAdmission({
           event: input.event,
           transaction,
@@ -591,10 +594,10 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
   console.warn(
     "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
     {
-      ...(describeHostedOnboardingErrorForLog(input.error) ?? {}),
       ...sanitizeHostedOnboardingStructuredLogDetails({
         admissionDisposition: "fail_open",
         errorCode: isHostedOnboardingError(input.error) ? input.error.code : null,
+        ...(isHostedOnboardingError(input.error) ? input.error.details ?? {} : {}),
         retryable: isHostedOnboardingError(input.error) ? input.error.retryable : null,
       }),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),

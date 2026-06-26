@@ -814,9 +814,11 @@ model HostedLinqFirstContactAdmissionDecision {
 
 model HostedLinqFirstContactEventReceipt {
   eventId   String   @id @map("event_id")
+  status    String   @default("consumed")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([status])
   @@map("hosted_linq_first_contact_event_receipt")
 }
 

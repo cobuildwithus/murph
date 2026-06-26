@@ -650,13 +650,46 @@ function buildLinqMessageWebhookBody(input: {
 }
 
 function createPrismaStub() {
+  const firstContactReceipts = new Map<string, Record<string, unknown>>();
   const prisma = {
+    $executeRaw: vi.fn().mockResolvedValue(0),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({
         inviteCode: "code_first_contact",
       }),
       update: vi.fn().mockResolvedValue(undefined),
+    },
+    hostedLinqFirstContactAdmissionDecision: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    hostedLinqFirstContactEventReceipt: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        firstContactReceipts.set(String(data.eventId), data);
+        return data;
+      }),
+      deleteMany: vi.fn(async ({ where }: { where: { eventId: string } }) => {
+        const existed = firstContactReceipts.delete(where.eventId);
+        return { count: existed ? 1 : 0 };
+      }),
+      findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+        firstContactReceipts.get(where.eventId) ?? null),
+      upsert: vi.fn(async (
+        { create, update, where }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+          where: { eventId: string };
+        },
+      ) => {
+        const data = {
+          ...create,
+          ...(firstContactReceipts.get(where.eventId) ?? {}),
+          ...update,
+        };
+        firstContactReceipts.set(where.eventId, data);
+        return data;
+      }),
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue([]),

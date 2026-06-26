@@ -19,6 +19,7 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
+  buildHostedLinqFirstContactEventProcessingError,
   deleteHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
 } from "./linq-first-contact-admission";
@@ -217,6 +218,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
         prisma: input.prisma,
         signal: input.signal,
       });
+      await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
 
     } catch (error) {
       await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
@@ -231,6 +233,34 @@ export async function drainHostedLinqSideEffectsDirect(input: {
 }
 
 async function recordSkippedHostedLinqInviteSignupSideEffectConsumed(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "invite_signup") {
+    return;
+  }
+
+  const invite = await prisma.hostedInvite.findUnique({
+    select: {
+      sentAt: true,
+    },
+    where: {
+      id: effect.payload.inviteId,
+    },
+  });
+  if (!invite?.sentAt) {
+    throw buildHostedLinqFirstContactEventProcessingError({
+      eventId: effect.payload.sourceEventId,
+    });
+  }
+
+  await recordHostedLinqFirstContactEventConsumed({
+    eventId: effect.payload.sourceEventId,
+    prisma,
+  });
+}
+
+async function recordDeliveredHostedLinqInviteSignupSideEffectConsumed(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {

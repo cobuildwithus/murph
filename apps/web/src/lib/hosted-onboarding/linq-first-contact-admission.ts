@@ -57,7 +57,10 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
 
 export type HostedLinqFirstContactEventReceipt = {
   eventId: string;
+  status: HostedLinqFirstContactEventReceiptStatus;
 };
+
+export type HostedLinqFirstContactEventReceiptStatus = "consumed" | "processing";
 
 type HostedLinqFirstContactAdmissionDecisionStore = {
   hostedLinqFirstContactAdmissionDecision: {
@@ -80,6 +83,7 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
 
 type HostedLinqFirstContactEventReceiptRecord = {
   eventId: string;
+  status: string;
 };
 
 type HostedLinqFirstContactEventReceiptStore = {
@@ -87,6 +91,7 @@ type HostedLinqFirstContactEventReceiptStore = {
     create(input: {
       data: {
         eventId: string;
+        status: HostedLinqFirstContactEventReceiptStatus;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord>;
     deleteMany(input: {
@@ -99,6 +104,18 @@ type HostedLinqFirstContactEventReceiptStore = {
         eventId: string;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord | null>;
+    upsert(input: {
+      create: {
+        eventId: string;
+        status: HostedLinqFirstContactEventReceiptStatus;
+      };
+      update: {
+        status: HostedLinqFirstContactEventReceiptStatus;
+      };
+      where: {
+        eventId: string;
+      };
+    }): Promise<HostedLinqFirstContactEventReceiptRecord>;
   };
 };
 
@@ -276,14 +293,38 @@ export async function recordHostedLinqFirstContactEventConsumed(input: {
   eventId: string;
   prisma: HostedLinqFirstContactEventReceiptStore;
 }): Promise<HostedLinqFirstContactEventReceipt> {
+  const receipt = await input.prisma.hostedLinqFirstContactEventReceipt.upsert({
+    create: {
+      eventId: input.eventId,
+      status: "consumed",
+    },
+    update: {
+      status: "consumed",
+    },
+    where: {
+      eventId: input.eventId,
+    },
+  });
+  return parseHostedLinqFirstContactEventReceiptRecord(receipt) ?? {
+    eventId: input.eventId,
+    status: "consumed",
+  };
+}
+
+export async function recordHostedLinqFirstContactEventProcessing(input: {
+  eventId: string;
+  prisma: HostedLinqFirstContactEventReceiptStore;
+}): Promise<HostedLinqFirstContactEventReceipt> {
   try {
     const created = await input.prisma.hostedLinqFirstContactEventReceipt.create({
       data: {
         eventId: input.eventId,
+        status: "processing",
       },
     });
     return parseHostedLinqFirstContactEventReceiptRecord(created) ?? {
       eventId: input.eventId,
+      status: "processing",
     };
   } catch (error) {
     if (!isPrismaUniqueConstraintError(error)) {
@@ -294,11 +335,32 @@ export async function recordHostedLinqFirstContactEventConsumed(input: {
       eventId: input.eventId,
       prisma: input.prisma,
     });
+    if (existing?.status === "processing") {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.eventId,
+      });
+    }
     if (existing) {
       return existing;
     }
     throw error;
   }
+}
+
+export function buildHostedLinqFirstContactEventProcessingError(input: {
+  eventId: string;
+}) {
+  return hostedOnboardingError({
+    code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+    details: {
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      operationName: "hosted_linq_first_contact_event",
+      type: "processing",
+    },
+    httpStatus: 503,
+    message: "Linq first-contact event is already processing.",
+    retryable: true,
+  });
 }
 
 export async function deleteHostedLinqFirstContactEventReceipt(input: {
@@ -491,6 +553,7 @@ function parseHostedLinqFirstContactEventReceiptRecord(
 
   return {
     eventId: record.eventId,
+    status: record.status === "processing" ? "processing" : "consumed",
   };
 }
 
