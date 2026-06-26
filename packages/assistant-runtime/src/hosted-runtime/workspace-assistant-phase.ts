@@ -735,6 +735,37 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       result.stableKeyRetryNeeded === true &&
       (input.retryStableKeyFailure || changed > 0);
     if (
+      result.stableKeyRetryNeeded === true &&
+      result.stableKeyFailure !== undefined
+    ) {
+      const failure = buildHostedRuntimeFailureDiagnostics(
+        result.stableKeyFailure,
+        "Hosted managed automation stable-key setup failed.",
+      );
+      await writeHostedRuntimeLogBestEffort({
+        entry: {
+          ...buildHostedRuntimeLogContextFields({
+            attemptId: input.input.request.attemptId,
+            leaseGeneration: input.input.request.leaseGeneration,
+            workspaceVersion: input.input.request.workspaceVersion,
+          }),
+          component: "runtime",
+          errorCode: failure.errorCode,
+          eventCode: "runner.error",
+          level: "warn",
+          phase: "error",
+          redactedJson: {
+            ...failure.redactedJson,
+            murphManagedAutomationCreated: result.created,
+            murphManagedAutomationFailed: true,
+            murphManagedAutomationSkipped: result.skipped,
+            murphManagedAutomationUpdated: result.updated,
+          },
+        },
+        platform: input.input.runtime.platform,
+      });
+    }
+    if (
       changed === 0 &&
       !shouldRetryStableKey
     ) {

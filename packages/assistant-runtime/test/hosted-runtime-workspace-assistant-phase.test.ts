@@ -1562,9 +1562,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps a retry wake when hosted managed automation work partially succeeds", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const stableKeyFailure = new Error("metadata unavailable");
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
       created: 1,
       skipped: 1,
+      stableKeyFailure,
       stableKeyRetryNeeded: true,
       updated: 0,
     });
@@ -1595,6 +1597,63 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           murphManagedAutomationFailed: true,
           murphManagedAutomationSkipped: 1,
           murphManagedAutomationUpdated: 0,
+        }),
+      }),
+    );
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        }),
+      }),
+    );
+  });
+
+  it("logs stable-key metadata failures even when background setup stays idle", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 0,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
         }),
       }),
     );
@@ -1748,6 +1807,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
       created: 0,
       skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
       stableKeyRetryNeeded: true,
       updated: 0,
     });

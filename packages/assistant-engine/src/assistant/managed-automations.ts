@@ -59,6 +59,7 @@ export interface ApplyMurphManagedAutomationsInput {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   skipped: number
+  stableKeyFailure?: unknown
   stableKeyRetryNeeded?: true
   updated: number
 }
@@ -393,9 +394,10 @@ export async function applyMurphManagedAutomations(
         }
         try {
           stableKey = await resolveScheduleStableKey()
-        } catch {
+        } catch (error) {
           scheduleStableKeyUnavailable = true
           result.skipped += 1
+          result.stableKeyFailure = error
           result.stableKeyRetryNeeded = true
           continue
         }

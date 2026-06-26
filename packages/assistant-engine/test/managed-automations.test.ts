@@ -661,7 +661,8 @@ describe('applyMurphManagedAutomations', () => {
   })
 
   it('defers spread-managed creation when vault metadata cannot be read', async () => {
-    managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
+    const metadataError = new Error('metadata unavailable')
+    managedAutomationMocks.loadVault.mockRejectedValue(metadataError)
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
@@ -670,6 +671,7 @@ describe('applyMurphManagedAutomations', () => {
     })).resolves.toEqual({
       created: 0,
       skipped: 4,
+      stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
@@ -713,7 +715,8 @@ describe('applyMurphManagedAutomations', () => {
       tags: ['assistant', 'scheduled', 'murph-managed'],
       title: 'Weekly health digest',
     })
-    managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
+    const metadataError = new Error('metadata unavailable')
+    managedAutomationMocks.loadVault.mockRejectedValue(metadataError)
 
     const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
       seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
@@ -741,6 +744,7 @@ describe('applyMurphManagedAutomations', () => {
     })).resolves.toEqual({
       created: 1,
       skipped: 1,
+      stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 1,
     })
