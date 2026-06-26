@@ -265,6 +265,26 @@ describe("Retell phone-call result handling", () => {
     });
   });
 
+  it("does not persist provider call_summary when custom result is missing", () => {
+    const result = mapRetellCallAnalysis({
+      call_analysis: {
+        call_summary: "Sensitive transcript-derived canary: payment code 123456.",
+        custom_analysis_data: {
+          follow_up: "Ask the user to retry.",
+          outcome: "needs_user",
+        },
+      },
+      call_id: "retell_call_123",
+    });
+
+    expect(result).toEqual({
+      followUp: "Ask the user to retry.",
+      outcome: "needs_user",
+      summary: "The call ended, but Retell did not return a final result.",
+    });
+    expect(JSON.stringify(result)).not.toContain("payment code 123456");
+  });
+
   it("updates call_ended once with provider id and end timestamp", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
@@ -544,7 +564,7 @@ describe("Retell phone-call result handling", () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultNotification: vi
-        .fn(async (_call: HostedPhoneCall) => {})
+        .fn(async () => {})
         .mockRejectedValueOnce(new Error("mailbox unavailable"))
         .mockResolvedValueOnce(undefined),
     });

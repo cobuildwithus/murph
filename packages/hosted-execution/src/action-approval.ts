@@ -72,8 +72,8 @@ export function parseHostedActionApprovalRequest(
       "actionId",
       "actionKind",
       "presentation",
-      "returnContactKind",
     ],
+    ["returnContactKind"],
   );
   const actionFingerprint = requireString(
     request.actionFingerprint,
@@ -229,9 +229,10 @@ function requireExactObject(
   value: unknown,
   label: string,
   keys: readonly string[],
+  optionalKeys: readonly string[] = [],
 ): Record<string, unknown> {
   const record = requireObject(value, label);
-  const allowed = new Set(keys);
+  const allowed = new Set([...keys, ...optionalKeys]);
   const unexpected = Object.keys(record).filter((key) => !allowed.has(key));
 
   if (unexpected.length > 0) {

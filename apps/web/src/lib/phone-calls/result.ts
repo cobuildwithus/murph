@@ -320,10 +320,6 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
       customAnalysis?.result,
       HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH,
     )
-    ?? readBoundedNonEmptyString(
-      call.call_analysis?.call_summary,
-      HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH,
-    )
     ?? "The call ended, but Retell did not return a final result.";
   const followUp = readBoundedNonEmptyString(
     customAnalysis?.follow_up,

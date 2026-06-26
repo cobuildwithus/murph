@@ -1134,6 +1134,7 @@ export function isComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
     case 'invalid-computer-arguments':
@@ -1150,6 +1151,7 @@ function isExecutableComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
       return true
