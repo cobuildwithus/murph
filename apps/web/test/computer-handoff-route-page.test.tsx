@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
   return {
     createComputerUseService: vi.fn(() => service),
     getHostedMurphContactContext: vi.fn(),
+    getPrisma: vi.fn(),
     headers: vi.fn(),
     requireActiveHostedAppSession: vi.fn(),
     redirect: vi.fn((url: string) => {
@@ -50,6 +51,10 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
   getHostedMurphContactContext: mocks.getHostedMurphContactContext,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 type ComputerHandoffDoneRouteModule = typeof import(
@@ -95,6 +100,9 @@ describe("computer handoff route and page", () => {
     });
     mocks.headers.mockResolvedValue(createHeaders(null));
     mocks.getHostedMurphContactContext.mockResolvedValue(createContactContext());
+    mocks.getPrisma.mockReturnValue(createPrisma({
+      metadataJson: createCheckpointMetadata("linq"),
+    }));
   });
 
   it("requires an active hosted app session before completing a handoff", async () => {
@@ -146,25 +154,61 @@ describe("computer handoff route and page", () => {
     expect(mocks.service.readHandoffPageState).not.toHaveBeenCalled();
   });
 
-  it("returns the preferred contact deep link with a literal Done body", async () => {
+  it("auto-returns to Messages when the handoff came from the text channel", async () => {
     const response = await computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
         method: "POST",
       }),
       createRouteContext({ token: "handoff-token" }),
     );
-    const body = (await response.json()) as { redirectTo: string };
+    const body = (await response.json()) as {
+      contactOptions: Array<{ href: string; kind: string }>;
+      redirectTo: string;
+    };
 
     expect(response.status).toBe(200);
     expect(body.redirectTo).toBe("sms:+15550100001?body=Done");
     expect(body.redirectTo).not.toContain("private");
+    assert.deepEqual(body.contactOptions.map((option) => option.kind), [
+      "text",
+      "telegram",
+      "email",
+    ]);
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
       token: "handoff-token",
     });
   });
 
+  it("returns email handoffs to the completed page instead of opening another app", async () => {
+    mocks.getPrisma.mockReturnValueOnce(createPrisma({
+      metadataJson: createCheckpointMetadata("email"),
+    }));
+
+    const response = await computerHandoffDoneRoute.POST(
+      new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+    const body = (await response.json()) as {
+      contactOptions: Array<{ href: string; kind: string }>;
+      redirectTo: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.redirectTo).toBe("/computer/handoff/handoff-token?return=email");
+    assert.deepEqual(body.contactOptions.map((option) => option.kind), [
+      "email",
+      "text",
+      "telegram",
+    ]);
+  });
+
   it("falls back to the handoff page path when no contact channel resolves", async () => {
+    mocks.getPrisma.mockReturnValueOnce(createPrisma({
+      metadataJson: null,
+    }));
     mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
       initialContactChannels: {
         email: false,
@@ -180,9 +224,13 @@ describe("computer handoff route and page", () => {
       }),
       createRouteContext({ token: "handoff-token" }),
     );
-    const body = (await response.json()) as { redirectTo: string };
+    const body = (await response.json()) as {
+      contactOptions: unknown[];
+      redirectTo: string;
+    };
 
     expect(response.status).toBe(200);
+    expect(body.contactOptions).toEqual([]);
     expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -269,6 +317,24 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
+  });
+
+  it("renders the preferred email webmail CTA for email-return handoffs", async () => {
+    mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
+      userEmailAddress: "member@gmail.com",
+    }));
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+      searchParams: Promise.resolve({ return: "email" }),
+    }));
+    const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
+
+    assert.match(markup, /Reply in Gmail/);
+    assert.match(markup, /Reply in Messages/);
+    expect(hrefs[0]).toMatch(/^https:\/\/mail\.google\.com\/mail\/u\/0\/?/u);
+    expect(hrefs[0]).toContain("to=murph%2Balias123%40mail.withmurph.ai");
+    expect(hrefs[0]).toContain("body=Done");
   });
 
   it("renders a literal Done fallback when completed handoff has no contact channel", async () => {
@@ -397,5 +463,36 @@ function createContactContext(input: {
     murphEmailAddress: input.murphEmailAddress ?? "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: input.murphPhoneNumber ?? "+15550100001",
     userEmailAddress: input.userEmailAddress ?? "member@example.test",
+  };
+}
+
+function createPrisma(input: {
+  memberId?: string;
+  metadataJson?: unknown;
+  runId?: string;
+} = {}) {
+  return {
+    hostedComputerHandoff: {
+      findUnique: vi.fn(async () => ({
+        memberId: input.memberId ?? "member_123",
+        runId: input.runId ?? "hcr_run123",
+      })),
+    },
+    hostedComputerRun: {
+      findFirst: vi.fn(async () => ({
+        metadataJson: input.metadataJson ?? null,
+      })),
+    },
+  };
+}
+
+function createCheckpointMetadata(channel: string) {
+  return {
+    pause: {
+      checkpointContext: {
+        conversationId: JSON.stringify([channel, "conversation-123"]),
+        recipientKey: JSON.stringify([channel, "recipient-123"]),
+      },
+    },
   };
 }
