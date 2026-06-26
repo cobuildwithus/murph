@@ -288,6 +288,9 @@ type UsageResetPrismaFixture = {
   hostedMember: {
     findUnique: MockedFunction;
   };
+  hostedThreadRoute: {
+    findMany: MockedFunction;
+  };
 };
 
 describe("hosted Linq usage reset e2e", () => {
@@ -695,7 +698,11 @@ function createUsageResetPrismaFixture(input: {
       findUnique: vi.fn(async () => ({
         ...activeMember,
         billingRef: null,
+        threadContainer: null,
       })),
+    },
+    hostedThreadRoute: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   };
 

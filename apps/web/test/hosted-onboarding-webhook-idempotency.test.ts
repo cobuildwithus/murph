@@ -640,6 +640,9 @@ function createPrismaStub() {
       }),
       update: vi.fn().mockResolvedValue(undefined),
     },
+    hostedThreadRoute: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   } as const;
 
   return prisma;

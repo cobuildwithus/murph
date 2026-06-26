@@ -377,7 +377,8 @@ function createTelegramVoiceMemoPartialDeliveryFailure(input: {
 const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'linq',
   canAutoReply(eligibility) {
-    return eligibility.threadIsDirect === true
+    return eligibility.threadIsDirect === true ||
+      eligibility.externalThreadRouteAuthorityPresent === true
       ? null
       : 'iMessage auto-reply only runs for direct chats'
   },
