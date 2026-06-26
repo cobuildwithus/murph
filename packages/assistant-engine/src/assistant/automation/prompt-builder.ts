@@ -24,6 +24,10 @@ import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
+const ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION = [
+  'Attachment contents are unavailable in this turn.',
+  'Do not claim to have inspected, listened to, decoded, or transcribed the attachment unless explicit text evidence appears above; respond using any other available message context.',
+].join(' ')
 const RAW_ATTACHMENT_FILE_INSTRUCTION =
   'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.'
 const PDF_ATTACHMENT_FILE_INSTRUCTION =
@@ -57,6 +61,13 @@ export interface AssistantAutoReplyPromptInput {
   text: string | null
 }
 
+/**
+ * Prompt construction is the boundary between durable capture state and model
+ * instructions. Keep transient storage details here instead of letting raw
+ * lifecycle labels leak to the provider. The provider can still reply when a
+ * media attachment is terminally unavailable, but it should see a user-level
+ * availability statement rather than `rawPath: missing` / `storedPath: missing`.
+ */
 export type AssistantAutoReplyPrompt =
   | { kind: 'defer'; reason: string }
   | { kind: 'ready'; prompt: string }
@@ -401,6 +412,9 @@ function renderAttachmentEvidencePromptSection(
         'Derived attachment evidence is available in the derived manifest path above.',
       )
     }
+    if (storedPathLine === null && derivedManifestPath === null) {
+      chunks.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
+    }
   }
 
   if (chunks.length === 0) {
@@ -546,6 +560,9 @@ function renderPreparedAttachmentPromptSection(
   if (status && !hasTextFragments) {
     sections.push(status)
   }
+  if (!hasTextFragments && !hasRawStoredPath && !richEvidenceCandidate && !storedPdfMetadata) {
+    sections.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
+  }
   if (hasRawStoredPath && !hasTextFragments) {
     sections.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
   }
@@ -574,7 +591,7 @@ function renderPreparedAttachmentMetadataLines(input: {
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `mime: ${attachment.mime ?? 'unknown'}`,
     `byteSize: ${typeof attachment.byteSize === 'number' ? attachment.byteSize : 'unknown'}`,
-    `storedPath: ${storedPath ?? 'missing'}`,
+    storedPath ? `storedPath: ${storedPath}` : null,
     input.includeParserEvidence && attachment.parseState
       ? `parseState: ${attachment.parseState}`
       : null,
@@ -721,6 +738,7 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
       attachment: input.attachment,
       rawPathByOrdinal: input.rawPathByOrdinal,
     })
+    const contentLine = rawPath ? `rawPath: ${rawPath}` : 'content: unavailable'
     return [
       '',
       `Attachment ${input.ordinal}`,
@@ -728,7 +746,7 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
       `kind: ${input.attachment.kind}`,
       `mime: ${normalizeNullableString(input.attachment.mime) ?? 'unknown'}`,
       `byteSize: ${typeof input.attachment.byteSize === 'number' ? input.attachment.byteSize : 'unknown'}`,
-      `rawPath: ${rawPath ?? 'missing'}`,
+      contentLine,
       ...(shouldRenderAttachmentParserEvidence(input.attachment.kind)
         ? [`parseState: ${input.attachment.parseState ?? 'unknown'}`]
         : []),
@@ -743,7 +761,7 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
     `kind: ${normalizeAttachmentLifecycleDescriptorKind(descriptor)}`,
     `mime: ${normalizeNullableString(descriptor?.contentType ?? null) ?? 'unknown'}`,
     `byteSize: ${typeof descriptor?.sizeBytes === 'number' ? descriptor.sizeBytes : 'unknown'}`,
-    'rawPath: missing',
+    'content: unavailable',
   ]
 }
 

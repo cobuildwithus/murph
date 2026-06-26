@@ -9,6 +9,7 @@ import {
   HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
   normalizeHostedLinqAttachmentUrl,
+  withHostedLinqAttachmentDownloadRetry,
 } from "../src/hosted-runtime/events/linq.ts";
 
 const originalLinqApiBaseUrl = process.env.LINQ_API_BASE_URL;
@@ -106,6 +107,28 @@ describe("normalizeHostedLinqAttachmentUrl", () => {
       normalizeHostedLinqAttachmentUrl("https://cdn.linqapp.com/uploads/photo.jpg"),
       "https://cdn.linqapp.com/uploads/photo.jpg",
     );
+  });
+});
+
+describe("withHostedLinqAttachmentDownloadRetry", () => {
+  it("retries short-lived hosted Linq CDN misses", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("not ready", { status: 404 });
+      }
+      return new Response(Uint8Array.from([9, 8, 7]), { status: 200 });
+    });
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch);
+    assert.ok(driver);
+    const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
+      retryDelaysMs: [0],
+    });
+
+    assert.ok(retrying);
+    await expect(
+      retrying.downloadUrl("https://cdn.linqapp.com/files/voice.m4a"),
+    ).resolves.toEqual(Uint8Array.from([9, 8, 7]));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

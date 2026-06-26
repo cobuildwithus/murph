@@ -505,7 +505,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
     expect(result.prompt).not.toContain('raw/assistant-input/')
     expect(result.prompt).not.toContain('storedPath:')
-    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
     )
@@ -646,7 +648,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
     expect(result.prompt).toContain('byteSize: 1024')
-    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
     expect(result.prompt).not.toContain('parseState: unknown')
     expect(result.prompt).toContain('Attachment 2\nfileName: private-voice.ogg')
     expect(result.prompt).toContain('kind: voice_memo')
@@ -1350,7 +1352,8 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('Attachment 1 (other)')
-    expect(result.prompt).toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain('parseState: succeeded')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
@@ -1402,8 +1405,10 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('rawPath: missing')
-    expect(result.prompt).toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain('raw/inbox/capture-1/attachments/expired.zip')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',

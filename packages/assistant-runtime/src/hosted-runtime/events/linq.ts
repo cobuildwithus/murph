@@ -61,6 +61,7 @@ interface HostedLinqAttachmentDownloadAttemptLog {
 // Hosted voice memo fetches routinely take longer than image/document fetches,
 // especially once the wake has crossed the web -> worker boundary.
 export const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 15_000;
+const DEFAULT_HOSTED_LINQ_ATTACHMENT_DOWNLOAD_RETRY_DELAYS_MS = [250, 1_000] as const;
 export const HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const DEFAULT_HOSTED_LINQ_ATTACHMENT_CDN_BASE_URL = "https://cdn.linqapp.com";
 const DEFAULT_HOSTED_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
@@ -162,6 +163,59 @@ export function createHostedLinqAttachmentDownloadDriver(
         signal,
       }),
   };
+}
+
+export function withHostedLinqAttachmentDownloadRetry(
+  driver: HostedLinqAttachmentDownloadDriver | null,
+  options: {
+    retryDelaysMs?: readonly number[];
+  } = {},
+): HostedLinqAttachmentDownloadDriver | null {
+  if (!driver) {
+    return null;
+  }
+
+  const retryDelaysMs = options.retryDelaysMs
+    ?? DEFAULT_HOSTED_LINQ_ATTACHMENT_DOWNLOAD_RETRY_DELAYS_MS;
+  const downloadPart = driver.downloadPart;
+  return {
+    downloadUrl: (url, signal) => retryHostedLinqAttachmentDownloadCall({
+      retryDelaysMs,
+      run: () => driver.downloadUrl(url, signal),
+      signal,
+    }),
+    ...(downloadPart
+      ? {
+          downloadPart: (part, signal) => retryHostedLinqAttachmentDownloadCall({
+            retryDelaysMs,
+            run: () => downloadPart(part, signal),
+            signal,
+          }),
+        }
+      : {}),
+  };
+}
+
+async function retryHostedLinqAttachmentDownloadCall<T>(input: {
+  retryDelaysMs: readonly number[];
+  run: () => Promise<T>;
+  signal?: AbortSignal;
+}): Promise<T> {
+  for (let attemptIndex = 0; ; attemptIndex += 1) {
+    try {
+      return await input.run();
+    } catch (error) {
+      const retryDelayMs = input.retryDelaysMs[attemptIndex];
+      if (
+        retryDelayMs === undefined
+        || !shouldRetryHostedLinqAttachmentDownloadError(error, input.signal)
+      ) {
+        throw error;
+      }
+
+      await waitHostedLinqAttachmentDownloadRetryDelay(retryDelayMs, input.signal);
+    }
+  }
 }
 
 export function normalizeHostedLinqAttachmentUrl(
@@ -469,6 +523,87 @@ function assertHostedLinqAttachmentWithinByteLimit(byteSize: number | null): voi
       `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
     );
   }
+}
+
+function shouldRetryHostedLinqAttachmentDownloadError(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  if (signal?.aborted || isAbortLikeHostedLinqAttachmentError(error)) {
+    return false;
+  }
+
+  const failure = classifyHostedLinqAttachmentDownloadError(error);
+  if (failure.status !== null) {
+    // Linq audio URLs can be visible in the message event before the backing
+    // CDN/metadata object is readable. A tiny bounded retry avoids converting
+    // that short provider lag into permanent descriptor-only audio.
+    return failure.status === 403
+      || failure.status === 404
+      || failure.status === 408
+      || failure.status === 425
+      || failure.status === 429
+      || failure.status >= 500;
+  }
+
+  return isHostedLinqTransientTransportError(error);
+}
+
+function isHostedLinqTransientTransportError(error: unknown): boolean {
+  const record = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : null;
+  const code = typeof record?.code === "string"
+    ? record.code.toLowerCase()
+    : "";
+  const causeKind = typeof record?.hostedRuntimeFetchCauseKind === "string"
+    ? record.hostedRuntimeFetchCauseKind.toLowerCase()
+    : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return code.includes("network")
+    || code.includes("timeout")
+    || code.includes("fetch")
+    || code.includes("econnreset")
+    || code.includes("eai_again")
+    || causeKind === "network"
+    || causeKind === "timeout"
+    || causeKind === "fetch_failed"
+    || message.includes("fetch failed")
+    || message.includes("network")
+    || message.includes("timed out")
+    || message.includes("timeout");
+}
+
+async function waitHostedLinqAttachmentDownloadRetryDelay(
+  delayMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return;
+  }
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const onAbort = () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+  });
 }
 
 class HostedLinqAttachmentDownloadError extends Error {
