@@ -194,6 +194,7 @@ async function drainHostedConversationParsers(input: {
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
+            nextWakeAtPresent: false,
             safeErrorMessage: "One or more hosted conversation parser jobs failed.",
             parserFailed: parserFailures.length,
             parserObservedFailedJobs: observedFailedJobs.length,
@@ -205,6 +206,7 @@ async function drainHostedConversationParsers(input: {
       });
     }
     return createHostedConversationParserMetrics({
+      nextWakeAt: null,
       parserProcessed: results.length,
     });
   } catch (error) {

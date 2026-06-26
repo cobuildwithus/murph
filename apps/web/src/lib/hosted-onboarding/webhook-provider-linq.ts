@@ -71,6 +71,9 @@ import {
 import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
+import type {
+  HostedLinqFirstContactAdmissionRequest,
+} from "./linq-first-contact-admission";
 import {
   readHostedThreadRouteByExternalThread,
   readHostedThreadRouteByThreadIdentity,
@@ -93,6 +96,11 @@ const HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS = 20_000;
 const HOSTED_LINQ_ATTACHMENT_ID_MAX_CHARS = 256;
 const HOSTED_LINQ_ATTACHMENT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_LINQ_ATTACHMENT_MIME_TYPE_MAX_CHARS = 120;
+const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_SERVICES = new Set([
+  "imessage",
+  "rcs",
+  "sms",
+]);
 const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
 
 type HostedLinqExistingMemberMatch =
@@ -106,7 +114,9 @@ type HostedLinqUsageGate = Awaited<ReturnType<typeof checkHostedAiUsageGate>>;
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
+  firstContactAdmitted?: boolean;
   prisma: Prisma.TransactionClient;
+  requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   if (input.event.event_type !== "message.received") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -496,6 +506,27 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "blocked-first-contact-content",
         routeStage: "ignored-blocked-first-contact-content",
+      }),
+    );
+  }
+
+  if (
+    existingMember === null
+    && input.requireFirstContactAdmission === true
+    && input.firstContactAdmitted !== true
+  ) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFirstContactAdmissionRequiredPlan({
+        request: buildHostedLinqFirstContactAdmissionRequest({
+          context,
+          event: input.event,
+        }),
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "first-contact-admission-required",
+        routeStage: "first-contact-admission-required",
       }),
     );
   }
@@ -922,6 +953,64 @@ async function planHostedLinqInboundAdmissionDenied(input: {
   }
 
   return null;
+}
+
+function buildFirstContactAdmissionRequiredPlan(input: {
+  request: HostedLinqFirstContactAdmissionRequest;
+}): HostedOnboardingLinqDirectPlan {
+  return {
+    ...buildActiveMemberDirectPlan({
+      desiredSideEffects: [],
+      response: {
+        ignored: true,
+        ok: true,
+        reason: "first-contact-admission-required",
+      },
+    }),
+    firstContactAdmissionRequest: input.request,
+  };
+}
+
+function buildHostedLinqFirstContactAdmissionRequest(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+}): HostedLinqFirstContactAdmissionRequest {
+  return {
+    eventId: input.event.event_id,
+    participantContactKind: input.context.participantContact?.kind ?? "phone",
+    partTypes: buildHostedLinqFirstContactAdmissionPartTypes(input.context.messageEvent.data.message.parts),
+    service: normalizeHostedLinqFirstContactAdmissionService(input.context.messageEvent.data.service),
+    text: buildHostedLinqFirstContactAdmissionText(input.context.messageEvent.data.message.parts),
+  };
+}
+
+function buildHostedLinqFirstContactAdmissionPartTypes(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+): string[] {
+  return [...new Set(parts.map((part) => part.type))].sort();
+}
+
+function buildHostedLinqFirstContactAdmissionText(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+): string | null {
+  const text = parts
+    .filter((part) => part.type === "text" || part.type === "link")
+    .map((part) => normalizeHostedLinqPartText(part.value) ?? "")
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 2_000)
+    .trim();
+
+  return text.length > 0 ? text : null;
+}
+
+function normalizeHostedLinqFirstContactAdmissionService(
+  value: string | null | undefined,
+): HostedLinqFirstContactAdmissionRequest["service"] {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return HOSTED_LINQ_FIRST_CONTACT_ADMISSION_SERVICES.has(normalized)
+    ? normalized as HostedLinqFirstContactAdmissionRequest["service"]
+    : "unknown";
 }
 
 function buildHostedLinqThreadRouteEgressAuthority(input: {

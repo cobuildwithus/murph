@@ -1,10 +1,15 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  ensureHostedThreadContainerRoute: vi.fn(),
   getPrisma: vi.fn(),
   hostedWorkspace: {
     count: vi.fn(),
@@ -34,6 +39,10 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
     mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
+vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({
+  ensureHostedThreadContainerRoute: mocks.ensureHostedThreadContainerRoute,
+}));
+
 vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -47,10 +56,13 @@ type RuntimeMaintenanceRouteModule =
   typeof import("../app/api/ops/runtime-maintenance/route");
 type RuntimeMaintenanceServiceModule =
   typeof import("../src/lib/hosted-ops/runtime-maintenance");
+type ThreadRoutesRouteModule =
+  typeof import("../app/api/ops/thread-routes/route");
 type OpsAccessModule = typeof import("../src/lib/hosted-ops/access");
 
 let runtimeMaintenanceRoute: RuntimeMaintenanceRouteModule;
 let runtimeMaintenanceService: RuntimeMaintenanceServiceModule;
+let threadRoutesRoute: ThreadRoutesRouteModule;
 let opsAccess: OpsAccessModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
@@ -62,6 +74,7 @@ describe("hosted runtime maintenance ops", () => {
   beforeAll(async () => {
     runtimeMaintenanceRoute = await import("../app/api/ops/runtime-maintenance/route");
     runtimeMaintenanceService = await import("../src/lib/hosted-ops/runtime-maintenance");
+    threadRoutesRoute = await import("../app/api/ops/thread-routes/route");
     opsAccess = await import("../src/lib/hosted-ops/access");
   });
 
@@ -79,6 +92,12 @@ describe("hosted runtime maintenance ops", () => {
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_001",
+    });
+    mocks.ensureHostedThreadContainerRoute.mockResolvedValue({
+      activationEventId: "member.activated:thread-container:linq:lookup",
+      activationMailboxItemId: "mailbox_activation_123",
+      containerMemberId: "member_thread_container_123",
+      created: true,
     });
     mocks.hostedWorkspace.count.mockResolvedValue(0);
     mocks.hostedWorkspace.findMany.mockResolvedValue([]);
@@ -389,6 +408,95 @@ describe("hosted runtime maintenance ops", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_OPS_ACCESS_DENIED",
+      },
+    });
+  });
+
+  it("ensures a Linq thread route through the authenticated same-origin ops route", async () => {
+    const request = new Request("https://join.example.test/api/ops/thread-routes", {
+      body: JSON.stringify({
+        containerMemberId: "",
+        linqAccountPhoneNumber: "+1 (555) 000-0000",
+        linqChatId: "chat_group_123",
+        ownerMemberId: "member_owner_123",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+    const response = await threadRoutesRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.ensureHostedThreadContainerRoute).toHaveBeenCalledWith({
+      accountLookupKey: createHostedPhoneLookupKey("+1 (555) 000-0000"),
+      accountLookupKeys: createHostedPhoneLookupKeyReadCandidates("+1 (555) 000-0000"),
+      channel: "linq",
+      containerMemberId: null,
+      ownerMemberId: "member_owner_123",
+      threadId: "chat_group_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      activationEventId: "member.activated:thread-container:linq:lookup",
+      activationMailboxItemId: "mailbox_activation_123",
+      containerMemberId: "member_thread_container_123",
+      created: true,
+    });
+  });
+
+  it("rejects invalid Linq account phones before ensuring a thread route", async () => {
+    const response = await threadRoutesRoute.POST(
+      new Request("https://join.example.test/api/ops/thread-routes", {
+        body: JSON.stringify({
+          linqAccountPhoneNumber: "not a phone",
+          linqChatId: "chat_group_123",
+          ownerMemberId: "member_owner_123",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.ensureHostedThreadContainerRoute).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_OPS_THREAD_ROUTE_LINQ_ACCOUNT_PHONE_INVALID",
+      },
+    });
+  });
+
+  it("does not ensure a thread route when the ops route session member is not allowlisted", async () => {
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: { id: "member_other" },
+    });
+
+    const response = await threadRoutesRoute.POST(
+      new Request("https://join.example.test/api/ops/thread-routes", {
+        body: JSON.stringify({
+          linqAccountPhoneNumber: "+15550000000",
+          linqChatId: "chat_group_123",
+          ownerMemberId: "member_owner_123",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.ensureHostedThreadContainerRoute).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_OPS_ACCESS_DENIED",

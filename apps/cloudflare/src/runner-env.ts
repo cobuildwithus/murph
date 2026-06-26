@@ -19,6 +19,7 @@ import {
   rewriteHostedRunnerLoopbackUrlForContainer,
 } from "./hosted-env-policy.ts";
 import {
+  createHostedRunnerNativeParserToolchain,
   createHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
@@ -138,6 +139,9 @@ export function buildHostedRunnerContainerPlatformEnv(
 export function buildHostedRunnerJobRuntimeConfig(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  providerEgressCredentials?: {
+    workersAiTranscribe?: string | null;
+  };
   rewritePlatformUrlsForContainer?: boolean;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   runnerSecrets: Readonly<Record<string, string>>;
@@ -147,7 +151,15 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
   const localE2eParserToolchain =
-    createHostedRunnerLocalE2eParserToolchain(configSource);
+    createHostedRunnerLocalE2eParserToolchain(configSource, {
+      providerEgressCredential:
+        input.providerEgressCredentials?.workersAiTranscribe ?? null,
+    });
+  const parserToolchain = localE2eParserToolchain ??
+    createHostedRunnerNativeParserToolchain(configSource, {
+      providerEgressCredential:
+        input.providerEgressCredentials?.workersAiTranscribe ?? null,
+    });
 
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: readHostedRuntimeCommitTimeoutConfigValue(
@@ -155,7 +167,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     configSource,
     forwardedEnv: input.forwardedEnv,
-    parserToolchain: localE2eParserToolchain ?? undefined,
+    parserToolchain,
     platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,

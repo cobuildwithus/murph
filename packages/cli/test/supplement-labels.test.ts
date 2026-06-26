@@ -7,6 +7,7 @@ import {
 } from '../src/supplement-labels.js'
 
 const hostedRuntimeEnv = {
+  MURPH_DATA_API_KEY: 'signed-murph-data-api-credential',
   MURPH_HOSTED_RUNTIME_PROCESS: '1',
 }
 
@@ -27,7 +28,7 @@ const dailymedLabel = {
 }
 
 describe('searchSupplementLabels', () => {
-  it('calls the internal supplements API without local authorization headers or hosted web config', async () => {
+  it('calls the internal supplements API with the hosted provider credential', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [
         {
@@ -90,9 +91,9 @@ describe('searchSupplementLabels', () => {
       : init?.headers
     assert.equal(
       headers && !Array.isArray(headers)
-        ? Object.hasOwn(headers, 'authorization')
-        : false,
-      false,
+        ? headers.authorization
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
     )
   })
 
@@ -531,9 +532,9 @@ describe('searchSupplementLabelsBatch', () => {
       : init?.headers
     assert.equal(
       headers && !Array.isArray(headers)
-        ? Object.hasOwn(headers, 'authorization')
-        : false,
-      false,
+        ? headers.authorization
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
     )
     assert.equal(
       headers && !Array.isArray(headers)
@@ -612,6 +613,28 @@ describe('searchSupplementLabelsBatch', () => {
     ).rejects.toMatchObject({
       code: 'supplement_labels_api_hosted_only',
       message: 'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
+    })
+    assert.equal(fetchMock.mock.calls.length, 0)
+  })
+
+  it('fails explicitly when the hosted provider credential is missing', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
+    await expect(
+      searchSupplementLabelsBatch(
+        {
+          queries: ['creatine'],
+        },
+        {
+          env: {
+            MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          },
+          fetchImpl: fetchMock,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'supplement_labels_api_credential_missing',
+      message: 'Supplement label search requires the hosted Murph data API provider credential.',
     })
     assert.equal(fetchMock.mock.calls.length, 0)
   })
