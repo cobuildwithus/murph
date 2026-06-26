@@ -22,6 +22,7 @@ import type {
 } from '../src/assistant/service-contracts.js'
 import {
   MAX_PROGRESS_UPDATES_PER_TURN,
+  MIN_PROGRESS_UPDATE_SPACING_MS,
 } from '../src/assistant/progress-constants.js'
 import {
   createAssistantProgressDelivery,
@@ -45,12 +46,14 @@ describe('assistant turn progress', () => {
 
   it('dedupes and limits progress updates inside one turn', async () => {
     const delivered: DeliverProgressInput[] = []
+    let nowMs = 0
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
     })
     const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
+      now: () => nowMs,
       session: createSession(),
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
@@ -72,13 +75,23 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Checking the saved context now.'),
     ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'too-soon',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(
+      progress.send('Checking the saved context now.'),
+    ).resolves.toEqual({
       kind: 'sent',
       source: 'model',
     })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
     await expect(
       progress.send('Reviewing the tool output now.'),
     ).resolves.toEqual({
-      kind: 'sent',
+      kind: 'skipped',
+      reason: 'limit',
       source: 'model',
     })
     await expect(
@@ -93,18 +106,19 @@ describe('assistant turn progress', () => {
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Extracting the PDF and checking relevant results.'],
       [1, 'Checking the saved context now.'],
-      [2, 'Reviewing the tool output now.'],
     ])
   })
 
   it('tracks one shared progress budget across system and model updates', async () => {
     const delivered: DeliverProgressInput[] = []
+    let nowMs = 0
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
     })
     const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
+      now: () => nowMs,
       session: createSession(),
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
@@ -121,13 +135,23 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Checking the saved context now.', { source: 'model' }),
     ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'too-soon',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(
+      progress.send('Checking the saved context now.', { source: 'model' }),
+    ).resolves.toEqual({
       kind: 'sent',
       source: 'model',
     })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
     await expect(
       progress.send('Preparing a concise final reply.', { source: 'model' }),
     ).resolves.toEqual({
-      kind: 'sent',
+      kind: 'skipped',
+      reason: 'limit',
       source: 'model',
     })
     await expect(
@@ -141,7 +165,6 @@ describe('assistant turn progress', () => {
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Hang on, refreshing my memory real quick.'],
       [1, 'Checking the saved context now.'],
-      [2, 'Preparing a concise final reply.'],
     ])
   })
 

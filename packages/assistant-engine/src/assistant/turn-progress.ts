@@ -11,6 +11,7 @@ import {
 } from './delivery-service.js'
 import {
   MAX_PROGRESS_UPDATES_PER_TURN,
+  MIN_PROGRESS_UPDATE_SPACING_MS,
 } from './progress-constants.js'
 import {
   normalizeNullableString,
@@ -53,7 +54,7 @@ export type AssistantProgressDeliveryResult =
   | { kind: 'sent'; source: AssistantProgressDeliverySource }
   | {
       kind: 'skipped'
-      reason: 'duplicate' | 'empty' | 'limit'
+      reason: 'duplicate' | 'empty' | 'limit' | 'too-soon'
       source: AssistantProgressDeliverySource
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
@@ -121,13 +122,16 @@ export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
+  now?: () => number
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): AssistantProgressDelivery {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
+  const now = input.now ?? Date.now
   const abortController = new AbortController()
   const sentTexts = new Set<string>()
+  let lastSentAtMs: number | null = null
   let sentCount = 0
   let deliveryOrdinal = 0
 
@@ -156,11 +160,24 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
+      const currentTimeMs = now()
+      if (
+        !required &&
+        lastSentAtMs !== null &&
+        currentTimeMs - lastSentAtMs < MIN_PROGRESS_UPDATE_SPACING_MS
+      ) {
+        return {
+          kind: 'skipped',
+          reason: 'too-soon',
+          source,
+        }
+      }
 
       const ordinal = deliveryOrdinal
       deliveryOrdinal += 1
       if (!required) {
         sentCount += 1
+        lastSentAtMs = currentTimeMs
         sentTexts.add(text)
       }
 

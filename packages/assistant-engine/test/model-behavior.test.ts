@@ -183,16 +183,28 @@ describe('assistant execution prompt contract', () => {
       'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
-      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+      'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
+      'never send a third',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text to one to three short conversational sentences, specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+    )
+    expect(prompt).toContain(
+      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
+    )
+    expect(prompt).toContain(
+      '3. Use `send_progress_update` first only for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work when silence would hurt the user experience.',
+    )
+    expect(prompt).toContain(
+      'If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third.',
+    )
+    expect(prompt).toContain(
+      'Never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn.',
     )
     expect(prompt).toContain(
       'Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself.',
@@ -555,7 +567,10 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, call `send_progress_update` first',
+      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
+    )
+    expect(prompt).toContain(
+      'at most one for ordinary long work, one more only after a multi-minute delay, and none when the final reply should be available shortly',
     )
     expect(prompt).toContain(
       'Do not use it for straightforward one-shot logging or capture writes',

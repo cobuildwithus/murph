@@ -664,7 +664,7 @@ describe('assistant skill assets', () => {
       'When their supplement answer will require ingredient lookup',
     )
     expect(raw).toContain(
-      'call `send_progress_update` once before the first lookup',
+      'use at most one `send_progress_update` before the first lookup',
     )
     expect(raw).toContain(
       'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
