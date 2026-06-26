@@ -293,9 +293,9 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
     )
-    expect(prDeepReviewPrompt).toContain('review:gpt `app_connector="github"` config')
-    expect(prDeepReviewPrompt).toContain('Treat missing GitHub connector context as a hard stop')
-    expect(prDeepReviewPrompt).toContain('do not review from pasted context, memory, files attached out of band, or the PR description alone')
+    expect(prDeepReviewPrompt).toContain('Use the connected GitHub repository to read:')
+    expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files through the connected repository')
+    expect(prDeepReviewPrompt).toContain('do not review from memory or from the PR description alone')
     expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
