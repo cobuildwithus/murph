@@ -109,6 +109,12 @@ export type ComputerManagedLoginContinuation =
       url: string;
     };
 
+export interface ComputerHandoffCompletion {
+  returnContactKind: HostedComputerReturnContactKind | null;
+  status: ComputerHandoffRecord["status"];
+  suggestedReply: string | null;
+}
+
 export type ComputerHandoffPageState =
   | {
       kind: "completed";
@@ -1244,10 +1250,7 @@ export class ComputerUseService {
   async completeHandoff(input: {
     memberId: string;
     token: string;
-  }): Promise<{
-    returnContactKind: HostedComputerReturnContactKind | null;
-    suggestedReply: string | null;
-  }> {
+  }): Promise<ComputerHandoffCompletion> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -1257,10 +1260,7 @@ export class ComputerUseService {
   private async completeHandoffWithStore(input: {
     memberId: string;
     token: string;
-  }, store: ComputerUseStore): Promise<{
-    returnContactKind: HostedComputerReturnContactKind | null;
-    suggestedReply: string | null;
-  }> {
+  }, store: ComputerUseStore): Promise<ComputerHandoffCompletion> {
     const now = this.now();
     const tokenHash = sha256Hex(input.token);
     const handoff = await store.requireHandoffByTokenHash({
@@ -1279,6 +1279,7 @@ export class ComputerUseService {
     if (openHandoff.status === "completed") {
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1286,6 +1287,7 @@ export class ComputerUseService {
     if (isFreshCheckpointingHandoff(openHandoff, now)) {
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1300,11 +1302,13 @@ export class ComputerUseService {
         });
         return {
           returnContactKind: expired.returnContactKind,
+          status: expired.status,
           suggestedReply: expired.suggestedReply,
         };
       }
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1327,6 +1331,7 @@ export class ComputerUseService {
       });
       return {
         returnContactKind: latest.returnContactKind,
+        status: latest.status,
         suggestedReply: latest.suggestedReply,
       };
     }
@@ -1345,6 +1350,7 @@ export class ComputerUseService {
         });
         return {
           returnContactKind: expired.returnContactKind,
+          status: expired.status,
           suggestedReply: expired.suggestedReply,
         };
       }
@@ -1365,6 +1371,7 @@ export class ComputerUseService {
 
       return {
         returnContactKind: completed.returnContactKind,
+        status: completed.status,
         suggestedReply: completed.suggestedReply,
       };
     } catch (error) {

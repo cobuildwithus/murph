@@ -24,7 +24,11 @@ export async function POST(
 
   const sourceContactKind = completed.returnContactKind;
   const fallbackHref = buildCompletedHandoffHref({ token });
-  if (!sourceContactKind || !AUTO_RETURN_CONTACT_KINDS.has(sourceContactKind)) {
+  if (
+    completed.status !== "completed" ||
+    !sourceContactKind ||
+    !AUTO_RETURN_CONTACT_KINDS.has(sourceContactKind)
+  ) {
     return NextResponse.json({ redirectTo: fallbackHref });
   }
 

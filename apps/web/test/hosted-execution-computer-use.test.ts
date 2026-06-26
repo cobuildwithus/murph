@@ -3878,6 +3878,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -3930,6 +3931,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -3976,6 +3978,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -4065,6 +4068,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "checkpointing",
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -4274,6 +4278,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({

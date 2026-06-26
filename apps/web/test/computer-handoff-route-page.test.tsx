@@ -83,6 +83,7 @@ describe("computer handoff route and page", () => {
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue(createSession());
     mocks.service.completeHandoff.mockResolvedValue({
       returnContactKind: "text",
+      status: "completed",
       suggestedReply: "private suggested reply",
     });
     mocks.service.continueManagedLoginHandoff.mockResolvedValue({
@@ -171,6 +172,7 @@ describe("computer handoff route and page", () => {
   it("returns email handoffs to the completed page instead of opening another app", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
       returnContactKind: "email",
+      status: "completed",
       suggestedReply: "private suggested reply",
     });
     mocks.getHostedMurphContactContext.mockRejectedValue(
@@ -195,6 +197,7 @@ describe("computer handoff route and page", () => {
   it("falls back to the handoff page path when the completed handoff has no source kind", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "private suggested reply",
     });
     mocks.getHostedMurphContactContext.mockRejectedValue(
@@ -223,6 +226,7 @@ describe("computer handoff route and page", () => {
   it("falls back to the completed page when the source auto-return channel is unavailable", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
       returnContactKind: "text",
+      status: "completed",
       suggestedReply: "private suggested reply",
     });
     mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
@@ -248,6 +252,34 @@ describe("computer handoff route and page", () => {
     expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
     expect(mocks.getHostedMurphContactContext).toHaveBeenCalledOnce();
   });
+
+  it.each(["checkpointing", "expired"] as const)(
+    "falls back to the completed page without contact lookup for %s source handoffs",
+    async (status) => {
+      mocks.service.completeHandoff.mockResolvedValueOnce({
+        returnContactKind: "text",
+        status,
+        suggestedReply: "private suggested reply",
+      });
+      mocks.getHostedMurphContactContext.mockRejectedValue(
+        new Error("contact context unavailable"),
+      );
+
+      const response = await computerHandoffDoneRoute.POST(
+        new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+          method: "POST",
+        }),
+        createRouteContext({ token: "handoff-token" }),
+      );
+      const body = (await response.json()) as {
+        redirectTo: string;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
+      expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+    },
+  );
 
   it("redirects managed-login handoffs without rendering the Live View", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
