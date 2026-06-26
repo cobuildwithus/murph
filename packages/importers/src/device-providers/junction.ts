@@ -631,6 +631,24 @@ const JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS = [
   "utcOffsetSeconds",
   "utc_offset_seconds",
 ] as const;
+const JUNCTION_SLEEP_STAGE_START_OFFSET_SECOND_PATHS = [
+  "stageStartOffsetSecond",
+  "stage_start_offset_second",
+  "stageStartOffsetSeconds",
+  "stage_start_offset_seconds",
+] as const;
+const JUNCTION_SLEEP_STAGE_END_OFFSET_SECOND_PATHS = [
+  "stageEndOffsetSecond",
+  "stage_end_offset_second",
+  "stageEndOffsetSeconds",
+  "stage_end_offset_seconds",
+] as const;
+const JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS = [
+  "stageType",
+  "stage_type",
+  "sleepStageType",
+  "sleep_stage_type",
+] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -1738,7 +1756,9 @@ function pushSleepCycle(
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
       occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: extractIsoDatePrefix(resolvedStartAt) ?? intervalTimestamp.dayKey ?? parentTimestamp.dayKey,
+      dayKey: resolveSleepStageDayKey(intervalEntry, resolvedStartAt) ??
+        intervalTimestamp.dayKey ??
+        parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });
@@ -1764,6 +1784,12 @@ function pushSleepCycle(
       },
     }));
   }
+}
+
+function resolveSleepStageDayKey(intervalEntry: PlainObject, resolvedStartAt: string): string | undefined {
+  return firstIsoDateFromPaths(intervalEntry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS) ??
+    extractIsoDatePrefix(resolvedStartAt) ??
+    undefined;
 }
 
 function pushWorkoutSummary(
@@ -3509,7 +3535,10 @@ function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEnt
 }
 
 function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
-  return collectSleepStageIntervalEntries(entry);
+  return [
+    ...collectSleepStageIntervalEntries(entry),
+    ...parallelSleepStageIntervalEntries(entry),
+  ];
 }
 
 function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
@@ -3533,6 +3562,52 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
     }
 
     return collectSleepStageIntervalEntries(nested);
+  });
+}
+
+function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+  const sessionStartRaw = firstValueFromPaths(entry, [
+    "sessionStart",
+    "session_start",
+    ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  ]);
+  const sessionStartAt = normalizeTimestamp(sessionStartRaw);
+  if (!sessionStartAt) {
+    return [];
+  }
+
+  const startOffsets = firstNumberArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_START_OFFSET_SECOND_PATHS);
+  const endOffsets = firstNumberArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_END_OFFSET_SECOND_PATHS);
+  const stageValues = firstArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS);
+  if (startOffsets.length === 0 || endOffsets.length === 0 || stageValues.length === 0) {
+    return [];
+  }
+
+  const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+
+  return stageValues.flatMap((stageValue, index) => {
+    const stage = normalizeJunctionSleepStageValue(stageValue);
+    const startOffsetSeconds = startOffsets[index];
+    const endOffsetSeconds = endOffsets[index];
+    if (!stage || startOffsetSeconds === undefined || endOffsetSeconds === undefined) {
+      return [];
+    }
+
+    const startAt = addMinutes(sessionStartAt, startOffsetSeconds / 60);
+    const endAt = addMinutes(sessionStartAt, endOffsetSeconds / 60);
+    if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+      return [];
+    }
+
+    return [stripUndefined({
+      start: startAt,
+      end: endAt,
+      stage,
+      localDate: resolveVaultLocalDayKey(startAt, timeZone),
+      stageStartOffsetSecond: startOffsetSeconds,
+      stageEndOffsetSecond: endOffsetSeconds,
+      stageIndex: index,
+    })];
   });
 }
 
@@ -3870,6 +3945,25 @@ function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly s
   }
 
   return undefined;
+}
+
+function firstNumberArrayFromPaths(source: PlainObject | undefined, paths: readonly string[]): Array<number | undefined> {
+  for (const path of paths) {
+    const values = numberArrayFromValue(readPath(source, path));
+    if (values.length > 0) {
+      return values;
+    }
+  }
+
+  return [];
+}
+
+function numberArrayFromValue(value: unknown): Array<number | undefined> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => finiteNumber(entry));
 }
 
 function firstNonNegativeNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {
@@ -4211,6 +4305,17 @@ function firstStringArrayFromPaths(source: PlainObject | undefined, paths: reado
     const values = stringArrayFromValue(readPath(source, path));
     if (values.length > 0) {
       return values;
+    }
+  }
+
+  return [];
+}
+
+function firstArrayFromPaths(source: PlainObject | undefined, paths: readonly string[]): unknown[] {
+  for (const path of paths) {
+    const value = readPath(source, path);
+    if (Array.isArray(value) && value.length > 0) {
+      return value;
     }
   }
 

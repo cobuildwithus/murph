@@ -4570,6 +4570,44 @@ test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () 
   assert.equal(samples[5]?.dataOrigin?.sourceProviderSlug, "garmin");
 });
 
+test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cycle-garmin-parallel-1",
+          session_start: "2026-06-25T02:00:00.000Z",
+          session_end: "2026-06-25T03:00:00.000Z",
+          source_provider: "garmin",
+          source_type: "watch",
+          stage_start_offset_second: [0, 900, 1800, 2700],
+          stage_end_offset_second: [900, 1800, 2700, 3600],
+          stage_type: [2, 3, 4, 1],
+          time_zone: "America/New_York",
+        }],
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+  const samples = payload.samples ?? [];
+
+  assert.equal(samples.length, 4);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "rem", "awake", "deep"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [15, 15, 15, 15]);
+  assert.deepEqual(samples.map((sample) => sample.dayKey), [
+    "2026-06-24",
+    "2026-06-24",
+    "2026-06-24",
+    "2026-06-24",
+  ]);
+  assert.equal(samples[0]?.sample.startAt, "2026-06-25T02:00:00.000Z");
+  assert.equal(samples[3]?.sample.endAt, "2026-06-25T03:00:00.000Z");
+  assert.ok(samples.every((sample) => sample.timeZone === "America/New_York"));
+  assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.equal(new Set(samples.map((sample) => sample.externalRef?.resourceId)).size, 4);
+});
+
 test("Junction hypnogram alias emits canonical sleep-stage records", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
