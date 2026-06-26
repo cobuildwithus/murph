@@ -95,7 +95,7 @@ export function ComputerHandoffActiveView({
 
   const controlsDisabled = phase.kind !== "idle";
   const idleError = phase.kind === "idle" ? phase.error : null;
-  const showBrowserSurface = phase.kind === "idle" || phase.kind === "saving";
+  const showBrowserSurface = phase.kind === "idle";
 
   return (
     <>
@@ -203,14 +203,12 @@ export function ComputerHandoffActiveView({
           aria-busy
           aria-live="polite"
           role="status"
-          className="pointer-events-none fixed inset-x-0 top-4 z-20 flex justify-center px-4"
+          className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-background px-6 py-12 text-foreground"
         >
-          <div className="flex items-center gap-3 rounded-full border border-border bg-background/95 px-4 py-2 shadow-lg backdrop-blur">
-            <MurphPulseLoader className="h-6 w-auto" />
-            <p className="text-sm font-medium text-foreground">
-              Saving your progress...
-            </p>
-          </div>
+          <MurphPulseLoader className="h-8 w-auto" />
+          <p className="text-sm font-medium text-muted-foreground">
+            Saving your progress...
+          </p>
         </div>
       ) : null}
       {phase.kind === "done" ? (

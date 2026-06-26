@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  HOSTED_RETURN_CONTACT_KINDS,
+  type HostedReturnContactKind,
+} from "./return-contact.ts";
+
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|os-control|pause-for-user|finish)$/u;
@@ -50,14 +55,10 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
 
-export const HOSTED_COMPUTER_RETURN_CONTACT_KINDS = [
-  "text",
-  "telegram",
-  "email",
-] as const;
+export const HOSTED_COMPUTER_RETURN_CONTACT_KINDS = HOSTED_RETURN_CONTACT_KINDS;
 
 export type HostedComputerReturnContactKind =
-  (typeof HOSTED_COMPUTER_RETURN_CONTACT_KINDS)[number];
+  HostedReturnContactKind;
 
 export const HOSTED_COMPUTER_OS_CONTROL_ACTIONS = [
   "clickMouse",

@@ -1,6 +1,6 @@
 import type {
-  HostedComputerReturnContactKind,
-} from '@murphai/hosted-execution/computer-use'
+  HostedReturnContactKind,
+} from '@murphai/hosted-execution/return-contact'
 import type {
   AssistantSession,
   AssistantVaultFileResponseMedia,
@@ -12,11 +12,14 @@ import type {
 import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
+import {
+  resolveAssistantHostedReturnContactKind,
+} from './return-contact-kind.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
   recipientKey: string | null
-  returnContactKind: HostedComputerReturnContactKind | null
+  returnContactKind: HostedReturnContactKind | null
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -86,20 +89,5 @@ export function createAssistantHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
-  }
-}
-
-function resolveAssistantHostedReturnContactKind(
-  channel: string | null | undefined,
-): HostedComputerReturnContactKind | null {
-  switch (channel?.trim().toLowerCase()) {
-    case 'linq':
-      return 'text'
-    case 'telegram':
-      return 'telegram'
-    case 'email':
-      return 'email'
-    default:
-      return null
   }
 }
