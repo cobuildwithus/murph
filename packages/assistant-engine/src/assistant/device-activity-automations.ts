@@ -426,19 +426,26 @@ async function scheduleDeviceActivityAutomationNotification(input: {
   await ensureAssistantCronState(paths)
   const jobId = buildDeviceActivityAutomationNotificationJobId(input)
   const occurrenceKey = buildDeviceActivityAutomationNotificationOccurrenceKey(input)
+  const authorityKey = buildAssistantDeviceActivityAuthorityKey(input.automation)
 
   return await withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
     const existingIndex = store.jobs.findIndex((existing) => existing.jobId === jobId)
-  const existing = existingIndex === -1
+    const existing = existingIndex === -1
       ? null
       : store.jobs[existingIndex] as AssistantCronJob
     if (existing) {
+      const existingMetadata = readAssistantDeviceActivityCronJobMetadata(existing.name)
       const existingOccurrenceKey =
-        readAssistantDeviceActivityCronJobMetadata(existing.name)?.occurrenceKey ??
+        existingMetadata?.occurrenceKey ??
         readAssistantDeviceActivityOccurrenceTag(existing.tags)?.trim() ??
         null
-      if (existingOccurrenceKey === occurrenceKey) {
+      if (
+        existingOccurrenceKey === occurrenceKey &&
+        existingMetadata?.parentAutomationId === input.automation.automationId &&
+        existingMetadata.authorityKey === authorityKey &&
+        deviceActivityOccurrenceJobHasCoverage(existing)
+      ) {
         return 'alreadyQueued'
       }
       if (
@@ -511,6 +518,16 @@ function buildDeviceActivityAutomationNotificationJob(input: {
       runningPid: null,
     },
   })
+}
+
+function deviceActivityOccurrenceJobHasCoverage(job: AssistantCronJob): boolean {
+  return Boolean(
+    job.enabled ||
+      job.state.nextRunAt !== null ||
+      job.state.pendingDeliveryIntentId ||
+      job.state.runningAt !== null ||
+      job.state.lastSucceededAt !== null,
+  )
 }
 
 function buildDeviceActivityAutomationNotificationJobId(input: {

@@ -689,6 +689,64 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('does not treat a stale live occurrence slot as current cursor coverage', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'run',
+      after: '2026-06-07T12:00:00.000Z',
+      automationId: 'auto_run_stale_slot',
+      instructions: 'Report run progress.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_stale_slot',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          title: 'Stale slot run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockResolvedValueOnce({
+      advanced: false,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    const [staleJob] = await readQueuedCronJobs(vaultRoot)
+    expect(staleJob?.enabled).toBe(true)
+    const staleMetadata = readAssistantDeviceActivityCronJobMetadata(staleJob?.name ?? '')
+    expect(staleMetadata?.parentAutomationId).toBe('auto_run_stale_slot')
+
+    deviceActivityMocks.automations = [{
+      ...automation,
+      instructions: 'Report run progress with the edited route.',
+    }]
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:07:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: '2026-06-07T12:07:00.000Z',
+      scheduled: 0,
+    })
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
+  })
+
   it('does not recreate a consumed occurrence when the same activity is rescored later', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({

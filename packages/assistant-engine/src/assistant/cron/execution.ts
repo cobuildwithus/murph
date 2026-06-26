@@ -677,10 +677,7 @@ function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
 
   return buildAssistantDeviceActivityDeliveryIdempotencyKey({
     discriminator: {
-      dueAt,
-      jobId: input.job.jobId,
-      target: input.job.target,
-      trigger: input.trigger,
+      operation: 'assistant-device-activity-notification',
     },
     metadata,
   })
