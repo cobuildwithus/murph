@@ -69,7 +69,7 @@ type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[
 export function shouldCreateAssistantProgressDelivery(
   input: Pick<
     AssistantMessageInput,
-    'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
+    'channel' | 'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
   >,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null
@@ -78,6 +78,7 @@ export function shouldCreateAssistantProgressDelivery(
 ): boolean {
   return input.deliverResponse === true &&
     input.deliveryDispatchMode !== 'queue-only' &&
+    input.channel !== 'email' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }

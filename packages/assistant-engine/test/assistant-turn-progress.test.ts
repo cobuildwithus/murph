@@ -374,6 +374,11 @@ describe('assistant turn progress', () => {
         }),
       ),
     ).toBe(false)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({ channel: 'email' }),
+      ),
+    ).toBe(false)
   })
 })
 
