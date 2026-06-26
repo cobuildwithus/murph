@@ -72,6 +72,27 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     });
   });
 
+  it("does not send when another worker already claimed the alert", async () => {
+    const fixture = createAlertEmailPrismaFixture({
+      updateManyResult: { count: 0 },
+    });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      id: "email_provider_123",
+    }), {
+      status: 200,
+    }));
+
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["hla_message_failed_123"],
+      env: buildAlertEmailEnv(),
+      fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertUpdate).not.toHaveBeenCalled();
+  });
+
   it("does not query alerts when Linq alert email recipients are not configured", async () => {
     const fixture = createAlertEmailPrismaFixture();
 
@@ -89,7 +110,9 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
   });
 });
 
-function createAlertEmailPrismaFixture() {
+function createAlertEmailPrismaFixture(input?: {
+  updateManyResult?: { count: number };
+}) {
   const hostedLinqAlertFindMany = vi.fn().mockResolvedValue([
     {
       attemptCount: 0,
@@ -119,7 +142,7 @@ function createAlertEmailPrismaFixture() {
     },
   ]);
   const hostedLinqAlertUpdate = vi.fn().mockResolvedValue(undefined);
-  const hostedLinqAlertUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqAlertUpdateMany = vi.fn().mockResolvedValue(input?.updateManyResult ?? { count: 1 });
   const prisma = {
     hostedLinqAlert: {
       findMany: hostedLinqAlertFindMany,

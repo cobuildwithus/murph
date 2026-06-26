@@ -71,7 +71,7 @@ async function sendHostedLinqAlertEmail(input: {
   fetchImpl?: typeof fetch;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedLinqAlert.updateMany({
+  const claim = await input.prisma.hostedLinqAlert.updateMany({
     where: {
       id: input.alert.id,
       status: { in: ["pending", "failed"] },
@@ -82,6 +82,9 @@ async function sendHostedLinqAlertEmail(input: {
       status: "sending",
     },
   });
+  if (claim.count !== 1) {
+    return;
+  }
 
   try {
     const result = await sendHostedResendPlainTextEmail({

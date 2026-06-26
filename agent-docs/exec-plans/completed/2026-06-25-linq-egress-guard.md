@@ -24,6 +24,8 @@ Done:
 - Hardened skipped delivery writes to upsert the line before writing line FKs and to use stable idempotency for voice-memo skips.
 - Focused verification passed: Linq web egress/observability/webhook/transport/dispatch tests, assistant-runtime callbacks test, web/cloudflare/hosted-execution/assistant-runtime typechecks, raw-log guard, and diff whitespace check.
 - Full `pnpm verify:acceptance` passed.
+- Added a HostedLinqAlert email claim-count guard so only the worker that successfully marks an alert `sending` sends the Resend email.
+- Updated PR privacy wording to distinguish participant/customer phone data from Murph-owned line numbers stored in HostedLinqLine.
 
 Now:
 - Commit and push the PR branch.
