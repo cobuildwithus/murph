@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer'
 
+import type { ImageGenerateParamsNonStreaming } from 'openai/resources/images'
+
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
@@ -48,13 +50,7 @@ export async function generateOpenAiImage(input: {
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
   const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/generations`, {
-    body: JSON.stringify({
-      model: OPENAI_IMAGE_GENERATION_MODEL,
-      output_format: input.outputFormat,
-      prompt: input.prompt,
-      quality: input.quality,
-      size: input.size,
-    }),
+    body: JSON.stringify(buildOpenAiImageGenerationRequest(input)),
     headers: {
       authorization: `Bearer ${input.apiKey}`,
       'content-type': 'application/json',
@@ -86,6 +82,21 @@ export async function generateOpenAiImage(input: {
   }
 
   return parseOpenAiImageGenerationPayload(payload, providerRequestId)
+}
+
+function buildOpenAiImageGenerationRequest(input: {
+  outputFormat: OpenAiImageOutputFormat
+  prompt: string
+  quality: OpenAiImageQuality
+  size: OpenAiImageSize
+}): ImageGenerateParamsNonStreaming {
+  return {
+    model: OPENAI_IMAGE_GENERATION_MODEL,
+    output_format: input.outputFormat,
+    prompt: input.prompt,
+    quality: input.quality,
+    size: input.size,
+  }
 }
 
 async function readOpenAiJsonResponse(response: Response): Promise<unknown> {

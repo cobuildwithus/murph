@@ -1,3 +1,5 @@
+import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
+
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -237,7 +239,7 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
   model: string;
   request: HostedLinqFirstContactAdmissionRequest;
-}): Record<string, unknown> {
+}): ResponseCreateParamsNonStreaming {
   return {
     input: [
       {
