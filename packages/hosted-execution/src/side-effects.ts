@@ -84,6 +84,8 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
 }
 
 export interface HostedAssistantDeliveryVaultFileMedia {
+  approvalGeneration: string | null;
+  approvalId: string | null;
   contentType: string;
   filename: string;
   kind: "vault_file";
@@ -733,9 +735,23 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     record,
     {
       required: ["contentType", "filename", "kind", "ref", "sha256", "sizeBytes"],
+      optional: ["approvalGeneration", "approvalId"],
     },
     label,
   );
+  const approvalGeneration = requireNullableSha256Hex(
+    record.approvalGeneration ?? null,
+    `${label}.approvalGeneration`,
+  );
+  const approvalId = requireNullableHostedActionApprovalId(
+    record.approvalId ?? null,
+    `${label}.approvalId`,
+  );
+  if ((approvalGeneration === null) !== (approvalId === null)) {
+    throw new TypeError(
+      `${label}.approvalId and ${label}.approvalGeneration must be present together.`,
+    );
+  }
   const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
   if (
     ref.startsWith("/")
@@ -772,6 +788,8 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     throw new TypeError(`${label}.filename must not contain path separators or control characters.`);
   }
   return {
+    approvalGeneration,
+    approvalId,
     contentType,
     filename,
     kind: "vault_file",
@@ -783,6 +801,31 @@ function parseHostedAssistantDeliveryVaultFileMedia(
       100 * 1024 * 1024,
     ),
   };
+}
+
+function requireNullableHostedActionApprovalId(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  const approvalId = requireString(value, label);
+  if (!/^haa_[A-Za-z0-9_-]{32}$/u.test(approvalId)) {
+    throw new TypeError(`${label} must be a hosted action approval id.`);
+  }
+  return approvalId;
+}
+
+function requireNullableSha256Hex(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const hash = requireString(value, label);
+  if (!/^[0-9a-f]{64}$/u.test(hash)) {
+    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+  }
+  return hash;
 }
 
 function parseHostedAssistantDeliveryVoiceMemoMedia(
