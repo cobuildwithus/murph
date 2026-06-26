@@ -1744,6 +1744,14 @@ function createHostedAssistantLinqSendDependency(input: {
     const fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
+    const providerTarget = shouldUseHostedAssistantLinqDirectRecoveryTarget({
+      deliveryContext,
+      directRecipientPhoneNumber,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    })
+      ? request.target
+      : deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
@@ -1790,7 +1798,7 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? null,
       message: request.message,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
+      target: providerTarget,
       targetKind: request.targetKind ?? null,
     }, {
       ...dependencies,
@@ -1954,6 +1962,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
+    const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -1976,13 +1985,13 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       intentId: input.intentId ?? null,
       replyToMessageId: deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
-      target: deliveryContext?.target ?? request.target,
+      target: providerTarget,
       targetKind: "thread",
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
       attachmentId: request.attachmentId,
-      target: deliveryContext?.target ?? request.target,
+      target: providerTarget,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;
@@ -2102,6 +2111,32 @@ function requireHostedAssistantLinqRouteAuthorityAssert(
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.startsWith("+") ? normalized : null;
+}
+
+function shouldUseHostedAssistantLinqDirectRecoveryTarget(input: {
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  directRecipientPhoneNumber: string | null;
+  target: string;
+  targetKind: string | null;
+}): boolean {
+  return (
+    input.deliveryContext !== null
+    && input.directRecipientPhoneNumber !== null
+    && (input.targetKind === "thread" || input.targetKind === "explicit")
+    && looksLikeHostedAssistantRedactedLinqTarget(input.target)
+  );
+}
+
+function looksLikeHostedAssistantRedactedLinqTarget(value: string | null | undefined): boolean {
+  const target = value?.trim() ?? "";
+  return (
+    /^h1_[a-f0-9]{24}$/iu.test(target)
+    || /(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target)
+    || /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target)
+    || target.includes("hbid:")
+    || target.includes("hbidx:")
+    || target.startsWith("[redacted")
+  );
 }
 
 function mergeHostedAssistantLinqSignals(

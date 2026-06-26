@@ -4864,6 +4864,106 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("uses the same-wake Linq target when replyTo recovers a non-routed send", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_non_routed_target_mismatch",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_other",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      intentId: "intent_123",
+      routeAuthority: null,
+      target: "linq_chat_current",
+      targetKind: "thread",
+    }, {
+      signal: null,
+    });
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "linq_chat_other",
+      }),
+      expect.any(Object),
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        target: "linq_chat_current",
+      }),
+    ]);
+  });
+
   it("blocks routed Linq provider egress when route authority is revoked", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
