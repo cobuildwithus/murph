@@ -27,6 +27,7 @@ type MockAutomationRecord = {
     threadId: string | null
   }
   schedule: AutomationSchedule
+  relativePath?: string
   slug?: string
   status: 'active' | 'paused' | 'archived'
   summary?: string | null
@@ -47,6 +48,7 @@ const cronMocks = vi.hoisted(() => ({
   loadVault: vi.fn(),
   nextAutomationId: 1,
   renderAutoLoggedFoodMealNote: vi.fn(),
+  readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock('@murphai/query', async (importOriginal) => {
     ...actual,
     listAutomations: cronMocks.listCanonicalAutomations,
     listScheduledLogs: cronMocks.listCanonicalScheduledLogs,
+    readAutomationByRelativePath: cronMocks.readAutomationByRelativePath,
     showAutomation: cronMocks.showCanonicalAutomation,
   }
 })
@@ -296,6 +299,12 @@ beforeEach(() => {
         allowed ? allowed.includes(record.status) : true,
       )
     },
+  )
+  cronMocks.readAutomationByRelativePath.mockReset().mockImplementation(
+    async (vault: string, relativePath: string) =>
+      getVaultAutomationStore(vault).find((record) =>
+        record.relativePath === relativePath
+      ) ?? null,
   )
   cronMocks.listCanonicalScheduledLogs.mockReset().mockImplementation(
     async (
@@ -1095,6 +1104,7 @@ describe('assistant cron runtime orchestration', () => {
           authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
           occurrenceKey: '1234567890abcdef1234567890abcdef12345678',
           parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
         },
       ),
       prompt: 'Ask about the imported run.',
@@ -1130,6 +1140,8 @@ describe('assistant cron runtime orchestration', () => {
       jobs: [localJob],
     })
 
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
     await expect(
       processDueAssistantCronJobsLocal({
         limit: 1,
@@ -1142,6 +1154,13 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    expect(cronMocks.listCanonicalAutomations).not.toHaveBeenCalledWith(vaultRoot, {
+      status: ['active', 'paused', 'archived'],
+    })
     const runs = await listAssistantCronRuns({
       job: localJob.jobId,
       vault: vaultRoot,
@@ -1198,6 +1217,7 @@ describe('assistant cron runtime orchestration', () => {
       authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
       occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef12',
       parentAutomationId,
+      parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
     }
     const intent = buildTestLinqOutboxIntent({
       createdAt: '2026-04-08T08:01:00.000Z',
@@ -1217,6 +1237,8 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     parentAutomation.status = 'paused'
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
     const prepareDispatchIntent = vi.fn()
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
@@ -1229,6 +1251,11 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(prepareDispatchIntent).not.toHaveBeenCalled()
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    expect(cronMocks.listCanonicalAutomations).not.toHaveBeenCalled()
     expect(dispatched.intent.status).toBe('failed')
     expect(dispatched.deliveryError).toEqual(
       expect.objectContaining({

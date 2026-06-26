@@ -139,6 +139,7 @@ describe('device activity triggered automations', () => {
       authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       occurrenceKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       parentAutomationId: 'auto_walk',
+      parentAutomationRelativePath: 'bank/automations/auto_walk.md',
     })
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -260,6 +261,7 @@ describe('device activity triggered automations', () => {
       authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       occurrenceKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       parentAutomationId: 'auto_fresh_run',
+      parentAutomationRelativePath: 'bank/automations/auto_fresh_run.md',
     })
     expect(queued?.target.sessionId).toBeNull()
   })

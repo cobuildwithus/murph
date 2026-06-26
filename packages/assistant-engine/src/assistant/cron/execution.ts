@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
-import { listAutomations, type AutomationQueryRecord } from '@murphai/query'
+import {
+  listAutomations,
+  readAutomationByRelativePath,
+  type AutomationQueryRecord,
+} from '@murphai/query'
 import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
@@ -40,6 +44,7 @@ import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
   buildAssistantDeviceActivityAuthorityKey,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
+  type AssistantDeviceActivityCronJobMetadata,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
 import {
@@ -896,9 +901,10 @@ async function resolveDeviceActivityParentAuthorityError(input: {
       : null
   }
 
-  const parentAutomation = (await listAutomations(input.vault, {
-    status: ['active', 'paused', 'archived'],
-  })).find((automation) => automation.automationId === metadata.parentAutomationId)
+  const parentAutomation = await readDeviceActivityParentAutomation({
+    metadata,
+    vault: input.vault,
+  })
   if (!parentAutomation || parentAutomation.status !== 'active') {
     return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
   }
@@ -918,6 +924,23 @@ async function resolveDeviceActivityParentAuthorityError(input: {
   }) === metadata.authorityKey
     ? null
     : ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+}
+
+async function readDeviceActivityParentAutomation(input: {
+  metadata: AssistantDeviceActivityCronJobMetadata
+  vault: string
+}): Promise<AutomationQueryRecord | null> {
+  if (input.metadata.parentAutomationRelativePath) {
+    const record = await readAutomationByRelativePath(
+      input.vault,
+      input.metadata.parentAutomationRelativePath,
+    )
+    return record?.automationId === input.metadata.parentAutomationId ? record : null
+  }
+
+  return (await listAutomations(input.vault, {
+    status: ['active', 'paused', 'archived'],
+  })).find((automation) => automation.automationId === input.metadata.parentAutomationId) ?? null
 }
 
 function assistantCronTargetMatchesAutomationRoute(

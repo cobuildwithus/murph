@@ -33,6 +33,7 @@ export interface AssistantDeviceActivityCronJobMetadata {
   authorityKey: string
   occurrenceKey: string
   parentAutomationId: string
+  parentAutomationRelativePath?: string
 }
 
 export function buildAssistantDeviceActivityAuthorityKey(
@@ -57,9 +58,12 @@ export function appendAssistantDeviceActivityCronJobMetadata(
 ): string {
   return `${name}${ASSISTANT_DEVICE_ACTIVITY_CRON_NAME_MARKER_PREFIX}${[
     encodeURIComponent(metadata.parentAutomationId),
+    metadata.parentAutomationRelativePath
+      ? encodeURIComponent(metadata.parentAutomationRelativePath)
+      : null,
     metadata.authorityKey,
     metadata.occurrenceKey,
-  ].join(':')}${ASSISTANT_DEVICE_ACTIVITY_CRON_NAME_MARKER_SUFFIX}`
+  ].filter((part): part is string => part !== null).join(':')}${ASSISTANT_DEVICE_ACTIVITY_CRON_NAME_MARKER_SUFFIX}`
 }
 
 export function readAssistantDeviceActivityCronJobMetadata(
@@ -87,10 +91,13 @@ export function buildAssistantDeviceActivityDeliveryIdempotencyKey(input: {
     .slice(0, 40)
   return `${ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX}${[
     encodeURIComponent(input.metadata.parentAutomationId),
+    input.metadata.parentAutomationRelativePath
+      ? encodeURIComponent(input.metadata.parentAutomationRelativePath)
+      : null,
     input.metadata.authorityKey,
     input.metadata.occurrenceKey,
     discriminatorDigest,
-  ].join(':')}`
+  ].filter((part): part is string => part !== null).join(':')}`
 }
 
 export function readAssistantDeviceActivityDeliveryIdempotencyMetadata(
@@ -103,7 +110,10 @@ export function readAssistantDeviceActivityDeliveryIdempotencyMetadata(
   const suffix = deliveryIdempotencyKey.slice(
     ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX.length,
   )
-  return parseAssistantDeviceActivityMetadataParts(suffix.split(':').slice(0, 3))
+  const parts = suffix.split(':')
+  return parseAssistantDeviceActivityMetadataParts(
+    parts.length >= 5 ? parts.slice(0, 4) : parts.slice(0, 3),
+  )
 }
 
 export function buildAssistantDeviceActivityParentAutomationTag(
@@ -164,10 +174,20 @@ export function isAssistantDeviceActivityReservedTag(tag: string): boolean {
 function parseAssistantDeviceActivityMetadataParts(
   parts: readonly string[],
 ): AssistantDeviceActivityCronJobMetadata | null {
-  if (parts.length !== 3) {
+  if (parts.length !== 3 && parts.length !== 4) {
     return null
   }
-  const [encodedParentAutomationId, authorityKey, occurrenceKey] = parts
+  const [
+    encodedParentAutomationId,
+    encodedParentAutomationRelativePathOrAuthorityKey,
+    authorityKeyOrOccurrenceKey,
+    occurrenceKeyMaybe,
+  ] = parts
+  const encodedParentAutomationRelativePath =
+    parts.length === 4 ? encodedParentAutomationRelativePathOrAuthorityKey : null
+  const authorityKey =
+    parts.length === 4 ? authorityKeyOrOccurrenceKey : encodedParentAutomationRelativePathOrAuthorityKey
+  const occurrenceKey = parts.length === 4 ? occurrenceKeyMaybe : authorityKeyOrOccurrenceKey
   if (
     !encodedParentAutomationId ||
     !isDeviceActivityHash(authorityKey) ||
@@ -178,11 +198,15 @@ function parseAssistantDeviceActivityMetadataParts(
 
   try {
     const parentAutomationId = decodeURIComponent(encodedParentAutomationId)
+    const parentAutomationRelativePath = encodedParentAutomationRelativePath
+      ? decodeURIComponent(encodedParentAutomationRelativePath)
+      : null
     return parentAutomationId.length > 0
       ? {
           authorityKey,
           occurrenceKey,
           parentAutomationId,
+          ...(parentAutomationRelativePath ? { parentAutomationRelativePath } : {}),
         }
       : null
   } catch {

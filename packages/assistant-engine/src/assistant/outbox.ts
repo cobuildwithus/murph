@@ -13,7 +13,11 @@ import {
   type AssistantStatusOutboxSummary,
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { listAutomations } from '@murphai/query'
+import {
+  listAutomations,
+  readAutomationByRelativePath,
+  type AutomationQueryRecord,
+} from '@murphai/query'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
@@ -86,6 +90,7 @@ import {
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import {
   buildAssistantDeviceActivityAuthorityKey,
+  type AssistantDeviceActivityCronJobMetadata,
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
 } from './device-activity-cron-tags.js'
 
@@ -886,9 +891,10 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     return null
   }
 
-  const parentAutomation = (await listAutomations(input.vault, {
-    status: ['active', 'paused', 'archived'],
-  })).find((automation) => automation.automationId === metadata.parentAutomationId)
+  const parentAutomation = await readDeviceActivityParentAutomation({
+    metadata,
+    vault: input.vault,
+  })
   if (
     !parentAutomation ||
     parentAutomation.status !== 'active' ||
@@ -908,6 +914,23 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
   }
 
   return null
+}
+
+async function readDeviceActivityParentAutomation(input: {
+  metadata: AssistantDeviceActivityCronJobMetadata
+  vault: string
+}): Promise<AutomationQueryRecord | null> {
+  if (input.metadata.parentAutomationRelativePath) {
+    const record = await readAutomationByRelativePath(
+      input.vault,
+      input.metadata.parentAutomationRelativePath,
+    )
+    return record?.automationId === input.metadata.parentAutomationId ? record : null
+  }
+
+  return (await listAutomations(input.vault, {
+    status: ['active', 'paused', 'archived'],
+  })).find((automation) => automation.automationId === input.metadata.parentAutomationId) ?? null
 }
 
 export async function deliverAssistantOutboxMessage(input: {

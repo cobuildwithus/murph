@@ -492,6 +492,7 @@ function buildDeviceActivityAutomationNotificationJob(input: {
         authorityKey: buildAssistantDeviceActivityAuthorityKey(input.automation),
         occurrenceKey: input.occurrenceKey,
         parentAutomationId: input.automation.automationId,
+        parentAutomationRelativePath: input.automation.relativePath,
       },
     ),
     enabled: true,

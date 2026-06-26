@@ -74,6 +74,7 @@ export type {
 export {
   listAutomations,
   readAutomation,
+  readAutomationByRelativePath,
   showAutomation,
 } from "./automation.ts";
 export type {

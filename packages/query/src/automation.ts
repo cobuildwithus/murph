@@ -17,7 +17,7 @@ import {
   type AutomationStatus,
 } from "@murphai/contracts";
 
-import { readMarkdownDocument, walkRelativeFiles } from "./health/loaders.ts";
+import { readMarkdownDocument, readOptionalMarkdownDocumentOutcome, walkRelativeFiles } from "./health/loaders.ts";
 import {
   applyLimit,
   compareNullableStrings,
@@ -417,6 +417,30 @@ export async function readAutomation(
   return records.find((record) => record.automationId === automationId) ?? null;
 }
 
+export async function readAutomationByRelativePath(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<AutomationQueryRecord | null> {
+  const normalizedPath = normalizeAutomationRelativePath(relativePath);
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, normalizedPath);
+  if (!outcome) {
+    return null;
+  }
+  if (!outcome.ok) {
+    throw new Error(`Failed to parse automation at ${outcome.relativePath}: ${outcome.reason}`);
+  }
+
+  return parseAutomationRecord(
+    outcome.document.attributes,
+    outcome.document.relativePath,
+    outcome.document.markdown,
+  );
+}
+
 export async function showAutomation(
   vaultRoot: string,
   lookup: string,
@@ -428,4 +452,20 @@ export async function showAutomation(
       matchesLookup(normalized, record.automationId, record.slug, record.title)
     ) ?? null
   );
+}
+
+function normalizeAutomationRelativePath(relativePath: string): string | null {
+  const normalized = relativePath.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.includes("\\") ||
+    normalized.startsWith("/") ||
+    normalized.split("/").includes("..") ||
+    !normalized.startsWith(`${AUTOMATIONS_DIRECTORY}/`) ||
+    !normalized.endsWith(".md")
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
