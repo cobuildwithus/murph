@@ -453,6 +453,9 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
+        const progressDeliveredSessionRef: { value: AssistantSession | null } = {
+          value: null,
+        }
         const currentAudienceReplyDeliveryAvailable =
           isHostedCurrentAudienceReplyDeliveryAvailable({
             executionContext,
@@ -493,14 +496,13 @@ export async function sendAssistantMessageLocal(
                       'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
-                  await deliverAssistantProgressUpdate({
+                  return await deliverAssistantProgressUpdate({
                     ...progressInput,
                     dependencies,
                   })
-                  return
                 }
 
-                await deliverAssistantProgressUpdate({
+                return await deliverAssistantProgressUpdate({
                   ...progressInput,
                 })
               },
@@ -509,6 +511,10 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
+              onDeliveredSession: (session) => {
+                progressDeliveredSessionRef.value = session
+                currentSession = session
+              },
               session: resolved.session,
               sharedPlan,
               turnId: currentUserTurn.turnId,
@@ -1153,7 +1159,16 @@ export async function sendAssistantMessageLocal(
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         }
-        currentSession = providerResult.session
+        const progressDeliveredSession = progressDeliveredSessionRef.value
+        currentSession =
+          progressDeliveredSession !== null &&
+          progressDeliveredSession.sessionId === providerResult.session.sessionId
+            ? {
+                ...providerResult.session,
+                binding: progressDeliveredSession.binding,
+                updatedAt: progressDeliveredSession.updatedAt,
+              }
+            : providerResult.session
         responseText = providerResult.response
         await recordAssistantUsageEvent({
           executionContext,
@@ -1230,7 +1245,7 @@ export async function sendAssistantMessageLocal(
         if (!codexUnsafeResumeStateInvalidated) {
           await clearAssistantSessionCodexResumeStateIfNeeded({
             action: providerResumeStateAction,
-            session: providerResult.session,
+            session: currentSession,
             vault: input.vault,
           })
         }
@@ -1250,7 +1265,7 @@ export async function sendAssistantMessageLocal(
           providerResult,
           providerResumeStateAction,
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
-          session: providerResult.session,
+          session: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })

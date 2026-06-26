@@ -67,13 +67,17 @@ type AssistantProgressDeliveryContext = {
 type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
 export function shouldCreateAssistantProgressDelivery(
-  input: Pick<AssistantMessageInput, 'deliverResponse' | 'turnTrigger'>,
+  input: Pick<
+    AssistantMessageInput,
+    'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
+  >,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null
     toolProfile?: 'provider-turn' | 'notification-turn' | null
   } | null,
 ): boolean {
   return input.deliverResponse === true &&
+    input.deliveryDispatchMode !== 'queue-only' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }
@@ -122,6 +126,7 @@ export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
+  onDeliveredSession?: (session: AssistantSession) => void
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -193,7 +198,8 @@ export function createAssistantProgressDelivery(input: {
           text,
           turnId: input.turnId,
         }
-        await deliver(progressInput)
+        const deliveredSession = await deliver(progressInput)
+        input.onDeliveredSession?.(deliveredSession)
         return {
           kind: 'sent',
           source,

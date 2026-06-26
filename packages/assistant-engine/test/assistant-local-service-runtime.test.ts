@@ -4760,7 +4760,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal exposes hosted progress and computer context for auto-replies', async () => {
+test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4809,11 +4809,10 @@ test('sendAssistantMessageLocal exposes hosted progress and computer context for
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(progressDelivery)
+  assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  await progressDelivery.send('Checking the iMessage thread.')
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
@@ -4839,7 +4838,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   await sendAssistantMessageLocal({
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -4872,6 +4871,109 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   )
 })
 
+test('sendAssistantMessageLocal uses progress-materialized sessions for final replies', async () => {
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress',
+      },
+      identityId: 'identity-progress',
+      threadId: null,
+      threadIsDirect: null,
+    },
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-materialized',
+      },
+      threadId: 'thread-progress-materialized',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const providerSession: AssistantSession = {
+    ...baseSession,
+    turnCount: 7,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-materialized',
+      target: 'thread-progress-materialized',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session: providerSession,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'immediate',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted immediate manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  const finalSession = mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.session
+  expect(finalSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-materialized',
+  })
+  expect(finalSession?.binding.threadId).toBe('thread-progress-materialized')
+  expect(finalSession?.binding.threadIsDirect).toBe(true)
+  expect(finalSession?.turnCount).toBe(7)
+})
+
 test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {
   const progressDeliveryDependencies = {
     sendLinqVoiceMemo: vi.fn(async () => ({
@@ -4893,7 +4995,7 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
   await sendAssistantMessageLocal({
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -4939,7 +5041,7 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
   await sendAssistantMessageLocal({
     channel: 'telegram',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -5127,7 +5229,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     },
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -5212,7 +5314,7 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
 
   await sendAssistantMessageLocal({
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -7319,10 +7421,10 @@ async function loadLocalServiceModule(input?: {
     ),
     deliverAssistantProgressUpdate: vi.fn(
       async (
-        _input: Parameters<
+        progressInput: Parameters<
           typeof import('../src/assistant/delivery-service.js').deliverAssistantProgressUpdate
         >[0],
-      ) => undefined,
+      ) => progressInput.session,
     ),
     deliverAssistantReaction: vi.fn(
       async (
@@ -7356,10 +7458,10 @@ async function loadLocalServiceModule(input?: {
     ),
     finalizeAssistantTurnArtifacts: vi.fn(
       async (
-        _input: Parameters<
+        finalizeInput: Parameters<
           typeof import('../src/assistant/turn-finalizer.js').persistAssistantTurnAndSession
         >[0],
-      ) => session,
+      ) => finalizeInput.session,
     ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (

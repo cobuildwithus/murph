@@ -51,8 +51,9 @@ describe('assistant turn progress', () => {
   it('dedupes and limits progress updates inside one turn', async () => {
     const delivered: DeliverProgressInput[] = []
     let nowMs = 0
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -116,8 +117,9 @@ describe('assistant turn progress', () => {
   it('tracks one shared progress budget across system and model updates', async () => {
     const delivered: DeliverProgressInput[] = []
     let nowMs = 0
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -193,8 +195,9 @@ describe('assistant turn progress', () => {
 
   it('can be closed so later progress sends fail without delivery', async () => {
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -230,8 +233,9 @@ describe('assistant turn progress', () => {
     })
     const session = createSession()
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -278,6 +282,13 @@ describe('assistant turn progress', () => {
       ),
     ).toBe(true)
     expect(shouldCreateAssistantProgressDelivery(createMessageInput())).toBe(true)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          deliveryDispatchMode: 'queue-only',
+        }),
+      ),
+    ).toBe(false)
   })
 })
 
