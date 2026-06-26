@@ -27,6 +27,7 @@ type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 export const HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS = 28;
 const HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS =
   HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+const HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS = 5 * 60 * 1000;
 
 export type HostedLinqRecentInboundDecision =
   | {
@@ -52,6 +53,13 @@ export function decideHostedLinqRecentInbound(input: {
       reason: "missing_recent_inbound",
     };
   }
+  if (lastInboundAt.getTime() > now.getTime() + HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS) {
+    return {
+      allowed: false,
+      lastInboundAt,
+      reason: "missing_recent_inbound",
+    };
+  }
 
   return lastInboundAt.getTime() >= now.getTime() - HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS
     ? {
@@ -70,10 +78,14 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
   memberId: string;
   occurredAt: Date | string;
   linePhoneNumber?: string | null;
+  now?: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
-  if (Number.isNaN(occurredAt.getTime())) {
+  const occurredAt = normalizeHostedLinqInboundEngagementAt({
+    now: input.now,
+    occurredAt: input.occurredAt,
+  });
+  if (!occurredAt) {
     return;
   }
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
@@ -116,10 +128,14 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   occurredAt: Date | string;
   linePhoneNumberLookupKey: string | null;
   memberId: string;
+  now?: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
-  if (Number.isNaN(occurredAt.getTime())) {
+  const occurredAt = normalizeHostedLinqInboundEngagementAt({
+    now: input.now,
+    occurredAt: input.occurredAt,
+  });
+  if (!occurredAt) {
     return;
   }
   const threadIdentityLookupKeys = createHostedExternalThreadIdentityLookupKeyReadCandidates({
@@ -259,6 +275,20 @@ export function buildHostedLinqRecentInboundSkipReason(lastInboundAt: Date | nul
   return lastInboundAt
     ? `last_inbound_at=${lastInboundAt.toISOString()}; window_days=${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS}`
     : `last_inbound_at=null; window_days=${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS}`;
+}
+
+function normalizeHostedLinqInboundEngagementAt(input: {
+  now?: Date;
+  occurredAt: Date | string;
+}): Date | null {
+  const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
+  if (Number.isNaN(occurredAt.getTime())) {
+    return null;
+  }
+  const now = input.now ?? new Date();
+  return occurredAt.getTime() > now.getTime() + HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS
+    ? now
+    : occurredAt;
 }
 
 async function resolveHostedLinqSideEffectMemberId(input: {

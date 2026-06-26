@@ -104,16 +104,29 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
         deliveredAt: null,
-        failedAt: null,
         idempotencyKey: input.idempotencyKey,
+        lastReceiptAt: null,
         skippedAt: null,
         OR: [
-          { messageLookupKey: null },
-          ...(messageLookupKey ? [{ messageLookupKey }] : []),
+          {
+            failedAt: null,
+            OR: [
+              { messageLookupKey: null },
+              ...(messageLookupKey ? [{ messageLookupKey }] : []),
+            ],
+          },
+          {
+            acceptedAt: null,
+            failedAt: { not: null },
+            messageLookupKey: null,
+          },
         ],
       },
       data: {
         acceptedAt: input.acceptedAt ?? new Date(),
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
         linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
         messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
         messageLookupKey,

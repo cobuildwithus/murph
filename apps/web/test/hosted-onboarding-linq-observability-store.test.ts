@@ -570,13 +570,16 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          failedAt: null,
+          failureCode: null,
+          failureReason: null,
           messageIdSuffix: "ge_123",
           status: "accepted",
         }),
         where: expect.objectContaining({
           idempotencyKey: "linq-message:event-123",
           deliveredAt: null,
-          failedAt: null,
+          lastReceiptAt: null,
           skippedAt: null,
         }),
       }),
@@ -585,6 +588,44 @@ describe("hosted Linq observability stores", () => {
       | Record<string, unknown>
       | undefined;
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
+  });
+
+  it("lets a retry acceptance replace a pre-provider send failure", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      messageId: "provider_message_retry_123",
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt: expect.any(Date),
+          failedAt: null,
+          failureCode: null,
+          failureReason: null,
+          status: "accepted",
+        }),
+        where: expect.objectContaining({
+          deliveredAt: null,
+          idempotencyKey: "linq-message:event-123",
+          lastReceiptAt: null,
+          skippedAt: null,
+          OR: expect.arrayContaining([
+            {
+              acceptedAt: null,
+              failedAt: {
+                not: null,
+              },
+              messageLookupKey: null,
+            },
+          ]),
+        }),
+      }),
+    );
   });
 
   it("does not downgrade an accepted delivery when an idempotent skip is recorded later", async () => {

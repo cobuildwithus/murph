@@ -8,6 +8,7 @@ import {
   assertHostedLinqRecentInboundEngagementForRuntime,
   decideHostedLinqRecentInbound,
   recordHostedMemberLinqInboundEngagementTx,
+  recordHostedThreadRouteLinqInboundEngagementTx,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 
 describe("hosted Linq egress engagement", () => {
@@ -29,6 +30,13 @@ describe("hosted Linq egress engagement", () => {
     });
     expect(decideHostedLinqRecentInbound({
       lastInboundAt: null,
+      now,
+    })).toMatchObject({
+      allowed: false,
+      reason: "missing_recent_inbound",
+    });
+    expect(decideHostedLinqRecentInbound({
+      lastInboundAt: new Date("2026-07-25T12:00:00.000Z"),
       now,
     })).toMatchObject({
       allowed: false,
@@ -71,6 +79,64 @@ describe("hosted Linq egress engagement", () => {
         where: expect.objectContaining({
           memberId: "member-1",
         }),
+      }),
+    );
+  });
+
+  it("caps future-dated inbound member engagement at server receipt time", async () => {
+    const prisma = {
+      hostedMemberRouting: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    await recordHostedMemberLinqInboundEngagementTx({
+      chatId: "chat-1",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:00:00.000Z"),
+      occurredAt: "2026-08-25T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+
+    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: {
+          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+        },
+      }),
+    );
+    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: {
+          pendingLinqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+        },
+      }),
+    );
+  });
+
+  it("caps future-dated inbound thread-route engagement at server receipt time", async () => {
+    const prisma = {
+      hostedThreadRoute: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    await recordHostedThreadRouteLinqInboundEngagementTx({
+      chatId: "chat-1",
+      linePhoneNumberLookupKey: null,
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:00:00.000Z"),
+      occurredAt: "2026-08-25T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+
+    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+        },
       }),
     );
   });

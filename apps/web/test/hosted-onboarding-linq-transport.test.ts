@@ -157,12 +157,15 @@ describe("hosted Linq webhook transport", () => {
       expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            failedAt: null,
+            failureCode: null,
+            failureReason: null,
             status: "accepted",
           }),
           where: expect.objectContaining({
             deliveredAt: null,
-            failedAt: null,
             idempotencyKey: effect.effectId,
+            lastReceiptAt: null,
             skippedAt: null,
           }),
         }),
