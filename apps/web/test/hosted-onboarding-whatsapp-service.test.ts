@@ -99,6 +99,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
 import {
   handleHostedOnboardingWhatsAppWebhook as handleHostedOnboardingWhatsAppWebhookImpl,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   grantHostedWhatsAppMessagingConsentTx,
   revokeHostedWhatsAppMessagingConsentTx,
@@ -708,6 +709,33 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       expectedUserId: "member_whatsapp_family",
       mailboxItemId: expect.stringContaining("assistant.notification.requested:family-chat"),
     });
+  });
+
+  it("ignores WhatsApp family invite tokens that are not acceptable for the sender", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This Family invite is bound to a different phone number.",
+    }));
+    const prisma = createWhatsAppPrismaHarness();
+    const rawBody = buildWhatsAppInboundTextBody("family_invite_wrong_phone");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: true,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "family-invite-not-accepted",
+      routedTextCount: 0,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
   });
 
   it("dedupes repeated WhatsApp message ids through the hosted mailbox append", async () => {

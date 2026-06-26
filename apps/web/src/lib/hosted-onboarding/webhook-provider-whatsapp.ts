@@ -18,12 +18,16 @@ import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import {
+  isHostedOnboardingError,
+  hostedOnboardingError,
+} from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromPhoneTx,
   hasHostedMemberEffectiveActiveAccessForMember,
+  parseHostedFamilyInviteStartToken,
 } from "./family-plan";
 import { normalizePhoneNumber } from "./phone";
 import {
@@ -151,31 +155,39 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("invalid-whatsapp-sender");
   }
 
-  const familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
-    now: input.inboundText.receivedAt,
-    onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
-      const consentWrite = await grantHostedWhatsAppMessagingConsentTx({
-        eventId: buildHostedWhatsAppConsentCommandEventId({
-          action: "granted",
-          externalMessageId: `${input.inboundText.externalMessageId}:family-invite`,
-        }),
-        memberId: acceptedMemberId,
-        now: input.inboundText.receivedAt,
-        prisma: input.prisma,
-      });
-
-      if (consentWrite.stale) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_WHATSAPP_CONSENT_STALE",
-          httpStatus: 409,
-          message: "WhatsApp messaging consent changed while accepting this family invite. Send the invite code again.",
+  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(input.inboundText.text) !== null;
+  let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
+  try {
+    familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
+      now: input.inboundText.receivedAt,
+      onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
+        const consentWrite = await grantHostedWhatsAppMessagingConsentTx({
+          eventId: buildHostedWhatsAppConsentCommandEventId({
+            action: "granted",
+            externalMessageId: `${input.inboundText.externalMessageId}:family-invite`,
+          }),
+          memberId: acceptedMemberId,
+          now: input.inboundText.receivedAt,
+          prisma: input.prisma,
         });
-      }
-    },
-    phoneNumber,
-    text: input.inboundText.text,
-    tx: input.prisma,
-  });
+
+        if (consentWrite.stale) {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_WHATSAPP_CONSENT_STALE",
+            httpStatus: 409,
+            message: "WhatsApp messaging consent changed while accepting this family invite. Send the invite code again.",
+          });
+        }
+      },
+      phoneNumber,
+      text: input.inboundText.text,
+      tx: input.prisma,
+    });
+  } catch (error) {
+    if (!isExpectedHostedWhatsAppFamilyInviteAcceptanceMiss(error)) {
+      throw error;
+    }
+  }
   if (familyAcceptance) {
     const notification = await appendHostedWhatsAppFamilyChatNotification({
       inboundText: input.inboundText,
@@ -191,6 +203,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       reason: "family-invite-accepted",
       wakeHandoff: notification.wakeHandoff,
     };
+  }
+
+  if (familyInviteTokenPresent) {
+    return buildWhatsAppInboundTextNoWakePlan("family-invite-not-accepted");
   }
 
   const member = await lookupHostedMemberByWhatsAppPhoneNumber({
@@ -468,4 +484,21 @@ function resolveWhatsAppWebhookResponseReason(input: {
   }
 
   return input.lastIgnoredReason;
+}
+
+const HOSTED_WHATSAPP_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
+  "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+  "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+  "HOSTED_FAMILY_INVITE_NOT_FOUND",
+  "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+  "HOSTED_FAMILY_INVITE_PHONE_REQUIRED",
+  "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+  "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
+  "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+]);
+
+function isExpectedHostedWhatsAppFamilyInviteAcceptanceMiss(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && !error.retryable
+    && HOSTED_WHATSAPP_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);
 }
