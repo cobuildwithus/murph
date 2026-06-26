@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { workoutSessionSchema } from "@murphai/contracts";
+import {
+  eventRevisionFromLifecycle,
+  isDeletedEventLifecycle,
+  workoutSessionSchema,
+} from "@murphai/contracts";
 import * as coreRuntime from "@murphai/core";
 import { test } from "vitest";
 
@@ -21,6 +26,8 @@ import {
   type DeviceBatchImportPayload,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
+
+type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
   for (const event of events) {
@@ -53,6 +60,75 @@ function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): vo
 
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+function latestLiveRecords(records: readonly StoredJsonlRecord[]): StoredJsonlRecord[] {
+  const latestById = new Map<string, StoredJsonlRecord>();
+
+  for (const record of records) {
+    if (typeof record.id !== "string") {
+      continue;
+    }
+
+    const existing = latestById.get(record.id);
+    if (!existing || eventRevisionFromLifecycle(record.lifecycle) > eventRevisionFromLifecycle(existing.lifecycle)) {
+      latestById.set(record.id, record);
+    }
+  }
+
+  return [...latestById.values()].filter((record) => !isDeletedEventLifecycle(record.lifecycle));
+}
+
+function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
+}
+
+function junctionFallbackSummaryResourceId(
+  input: {
+    observedAtRaw: string;
+    resourceSlug: string;
+    sourceProviderSlug: string;
+    sourceType?: string;
+    sourceInstanceId?: string;
+  },
+): string {
+  return `${input.resourceSlug}-${createHash("sha256")
+    .update(JSON.stringify([
+      input.resourceSlug,
+      input.sourceProviderSlug,
+      input.sourceType,
+      input.sourceInstanceId,
+      input.observedAtRaw,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+function junctionDailyTimeseriesResourceId(
+  input: {
+    dayKey: string;
+    resource: string;
+    resourceSlug: string;
+    sourceProviderSlug: string;
+    sourceType?: string;
+    sourceInstanceId?: string;
+  },
+): string {
+  return `${input.resourceSlug}-${createHash("sha256")
+    .update(JSON.stringify([
+      input.resourceSlug,
+      input.sourceProviderSlug,
+      input.sourceType,
+      input.sourceInstanceId,
+      `${input.dayKey}:${input.resource}:daily`,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
 }
 
 function assertCompactSummaryObservationFields(fields: Record<string, unknown> | undefined): void {
@@ -493,6 +569,78 @@ test("Junction stress level aggregates pass the canonical device import contract
   }
 });
 
+test("Junction daily aggregates keep adjacent provider-local days distinct through core replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-adjacent-local-days");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "America/Los_Angeles",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        stress_level: {
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-04-23T06:30:00.000Z", timezone_offset: -25_200, score: 44 },
+                { timestamp: "2026-04-23T08:00:00.000Z", timezone_offset: -25_200, value: 44 },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    };
+    const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...firstImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "stress-level",
+    );
+
+    assert.deepEqual(
+      firstImport.events
+        .filter((event) => event.kind === "observation" && event.metric === "stress-level")
+        .map((event) => event.dayKey)
+        .sort(),
+      ["2026-04-22", "2026-04-23"],
+    );
+    assert.equal(liveStressRecords.length, 2);
+    assert.deepEqual(liveStressRecords.map((record) => record.dayKey).sort(), ["2026-04-22", "2026-04-23"]);
+    assert.equal(new Set(liveStressRecords.map((record) => record.id)).size, 2);
+    assert.equal(new Set(liveStressRecords.map((record) => storedExternalRefResourceId(record))).size, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction blood pressure readings pass the canonical device import contract", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-blood-pressure-import");
   try {
@@ -578,6 +726,365 @@ test("Junction normalizer buckets stress level aggregates by provider local offs
   assert.equal(localDayTwo?.dataOrigin?.timeZoneOffsetMinutes, -420);
 });
 
+test("Junction timeseries aggregates trust embedded offset timestamps before separate offset metadata", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-06-25T00:30:00+02:00", timezone_offset: -14_400, score: 44 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const stressEvent = payload.events?.find((event) => event.fields?.metric === "stress-level");
+
+  assert.equal(stressEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
+  assert.equal(stressEvent?.dayKey, "2026-06-25");
+  assert.equal(stressEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+  assert.equal(stressEvent?.dataOrigin?.timestampSemantics, "offset");
+});
+
+test("Junction daily aggregates repair legacy calendar-date resource ids through core replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-calendar-date-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const legacyResourceId = junctionDailyTimeseriesResourceId({
+      dayKey: "2026-06-24",
+      resource: "stress_level",
+      resourceSlug: "stress-level",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    });
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-25T03:30:00.000Z",
+        recordedAt: "2026-06-25T03:30:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction stress level",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-stress-level",
+          resourceId: legacyResourceId,
+          facet: "stress-level",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          observedAtRaw: "2026-06-24:stress_level:daily",
+          timestampSemantics: "offset",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{
+                  data: [
+                    {
+                      calendar_date: "2026-06-25",
+                      timestamp: "2026-06-24T23:30:00-04:00",
+                      score: 44,
+                    },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "stress-level",
+    );
+    const replayStress = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+
+    assert.equal(replayStress?.id, legacyImport.events[0]?.id);
+    assert.equal(replayStress?.dayKey, "2026-06-25");
+    assert.equal(liveStressRecords.length, 1);
+    assert.equal(liveStressRecords[0]?.id, legacyImport.events[0]?.id);
+    assert.equal(liveStressRecords[0]?.dayKey, "2026-06-25");
+    assert.equal(
+      storedExternalRefResourceId(liveStressRecords[0]),
+      junctionDailyTimeseriesResourceId({
+        dayKey: "2026-06-25",
+        resource: "stress_level",
+        resourceSlug: "stress-level",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      }),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregates do not rewrite same-value adjacent days through legacy refs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-adjacent-legacy-ref");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const adjacentResourceId = junctionDailyTimeseriesResourceId({
+      dayKey: "2026-06-24",
+      resource: "stress_level",
+      resourceSlug: "stress-level",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    });
+    const adjacentImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-24T21:30:00.000Z",
+        recordedAt: "2026-06-24T21:30:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction stress level",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-stress-level",
+          resourceId: adjacentResourceId,
+          facet: "stress-level",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          observedAtRaw: "2026-06-24:stress_level:daily",
+          timestampSemantics: "offset",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:30:00.000Z",
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{
+                  data: [
+                    {
+                      timestamp: "2026-06-25T00:30:00+02:00",
+                      timezone_offset: -14_400,
+                      score: 44,
+                    },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...adjacentImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records)
+      .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    const replayStress = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+
+    assert.notEqual(replayStress?.id, adjacentImport.events[0]?.id);
+    assert.equal(liveStressRecords.length, 2);
+    assert.deepEqual(liveStressRecords.map((record) => record.dayKey), ["2026-06-24", "2026-06-25"]);
+    assert.equal(new Set(liveStressRecords.map((record) => record.id)).size, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregates reserve proven legacy ids when adjacent primary keys collide", async () => {
+  async function exercise(order: "corrected-first" | "adjacent-first") {
+    const vaultRoot = await makeTempDirectory(`murph-junction-stress-legacy-primary-collision-${order}`);
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-06-24T00:00:00.000Z",
+        timezone: "America/New_York",
+      });
+
+      const legacyResourceId = junctionDailyTimeseriesResourceId({
+        dayKey: "2026-06-24",
+        resource: "stress_level",
+        resourceSlug: "stress-level",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      });
+      const correctedResourceId = junctionDailyTimeseriesResourceId({
+        dayKey: "2026-06-25",
+        resource: "stress_level",
+        resourceSlug: "stress-level",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      });
+      const legacyImport = await coreRuntime.importDeviceBatch({
+        vaultRoot,
+        provider: "junction",
+        accountId: "junction-account-hash-1",
+        importedAt: "2026-06-25T12:00:00.000Z",
+        events: [{
+          kind: "observation",
+          occurredAt: "2026-06-24T22:30:00.000Z",
+          recordedAt: "2026-06-24T22:30:00.000Z",
+          dayKey: "2026-06-25",
+          title: "Junction stress level",
+          externalRef: {
+            system: "junction",
+            resourceType: "junction-garmin-stress-level",
+            resourceId: legacyResourceId,
+            facet: "stress-level",
+          },
+          dataOrigin: {
+            version: 1,
+            aggregatorProvider: "junction",
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+            observedAtRaw: "2026-06-24:stress_level:daily",
+            timestampSemantics: "offset",
+            timeZoneOffsetMinutes: -240,
+          },
+          fields: {
+            metric: "stress-level",
+            observationGrain: "summary",
+            value: 44,
+            unit: "score",
+          },
+        }],
+      });
+      const correctedSample = {
+        timestamp: "2026-06-25T00:30:00+02:00",
+        timezone_offset: -14_400,
+        score: 44,
+      };
+      const adjacentSample = {
+        timestamp: "2026-06-24T00:30:00+02:00",
+        timezone_offset: -14_400,
+        score: 44,
+      };
+      const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "junction",
+          vaultRoot,
+          snapshot: {
+            accountId: "junction-account-hash-1",
+            importedAt: "2026-06-25T12:30:00.000Z",
+            timeseries: {
+              stress_level: {
+                groups: {
+                  garmin: [{
+                    data: order === "corrected-first"
+                      ? [correctedSample, adjacentSample]
+                      : [adjacentSample, correctedSample],
+                    source: { provider: "garmin", type: "watch" },
+                  }],
+                },
+              },
+            },
+          },
+        },
+        {
+          corePort: coreRuntime,
+        },
+      );
+      const records = (
+        await Promise.all(
+          [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+            coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+          ),
+        )
+      ).flat();
+      const liveStressRecords = latestLiveRecords(records)
+        .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+        .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+      const legacyEventId = legacyImport.events[0]?.id;
+      const correctedLiveRecord = liveStressRecords.find((record) => record.dayKey === "2026-06-25");
+      const adjacentLiveRecord = liveStressRecords.find((record) => record.dayKey === "2026-06-24");
+
+      assert.equal(liveStressRecords.length, 2);
+      assert.equal(correctedLiveRecord?.id, legacyEventId);
+      assert.equal(storedExternalRefResourceId(correctedLiveRecord), correctedResourceId);
+      assert.notEqual(adjacentLiveRecord?.id, legacyEventId);
+      assert.equal(storedExternalRefResourceId(adjacentLiveRecord), legacyResourceId);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+
+  await exercise("corrected-first");
+  await exercise("adjacent-first");
+});
+
 test("Junction normalizer keeps floating stress timestamps on their raw day despite offset metadata", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -608,6 +1115,403 @@ test("Junction normalizer keeps floating stress timestamps on their raw day desp
   assert.equal(rawDayEvent?.dataOrigin?.timeZoneOffsetMinutes, -420);
   assert.equal(rawDayEvent?.dataOrigin?.timestampSemantics, "floating");
   assert.equal(stressEvents.some((event) => event.dayKey === "2026-04-22"), false);
+});
+
+test("Junction WHOOP workout summaries use provider offset local day across UTC midnight", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-offset-local-24",
+        start: "2026-06-25T03:45:00.000Z",
+        end: "2026-06-25T04:15:00.000Z",
+        updated_at: "2026-06-25T04:20:00.000Z",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+        workout_strain: 6.8,
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  assert.equal(workoutEvent?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries derive provider day from computed start with provider offset", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-end-duration-offset-local-24",
+        end: "2026-06-25T04:15:00.000Z",
+        durationSeconds: 1800,
+        updated_at: "2026-06-25T04:20:00.000Z",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries derive computed start day from embedded end offset", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-end-duration-embedded-offset-local-24",
+        end: "2026-06-25T00:15:00-04:00",
+        durationSeconds: 1800,
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-25T03:45:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-24");
+});
+
+test("Junction workout summaries keep id-less fallback identity stable when correcting start day", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-idless-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const startAt = "2026-06-25T03:45:00.000Z";
+    const endAt = "2026-06-25T04:15:00.000Z";
+    const legacyResourceId = junctionFallbackSummaryResourceId({
+      resourceSlug: "workouts",
+      sourceProviderSlug: "whoop",
+      sourceType: "wearable",
+      observedAtRaw: startAt,
+    });
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "activity_session",
+        occurredAt: startAt,
+        recordedAt: endAt,
+        dayKey: "2026-06-24",
+        title: "Junction workout",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-whoop-workouts",
+          resourceId: legacyResourceId,
+          facet: "session",
+        },
+        fields: {
+          durationMinutes: 30,
+          activityType: "run",
+          workout: {
+            sourceApp: "whoop",
+            startedAt: startAt,
+            endedAt: endAt,
+            exercises: [],
+          },
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          summaries: {
+            workouts: [{
+              source: {
+                provider: "whoop",
+                type: "wearable",
+              },
+              start: startAt,
+              end: endAt,
+              timezone_offset: "-04:00",
+              sport_name: "Run",
+            }],
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveWorkoutRecords = latestLiveRecords(records).filter((record) => record.kind === "activity_session");
+
+    assert.equal(replayImport.events.find((event) => event.kind === "activity_session")?.id, legacyImport.events[0]?.id);
+    assert.equal(liveWorkoutRecords.length, 1);
+    assert.equal(storedExternalRefResourceId(liveWorkoutRecords[0]), legacyResourceId);
+    assert.equal(liveWorkoutRecords[0]?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction workout summaries trust embedded offset timestamps before separate offset metadata", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-06-25T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        source: {
+          provider: "whoop",
+          type: "wearable",
+        },
+        id: "junction-whoop-run-embedded-offset",
+        start: "2026-06-25T00:30:00+02:00",
+        end: "2026-06-25T01:00:00+02:00",
+        timezone_offset: "-04:00",
+        sport_name: "Run",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(workoutEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
+  assert.equal(workoutEvent?.dayKey, "2026-06-25");
+  assert.equal(workoutEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
+});
+
+test("Junction workout summaries trust calendar_date over offset-derived workout days", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-whoop-calendar-start",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "wearable",
+          start: "2026-09-28T05:45:00.000Z",
+          end: "2026-09-28T06:15:00.000Z",
+          timezone_offset: "-04:00",
+          sport_name: "Run",
+        },
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-whoop-calendar-computed-start",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "wearable",
+          end: "2026-09-28T06:15:00.000Z",
+          durationSeconds: 1800,
+          timezone_offset: "-04:00",
+          sport_name: "Run",
+        },
+      ],
+    },
+  });
+  const workoutEvents = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+
+  assert.equal(workoutEvents.length, 2);
+  assert.deepEqual(workoutEvents.map((event) => event.dayKey), ["2026-09-27", "2026-09-27"]);
+});
+
+test("Junction workout summaries without provider offset defer canonical day to vault timezone", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-local-day-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        workouts: [{
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          id: "junction-whoop-run-no-offset-local-24",
+          start: "2026-06-25T03:45:00.000Z",
+          end: "2026-06-25T04:15:00.000Z",
+          updated_at: "2026-06-25T04:20:00.000Z",
+          sport_name: "Run",
+          strain: 5.9,
+        }],
+      },
+    };
+    const payload = normalizeJunctionSnapshot(snapshot);
+    const normalizedWorkout = payload.events?.find((event) => event.kind === "activity_session");
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const workoutEvent = result.events.find((event) => event.kind === "activity_session");
+
+    assert.equal(normalizedWorkout?.dayKey, undefined);
+    assert.equal(workoutEvent?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction activity summaries trust calendar_date over midnight UTC date offsets", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "fixture-id-65",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "watch",
+          steps: 1234,
+          timezone_offset: -14400,
+          updated_at: "2026-09-28T06:11:08.000Z",
+        },
+        {
+          calendar_date: "2026-09-27",
+          date: "2026-09-27T00:00:00.000Z",
+          id: "junction-garmin-calendar-date-activity",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          steps: 5678,
+          timezone_offset: -14400,
+          updated_at: "2026-09-28T06:11:08.000Z",
+        },
+      ],
+    },
+  });
+
+  const stepEvents = payload.events?.filter((event) => event.fields?.metric === "daily-steps") ?? [];
+
+  assert.equal(stepEvents.length, 2);
+  assert.deepEqual(
+    stepEvents.map((event) => [event.dataOrigin?.sourceProviderSlug, event.dayKey]).sort(),
+    [
+      ["garmin", "2026-09-27"],
+      ["whoop-v2", "2026-09-27"],
+    ],
+  );
+});
+
+test("Junction sleep summaries trust calendar_date and anchor occurrence to sleep end", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-09-28T16:00:00.000Z",
+    summaries: {
+      sleep: [{
+        average_hrv: 62.77,
+        bedtime_start: "2026-09-28T05:12:22.000Z",
+        bedtime_stop: "2026-09-28T14:42:48.000Z",
+        calendar_date: "2026-09-28",
+        date: "2026-09-28T00:00:00.000Z",
+        duration: 34225,
+        id: "fixture-id-73",
+        recovery_readiness_score: 65,
+        score: 93,
+        sourceProviderSlug: "whoop_v2",
+        sourceType: "unknown",
+        timezone_offset: -14400,
+        updated_at: "2026-09-28T15:03:43.000Z",
+      }],
+    },
+  });
+
+  const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
+  const sleepScore = payload.events?.find((event) => event.fields?.metric === "sleep-score");
+  const readinessScore = payload.events?.find((event) => event.fields?.metric === "recovery-score");
+
+  assert.equal(sleepSession?.dayKey, "2026-09-28");
+  assert.equal(sleepSession?.occurredAt, "2026-09-28T14:42:48.000Z");
+  assert.equal(sleepScore?.dayKey, "2026-09-28");
+  assert.equal(sleepScore?.occurredAt, "2026-09-28T14:42:48.000Z");
+  assert.equal(readinessScore?.dayKey, "2026-09-28");
+});
+
+test("Junction sleep summaries without provider offset derive canonical day from sleep end", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-local-day-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep: [{
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          id: "junction-whoop-sleep-no-offset-overnight-24",
+          start: "2026-06-24T02:30:00.000Z",
+          end: "2026-06-24T11:00:00.000Z",
+          updated_at: "2026-06-24T11:30:00.000Z",
+          sleep_score: 82,
+        }],
+      },
+    };
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const sleepSession = result.events.find((event) => event.kind === "sleep_session");
+    const sleepScore = result.events.find(
+      (event) => event.kind === "observation" && event.metric === "sleep-score",
+    );
+
+    assert.equal(sleepSession?.dayKey, "2026-06-24");
+    assert.equal(sleepScore?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction snapshot adapter fails closed on glucose values outside the mmol/L window", () => {
@@ -1755,6 +2659,39 @@ test("Junction normalizer compacts HRV timeseries into daily average facts", () 
   assert.equal(dayTwo?.fields?.value, 61);
 });
 
+test("Junction normalizer uses vault timezone for UTC-only daily aggregate days", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-06-25T12:00:00.000Z",
+      timeseries: {
+        hrv: {
+          groups: {
+            whoop: [{
+              data: [
+                { timestamp: "2026-06-25T02:30:00.000Z", value: 70 },
+              ],
+              source: { provider: "whoop", type: "wearable" },
+            }],
+          },
+        },
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+
+  const hrvEvent = payload.events?.find((event) => event.fields?.metric === "hrv");
+  const artifact = findJunctionCompactTimeseriesArtifacts(payload, "hrv")[0]?.content as
+    | Record<string, unknown>
+    | undefined;
+
+  assert.equal(hrvEvent?.occurredAt, "2026-06-25T02:30:00.000Z");
+  assert.equal(hrvEvent?.dayKey, "2026-06-24");
+  assert.equal(hrvEvent?.dataOrigin?.observedAtRaw, "2026-06-24:hrv:daily");
+  assert.equal(hrvEvent?.legacyExternalRefs?.length, 1);
+  assert.notEqual(hrvEvent?.legacyExternalRefs?.[0]?.resourceId, hrvEvent?.externalRef?.resourceId);
+  assert.deepEqual(artifact?.legacyDayKeys, ["2026-06-25"]);
+});
+
 test("Junction normalizer compacts VO2 max interval timeseries into daily facts", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -2476,7 +3413,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
-test("Junction importer drops floating-timestamp glucose records without retaining raw samples", async () => {
+test("Junction importer compacts floating-timestamp glucose records without retaining raw samples", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     sourceKind: "poll",
@@ -2489,14 +3426,14 @@ test("Junction importer drops floating-timestamp glucose records without retaini
       timeseries: {
         glucose: [
           {
-            sourceProviderSlug: "freestyle_libre",
+            sourceProviderSlug: "abbott_libreview",
             timestamp: "2023-09-27T07:48:00+00:00",
-            value: 101,
+            value: 5.5,
           },
           {
             sourceProviderSlug: "abbott_libreview",
-            timestamp: "2023-09-27T07:48:00+00:00",
-            value: 102,
+            timestamp: "2023-09-27T08:03:00+00:00",
+            value: 6.5,
           },
         ],
       },
@@ -2504,20 +3441,25 @@ test("Junction importer drops floating-timestamp glucose records without retaini
   });
 
   const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
-  const glucoseArtifact = payload.evidenceParts?.find((artifact) =>
-    artifact.role === "junction-timeseries-glucose"
-  );
+  const glucoseEvents = payload.events?.filter((event) =>
+    event.kind === "observation" &&
+    ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields?.metric))
+  ) ?? [];
+  const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
-  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(glucoseEvents.length, 3);
+  assert.equal(mean?.occurredAt, "2023-09-27T00:00:00.000Z");
+  assert.equal(mean?.dayKey, "2023-09-27");
+  assert.equal(mean?.fields?.value, 108.1092);
+  assert.equal(mean?.dataOrigin?.timestampSemantics, "floating");
   assert.equal(glucoseSamples.length, 0);
-  assert.equal(glucoseArtifact, undefined);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assert.equal(
     payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
-    true,
+    false,
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"value":101|"value":102/u);
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
@@ -2684,7 +3626,7 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "garmin");
   assert.equal(stepEvent?.dataOrigin?.sourceType, "watch");
   assert.equal(sleepSession?.fields?.durationMinutes, 480);
-  assert.equal(sleepSession?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSession?.occurredAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepScore?.fields?.value, 82);
   assert.equal(respiratoryRate?.fields?.value, 14.8);
   assert.equal(respiratoryRate?.dayKey, "2026-05-20");
@@ -3628,6 +4570,85 @@ test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () 
   assert.equal(samples[5]?.dataOrigin?.sourceProviderSlug, "garmin");
 });
 
+test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cycle-garmin-parallel-1",
+          session_start: "2026-06-25T02:00:00.000Z",
+          session_end: "2026-06-25T03:00:00.000Z",
+          source_provider: "garmin",
+          source_type: "watch",
+          stage_start_offset_second: [0, 900, 1800, 2700],
+          stage_end_offset_second: [900, 1800, 2700, 3600],
+          stage_type: [2, 3, 4, 1],
+          time_zone: "America/New_York",
+        }],
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+  const samples = payload.samples ?? [];
+
+  assert.equal(samples.length, 4);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "rem", "awake", "deep"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [15, 15, 15, 15]);
+  assert.deepEqual(samples.map((sample) => sample.dayKey), [
+    "2026-06-24",
+    "2026-06-24",
+    "2026-06-24",
+    "2026-06-24",
+  ]);
+  assert.equal(samples[0]?.sample.startAt, "2026-06-25T02:00:00.000Z");
+  assert.equal(samples[3]?.sample.endAt, "2026-06-25T03:00:00.000Z");
+  assert.ok(samples.every((sample) => sample.timeZone === "America/New_York"));
+  assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.equal(new Set(samples.map((sample) => sample.externalRef?.resourceId)).size, 4);
+});
+
+test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-01-02T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [
+          {
+            id: "sleep-cycle-parent-zone-1",
+            source_provider: "whoop",
+            source_type: "wearable",
+            time_zone: "America/New_York",
+            stages: [{
+              start: "2026-01-02T04:30:00.000Z",
+              end: "2026-01-02T05:00:00.000Z",
+              stage: "light",
+            }],
+          },
+          {
+            id: "sleep-cycle-default-zone-1",
+            source_provider: "garmin",
+            source_type: "watch",
+            stages: [{
+              start: "2026-01-02T04:30:00.000Z",
+              end: "2026-01-02T05:00:00.000Z",
+              stage: "deep",
+            }],
+          },
+        ],
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+  const samples = payload.samples ?? [];
+
+  assert.equal(samples.length, 2);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "deep"]);
+  assert.deepEqual(samples.map((sample) => sample.dayKey), ["2026-01-01", "2026-01-01"]);
+  assert.equal(samples[0]?.timeZone, "America/New_York");
+  assert.equal(samples[1]?.timeZone, undefined);
+});
+
 test("Junction hypnogram alias emits canonical sleep-stage records", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
@@ -3672,6 +4693,82 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
   assert.ok(samples.every((sample) => sample.dataOrigin?.sourceProviderSlug === "garmin"));
   assert.ok(samples.every((sample) => sample.dataOrigin?.sourceType === "watch"));
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
+});
+
+test("Junction sleep-stage samples keep stable replay identity with parent offset metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cycle-parent-offset-1",
+          source: {
+            provider: "whoop",
+            type: "wearable",
+          },
+          start: "2026-06-25T02:30:00.000Z",
+          end: "2026-06-25T03:45:00.000Z",
+          timezone_offset: "-04:00",
+          stages: [{
+            start: "2026-06-25T02:30:00.000Z",
+            end: "2026-06-25T03:00:00.000Z",
+            stage: "light",
+          }],
+        }],
+      },
+    };
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot,
+      snapshot,
+    });
+    const [sample] = payload.samples ?? [];
+
+    assert.ok(sample);
+    assert.equal(sample.stream, "sleep_stage");
+    assert.equal(sample.dayKey, "2026-06-25");
+
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: payload.provider,
+      accountId: payload.accountId,
+      importedAt: payload.importedAt,
+      samples: [{
+        ...sample,
+        dayKey: "2026-06-25",
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const [sampleShardPath] = legacyImport.sampleShardPaths;
+    assert.ok(sampleShardPath);
+    const sampleRecords = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: sampleShardPath,
+    });
+
+    assert.equal(replayImport.samples[0]?.id, legacyImport.samples[0]?.id);
+    assert.equal(sampleRecords.length, 1);
+    assert.equal(sampleRecords[0]?.dayKey, "2026-06-25");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer merges canonical and alias resource payloads before import", () => {
@@ -3896,7 +4993,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
 
   const sleepSessions = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
   assert.equal(sleepSessions.length, 1);
-  assert.equal(sleepSessions[0]?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSessions[0]?.occurredAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.startAt, "2026-05-20T02:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.endAt, "2026-05-20T10:00:00.000Z");
   assert.equal(sleepSessions[0]?.fields?.durationMinutes, 480);

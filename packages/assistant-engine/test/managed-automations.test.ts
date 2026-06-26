@@ -15,6 +15,12 @@ type StoredAutomationRecord = {
     | { kind: 'at'; at: string }
     | { kind: 'cron'; expression: string }
     | { kind: 'dailyLocal'; localTime: string }
+    | {
+        activityKind?: string
+        after: string
+        kind: 'deviceActivity'
+        source?: 'whoop' | 'whoop_v2'
+      }
     | { kind: 'every'; everyMs: number }
   slug: string
   status: 'active' | 'paused' | 'archived'
@@ -26,6 +32,7 @@ type StoredAutomationRecord = {
 const managedAutomationMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
+  loadVault: vi.fn(),
   patchAutomation: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
   showAutomation: vi.fn(),
@@ -33,6 +40,7 @@ const managedAutomationMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  loadVault: managedAutomationMocks.loadVault,
   patchAutomation: managedAutomationMocks.patchAutomation,
   showAutomation: managedAutomationMocks.showAutomation,
   upsertAutomation: managedAutomationMocks.upsertAutomation,
@@ -111,6 +119,13 @@ const defaultRoute = {
   threadId: null,
 }
 
+const EXPECTED_MANAGED_SPREAD_CRONS = {
+  digest: { kind: 'cron', expression: '30 10 * * 2' },
+  insight: { kind: 'cron', expression: '0 13 * * 0' },
+  researchScout: { kind: 'cron', expression: '0 14 * * 3' },
+  productUpdates: { kind: 'cron', expression: '30 12 * * 5' },
+} as const
+
 const legacyOnboardingFollowupInstructions = [
   'This scheduled check helps continue Murph setup.',
   '',
@@ -122,6 +137,11 @@ const legacyOnboardingFollowupInstructions = [
 ].join('\n')
 
 beforeEach(() => {
+  managedAutomationMocks.loadVault
+    .mockReset()
+    .mockResolvedValue({
+      metadata: { vaultId: 'vault_managed_automations_test' },
+    })
   managedAutomationMocks.records.clear()
   managedAutomationMocks.getAssistantChannelAdapter
     .mockReset()
@@ -228,7 +248,7 @@ beforeEach(() => {
 })
 
 describe('applyMurphManagedAutomations', () => {
-  it('keeps the managed weekly health insight on the Sunday noon local recurrence', () => {
+  it('keeps the managed weekly health insight seed as the baseline Sunday noon recurrence', () => {
     const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
     )
@@ -237,7 +257,8 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
-    expect(insightSeed.instructions).toContain('Each Sunday at noon local time')
+    expect(insightSeed.instructions).toContain('On this scheduled weekly run')
+    expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
     expect(insightSeed.instructions).not.toContain('Wednesday')
     expect(insightSeed.instructions).not.toContain('Friday at 2:30 PM local time')
 
@@ -257,7 +278,7 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-28T16:00:00.000Z')
   })
 
-  it('keeps the managed weekly health research scout on the Wednesday 7:30 PM local recurrence', () => {
+  it('keeps the managed weekly health research scout seed as the baseline Wednesday evening recurrence', () => {
     const researchScoutSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
     )
@@ -266,7 +287,8 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(researchScoutSeed.schedule.expression).toBe('30 19 * * 3')
-    expect(researchScoutSeed.instructions).toContain('Each Wednesday at 7:30 PM local time')
+    expect(researchScoutSeed.instructions).toContain('On this scheduled weekly run')
+    expect(researchScoutSeed.instructions).not.toContain('7:30 PM local time')
     expect(researchScoutSeed.instructions).not.toContain('Friday morning')
 
     const nextRunAt = findNextAssistantCronOccurrence(
@@ -285,7 +307,7 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-07-01T23:30:00.000Z')
   })
 
-  it('keeps weekly product updates on Thursday at 11:30 AM local time', () => {
+  it('keeps weekly product update seed as the baseline Thursday late-morning recurrence', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) => entry.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     )
@@ -328,19 +350,18 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(4)
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
-      .toMatchObject({
-        automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
-        continuityPolicy: 'fresh',
-        route: defaultRoute,
-        schedule: {
-          kind: 'cron',
-          expression: '0 9 * * 1',
-        },
-        slug: 'weekly-health-digest',
-        status: 'active',
-        title: 'Weekly health digest',
-      })
+    const digestRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    expect(digestRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      title: 'Weekly health digest',
+    })
+    expect(digestRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
 
     const insightRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -349,17 +370,15 @@ describe('applyMurphManagedAutomations', () => {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '0 12 * * 0',
-      },
       slug: 'weekly-health-insight',
       status: 'active',
       title: 'Weekly health insight',
     })
+    expect(insightRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(insightRecord?.instructions).toContain('Sunday at noon local time')
+    expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('assistant onboarding')
     expect(insightRecord?.instructions).not.toContain('14 days')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
@@ -418,17 +437,15 @@ describe('applyMurphManagedAutomations', () => {
       automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '30 19 * * 3',
-      },
       slug: 'weekly-health-research-scout',
       status: 'active',
       title: 'Weekly health research scout',
     })
+    expect(researchScoutRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain('Wednesday at 7:30 PM local time')
+    expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('0-1 genuinely useful research-backed note')
@@ -485,14 +502,11 @@ describe('applyMurphManagedAutomations', () => {
       automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '30 11 * * 4',
-      },
       slug: 'weekly-product-updates',
       status: 'active',
       title: 'This week in Murph',
     })
+    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
     expect(productUpdatesRecord?.tags).toContain(
       'murph-managed:weekly-product-updates',
     )
@@ -505,7 +519,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
   })
 
-  it('updates existing research-oriented automations to the managed cadence', async () => {
+  it('updates existing research-oriented automations without rewriting their cadence', async () => {
     managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       continuityPolicy: 'preserve',
@@ -549,28 +563,254 @@ describe('applyMurphManagedAutomations', () => {
       updated: 2,
     })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-      .toMatchObject({
+      .toEqual(expect.objectContaining({
         schedule: {
           kind: 'cron',
-          expression: '0 12 * * 0',
+          expression: '30 14 * * 5',
         },
-      })
+      }))
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)
         ?.instructions,
     )
-      .toContain('Sunday at noon local time')
+      .toContain('On this scheduled weekly run')
+    expect(
+      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)
+        ?.instructions,
+    )
+      .not.toContain('Sunday at noon local time')
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
-      .toMatchObject({
+      .toEqual(expect.objectContaining({
         schedule: {
           kind: 'cron',
-          expression: '30 19 * * 3',
+          expression: '0 11 * * 5',
         },
-      })
+      }))
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
         ?.instructions,
-    ).toContain('Wednesday at 7:30 PM local time')
+    ).toContain('On this scheduled weekly run')
+    expect(
+      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
+        ?.instructions,
+    ).not.toContain('Wednesday at 7:30 PM local time')
+  })
+
+  it('preserves an existing device activity cadence on managed reconciliation', async () => {
+    const deviceActivitySchedule = {
+      after: '2026-06-20T12:00:00.000Z',
+      kind: 'deviceActivity' as const,
+      source: 'whoop' as const,
+      activityKind: 'workout',
+    }
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'After my next workout, find one old finding.',
+      route: defaultRoute,
+      schedule: deviceActivitySchedule,
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health insight',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: expect.stringContaining('On this scheduled weekly run'),
+        schedule: deviceActivitySchedule,
+      }))
+  })
+
+  it('does not overwrite a queued device activity occurrence payload', async () => {
+    const queuedSchedule = {
+      at: '2026-06-20T12:01:00.000Z',
+      kind: 'at' as const,
+    }
+    const queuedInstructions = [
+      'After my next workout, find one old finding.',
+      '',
+      'Device activity context:',
+      'Kind: workout',
+      'Occurred at: 2026-06-20T12:00:00.000Z',
+      'Source: whoop',
+    ].join('\n')
+    const queuedTags = [
+      'assistant',
+      'scheduled',
+      'murph-managed',
+      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+    ]
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: queuedInstructions,
+      route: defaultRoute,
+      schedule: queuedSchedule,
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: queuedTags,
+      title: 'Weekly health insight',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 1,
+      updated: 0,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: queuedInstructions,
+        schedule: queuedSchedule,
+        tags: queuedTags,
+      }))
+  })
+
+  it('spreads managed recurring schedules deterministically by vault id', async () => {
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+    const firstSchedules = new Map(
+      [...managedAutomationMocks.records.entries()].map(([id, record]) => [id, record.schedule]),
+    )
+
+    managedAutomationMocks.records.clear()
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-10T12:00:00.000Z'),
+      vaultRoot: `${vaultRoot}-moved`,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
+  })
+
+  it('defers spread-managed creation when vault metadata cannot be read', async () => {
+    const metadataError = new Error('metadata unavailable')
+    managedAutomationMocks.loadVault.mockRejectedValue(metadataError)
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 4,
+      stableKeyFailure: metadataError,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records.size).toBe(0)
+
+    managedAutomationMocks.loadVault.mockResolvedValue({
+      metadata: { vaultId: 'vault_managed_automations_test' },
+    })
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-10T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 0,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
+  })
+
+  it('continues non-spread seeds and existing updates when stable-key metadata is unavailable', async () => {
+    const existingDigestSchedule = { kind: 'cron', expression: '0 9 * * 2' } as const
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'Old digest prompt.',
+      route: defaultRoute,
+      schedule: existingDigestSchedule,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: 'Old digest summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health digest',
+    })
+    const metadataError = new Error('metadata unavailable')
+    managedAutomationMocks.loadVault.mockRejectedValue(metadataError)
+
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    )
+    const productUpdatesSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID
+    )
+    if (!digestSeed || !productUpdatesSeed) {
+      throw new Error('Expected managed seeds to exist.')
+    }
+    const experimentSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_01KSTABLEKEYTEST000000000000',
+      instructions: 'Create the due experiment final-results message.',
+      schedule: { kind: 'at', at: '2026-06-09T12:30:00.000Z' },
+      slug: 'experiment-final-results-stable-key-test',
+      tags: ['experiment', 'final-results'],
+      title: 'Final results · Stable key test',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      seeds: [digestSeed, productUpdatesSeed, experimentSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 1,
+      stableKeyFailure: metadataError,
+      stableKeyRetryNeeded: true,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: expect.stringContaining('On this scheduled weekly run'),
+        schedule: existingDigestSchedule,
+      }))
+    expect(managedAutomationMocks.records.get(experimentSeed.automationId))
+      .toEqual(expect.objectContaining({
+        instructions: experimentSeed.instructions,
+        schedule: experimentSeed.schedule,
+      }))
+    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
+      .toBe(false)
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {
