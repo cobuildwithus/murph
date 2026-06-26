@@ -697,7 +697,7 @@ test("normalizeHostedLinqConversationMessage uses downloadUrl when downloadPart 
   ]);
 });
 
-test("normalizeHostedLinqConversationMessage starts attachment timeout budgets concurrently", async () => {
+test("normalizeHostedLinqConversationMessage bounds concurrent downloads with one deadline", async () => {
   vi.useFakeTimers();
 
   try {
@@ -763,12 +763,13 @@ test("normalizeHostedLinqConversationMessage starts attachment timeout budgets c
     });
 
     await vi.advanceTimersByTimeAsync(0);
-    assert.deepEqual(started, ["voice_att_one", "voice_att_two", "media_att_three"]);
+    assert.deepEqual(started, ["voice_att_one", "voice_att_two"]);
 
     await vi.advanceTimersByTimeAsync(10);
     const capture = await capturePromise;
 
-    assert.deepEqual(aborted.sort(), ["media_att_three", "voice_att_one", "voice_att_two"]);
+    assert.deepEqual(aborted.sort(), ["voice_att_one", "voice_att_two"]);
+    assert.equal(downloadPart.mock.calls.length, 2);
     assert.deepEqual(
       capture.attachments.map((attachment) => ({
         data: attachment.data,
@@ -976,7 +977,7 @@ test("toLinqChatMessage uses service-only thread titles and timed-out downloads 
     },
   });
 
-  assert.equal(aborted, true);
+  assert.equal(aborted, false);
   assert.equal(message.thread.title, "iMessage");
   assert.deepEqual(
     message.attachments.map((attachment) => ({

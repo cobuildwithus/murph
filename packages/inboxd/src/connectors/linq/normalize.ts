@@ -21,6 +21,7 @@ import {
 } from "../../shared-runtime.ts";
 
 const LINQ_CAPTURE_RAW_SCHEMA = "murph.linq-capture.v1";
+const LINQ_ATTACHMENT_DOWNLOAD_CONCURRENCY = 2;
 
 export interface LinqAttachmentDownloadDriver {
   downloadUrl(url: string, signal?: AbortSignal): Promise<Uint8Array | null>;
@@ -298,31 +299,66 @@ async function buildLinqAttachments(
       isLinqAttachmentPart(entry.part)
     );
   const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
+  const deadlineMs = normalizedTimeoutMs === null ? null : Date.now() + normalizedTimeoutMs;
+  const attachments = new Array<InboundAttachment>(attachmentParts.length);
+  let nextAttachmentIndex = 0;
 
-  return await Promise.all(attachmentParts.map(async ({ index, part }) => {
-    const data = await runLinqAttachmentDownloadWithTimeout(
-      (downloadSignal) => downloadLinqAttachmentInlineBestEffort(
-        part,
+  async function buildNextAttachment(): Promise<void> {
+    for (;;) {
+      const resultIndex = nextAttachmentIndex;
+      nextAttachmentIndex += 1;
+      const entry = attachmentParts[resultIndex];
+      if (!entry) {
+        return;
+      }
+
+      attachments[resultIndex] = await buildLinqAttachment({
+        deadlineMs,
         downloadDriver,
+        part: entry.part,
+        partIndex: entry.index,
+        signal,
+      });
+    }
+  }
+
+  const workerCount = Math.min(LINQ_ATTACHMENT_DOWNLOAD_CONCURRENCY, attachmentParts.length);
+  await Promise.all(Array.from({ length: workerCount }, () => buildNextAttachment()));
+  return attachments;
+}
+
+async function buildLinqAttachment(input: {
+  deadlineMs: number | null;
+  downloadDriver: LinqAttachmentDownloadDriver | null;
+  part: LinqMediaPart;
+  partIndex: number;
+  signal?: AbortSignal;
+}): Promise<InboundAttachment> {
+  const remainingTimeoutMs = readRemainingLinqAttachmentDownloadBudgetMs(input.deadlineMs);
+  const data = remainingTimeoutMs === 0
+    ? null
+    : await runLinqAttachmentDownloadWithTimeout(
+      (downloadSignal) => downloadLinqAttachmentInlineBestEffort(
+        input.part,
+        input.downloadDriver,
         downloadSignal,
       ),
-      normalizedTimeoutMs,
-      signal,
+      remainingTimeoutMs,
+      input.signal,
     );
-    const mime = normalizeTextValue(part.mime_type ?? null);
-    const fileName = normalizeTextValue(part.filename ?? null)
-      ?? inferAttachmentFileName(part, data)
-      ?? inferFallbackAttachmentFileName(part, mime, index, data);
+  const mime = normalizeTextValue(input.part.mime_type ?? null);
+  const fileName = normalizeTextValue(input.part.filename ?? null)
+    ?? inferAttachmentFileName(input.part, data)
+    ?? inferFallbackAttachmentFileName(input.part, mime, input.partIndex, data);
 
-    return {
-      externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
-      kind: inferLinqAttachmentKind(part.type, mime, fileName),
-      mime,
-      fileName,
-      byteSize: normalizeAttachmentByteSize(part.size, data),
-      data,
-    };
-  }));
+  return {
+    externalId: normalizeTextValue(input.part.attachment_id ?? null) ?? `part:${input.partIndex + 1}`,
+    kind: inferLinqAttachmentKind(input.part.type, mime, fileName),
+    mime,
+    fileName,
+    byteSize: normalizeAttachmentByteSize(input.part.size, data),
+    data,
+  };
 }
 
 async function downloadLinqAttachmentInlineBestEffort(
@@ -402,6 +438,14 @@ function normalizeAttachmentDownloadTimeout(value: number | null | undefined): n
   }
 
   return Math.max(0, Math.floor(value));
+}
+
+function readRemainingLinqAttachmentDownloadBudgetMs(deadlineMs: number | null): number | null {
+  if (deadlineMs === null) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor(deadlineMs - Date.now()));
 }
 
 function buildLinqThreadTitle(data: LinqMessageReceivedData): string | null {
