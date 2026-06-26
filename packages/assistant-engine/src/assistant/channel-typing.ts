@@ -22,6 +22,10 @@ export function startAssistantChannelTypingIndicator(input: {
     return null
   }
 
+  if (input.input.deliveryDispatchMode === 'queue-only') {
+    return null
+  }
+
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     precedence: input.precedence,
