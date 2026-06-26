@@ -253,6 +253,31 @@ describe("computer handoff route and page", () => {
     expect(mocks.getHostedMurphContactContext).toHaveBeenCalledOnce();
   });
 
+  it("falls back to the completed page when source contact resolution fails after completion", async () => {
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      returnContactKind: "telegram",
+      status: "completed",
+      suggestedReply: "private suggested reply",
+    });
+    mocks.getHostedMurphContactContext.mockRejectedValueOnce(
+      new Error("contact context unavailable"),
+    );
+
+    const response = await computerHandoffDoneRoute.POST(
+      new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+    const body = (await response.json()) as {
+      redirectTo: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
+    expect(mocks.getHostedMurphContactContext).toHaveBeenCalledOnce();
+  });
+
   it.each(["checkpointing", "expired"] as const)(
     "falls back to the completed page without contact lookup for %s source handoffs",
     async (status) => {
@@ -418,6 +443,28 @@ describe("computer handoff route and page", () => {
         text: true,
       },
     }));
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /All set/);
+    assert.match(markup, /Reply with:/);
+    assert.match(markup, />Done</);
+    assert.equal(markup.includes("Reply in Messages"), false);
+    assert.equal(markup.includes("Reply in Telegram"), false);
+    assert.equal(markup.includes("Reply in Email"), false);
+  });
+
+  it("renders the literal Done fallback when source contact resolution fails", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "completed",
+      returnContactKind: "text",
+      suggestedReply: "finished_browser_step",
+    });
+    mocks.getHostedMurphContactContext.mockRejectedValueOnce(
+      new Error("contact context unavailable"),
+    );
 
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),

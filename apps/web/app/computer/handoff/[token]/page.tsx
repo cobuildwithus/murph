@@ -216,10 +216,15 @@ async function readHandoffSessionOrAuthState() {
 async function resolveCompletedHandoffContactOptions(
   returnContactKind: MurphContactKind | null,
 ): Promise<MurphContactOption[]> {
-  const options = await resolveHostedMurphContactOptions({
-    message: { body: HANDOFF_DONE_REPLY_BODY },
-    preferredKind: returnContactKind,
-  });
+  let options: MurphContactOption[];
+  try {
+    options = await resolveHostedMurphContactOptions({
+      message: { body: HANDOFF_DONE_REPLY_BODY },
+      preferredKind: returnContactKind,
+    });
+  } catch {
+    return [];
+  }
   return returnContactKind
     ? options.filter((option) => option.kind === returnContactKind)
     : options;

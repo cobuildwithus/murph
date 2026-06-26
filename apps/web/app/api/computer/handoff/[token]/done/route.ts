@@ -32,10 +32,15 @@ export async function POST(
     return NextResponse.json({ redirectTo: fallbackHref });
   }
 
-  const contactOptions = await resolveHostedMurphContactOptions({
-    message: { body: HANDOFF_DONE_REPLY_BODY },
-    preferredKind: sourceContactKind,
-  });
+  let contactOptions: MurphContactOption[];
+  try {
+    contactOptions = await resolveHostedMurphContactOptions({
+      message: { body: HANDOFF_DONE_REPLY_BODY },
+      preferredKind: sourceContactKind,
+    });
+  } catch {
+    return NextResponse.json({ redirectTo: fallbackHref });
+  }
   const redirectTo = resolveHandoffDoneRedirect({
     contactOptions,
     fallbackHref,
