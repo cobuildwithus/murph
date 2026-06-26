@@ -331,6 +331,9 @@
       "@murphai/operator-config/assistant/current-delivery-route": [
         "packages/operator-config/src/assistant/current-delivery-route.ts"
       ],
+      "@murphai/operator-config/assistant/delivery-failure": [
+        "packages/operator-config/src/assistant/delivery-failure.ts"
+      ],
       "@murphai/operator-config/assistant-cli-contracts": [
         "packages/operator-config/src/assistant-cli-contracts.ts"
       ],
