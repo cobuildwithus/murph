@@ -26,7 +26,6 @@ export type { HostedLinqWebhookSubscription } from "./linq-client";
 
 export {
   listHostedLinqContactCards,
-  listHostedLinqPhoneNumbers,
   reconcileHostedLinqContactCards,
   setupHostedLinqContactCard,
   updateHostedLinqContactCard,
@@ -34,8 +33,6 @@ export {
 export type {
   HostedLinqContactCard,
   HostedLinqContactCardReconciliation,
-  HostedLinqLineReputation,
-  HostedLinqProviderPhoneNumber,
 } from "./linq-contact-card";
 
 export {

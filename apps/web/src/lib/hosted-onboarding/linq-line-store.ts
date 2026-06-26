@@ -129,21 +129,43 @@ async function projectMessageReceived(
     await prisma.hostedLinqLine.update({
       where: { phoneNumberLookupKey },
       data: {
-        lastOutboundAt: event.providerCreatedAt,
         totalOutboundCount: { increment: 1 },
       },
     });
-    return true;
+    const updated = await prisma.hostedLinqLine.updateMany({
+      where: {
+        phoneNumberLookupKey,
+        OR: [
+          { lastOutboundAt: null },
+          { lastOutboundAt: { lt: event.providerCreatedAt } },
+        ],
+      },
+      data: {
+        lastOutboundAt: event.providerCreatedAt,
+      },
+    });
+    return updated.count === 1;
   }
 
   await prisma.hostedLinqLine.update({
     where: { phoneNumberLookupKey },
     data: {
-      lastInboundAt: event.providerCreatedAt,
       totalInboundCount: { increment: 1 },
     },
   });
-  return true;
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey,
+      OR: [
+        { lastInboundAt: null },
+        { lastInboundAt: { lt: event.providerCreatedAt } },
+      ],
+    },
+    data: {
+      lastInboundAt: event.providerCreatedAt,
+    },
+  });
+  return updated.count === 1;
 }
 
 async function projectMessageDelivered(

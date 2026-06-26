@@ -4,7 +4,6 @@ import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import {
   syncHostedLinqConfiguredLinesTx,
-  upsertHostedLinqLineForPhoneTx,
 } from "./linq-line-store";
 import {
   getHostedOnboardingEnvironment,
@@ -15,15 +14,6 @@ import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
-
-export type HostedLinqLineReputation = "AT_RISK" | "CRITICAL" | "HEALTHY";
-
-export type HostedLinqProviderPhoneNumber = {
-  id: string | null;
-  phoneNumber: string;
-  reputationDocUrl: string | null;
-  reputationStatus: HostedLinqLineReputation;
-};
 
 export type HostedLinqContactCard = {
   firstName: string;
@@ -44,20 +34,6 @@ export type HostedLinqContactCardReconciliation = {
 };
 
 type HostedLinqContactCardClient = PrismaClient | Prisma.TransactionClient;
-
-type LinqPhoneNumbersResponse = {
-  phone_numbers?: Array<{
-    health_status?: LinqStatusObject | null;
-    id?: string | null;
-    phone_number?: string | null;
-    reputation?: LinqStatusObject | null;
-  }> | null;
-};
-
-type LinqStatusObject = {
-  doc_url?: string | null;
-  status?: string | null;
-};
 
 type LinqContactCardResponse = {
   first_name?: string | null;
@@ -115,22 +91,6 @@ export async function reconcileHostedLinqContactCards(input: {
   }
 
   return result;
-}
-
-export async function listHostedLinqPhoneNumbers(input: {
-  signal?: AbortSignal;
-} = {}): Promise<HostedLinqProviderPhoneNumber[]> {
-  const payload = await fetchHostedLinqJson<LinqPhoneNumbersResponse>({
-    method: "GET",
-    operation: "phone number list",
-    path: "phone_numbers",
-    signal: input.signal,
-    timeoutMessage: "Linq phone number list timed out.",
-  });
-
-  return (payload?.phone_numbers ?? [])
-    .map(parseHostedLinqPhoneNumber)
-    .filter((value): value is HostedLinqProviderPhoneNumber => value !== null);
 }
 
 export async function listHostedLinqContactCards(input: {
@@ -223,47 +183,6 @@ type HostedLinqContactCardOutcome =
   | "createdCards"
   | "inactiveCards"
   | "updatedCards";
-
-export async function syncHostedLinqProviderPhoneNumberTx(input: {
-  observedAt: Date;
-  phoneNumber: HostedLinqProviderPhoneNumber;
-  prisma: HostedLinqContactCardClient;
-}): Promise<void> {
-  const line = await upsertHostedLinqLineForPhoneTx({
-    observedAt: input.observedAt,
-    phoneNumber: input.phoneNumber.phoneNumber,
-    prisma: input.prisma,
-    source: "provider",
-  });
-
-  const current = await input.prisma.hostedLinqLine.findUnique({
-    where: {
-      phoneNumber: input.phoneNumber.phoneNumber,
-    },
-    select: {
-      egressPolicy: true,
-    },
-  });
-  const egressPolicy = resolveHostedLinqEgressPolicyForReputation({
-    currentEgressPolicy: current?.egressPolicy ?? null,
-    reputationStatus: input.phoneNumber.reputationStatus,
-  });
-
-  await input.prisma.hostedLinqLine.update({
-    where: {
-      phoneNumber: line.phoneNumber,
-    },
-    data: {
-      ...(egressPolicy ? { egressPolicy } : {}),
-      healthStatus: resolveHostedLinqHealthStatusForReputation(
-        input.phoneNumber.reputationStatus,
-      ),
-      providerReason: input.phoneNumber.reputationDocUrl,
-      providerStatus: input.phoneNumber.reputationStatus,
-      providerUpdatedAt: input.observedAt,
-    },
-  });
-}
 
 async function listHostedLinqConfiguredContactCardLines(input: {
   maxLines?: number;
@@ -420,28 +339,6 @@ function buildHostedLinqContactCardBody(input: {
   };
 }
 
-function parseHostedLinqPhoneNumber(value: unknown): HostedLinqProviderPhoneNumber | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const phoneNumber = normalizeNullableString(record.phone_number);
-  if (!phoneNumber) {
-    return null;
-  }
-
-  const reputation = parseHostedLinqStatusObject(record.reputation);
-  const deprecatedHealthStatus = parseHostedLinqStatusObject(record.health_status);
-
-  return {
-    id: normalizeNullableString(record.id),
-    phoneNumber,
-    reputationDocUrl: reputation.docUrl ?? deprecatedHealthStatus.docUrl,
-    reputationStatus: reputation.status ?? deprecatedHealthStatus.status ?? "HEALTHY",
-  };
-}
-
 function parseHostedLinqContactCard(value: unknown): HostedLinqContactCard | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -479,67 +376,6 @@ function requireHostedLinqContactCard(
   }
 
   return card;
-}
-
-function parseHostedLinqStatusObject(value: unknown): {
-  docUrl: string | null;
-  status: HostedLinqLineReputation | null;
-} {
-  if (!value || typeof value !== "object") {
-    return { docUrl: null, status: null };
-  }
-
-  const record = value as Record<string, unknown>;
-
-  return {
-    docUrl: normalizeNullableString(record.doc_url),
-    status: parseHostedLinqLineReputation(record.status),
-  };
-}
-
-function parseHostedLinqLineReputation(value: unknown): HostedLinqLineReputation | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim().toUpperCase();
-  if (normalized === "HEALTHY" || normalized === "AT_RISK" || normalized === "CRITICAL") {
-    return normalized;
-  }
-
-  return null;
-}
-
-function resolveHostedLinqHealthStatusForReputation(
-  status: HostedLinqLineReputation,
-): "degraded" | "healthy" | "unhealthy" {
-  switch (status) {
-    case "AT_RISK":
-      return "degraded";
-    case "CRITICAL":
-      return "unhealthy";
-    case "HEALTHY":
-      return "healthy";
-  }
-}
-
-function resolveHostedLinqEgressPolicyForReputation(input: {
-  currentEgressPolicy: string | null;
-  reputationStatus: HostedLinqLineReputation;
-}): "avoid_new_assignments" | "disabled" | null {
-  if (input.reputationStatus === "CRITICAL") {
-    return "disabled";
-  }
-
-  if (input.currentEgressPolicy === "disabled") {
-    return null;
-  }
-
-  if (input.reputationStatus === "AT_RISK") {
-    return "avoid_new_assignments";
-  }
-
-  return null;
 }
 
 function requireNonEmptyText(value: unknown, label: string): string {

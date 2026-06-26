@@ -200,9 +200,25 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
           totalOutboundCount: { increment: 1 },
         },
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
+        },
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              lastOutboundAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+          ]),
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
+        }),
       }),
     );
     expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
@@ -259,6 +275,30 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
     });
 
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalInboundCount: { increment: 1 },
+        },
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+        },
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              lastInboundAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+          ]),
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
+        }),
+      }),
+    );
     expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

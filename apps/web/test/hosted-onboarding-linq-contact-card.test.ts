@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const linqLineStoreMocks = vi.hoisted(() => ({
   syncHostedLinqConfiguredLinesTx: vi.fn(),
-  upsertHostedLinqLineForPhoneTx: vi.fn(),
 }));
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -19,16 +18,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   syncHostedLinqConfiguredLinesTx: linqLineStoreMocks.syncHostedLinqConfiguredLinesTx,
-  upsertHostedLinqLineForPhoneTx: linqLineStoreMocks.upsertHostedLinqLineForPhoneTx,
 }));
 
 import {
   getHostedLinqContactCard,
   listHostedLinqContactCards,
-  listHostedLinqPhoneNumbers,
   reconcileHostedLinqContactCards,
   setupHostedLinqContactCard,
-  syncHostedLinqProviderPhoneNumberTx,
   updateHostedLinqContactCard,
 } from "@/src/lib/hosted-onboarding/linq-contact-card";
 
@@ -37,7 +33,6 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   runtimeMocks.getHostedOnboardingEnvironment.mockReset();
   linqLineStoreMocks.syncHostedLinqConfiguredLinesTx.mockReset();
-  linqLineStoreMocks.upsertHostedLinqLineForPhoneTx.mockReset();
 
   if (originalFetch) {
     vi.stubGlobal("fetch", originalFetch);
@@ -65,51 +60,6 @@ function readJsonRequestBody(init: RequestInit | undefined): unknown {
 }
 
 describe("hosted Linq contact card client", () => {
-  it("lists phone numbers with provider reputation", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
-      phone_numbers: [
-        {
-          id: "line_1",
-          phone_number: "+15550000001",
-          reputation: {
-            status: "AT_RISK",
-            doc_url: "https://docs.linqapp.com/guides/phone-numbers/phone-health#at-risk",
-          },
-        },
-        {
-          id: "line_2",
-          phone_number: "+15550000002",
-          health_status: {
-            status: "CRITICAL",
-            doc_url: "https://docs.linqapp.com/guides/phone-numbers/phone-health#critical",
-          },
-        },
-      ],
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(listHostedLinqPhoneNumbers()).resolves.toEqual([
-      {
-        id: "line_1",
-        phoneNumber: "+15550000001",
-        reputationDocUrl: "https://docs.linqapp.com/guides/phone-numbers/phone-health#at-risk",
-        reputationStatus: "AT_RISK",
-      },
-      {
-        id: "line_2",
-        phoneNumber: "+15550000002",
-        reputationDocUrl: "https://docs.linqapp.com/guides/phone-numbers/phone-health#critical",
-        reputationStatus: "CRITICAL",
-      },
-    ]);
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("phone_numbers", "https://linq.example.test/api/partner/v3/"),
-      expect.objectContaining({
-        method: "GET",
-      }),
-    );
-  });
-
   it("lists contact cards", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
       contact_cards: [
@@ -215,71 +165,6 @@ describe("hosted Linq contact card client", () => {
     );
     expect(readJsonRequestBody(init)).toEqual({
       first_name: "Murph",
-    });
-  });
-
-  it("syncs provider reputation without auto-enabling disabled lines", async () => {
-    const observedAt = new Date("2026-06-25T12:00:00.000Z");
-    const findUnique = vi.fn()
-      .mockResolvedValueOnce({ egressPolicy: "disabled" })
-      .mockResolvedValueOnce({ egressPolicy: "enabled" });
-    const update = vi.fn().mockResolvedValue(null);
-    const prisma = {
-      hostedLinqLine: {
-        findUnique,
-        update,
-      },
-    };
-    linqLineStoreMocks.upsertHostedLinqLineForPhoneTx.mockImplementation(
-      async (input: { phoneNumber: string }) => ({
-        phoneNumber: input.phoneNumber,
-      }),
-    );
-
-    await syncHostedLinqProviderPhoneNumberTx({
-      observedAt,
-      phoneNumber: {
-        id: "line_healthy",
-        phoneNumber: "+15550000001",
-        reputationDocUrl: null,
-        reputationStatus: "HEALTHY",
-      },
-      prisma: prisma as never,
-    });
-    await syncHostedLinqProviderPhoneNumberTx({
-      observedAt,
-      phoneNumber: {
-        id: "line_risk",
-        phoneNumber: "+15550000002",
-        reputationDocUrl: "https://docs.linqapp.com/guides/phone-numbers/phone-health#at-risk",
-        reputationStatus: "AT_RISK",
-      },
-      prisma: prisma as never,
-    });
-
-    expect(linqLineStoreMocks.upsertHostedLinqLineForPhoneTx).toHaveBeenCalledTimes(2);
-    expect(update).toHaveBeenNthCalledWith(1, {
-      where: {
-        phoneNumber: "+15550000001",
-      },
-      data: {
-        healthStatus: "healthy",
-        providerReason: null,
-        providerStatus: "HEALTHY",
-        providerUpdatedAt: observedAt,
-      },
-    });
-    expect(update).toHaveBeenNthCalledWith(2, {
-      where: {
-        phoneNumber: "+15550000002",
-      },
-      data: {
-        egressPolicy: "avoid_new_assignments",
-        healthStatus: "degraded",
-        providerReason: "https://docs.linqapp.com/guides/phone-numbers/phone-health#at-risk",
-        providerStatus: "AT_RISK",
-        providerUpdatedAt: observedAt,
-      },
     });
   });
 
@@ -396,44 +281,4 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
-  it("pauses outbound for critical provider reputation", async () => {
-    const observedAt = new Date("2026-06-25T13:00:00.000Z");
-    const findUnique = vi.fn().mockResolvedValue({ egressPolicy: "enabled" });
-    const update = vi.fn().mockResolvedValue(null);
-    const prisma = {
-      hostedLinqLine: {
-        findUnique,
-        update,
-      },
-    };
-    linqLineStoreMocks.upsertHostedLinqLineForPhoneTx.mockImplementation(
-      async (input: { phoneNumber: string }) => ({
-        phoneNumber: input.phoneNumber,
-      }),
-    );
-
-    await syncHostedLinqProviderPhoneNumberTx({
-      observedAt,
-      phoneNumber: {
-        id: "line_critical",
-        phoneNumber: "+15550000003",
-        reputationDocUrl: "https://docs.linqapp.com/guides/phone-numbers/phone-health#critical",
-        reputationStatus: "CRITICAL",
-      },
-      prisma: prisma as never,
-    });
-
-    expect(update).toHaveBeenCalledWith({
-      where: {
-        phoneNumber: "+15550000003",
-      },
-      data: {
-        egressPolicy: "disabled",
-        healthStatus: "unhealthy",
-        providerReason: "https://docs.linqapp.com/guides/phone-numbers/phone-health#critical",
-        providerStatus: "CRITICAL",
-        providerUpdatedAt: observedAt,
-      },
-    });
-  });
 });

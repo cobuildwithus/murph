@@ -139,15 +139,26 @@ describe("hosted Linq egress engagement", () => {
     );
   });
 
-  it("allows pre-chat runtime sends when the sending line has recent inbound engagement", async () => {
+  it("does not authorize no-route participant sends from sender-line engagement", async () => {
     const lineLookupKey = createHostedPhoneLookupKey("+15550100001");
     if (!lineLookupKey) {
       throw new Error("Expected test Linq line lookup key.");
     }
     const prisma = {
       hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
+        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqLine: {
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
       },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -171,8 +182,20 @@ describe("hosted Linq egress engagement", () => {
       prisma: prisma as never,
       target: "+15550199999",
       targetKind: "participant",
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+      httpStatus: 403,
+    });
 
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          idempotencyKey: "delivery-key-2",
+          source: "hosted_runtime_linq_egress_guard",
+          status: "skipped",
+          targetKind: "participant",
+        }),
+      }),
+    );
   });
 });
