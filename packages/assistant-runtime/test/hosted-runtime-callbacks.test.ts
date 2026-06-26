@@ -749,6 +749,111 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("durably parks preferred vault-file intents when the hosted approval port is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      let storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_vault_file",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: null,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      const deferredIntent = {
+        ...storedIntent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
+          diagnosticContext: {
+            assistantDeliveryFailureClass: "blocked",
+            assistantDeliveryResumeTrigger: "approval_state_change",
+            retryable: false,
+          },
+          message: "Secure vault-file approval could not be checked yet.",
+        },
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "awaiting_approval",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      mocks.listAssistantOutboxIntents.mockImplementation(async () => [
+        storedIntent,
+      ]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.deferAssistantVaultFileApprovalCheck.mockImplementationOnce(
+        ({ intent, now }) => {
+          expect(intent).toBe(storedIntent);
+          expect(now.toISOString()).toBe("2026-04-08T00:00:00.000Z");
+          return deferredIntent;
+        },
+      );
+      mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementationOnce(
+        async ({ expectedDedupeKey, expectedStatus, expectedUpdatedAt, intent, vault }) => {
+          expect(expectedDedupeKey).toBe("dedupe_vault_file");
+          expect(expectedStatus).toBe("pending");
+          expect(expectedUpdatedAt).toBe("2026-04-08T00:00:00.000Z");
+          expect(vault).toBe("/tmp/vault");
+          storedIntent = intent;
+          return intent;
+        },
+      );
+
+      const sideEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: null,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: ["intent_vault_file"],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(sideEffects).toEqual([]);
+      expect(storedIntent).toMatchObject({
+        intentId: "intent_vault_file",
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
+        },
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "awaiting_approval",
+      });
+      expect(mocks.buildAssistantVaultFileSendApprovalRequest).not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledTimes(1);
+
+      const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:00:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(wakeAt).toBe("2026-04-08T00:01:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
