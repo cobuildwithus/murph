@@ -11,22 +11,28 @@ import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import type { MurphContactKind } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
 const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
+
+type HandoffSearchParams = {
+  managed?: string | string[];
+  return?: string | string[];
+};
 
 export default async function ComputerHandoffPage({
   params,
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams?: Promise<{ managed?: string | string[] }>;
+  searchParams?: Promise<HandoffSearchParams>;
 }) {
   const { token } = await params;
-  const managedState = readManagedHandoffState(
-    await (searchParams ?? Promise.resolve({})),
-  );
+  const resolvedSearchParams = await (searchParams ?? Promise.resolve({}));
+  const managedState = readManagedHandoffState(resolvedSearchParams);
+  const preferredContactKind = readReturnContactKind(resolvedSearchParams);
   const session = await readHandoffSessionOrAuthState();
   if (!session) {
     return <ComputerHandoffAuthRequiredState />;
@@ -95,6 +101,7 @@ export default async function ComputerHandoffPage({
     const contactOptions = canSendDoneReply
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
+          preferredKind: preferredContactKind,
         })
       : [];
 
@@ -172,13 +179,22 @@ export default async function ComputerHandoffPage({
 }
 
 function readManagedHandoffState(
-  searchParams: { managed?: string | string[] },
+  searchParams: HandoffSearchParams,
 ): "retry" | "waiting" | null {
   const value = Array.isArray(searchParams.managed)
     ? searchParams.managed[0]
     : searchParams.managed;
   return value === "retry" ||
       value === "waiting"
+    ? value
+    : null;
+}
+
+function readReturnContactKind(searchParams: HandoffSearchParams): MurphContactKind | null {
+  const value = Array.isArray(searchParams.return)
+    ? searchParams.return[0]
+    : searchParams.return;
+  return value === "text" || value === "telegram" || value === "email"
     ? value
     : null;
 }
