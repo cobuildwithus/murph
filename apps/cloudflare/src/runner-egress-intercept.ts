@@ -350,6 +350,7 @@ interface HostedProviderEgressAuthorization {
   rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
+  validationError?: unknown;
   validationErrorCode?: string;
   validationErrorName?: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -3311,6 +3312,7 @@ async function authorizeHostedProviderEgressCredential(input: {
       rejectReason: "provider_egress_credential_validation_error",
       runtimeAuthorityHeadersPresent,
       userId: null,
+      validationError: error,
       validationErrorCode: deriveHostedExecutionErrorCode(error),
       ...(validationErrorName ? { validationErrorName } : {}),
       writeFence: null,
@@ -3373,6 +3375,7 @@ async function authorizeHostedProviderEgressCredential(input: {
       rejectReason: "provider_egress_credential_validation_error",
       runtimeAuthorityHeadersPresent,
       userId: verification.claims.userId,
+      validationError: error,
       validationErrorCode: deriveHostedExecutionErrorCode(error),
       ...(validationErrorName ? { validationErrorName } : {}),
       writeFence: null,
@@ -3657,8 +3660,9 @@ function emitHostedProviderEgressDiagnostic(input: {
   upstreamDurationMs: number | null;
   url: URL;
 }): void {
-  const errorCode = input.error ? deriveHostedExecutionErrorCode(input.error) : null;
-  const errorName = input.error ? readHostedExecutionSafeErrorName(input.error) : null;
+  const diagnosticError = input.error ?? input.authorization.validationError;
+  const errorCode = diagnosticError ? deriveHostedExecutionErrorCode(diagnosticError) : null;
+  const errorName = diagnosticError ? readHostedExecutionSafeErrorName(diagnosticError) : null;
   const providerBearerCredentialKind = input.providerKind === "openai"
     ? readHostedProviderCredentialDiagnosticKind(readBearerCredential(input.request.headers))
     : null;
@@ -3711,6 +3715,7 @@ function emitHostedProviderEgressDiagnostic(input: {
           }
         : {}),
     },
+    ...(diagnosticError ? { error: diagnosticError } : {}),
     level: input.authorization.authorized && !input.error ? "info" : "warn",
     message: "Hosted runner provider egress completed.",
     phase: "wake.running",

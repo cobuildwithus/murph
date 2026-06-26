@@ -2036,6 +2036,9 @@ describe("hostedRunnerIntercept", () => {
           writeFenceValidationMode: "provider_egress_credential",
           writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
         }),
+        error: expect.objectContaining({
+          message: "provider credential validation failed",
+        }),
         message: "Hosted runner provider egress completed.",
       }),
     );
@@ -2083,6 +2086,7 @@ describe("hostedRunnerIntercept", () => {
           writeFenceValidationMode: "provider_egress_credential",
           writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
         }),
+        error: expect.any(Error),
         message: "Hosted runner provider egress completed.",
       }),
     );
