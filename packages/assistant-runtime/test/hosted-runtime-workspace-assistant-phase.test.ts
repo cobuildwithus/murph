@@ -3206,6 +3206,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes the runtime action-approval port into hosted delivery drain", async () => {
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      request: vi.fn(),
+    };
+    const deliveryEffect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deliveryEffect.fingerprint,
+        effectId: deliveryEffect.effectId,
+        journalMethod: "POST",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeActionApprovalPort: actionApprovalPort,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionApprovalPort,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionApprovalPort,
+        assistantDeliveryEffects: [deliveryEffect],
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+  });
+
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -6528,6 +6582,9 @@ function createPhaseInput(input: {
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
+  runtimeActionApprovalPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
+  >;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -6637,6 +6694,9 @@ function createPhaseInput(input: {
             }
           : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
+        ...(input.runtimeActionApprovalPort
+          ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
       },
       platformEnv: {},

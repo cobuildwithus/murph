@@ -376,16 +376,7 @@ describe('assistant vault-file send', () => {
   })
 
   it('attaches an approved vault file to the normal assistant reply path', async () => {
-    const file = {
-      approvalGeneration: 'f'.repeat(64),
-      approvalId: `haa_${'f'.repeat(32)}`,
-      contentType: 'application/pdf',
-      filename: 'report.pdf',
-      kind: 'vault_file' as const,
-      ref: 'documents/report.pdf',
-      sha256: 'a'.repeat(64),
-      sizeBytes: 42,
-    }
+    const file = createApprovedVaultFileResponseMedia()
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
@@ -422,7 +413,84 @@ describe('assistant vault-file send', () => {
       status: 'approved',
     }))
   })
+
+  it('does not allow later response media to replace an approved vault file', async () => {
+    const result = await executeMurphDynamicToolRequest({
+      currentResponseMedia: [createApprovedVaultFileResponseMedia()],
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      publicFetchImpl: fetch,
+      request: {
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Generated bottle image',
+          kind: 'image' as const,
+          source: 'test',
+          url: 'https://imagedelivery.net/account/image/public',
+        }],
+      },
+    })
+
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        text: 'response media cannot be changed after an approved vault file is attached',
+        type: 'inputText',
+      }],
+    })
+  })
+
+  it('does not allow generated images to append after an approved vault file', async () => {
+    const nextUsageOrdinal = vi.fn(() => 1)
+
+    const result = await executeMurphDynamicToolRequest({
+      currentResponseMedia: [createApprovedVaultFileResponseMedia()],
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl: fetch,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      publicFetchImpl: fetch,
+      request: {
+        kind: 'generate-image',
+        args: {
+          alt: 'Generated bottle image',
+          outputFormat: 'webp',
+          prompt: 'Render a clean supplement bottle.',
+          quality: 'medium',
+          size: '1024x1024',
+        },
+      },
+    })
+
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        text: 'image generation cannot be combined with an approved vault file',
+        type: 'inputText',
+      }],
+    })
+  })
 })
+
+function createApprovedVaultFileResponseMedia() {
+  return {
+    approvalGeneration: 'f'.repeat(64),
+    approvalId: `haa_${'f'.repeat(32)}`,
+    contentType: 'application/pdf',
+    filename: 'report.pdf',
+    kind: 'vault_file' as const,
+    ref: 'documents/report.pdf',
+    sha256: 'a'.repeat(64),
+    sizeBytes: 42,
+  }
+}
 
 function createVaultFileIntent() {
   return {
