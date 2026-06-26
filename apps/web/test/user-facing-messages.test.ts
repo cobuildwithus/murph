@@ -96,6 +96,10 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.edge_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.pulse_upgrade_edge", "https://withmurph.ai/home");
   });
+
+  it("identifies Murph in every phone signup invite", () => {
+    expectEveryVariantMatches("linq.invite_signup", /Murph/u);
+  });
 });
 
 function expectEveryVariantContains<K extends UserFacingMessageTemplateKey>(
@@ -104,6 +108,15 @@ function expectEveryVariantContains<K extends UserFacingMessageTemplateKey>(
 ): void {
   for (const text of collectRenderedTexts(key)) {
     expect(text).toContain(expected);
+  }
+}
+
+function expectEveryVariantMatches<K extends UserFacingMessageTemplateKey>(
+  key: K,
+  expected: RegExp,
+): void {
+  for (const text of collectRenderedTexts(key)) {
+    expect(text).toMatch(expected);
   }
 }
 

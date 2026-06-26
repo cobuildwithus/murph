@@ -205,7 +205,7 @@ Good number for you?`,
 {joinUrl}
 
 Your number?`,
-    `Tap to verify and we can get going:
+    `Murph here. Tap to verify and we can get going:
 {joinUrl}
 
 Sound good?`,
@@ -213,7 +213,7 @@ Sound good?`,
 {joinUrl}
 
 Was this you signing up?`,
-    `Welcome in. Verify your phone here:
+    `Welcome in to Murph. Verify your phone here:
 {joinUrl}
 
 All good?`,
@@ -221,11 +221,11 @@ All good?`,
 {joinUrl}
 
 All you?`,
-    `Confirm this is your number to start:
+    `Confirm this is your Murph number to start:
 {joinUrl}
 
 Ready?`,
-    `Quick verify before we get started:
+    `Quick Murph verify before we get started:
 {joinUrl}
 
 This the right number?`,
@@ -233,7 +233,7 @@ This the right number?`,
 {joinUrl}
 
 Save this number?`,
-    `Welcome. Tap to confirm this number is yours:
+    `Welcome to Murph. Tap to confirm this number is yours:
 {joinUrl}
 
 OK to text from here?`,
@@ -248,15 +248,15 @@ Make sense?`,
     `Murph here. Tap the link to verify and I'll reply from this number: {joinUrl}
 
 Good?`,
-    `All set once you verify:
+    `All set with Murph once you verify:
 {joinUrl}
 
 That you?`,
-    `Quick one. Tap to verify this is your number:
+    `Quick Murph check. Tap to verify this is your number:
 {joinUrl}
 
 Is this you?`,
-    `Tap to confirm and we're set: {joinUrl}
+    `Tap to confirm and Murph is set: {joinUrl}
 
 Cool?`,
     `Hello, I'm Murph. Verify this number to start:
@@ -266,7 +266,7 @@ Sound right?`,
     `Murph here. One tap and we're in: {joinUrl}
 
 Good number?`,
-    `One tap and I can text back from this number:
+    `One tap and Murph can text back from this number:
 {joinUrl}
 
 Want me to keep texting from here?`,
