@@ -13,7 +13,7 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 describe("hosted Linq observability stores", () => {
   it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValue({
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
       id: "hld_attempt_123",
     });
     const event = requireParsedProviderEvent(buildProviderEvent({
@@ -98,7 +98,7 @@ describe("hosted Linq observability stores", () => {
 
   it("does not regress projections or alerts for stale delivery receipts", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValue({
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
       id: "hld_attempt_123",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -190,6 +190,57 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves the stored line lookup key when the phone blind-index key rotated", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqLineUpsert.mockResolvedValueOnce({
+      phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        changed_at: "2026-03-26T12:00:00.000Z",
+        new_reputation: "CRITICAL",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_status_rotated_key",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          phoneNumber: "+15550000000",
+        },
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: "evt_status_rotated_key",
+          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+        }),
+      }),
+    );
   });
 
   it("projects production-shape critical reputation status updates", async () => {
@@ -479,7 +530,11 @@ describe("hosted Linq observability stores", () => {
           deliveryStatus: {
             in: ["delivered", "failed"],
           },
-          messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+          messageLookupKey: {
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:linq-message:/u),
+            ]),
+          },
         }),
       }),
     );
@@ -537,14 +592,21 @@ describe("hosted Linq observability stores", () => {
 function createObservabilityPrismaFixture() {
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
+  const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
-  const hostedLinqLineUpdate = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+    Promise.resolve({
+      phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+    }));
   const hostedLinqLineUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-  const hostedLinqLineUpsert = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqLineUpsert = vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+    Promise.resolve({
+      phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+    }));
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const prisma = {
@@ -553,6 +615,7 @@ function createObservabilityPrismaFixture() {
     },
     hostedLinqDelivery: {
       create: hostedLinqDeliveryCreate,
+      findFirst: hostedLinqDeliveryFindFirst,
       findUnique: hostedLinqDeliveryFindUnique,
       update: hostedLinqDeliveryUpdate,
       updateMany: hostedLinqDeliveryUpdateMany,
@@ -573,10 +636,12 @@ function createObservabilityPrismaFixture() {
   return {
     hostedLinqAlertCreateMany,
     hostedLinqDeliveryCreate,
+    hostedLinqDeliveryFindFirst,
     hostedLinqDeliveryFindUnique,
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
+    hostedLinqLineFindUnique,
     hostedLinqLineUpdate,
     hostedLinqLineUpdateMany,
     hostedLinqLineUpsert,

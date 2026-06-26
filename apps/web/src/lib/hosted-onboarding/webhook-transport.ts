@@ -16,11 +16,9 @@ import {
   recordHostedLinqDeliveryAttemptTx,
 } from "./linq-delivery-store";
 import {
-  claimHostedLinqSideEffectEgressTx,
+  buildHostedLinqRecentInboundSkipReason,
+  readHostedLinqSideEffectRecentInboundDecision,
 } from "./linq-egress-engagement";
-import {
-  buildHostedLinqConversationEgressSkipReason,
-} from "./linq-conversation-state";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { buildHostedInviteUrl } from "./invite-service";
@@ -272,24 +270,21 @@ async function sendHostedLinqSideEffect(
       options.currentInboundReply,
     );
     if (!currentInboundReply) {
-      const engagementDecision = await claimHostedLinqSideEffectEgressTx({
-        currentInboundReply,
+      const engagementDecision = await readHostedLinqSideEffectRecentInboundDecision({
         payload: effect.payload,
         prisma: options.prisma,
       });
       if (!engagementDecision.allowed) {
         await deliveryAttemptTask;
         await markHostedLinqDeliverySkippedBestEffort({
-          decision: engagementDecision,
           effect,
+          lastInboundAt: engagementDecision.lastInboundAt,
           prisma: options.prisma,
         });
         console.warn("Hosted Linq side-effect skipped by recipient engagement policy.", {
           effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
-          egressKind: engagementDecision.egressKind,
           lastInboundAt: engagementDecision.lastInboundAt?.toISOString() ?? null,
           reason: engagementDecision.reason,
-          recipientReplyCount: engagementDecision.recipientReplyCount,
           template: effect.payload.template,
         });
         return { status: "skipped" };
@@ -785,8 +780,8 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
 }
 
 async function markHostedLinqDeliverySkippedBestEffort(input: {
-  decision: Parameters<typeof buildHostedLinqConversationEgressSkipReason>[0];
   effect: HostedLinqMessageSideEffect;
+  lastInboundAt: Date | null;
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<void> {
   try {
@@ -794,7 +789,7 @@ async function markHostedLinqDeliverySkippedBestEffort(input: {
       idempotencyKey: input.effect.effectId,
       linqChatId: input.effect.payload.chatId,
       prisma: input.prisma,
-      reason: buildHostedLinqConversationEgressSkipReason(input.decision),
+      reason: buildHostedLinqRecentInboundSkipReason(input.lastInboundAt),
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
       targetKind: "thread",

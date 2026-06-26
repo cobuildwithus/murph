@@ -25,7 +25,7 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 
   return input.prisma.hostedLinqLine.upsert({
     where: {
-      phoneNumberLookupKey: lookupKey,
+      phoneNumber: normalizedPhoneNumber,
     },
     create: {
       assignmentWeight: 100,
@@ -99,13 +99,13 @@ export async function ensureHostedLinqLineForProviderEventTx(input: {
   }
 
   if (input.event.phoneNumberRole === "line" && input.event.phoneNumber) {
-    await upsertHostedLinqLineForPhoneTx({
+    const line = await upsertHostedLinqLineForPhoneTx({
       observedAt: input.event.providerCreatedAt,
       phoneNumber: input.event.phoneNumber,
       prisma: input.prisma,
       source: "webhook",
     });
-    return input.event.phoneNumberLookupKey;
+    return line.phoneNumberLookupKey;
   }
 
   const existing = await input.prisma.hostedLinqLine.findUnique({

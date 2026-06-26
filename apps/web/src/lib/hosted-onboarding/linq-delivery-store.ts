@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   createHostedLinqChatLookupKey,
   createHostedLinqMessageLookupKey,
-  createHostedPhoneLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
@@ -42,12 +42,11 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = normalizeNullable(input.idempotencyKey);
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  await ensureHostedLinqDeliveryLineTx({
+  const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
     observedAt: attemptedAt,
     phoneNumber,
     prisma: input.prisma,
   });
-  const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
   const data = {
     attemptedAt,
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
@@ -100,6 +99,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  const messageLookupKeyCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
@@ -126,6 +126,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 
     await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
       idempotencyKey: input.idempotencyKey,
+      messageLookupKeyCandidates,
       messageLookupKey,
       prisma,
     });
@@ -175,7 +176,7 @@ export async function markHostedLinqDeliverySkippedTx(input: {
   const skippedAt = input.skippedAt ?? new Date();
   const idempotencyKey = normalizeNullable(input.idempotencyKey);
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  await ensureHostedLinqDeliveryLineTx({
+  const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
     observedAt: skippedAt,
     phoneNumber,
     prisma: input.prisma,
@@ -187,7 +188,7 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     failureReason: "Linq/iMessage send skipped because the recipient has not replied within the allowed window.",
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
-    phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
+    phoneNumberLookupKey,
     skipReason: input.reason.slice(0, 160),
     skippedAt,
     source: input.source,
@@ -257,9 +258,13 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     };
   }
 
-  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     where: {
-      messageLookupKey: input.event.messageLookupKey,
+      messageLookupKey: {
+        in: input.event.messageLookupKeyReadCandidates.length > 0
+          ? input.event.messageLookupKeyReadCandidates
+          : [input.event.messageLookupKey],
+      },
     },
     select: {
       id: true,
@@ -329,19 +334,25 @@ function buildReceiptUpdateFromData(
 
 async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
   idempotencyKey: string;
+  messageLookupKeyCandidates?: readonly string[];
   messageLookupKey: string | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   if (!input.messageLookupKey) {
     return;
   }
+  const messageLookupKeys = input.messageLookupKeyCandidates && input.messageLookupKeyCandidates.length > 0
+    ? [...input.messageLookupKeyCandidates]
+    : [input.messageLookupKey];
 
   const receipt = await input.prisma.hostedLinqProviderEvent.findFirst({
     where: {
       deliveryStatus: {
         in: ["delivered", "failed"],
       },
-      messageLookupKey: input.messageLookupKey,
+      messageLookupKey: {
+        in: messageLookupKeys,
+      },
     },
     orderBy: [
       { providerCreatedAt: "desc" },
@@ -450,15 +461,16 @@ async function ensureHostedLinqDeliveryLineTx(input: {
   observedAt: Date;
   phoneNumber: string | null;
   prisma: HostedLinqDeliveryClient;
-}): Promise<void> {
+}): Promise<string | null> {
   if (!input.phoneNumber) {
-    return;
+    return null;
   }
 
-  await upsertHostedLinqLineForPhoneTx({
+  const line = await upsertHostedLinqLineForPhoneTx({
     observedAt: input.observedAt,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
     source: "webhook",
   });
+  return line.phoneNumberLookupKey;
 }

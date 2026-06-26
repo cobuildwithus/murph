@@ -338,6 +338,7 @@ type HostedLinqAlertFixture = {
 
 type HostedLinqDeliveryFixture = {
   create?: MockedFunction;
+  findFirst?: MockedFunction;
   findUnique?: MockedFunction;
   update?: MockedFunction;
   updateMany?: MockedFunction;
@@ -347,6 +348,7 @@ type HostedLinqDeliveryFixture = {
 type HostedLinqLineFixture = {
   findUnique?: MockedFunction;
   update?: MockedFunction;
+  updateMany?: MockedFunction;
   upsert?: MockedFunction;
 };
 
@@ -4939,17 +4941,25 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       configurable: true,
       value: {
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue(undefined),
-        upsert: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
       },
     });
   }
 
-  if (!hostedLinqDelivery?.findUnique) {
+  if (!hostedLinqDelivery?.findUnique || !hostedLinqDelivery.findFirst) {
     Object.defineProperty(prisma, "hostedLinqDelivery", {
       configurable: true,
       value: {
         create: vi.fn().mockResolvedValue({ id: "hld_random" }),
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn().mockResolvedValue(undefined),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),

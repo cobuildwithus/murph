@@ -290,6 +290,7 @@ type UsageResetPrismaFixture = {
   };
   hostedLinqDelivery: {
     create: MockedFunction;
+    findFirst: MockedFunction;
     findUnique: MockedFunction;
     update: MockedFunction;
     updateMany: MockedFunction;
@@ -726,6 +727,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "hld_random" }),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -744,8 +746,14 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedLinqLine: {
       findUnique: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockResolvedValue(undefined),
-      upsert: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+        Promise.resolve({
+          phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+        })),
+      upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+        Promise.resolve({
+          phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+        })),
     },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),

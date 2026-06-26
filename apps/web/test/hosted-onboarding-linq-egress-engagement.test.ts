@@ -91,18 +91,19 @@ describe("hosted Linq egress engagement", () => {
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedLinqConversationState: {
-        findUnique: vi.fn().mockResolvedValue({
-          healthStatus: "AT_RISK",
-          lastInboundAt: new Date("2026-05-01T12:00:00.000Z"),
-          memberId: "member-1",
-          outboundSinceLastInboundCount: 1,
-          recipientReplyCount: 3,
-        }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn().mockResolvedValue(undefined),
       },
       hostedLinqLine: {
-        upsert: vi.fn().mockResolvedValue(undefined),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
       },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -130,7 +131,7 @@ describe("hosted Linq egress engagement", () => {
       httpStatus: 403,
     });
 
-    expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
     expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

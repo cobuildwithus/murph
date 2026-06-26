@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import {
   createHostedLinqChatLookupKey,
   createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "./contact-privacy";
@@ -44,6 +45,7 @@ export type ParsedHostedLinqProviderEvent = {
   linqChatLookupKey: string | null;
   messageIdSuffix: string | null;
   messageLookupKey: string | null;
+  messageLookupKeyReadCandidates: string[];
   payloadHash: string | null;
   payloadSanitizedJson: Prisma.InputJsonValue;
   payloadShapeJson: Prisma.InputJsonValue;
@@ -271,6 +273,7 @@ function buildParsedProviderEvent(input: {
   const phoneNumberIsLine = input.phoneNumberRole === "line";
   const phoneNumberLookupKey = phoneNumberIsLine ? createHostedPhoneLookupKey(phoneNumber) : null;
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  const messageLookupKeyReadCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
   const payloadShapeJson = toPrismaJson(buildHostedJsonShape(input.event));
 
@@ -289,6 +292,7 @@ function buildParsedProviderEvent(input: {
     linqChatLookupKey,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
+    messageLookupKeyReadCandidates,
     payloadHash: buildPayloadHash(input.rawBody, input.event),
     payloadSanitizedJson: toPrismaJson({
       api_version: normalizeNullableString(input.event.api_version),

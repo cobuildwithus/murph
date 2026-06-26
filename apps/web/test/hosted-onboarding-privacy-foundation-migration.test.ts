@@ -559,7 +559,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');
-    expect(hostedLinqEgressEngagementMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');
     expect(hostedLinqEgressEngagementMigrationSql).not.toContain("raw_payload");
     expect(hostedLinqConversationStateMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_conversation_state"',

@@ -45,7 +45,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
       payloadSanitizedJson: input.event.payloadSanitizedJson,
       payloadShapeJson: input.event.payloadShapeJson,
       phoneNumberHint: input.event.phoneNumberHint,
-      phoneNumberLookupKey: input.event.phoneNumberLookupKey,
+      phoneNumberLookupKey: lineLookupKey,
       phoneNumberRole: input.event.phoneNumberRole,
       providerCreatedAt: input.event.providerCreatedAt,
       providerReason: input.event.providerReason,
@@ -93,6 +93,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
     deliveryId: deliveryReceipt.deliveryId,
     event: input.event,
+    lineLookupKey,
     prisma: input.prisma,
   });
 
@@ -112,6 +113,7 @@ function isStaleStatusProjection(
 async function claimHostedLinqAlertsForProviderEventTx(input: {
   deliveryId: string | null;
   event: ParsedHostedLinqProviderEvent;
+  lineLookupKey: string | null;
   prisma: HostedLinqProviderEventClient;
 }): Promise<string[]> {
   const kind = resolveHostedLinqAlertKind(input.event);
@@ -129,7 +131,7 @@ async function claimHostedLinqAlertsForProviderEventTx(input: {
       id,
       kind,
       phoneNumberHint: input.event.phoneNumberHint,
-      phoneNumberLookupKey: input.event.phoneNumberLookupKey,
+      phoneNumberLookupKey: input.lineLookupKey,
       status: "pending",
       subject: buildHostedLinqAlertSubject(kind, input.event),
     },

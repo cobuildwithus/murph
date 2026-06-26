@@ -817,6 +817,7 @@ function createPrismaStub() {
     },
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "hld_random" }),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -835,9 +836,15 @@ function createPrismaStub() {
     },
     hostedLinqLine: {
       findUnique: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+        Promise.resolve({
+          phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+        })),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      upsert: vi.fn().mockResolvedValue(undefined),
+      upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+        Promise.resolve({
+          phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+        })),
     },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
