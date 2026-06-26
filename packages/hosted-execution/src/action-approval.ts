@@ -2,17 +2,19 @@ import {
   requireObject,
   requireString,
 } from "./parsers/assertions.ts";
+import {
+  HOSTED_RETURN_CONTACT_KINDS,
+  parseHostedReturnContactKind,
+  type HostedReturnContactKind,
+} from "./return-contact.ts";
 
 export const HOSTED_ACTION_APPROVAL_ID_PREFIX = "haa_";
 
-export const HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS = [
-  "text",
-  "telegram",
-  "email",
-] as const;
+export const HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS =
+  HOSTED_RETURN_CONTACT_KINDS;
 
 export type HostedActionApprovalReturnContactKind =
-  (typeof HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS)[number];
+  HostedReturnContactKind;
 
 const ACTION_ID_MAX_LENGTH = 200;
 const ACTION_KIND_MAX_LENGTH = 120;
@@ -106,17 +108,9 @@ export function parseHostedActionApprovalRequest(
 function parseHostedActionApprovalReturnContactKind(
   value: unknown,
 ): HostedActionApprovalReturnContactKind | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (
-    typeof value === "string"
-    && (HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS as readonly string[]).includes(value)
-  ) {
-    return value as HostedActionApprovalReturnContactKind;
-  }
-  throw new TypeError(
-    "Hosted action approval request returnContactKind must be null or one of text, telegram, email.",
+  return parseHostedReturnContactKind(
+    value,
+    "Hosted action approval request returnContactKind",
   );
 }
 

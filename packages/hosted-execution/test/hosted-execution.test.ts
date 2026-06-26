@@ -523,6 +523,7 @@ describe("hosted execution coverage gaps", () => {
       "./orchestration-control",
       "./parsers",
       "./phone-calls",
+      "./return-contact",
       "./routes",
       "./runtime-control",
       "./side-effects",

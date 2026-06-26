@@ -1,4 +1,7 @@
 import type {
+  HostedReturnContactKind,
+} from '@murphai/hosted-execution/return-contact'
+import type {
   AssistantSession,
   AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -12,10 +15,14 @@ import type {
 import type {
   AssistantPhoneCallPort,
 } from './execution-context.js'
+import {
+  resolveAssistantHostedReturnContactKind,
+} from './return-contact-kind.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
   recipientKey: string | null
+  returnContactKind: HostedReturnContactKind | null
 }
 
 export interface AssistantHostedToolRequestKeyScope {
@@ -93,8 +100,11 @@ export function createAssistantHostedToolContext(input: {
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency
       const conversationId = context?.conversationId ?? null
       const recipientKey = context?.recipientKey ?? null
-      return conversationId || recipientKey
-        ? { conversationId, recipientKey }
+      const returnContactKind = resolveAssistantHostedReturnContactKind(
+        deliveryContext.messageInput.channel,
+      )
+      return conversationId || recipientKey || returnContactKind
+        ? { conversationId, recipientKey, returnContactKind }
         : null
     },
     currentHostedMailboxItemIds: () => {

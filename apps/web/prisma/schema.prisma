@@ -513,6 +513,7 @@ model HostedComputerHandoff {
   purpose        String
   status         HostedComputerHandoffStatus  @default(open)
   suggestedReply String?                      @map("suggested_reply")
+  returnContactKind String?                   @map("return_contact_kind")
   createdAt      DateTime                     @default(now()) @map("created_at")
   expiresAt      DateTime                     @map("expires_at")
   completedAt    DateTime?                    @map("completed_at")
