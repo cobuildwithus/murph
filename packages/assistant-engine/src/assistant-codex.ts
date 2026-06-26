@@ -2728,10 +2728,27 @@ async function runCodexAppServerTurnOnProcess(
     } while (drained !== dynamicToolExecutionChain)
   }
 
-  const applyResponseMediaPatch = (patch: {
-    media: AssistantResponseMedia[]
-    op: 'append' | 'replace'
-  }): void => {
+  const hasAcceptedNoReplyPatchForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.deliveryContextOrdinal === deliveryContextOrdinal &&
+      entry.patch.kind === 'none'
+    )
+
+  const applyResponseMediaPatch = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
+        'Response media cannot be attached after finish_without_reply.',
+      )
+    }
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
@@ -2749,6 +2766,9 @@ async function runCodexAppServerTurnOnProcess(
       trailingSteerCandidateDeliveryContextOrdinal !== null &&
       trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
     ) {
+      return false
+    }
+    if (responseMedia.length > 0) {
       return false
     }
     if (
@@ -3060,11 +3080,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
-        ? Math.max(0, completedUserMessageOrdinal)
+        ? dynamicToolRequestDeliveryContextOrdinal
         : null
     const dynamicToolProgressDelivery =
       dynamicToolRequest.kind === 'send-progress-update'
@@ -3150,8 +3172,15 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.responseMediaPatch) {
         try {
-          applyResponseMediaPatch(result.responseMediaPatch)
-        } catch {
+          applyResponseMediaPatch(
+            result.responseMediaPatch,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch (error) {
+          const text = error instanceof VaultCliError &&
+            error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
+            ? 'response media unavailable after finish_without_reply'
+            : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -3159,7 +3188,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'response media limit reached',
+                  text,
                 },
               ],
             },

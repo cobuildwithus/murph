@@ -41,7 +41,7 @@ function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string 
   }
 
   if (media.kind === 'vault_file') {
-    return `vault_file:${media.ref}:${media.sha256}`
+    return `vault_file:${media.ref}:${media.sha256}:${media.approvalId ?? ''}:${media.approvalGeneration ?? ''}`
   }
 
   switch (media.transport.kind) {
