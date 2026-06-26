@@ -587,6 +587,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   if (existingDailyState?.onboardingLinkSentAt) {
     const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
+      claimSentAt: existingDailyState.onboardingLinkSentAt,
       context,
       event: input.event,
       existingMember,
@@ -610,6 +611,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   if (dailyState.onboardingLinkSentAt) {
     const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
+      claimSentAt: dailyState.onboardingLinkSentAt,
       context,
       dailyInboundCount: dailyState.inboundCount,
       event: input.event,
@@ -667,6 +669,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 }
 
 async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
+  claimSentAt: Date;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dailyInboundCount?: number;
   event: HostedLinqWebhookEvent;
@@ -675,13 +678,19 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const now = new Date();
   const deliveredInvite = await input.prisma.hostedInvite.findFirst({
     orderBy: {
       sentAt: "desc",
     },
     where: {
+      channel: "linq",
+      expiresAt: {
+        gt: now,
+      },
       memberId: input.memberId,
       sentAt: {
+        gte: input.claimSentAt,
         not: null,
       },
     },

@@ -2135,6 +2135,22 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        sentAt: "desc",
+      },
+      where: {
+        channel: "linq",
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+        memberId: "member_stale_claim",
+        sentAt: {
+          gte: new Date("2026-03-26T12:00:01.000Z"),
+          not: null,
+        },
+      },
+    });
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
@@ -5431,6 +5447,8 @@ https://join.example.test/join/code_first_text`);
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue({
+          channel: "linq",
+          expiresAt: new Date("2026-03-27T12:00:00.000Z"),
           id: "invite_repeat_signup",
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
@@ -5462,6 +5480,22 @@ https://join.example.test/join/code_first_text`);
       reason: "signup-link-already-sent",
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        sentAt: "desc",
+      },
+      where: {
+        channel: "linq",
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+        memberId: "member_123",
+        sentAt: {
+          gte: new Date("2026-03-26T12:00:01.000Z"),
+          not: null,
+        },
+      },
+    });
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();

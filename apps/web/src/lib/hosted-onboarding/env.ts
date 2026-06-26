@@ -371,7 +371,7 @@ function readHostedLinqFirstContactAdmissionMode(
 ): HostedLinqFirstContactAdmissionMode {
   const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE");
   if (!configured) {
-    return "enforce";
+    return "off";
   }
 
   const normalized = configured.trim().toLowerCase();
