@@ -2,10 +2,18 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
-import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
-import { requireHostedOnboardingLinqConfig } from "./runtime";
+import {
+  syncHostedLinqConfiguredLinesTx,
+  upsertHostedLinqLineForPhoneTx,
+} from "./linq-line-store";
+import {
+  getHostedOnboardingEnvironment,
+  requireHostedOnboardingLinqConfig,
+} from "./runtime";
 import { normalizeNullableString } from "./shared";
+import { normalizePhoneNumber } from "./phone";
 
+const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
 
 export type HostedLinqLineReputation = "AT_RISK" | "CRITICAL" | "HEALTHY";
@@ -64,20 +72,17 @@ type LinqContactCardsResponse = {
 };
 
 export async function reconcileHostedLinqContactCards(input: {
+  maxLines?: number;
   observedAt?: Date;
   prisma: HostedLinqContactCardClient;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardReconciliation> {
   const observedAt = input.observedAt ?? new Date();
-  const phoneNumbers = await listHostedLinqPhoneNumbers({
-    signal: input.signal,
+  const lines = await listHostedLinqConfiguredContactCardLines({
+    maxLines: input.maxLines,
+    observedAt,
+    prisma: input.prisma,
   });
-  const contactCards = await listHostedLinqContactCards({
-    signal: input.signal,
-  });
-  const contactCardsByPhoneNumber = new Map(
-    contactCards.map((card) => [card.phoneNumber, card]),
-  );
 
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
@@ -85,27 +90,25 @@ export async function reconcileHostedLinqContactCards(input: {
     createdCards: 0,
     criticalLines: 0,
     inactiveCards: 0,
-    lineCount: phoneNumbers.length,
+    lineCount: lines.length,
     updatedCards: 0,
   };
 
-  for (const phoneNumber of phoneNumbers) {
-    await syncHostedLinqProviderPhoneNumber({
-      observedAt,
-      phoneNumber,
-      prisma: input.prisma,
-    });
-
-    if (phoneNumber.reputationStatus === "AT_RISK") {
+  for (const line of lines) {
+    if (line.providerStatus === "AT_RISK") {
       result.atRiskLines += 1;
     }
-    if (phoneNumber.reputationStatus === "CRITICAL") {
+    if (line.providerStatus === "CRITICAL") {
       result.criticalLines += 1;
     }
 
+    const existingCard = await getHostedLinqContactCard({
+      phoneNumber: line.phoneNumber,
+      signal: input.signal,
+    });
     const outcome = await reconcileHostedLinqContactCardForLine({
-      existingCard: contactCardsByPhoneNumber.get(phoneNumber.phoneNumber) ?? null,
-      phoneNumber: phoneNumber.phoneNumber,
+      existingCard,
+      phoneNumber: line.phoneNumber,
       signal: input.signal,
     });
     result[outcome] += 1;
@@ -131,19 +134,40 @@ export async function listHostedLinqPhoneNumbers(input: {
 }
 
 export async function listHostedLinqContactCards(input: {
+  phoneNumber?: string | null;
   signal?: AbortSignal;
 } = {}): Promise<HostedLinqContactCard[]> {
-  const payload = await fetchHostedLinqJson<LinqContactCardsResponse>({
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  const payload = await fetchHostedLinqJson<LinqContactCardsResponse | LinqContactCardResponse>({
     method: "GET",
     operation: "contact card list",
-    path: "contact_card",
+    path: phoneNumber
+      ? `contact_card?phone_number=${encodeURIComponent(phoneNumber)}`
+      : "contact_card",
     signal: input.signal,
     timeoutMessage: "Linq contact card list timed out.",
   });
 
-  return (payload?.contact_cards ?? [])
+  const values = Array.isArray((payload as LinqContactCardsResponse | null)?.contact_cards)
+    ? (payload as LinqContactCardsResponse).contact_cards ?? []
+    : payload
+      ? [payload as LinqContactCardResponse]
+      : [];
+
+  return values
     .map(parseHostedLinqContactCard)
     .filter((value): value is HostedLinqContactCard => value !== null);
+}
+
+export async function getHostedLinqContactCard(input: {
+  phoneNumber: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqContactCard | null> {
+  const [card] = await listHostedLinqContactCards({
+    phoneNumber: input.phoneNumber,
+    signal: input.signal,
+  });
+  return card ?? null;
 }
 
 export async function setupHostedLinqContactCard(input: {
@@ -213,7 +237,7 @@ type HostedLinqContactCardOutcome =
   | "inactiveCards"
   | "updatedCards";
 
-async function syncHostedLinqProviderPhoneNumber(input: {
+export async function syncHostedLinqProviderPhoneNumberTx(input: {
   observedAt: Date;
   phoneNumber: HostedLinqProviderPhoneNumber;
   prisma: HostedLinqContactCardClient;
@@ -251,6 +275,48 @@ async function syncHostedLinqProviderPhoneNumber(input: {
       providerStatus: input.phoneNumber.reputationStatus,
       providerUpdatedAt: input.observedAt,
     },
+  });
+}
+
+async function listHostedLinqConfiguredContactCardLines(input: {
+  maxLines?: number;
+  observedAt: Date;
+  prisma: HostedLinqContactCardClient;
+}): Promise<Array<{
+  phoneNumber: string;
+  providerStatus: string | null;
+}>> {
+  const environment = getHostedOnboardingEnvironment();
+  const maxLines = normalizeLineLimit(input.maxLines);
+  const phoneNumbers = uniqueNormalizedPhoneNumbers(
+    environment.linqConversationPhoneNumbers,
+  ).slice(0, maxLines);
+
+  if (phoneNumbers.length === 0) {
+    return [];
+  }
+
+  await syncHostedLinqConfiguredLinesTx({
+    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+    observedAt: input.observedAt,
+    phoneNumbers,
+    prisma: input.prisma,
+  });
+
+  return input.prisma.hostedLinqLine.findMany({
+    where: {
+      phoneNumber: {
+        in: phoneNumbers,
+      },
+    },
+    orderBy: {
+      phoneNumber: "asc",
+    },
+    select: {
+      phoneNumber: true,
+      providerStatus: true,
+    },
+    take: maxLines,
   });
 }
 
@@ -506,4 +572,29 @@ function requireNonEmptyText(value: unknown, label: string): string {
   }
 
   return normalized;
+}
+
+function normalizeLineLimit(value: number | null | undefined): number {
+  if (!Number.isInteger(value) || value === undefined || value === null || value < 1) {
+    return HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT;
+  }
+
+  return Math.min(value, HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT);
+}
+
+function uniqueNormalizedPhoneNumbers(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const phoneNumbers: string[] = [];
+
+  for (const value of values) {
+    const phoneNumber = normalizePhoneNumber(value);
+    if (!phoneNumber || seen.has(phoneNumber)) {
+      continue;
+    }
+
+    seen.add(phoneNumber);
+    phoneNumbers.push(phoneNumber);
+  }
+
+  return phoneNumbers;
 }

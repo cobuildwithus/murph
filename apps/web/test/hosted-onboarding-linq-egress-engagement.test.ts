@@ -81,7 +81,8 @@ describe("hosted Linq egress engagement", () => {
     }
     const prisma = {
       hostedLinqDelivery: {
-        upsert: vi.fn().mockResolvedValue({ id: "hld_skip" }),
+        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedLinqLine: {
         upsert: vi.fn().mockResolvedValue(undefined),
@@ -113,17 +114,14 @@ describe("hosted Linq egress engagement", () => {
     });
 
     expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedLinqDelivery.upsert).toHaveBeenCalledWith(
+    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({
+        data: expect.objectContaining({
           idempotencyKey: "delivery-key-1",
           skippedAt: new Date("2026-06-25T12:00:00.000Z"),
           source: "hosted_runtime_linq_egress_guard",
           status: "skipped",
         }),
-        where: {
-          idempotencyKey: "delivery-key-1",
-        },
       }),
     );
   });

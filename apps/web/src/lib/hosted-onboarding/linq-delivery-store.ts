@@ -81,12 +81,9 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     },
     update: {
       attemptedAt,
-      failureCode: null,
-      failureReason: null,
       linqChatLookupKey: data.linqChatLookupKey,
       phoneNumberHint: data.phoneNumberHint,
       phoneNumberLookupKey: data.phoneNumberLookupKey,
-      status: "attempted",
       targetKind: data.targetKind,
       template: data.template,
     },
@@ -128,7 +125,13 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   await input.prisma.hostedLinqDelivery.updateMany({
-    where: { idempotencyKey: input.idempotencyKey },
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      idempotencyKey: input.idempotencyKey,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+    },
     data: {
       failedAt: input.failedAt ?? new Date(),
       failureCode: sanitizeHostedOnboardingPersistedErrorCode(
@@ -189,14 +192,38 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     });
   }
 
-  return input.prisma.hostedLinqDelivery.upsert({
+  const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
-    create: {
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      failedAt: true,
+      id: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      skippedAt: true,
+      status: true,
+    },
+  });
+
+  if (existing) {
+    if (isHostedLinqDeliveryLifecycleFinal(existing)) {
+      return { id: existing.id };
+    }
+
+    return input.prisma.hostedLinqDelivery.update({
+      where: { id: existing.id },
+      data,
+      select: { id: true },
+    });
+  }
+
+  return input.prisma.hostedLinqDelivery.create({
+    data: {
       ...data,
       id: buildHostedLinqDeliveryId(idempotencyKey),
       idempotencyKey,
     },
-    update: data,
     select: { id: true },
   });
 }
@@ -356,6 +383,26 @@ function isHostedLinqTerminalReceiptData(
   } | null,
 ): value is HostedLinqDeliveryReceiptData {
   return value?.deliveryStatus === "delivered" || value?.deliveryStatus === "failed";
+}
+
+function isHostedLinqDeliveryLifecycleFinal(input: {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): boolean {
+  return Boolean(
+    input.acceptedAt
+      || input.deliveredAt
+      || input.failedAt
+      || input.lastReceiptAt
+      || input.messageLookupKey
+      || input.skippedAt
+      || input.status !== "attempted",
+  );
 }
 
 function buildHostedLinqDeliveryId(idempotencyKey: string): string {

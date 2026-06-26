@@ -4,6 +4,7 @@ import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
+  markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
@@ -334,6 +335,12 @@ describe("hosted Linq observability stores", () => {
         },
       }),
     );
+    const attemptUpdate = fixture.hostedLinqDeliveryUpsert.mock.calls[0]?.[0]?.update as
+      | Record<string, unknown>
+      | undefined;
+    expect(attemptUpdate).not.toHaveProperty("failureCode");
+    expect(attemptUpdate).not.toHaveProperty("failureReason");
+    expect(attemptUpdate).not.toHaveProperty("status");
 
     await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: "linq-message:event-123",
@@ -357,6 +364,81 @@ describe("hosted Linq observability stores", () => {
       | Record<string, unknown>
       | undefined;
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
+  });
+
+  it("does not downgrade an accepted delivery when an idempotent skip is recorded later", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_accepted",
+      lastReceiptAt: null,
+      messageLookupKey: "hbidx:linq-message:provider",
+      skippedAt: null,
+      status: "accepted",
+    });
+
+    await expect(markHostedLinqDeliverySkippedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      reason: "recent_reply_required",
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      id: "hld_accepted",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpsert).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
+  });
+
+  it("updates only pre-provider attempted deliveries when a send is skipped", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_attempted",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      skippedAt: null,
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdate.mockResolvedValueOnce({
+      id: "hld_attempted",
+    });
+
+    await expect(markHostedLinqDeliverySkippedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      reason: "recent_reply_required",
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      id: "hld_attempted",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          skipReason: "recent_reply_required",
+          status: "skipped",
+        }),
+        where: {
+          id: "hld_attempted",
+        },
+      }),
+    );
   });
 
   it("backfills an already-ingested terminal receipt when acceptance records the provider id", async () => {
@@ -480,6 +562,7 @@ function createObservabilityPrismaFixture() {
 
   return {
     hostedLinqAlertCreateMany,
+    hostedLinqDeliveryCreate,
     hostedLinqDeliveryFindUnique,
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
