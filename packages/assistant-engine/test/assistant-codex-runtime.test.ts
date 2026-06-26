@@ -14198,6 +14198,56 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
+  it('allows response media for a later steered message after earlier finish_without_reply', async () => {
+    const media = {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/later-after-no-reply.png',
+      alt: 'Later steered message media',
+      source: 'later-no-reply-media-test',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 80,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-earlier-no-reply',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 81,
+        media: [media],
+        expectedText: '1 response image attached',
+      },
+      completedItemEvent({
+        id: 'assistant-later-media',
+        type: 'assistant_message',
+        message: 'Visible answer with media.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalMessage).toBe('Visible answer with media.')
+    expect(result.responseMedia).toEqual([media])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
   it('rejects a later no-reply while an earlier steered answer is still pending', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({

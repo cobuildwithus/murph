@@ -2731,14 +2731,22 @@ async function runCodexAppServerTurnOnProcess(
     } while (drained !== dynamicToolExecutionChain)
   }
 
-  const hasAcceptedNoReplyPatch = (): boolean =>
-    finalActionPatches.some((entry) => entry.patch.kind === 'none')
+  const hasAcceptedNoReplyPatchForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.deliveryContextOrdinal === deliveryContextOrdinal &&
+      entry.patch.kind === 'none'
+    )
 
-  const applyResponseMediaPatch = (patch: {
-    media: AssistantResponseMedia[]
-    op: 'append' | 'replace'
-  }): void => {
-    if (hasAcceptedNoReplyPatch()) {
+  const applyResponseMediaPatch = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
         'Response media cannot be attached after finish_without_reply.',
@@ -3075,11 +3083,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
-        ? Math.max(0, completedUserMessageOrdinal)
+        ? dynamicToolRequestDeliveryContextOrdinal
         : null
     const dynamicToolProgressDelivery =
       dynamicToolRequest.kind === 'send-progress-update'
@@ -3165,7 +3175,10 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.responseMediaPatch) {
         try {
-          applyResponseMediaPatch(result.responseMediaPatch)
+          applyResponseMediaPatch(
+            result.responseMediaPatch,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
         } catch (error) {
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
