@@ -37,6 +37,10 @@ describe("hosted Linq egress engagement", () => {
 
   it("projects real inbound Linq messages onto active and pending member routes", async () => {
     const prisma = {
+      hostedLinqConversationState: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockResolvedValue(undefined),
+      },
       hostedMemberRouting: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -50,6 +54,8 @@ describe("hosted Linq egress engagement", () => {
     });
 
     expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedLinqConversationState.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedLinqConversationState.updateMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -84,6 +90,17 @@ describe("hosted Linq egress engagement", () => {
         create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
         findUnique: vi.fn().mockResolvedValue(null),
       },
+      hostedLinqConversationState: {
+        findUnique: vi.fn().mockResolvedValue({
+          healthStatus: "AT_RISK",
+          lastInboundAt: new Date("2026-05-01T12:00:00.000Z"),
+          memberId: "member-1",
+          outboundSinceLastInboundCount: 1,
+          recipientReplyCount: 3,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn().mockResolvedValue(undefined),
+      },
       hostedLinqLine: {
         upsert: vi.fn().mockResolvedValue(undefined),
       },
@@ -113,7 +130,7 @@ describe("hosted Linq egress engagement", () => {
       httpStatus: 403,
     });
 
-    expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(2);
     expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

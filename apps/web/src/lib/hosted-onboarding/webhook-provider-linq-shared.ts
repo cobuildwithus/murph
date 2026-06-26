@@ -276,6 +276,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
 
   await recordHostedMemberLinqInboundEngagementTx({
     chatId: input.chatId,
+    linePhoneNumber: input.recipientPhone,
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     prisma: input.prisma,
@@ -331,6 +332,7 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
 
   await recordHostedMemberLinqInboundEngagementTx({
     chatId: input.chatId,
+    linePhoneNumber: input.recipientPhone,
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     prisma: input.prisma,

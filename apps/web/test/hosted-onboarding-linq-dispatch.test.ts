@@ -326,6 +326,12 @@ type HostedLinqDailyStateFixture = {
   }) => Promise<unknown>;
 };
 
+type HostedLinqConversationStateFixture = {
+  findUnique?: MockedFunction;
+  updateMany?: MockedFunction;
+  upsert?: MockedFunction;
+};
+
 type HostedLinqAlertFixture = {
   createMany?: MockedFunction;
 };
@@ -415,6 +421,7 @@ type PrismaFixtureBase = {
   $transaction?: MockedFunction;
   hostedInvite?: HostedInviteFixture;
   hostedLinqAlert?: HostedLinqAlertFixture;
+  hostedLinqConversationState?: HostedLinqConversationStateFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
   hostedLinqDelivery?: HostedLinqDeliveryFixture;
   hostedLinqFirstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecisionFixture;
@@ -4880,6 +4887,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedInvite = prisma.hostedInvite;
   const hostedLinqDailyState = prisma.hostedLinqDailyState;
   const hostedLinqAlert = prisma.hostedLinqAlert;
+  const hostedLinqConversationState = prisma.hostedLinqConversationState;
   const hostedLinqDelivery = prisma.hostedLinqDelivery;
   const hostedLinqFirstContactAdmissionDecision = prisma.hostedLinqFirstContactAdmissionDecision;
   const hostedLinqLine = prisma.hostedLinqLine;
@@ -4898,6 +4906,31 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+    });
+  }
+
+  if (!hostedLinqConversationState?.upsert || !hostedLinqConversationState?.updateMany) {
+    Object.defineProperty(prisma, "hostedLinqConversationState", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue({
+          healthStatus: "AT_RISK",
+          lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+          memberId: "member_123",
+          outboundSinceLastInboundCount: 0,
+          recipientReplyCount: 3,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+  } else if (!hostedLinqConversationState.findUnique) {
+    hostedLinqConversationState.findUnique = vi.fn().mockResolvedValue({
+      healthStatus: "AT_RISK",
+      lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+      memberId: "member_123",
+      outboundSinceLastInboundCount: 0,
+      recipientReplyCount: 3,
     });
   }
 

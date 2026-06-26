@@ -295,6 +295,11 @@ type UsageResetPrismaFixture = {
     updateMany: MockedFunction;
     upsert: MockedFunction;
   };
+  hostedLinqConversationState: {
+    findUnique: MockedFunction;
+    updateMany: MockedFunction;
+    upsert: MockedFunction;
+  };
   hostedLinqLine: {
     findUnique: MockedFunction;
     update: MockedFunction;
@@ -725,6 +730,17 @@ function createUsageResetPrismaFixture(input: {
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
+    },
+    hostedLinqConversationState: {
+      findUnique: vi.fn().mockResolvedValue({
+        healthStatus: "AT_RISK",
+        lastInboundAt: new Date("2026-04-30T12:00:00.000Z"),
+        memberId: MEMBER_ID,
+        outboundSinceLastInboundCount: 0,
+        recipientReplyCount: 3,
+      }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      upsert: vi.fn().mockResolvedValue(undefined),
     },
     hostedLinqLine: {
       findUnique: vi.fn().mockResolvedValue(null),

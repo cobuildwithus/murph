@@ -822,6 +822,17 @@ function createPrismaStub() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
     },
+    hostedLinqConversationState: {
+      findUnique: vi.fn().mockResolvedValue({
+        healthStatus: "AT_RISK",
+        lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+        memberId: "member_active",
+        outboundSinceLastInboundCount: 0,
+        recipientReplyCount: 3,
+      }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      upsert: vi.fn().mockResolvedValue(undefined),
+    },
     hostedLinqLine: {
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),

@@ -12,6 +12,13 @@ import {
 import {
   markHostedLinqDeliverySkippedTx,
 } from "./linq-delivery-store";
+import {
+  buildHostedLinqConversationEgressSkipReason,
+  claimHostedLinqConversationEgressTx,
+  recordHostedLinqConversationInboundTx,
+  type HostedLinqConversationEgressDecision,
+  type HostedLinqConversationEgressKind,
+} from "./linq-conversation-state";
 import type {
   HostedLinqMessagePayload,
 } from "./webhook-transport";
@@ -69,6 +76,7 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
   chatId: string | null | undefined;
   memberId: string;
   occurredAt: Date | string;
+  linePhoneNumber?: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
@@ -107,11 +115,21 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
       pendingLinqLastInboundAt: occurredAt,
     },
   });
+
+  await recordHostedLinqConversationInboundTx({
+    chatId: input.chatId,
+    linePhoneNumber: input.linePhoneNumber,
+    memberId: input.memberId,
+    occurredAt,
+    prisma: input.prisma,
+  });
 }
 
 export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   chatId: string | null | undefined;
   occurredAt: Date | string;
+  linePhoneNumberLookupKey: string | null;
+  memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
@@ -138,6 +156,14 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
     data: {
       lastInboundAt: occurredAt,
     },
+  });
+
+  await recordHostedLinqConversationInboundTx({
+    chatId: input.chatId,
+    linePhoneNumberLookupKey: input.linePhoneNumberLookupKey,
+    memberId: input.memberId,
+    occurredAt,
+    prisma: input.prisma,
   });
 }
 
@@ -176,6 +202,50 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
   });
 }
 
+export async function claimHostedLinqSideEffectEgressTx(input: {
+  currentInboundReply: boolean;
+  now?: Date;
+  payload: HostedLinqMessagePayload;
+  prisma: HostedLinqEngagementClient;
+}): Promise<HostedLinqConversationEgressDecision> {
+  const routeAuthority = "routeAuthority" in input.payload
+    ? input.payload.routeAuthority ?? null
+    : null;
+  if (routeAuthority) {
+    const route = await assertHostedThreadRouteEgressAuthority({
+      authority: routeAuthority,
+      prisma: input.prisma,
+    });
+    return claimHostedLinqConversationEgressTx({
+      chatId: input.payload.chatId,
+      egressKind: resolveHostedLinqSideEffectEgressKind(input.currentInboundReply),
+      linePhoneNumberLookupKey: route.accountLookupKey,
+      memberId: route.containerMemberId,
+      now: input.now,
+      prisma: input.prisma,
+    });
+  }
+
+  const memberId = await resolveHostedLinqSideEffectMemberId(input);
+  if (!memberId) {
+    return {
+      allowed: false,
+      egressKind: resolveHostedLinqSideEffectEgressKind(input.currentInboundReply),
+      lastInboundAt: null,
+      reason: "conversation_missing",
+      recipientReplyCount: 0,
+    };
+  }
+
+  return claimHostedLinqConversationEgressTx({
+    chatId: input.payload.chatId,
+    egressKind: resolveHostedLinqSideEffectEgressKind(input.currentInboundReply),
+    memberId,
+    now: input.now,
+    prisma: input.prisma,
+  });
+}
+
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -198,23 +268,21 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     });
   }
 
-  const decision = input.routeAuthority
-    ? decideHostedLinqRecentInbound({
-        lastInboundAt: (await assertHostedThreadRouteEgressAuthority({
-          authority: input.routeAuthority,
-          prisma: input.prisma,
-        })).lastInboundAt,
-        now,
+  const route = input.routeAuthority
+    ? await assertHostedThreadRouteEgressAuthority({
+        authority: input.routeAuthority,
+        prisma: input.prisma,
       })
-    : decideHostedLinqRecentInbound({
-        lastInboundAt: await readHostedMemberLinqRouteLastInboundAt({
-          chatId: input.target,
-          memberId: input.memberId,
-          prisma: input.prisma,
-          recipientPhone: input.directRecipientPhoneNumber,
-        }),
-        now,
-      });
+    : null;
+  const decision = await claimHostedLinqConversationEgressTx({
+    chatId: input.target,
+    egressKind: "proactive",
+    linePhoneNumber: input.fromPhoneNumber,
+    linePhoneNumberLookupKey: route?.accountLookupKey ?? null,
+    memberId: route?.containerMemberId ?? input.memberId,
+    now,
+    prisma: input.prisma,
+  });
 
   if (decision.allowed) {
     return;
@@ -225,7 +293,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     linqChatId: input.targetKind === "participant" ? null : input.target,
     phoneNumber: input.fromPhoneNumber,
     prisma: input.prisma,
-    reason: buildHostedLinqRecentInboundSkipReason(decision.lastInboundAt),
+    reason: buildHostedLinqConversationEgressSkipReason(decision),
     skippedAt: now,
     source: "hosted_runtime_linq_egress_guard",
     sourceRef: input.intentId,
@@ -235,8 +303,10 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
     details: {
+      egressKind: decision.egressKind,
       lastInboundAt: decision.lastInboundAt?.toISOString() ?? null,
       policyDays: HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS,
+      reason: decision.reason,
     },
     httpStatus: 403,
     message: `Linq/iMessage delivery requires a recipient reply within the last ${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS} days.`,
@@ -248,6 +318,12 @@ export function buildHostedLinqRecentInboundSkipReason(lastInboundAt: Date | nul
   return lastInboundAt
     ? `last_inbound_at=${lastInboundAt.toISOString()}; window_days=${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS}`
     : `last_inbound_at=null; window_days=${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS}`;
+}
+
+function resolveHostedLinqSideEffectEgressKind(
+  currentInboundReply: boolean,
+): HostedLinqConversationEgressKind {
+  return currentInboundReply ? "current_inbound_reply" : "proactive";
 }
 
 async function resolveHostedLinqSideEffectMemberId(input: {

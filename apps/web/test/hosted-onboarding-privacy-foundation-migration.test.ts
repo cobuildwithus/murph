@@ -41,6 +41,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    "linqConversationStates HostedLinqConversationState[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -397,6 +398,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqConversationStateMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062502_hosted_linq_conversation_state/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
@@ -463,6 +471,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624200000_hosted_action_approval_return_contact_kind",
       "2026062500_hosted_linq_observability",
       "2026062501_hosted_linq_egress_engagement",
+      "2026062502_hosted_linq_conversation_state",
       "20260626000000_linq_first_contact_admission_decision",
       "migration_lock.toml",
     ]);
@@ -552,6 +561,21 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).not.toContain("raw_payload");
+    expect(hostedLinqConversationStateMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_conversation_state"',
+    );
+    expect(hostedLinqConversationStateMigrationSql).toContain(
+      'PRIMARY KEY ("linq_chat_lookup_key")',
+    );
+    expect(hostedLinqConversationStateMigrationSql).toContain('"last_receipt_at" TIMESTAMP(3)');
+    expect(hostedLinqConversationStateMigrationSql).toContain('"last_receipt_event_id" TEXT');
+    expect(hostedLinqConversationStateMigrationSql).toContain(
+      'REFERENCES "hosted_linq_line"("phone_number_lookup_key") ON DELETE SET NULL',
+    );
+    expect(hostedLinqConversationStateMigrationSql).not.toContain(
+      'r."linq_recipient_phone_lookup_key"',
+    );
+    expect(hostedLinqConversationStateMigrationSql).not.toContain("raw_payload");
     expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
     );

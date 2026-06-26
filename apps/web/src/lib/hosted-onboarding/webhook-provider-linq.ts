@@ -731,6 +731,8 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   await recordHostedThreadRouteLinqInboundEngagementTx({
     chatId: summary.chatId,
+    linePhoneNumberLookupKey: input.route.accountLookupKey,
+    memberId: input.route.containerMemberId,
     occurredAt,
     prisma: input.prisma,
   });
