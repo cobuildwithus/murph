@@ -378,6 +378,8 @@ const assistantVoiceMemoResponseMediaSchema = z
 
 const assistantVaultFileResponseMediaSchema = z
   .object({
+    approvalGeneration: z.string().regex(/^[0-9a-f]{64}$/u).nullable().default(null),
+    approvalId: z.string().regex(/^haa_[A-Za-z0-9_-]{32}$/u).nullable().default(null),
     kind: z.literal('vault_file'),
     ref: z
       .string()
@@ -407,6 +409,10 @@ const assistantVaultFileResponseMediaSchema = z
     sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
   })
   .strict()
+  .refine(
+    (value) => (value.approvalGeneration === null) === (value.approvalId === null),
+    'Assistant vault file approval id and generation must be present together.',
+  )
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,

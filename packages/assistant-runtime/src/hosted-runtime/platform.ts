@@ -2,6 +2,7 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import type {
+  HostedActionApprovalConsumeRequest,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -378,6 +379,9 @@ export interface HostedRuntimeLatencyTracePort {
 }
 
 export interface HostedRuntimeActionApprovalPort {
+  consume(
+    input: HostedActionApprovalConsumeRequest,
+  ): Promise<HostedActionApprovalResult>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;

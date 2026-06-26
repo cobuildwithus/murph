@@ -3067,6 +3067,7 @@ async function drainHostedPostCheckpointDelivery(input: {
 
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
         allowPreparedSending: true,
         assistantDeliveryEffects: input.assistantDeliveryEffects,
         assertLiveness: async () => {
