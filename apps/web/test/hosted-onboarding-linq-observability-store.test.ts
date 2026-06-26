@@ -136,12 +136,17 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
-  it("does not re-enable egress policy for healthy status updates", async () => {
+  it("projects production-shape critical reputation status updates", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T11:59:59.000Z",
       data: {
+        changed_at: "2026-03-26T12:00:00.000Z",
+        new_reputation: "CRITICAL",
+        new_status: "FLAGGED",
         phone_number: "+15550000000",
-        status: "active",
+        previous_reputation: "AT_RISK",
+        previous_status: "ACTIVE",
       },
       eventId: "evt_status_123",
       eventType: "phone_number.status_updated",
@@ -152,15 +157,107 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
     });
 
-    const updateInput = fixture.hostedLinqLineUpdate.mock.calls[0]?.[0] as
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: "evt_status_123",
+          providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          providerStatus: "CRITICAL",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          egressPolicy: "disabled",
+          healthStatus: "unhealthy",
+          lastStatusEventId: "evt_status_123",
+          providerStatus: "CRITICAL",
+          providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "phone_number_status_updated",
+          status: "pending",
+        }),
+      }),
+    );
+  });
+
+  it("does not re-enable egress policy for healthy status updates", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        new_status: "ACTIVE",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_status_123",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    const updateInput = fixture.hostedLinqLineUpdateMany.mock.calls[0]?.[0] as
       | { data?: Record<string, unknown> }
       | undefined;
     expect(updateInput?.data).toMatchObject({
       healthStatus: "healthy",
       lastStatusEventId: "evt_status_123",
-      providerStatus: "active",
+      providerStatus: "ACTIVE",
     });
     expect(updateInput?.data).not.toHaveProperty("egressPolicy");
+  });
+
+  it("guards line status projection against stale status webhooks", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        changed_at: "2026-03-26T12:00:00.000Z",
+        new_reputation: "AT_RISK",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_status_older",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
+          OR: [
+            {
+              providerUpdatedAt: null,
+            },
+            {
+              providerUpdatedAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+            {
+              lastStatusEventId: null,
+              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+            {
+              lastStatusEventId: {
+                lt: "evt_status_older",
+              },
+              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+          ],
+        },
+      }),
+    );
   });
 
   it("records attempts and later preserves provider ids as lookup keys on acceptance", async () => {
@@ -224,6 +321,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockResolvedValue(undefined);
+  const hostedLinqLineUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqLineUpsert = vi.fn().mockResolvedValue(undefined);
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const prisma = {
@@ -240,6 +338,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqLine: {
       findUnique: hostedLinqLineFindUnique,
       update: hostedLinqLineUpdate,
+      updateMany: hostedLinqLineUpdateMany,
       upsert: hostedLinqLineUpsert,
     },
     hostedLinqProviderEvent: {
@@ -254,6 +353,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
     hostedLinqLineUpdate,
+    hostedLinqLineUpdateMany,
     hostedLinqLineUpsert,
     hostedLinqProviderEventCreateMany,
     prisma,
@@ -273,13 +373,14 @@ function requireParsedProviderEvent(event: HostedLinqWebhookEvent) {
 }
 
 function buildProviderEvent(input: {
+  createdAt?: string;
   data: Record<string, unknown>;
   eventId: string;
   eventType: string;
 }): HostedLinqWebhookEvent {
   return {
     api_version: "v3",
-    created_at: "2026-03-26T12:00:00.000Z",
+    created_at: input.createdAt ?? "2026-03-26T12:00:00.000Z",
     data: input.data,
     event_id: input.eventId,
     event_type: input.eventType,

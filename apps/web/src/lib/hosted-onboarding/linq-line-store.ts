@@ -190,8 +190,30 @@ async function projectPhoneNumberStatusUpdated(
 ): Promise<void> {
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
   const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
-  await prisma.hostedLinqLine.update({
-    where: { phoneNumberLookupKey },
+  await prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey,
+      OR: [
+        {
+          providerUpdatedAt: null,
+        },
+        {
+          providerUpdatedAt: {
+            lt: event.providerCreatedAt,
+          },
+        },
+        {
+          lastStatusEventId: null,
+          providerUpdatedAt: event.providerCreatedAt,
+        },
+        {
+          lastStatusEventId: {
+            lt: event.eventId,
+          },
+          providerUpdatedAt: event.providerCreatedAt,
+        },
+      ],
+    },
     data: {
       ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
@@ -208,10 +230,10 @@ function classifyHostedLinqProviderStatus(value: string | null): string {
   if (["active", "healthy", "ok", "ready"].includes(normalized)) {
     return "healthy";
   }
-  if (/flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
+  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
     return "unhealthy";
   }
-  if (/degraded|warning|limited|throttled/u.test(normalized)) {
+  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
     return "degraded";
   }
   return "unknown";
@@ -219,10 +241,10 @@ function classifyHostedLinqProviderStatus(value: string | null): string {
 
 function deriveHostedLinqEgressPolicy(value: string | null): string | null {
   const normalized = value?.trim().toLowerCase() ?? "";
-  if (/flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
+  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
     return "disabled";
   }
-  if (/degraded|warning|limited|throttled/u.test(normalized)) {
+  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
     return "avoid_new_assignments";
   }
   return null;

@@ -170,17 +170,32 @@ function parseGenericHostedLinqProviderEvent(input: {
     ["line", "service"],
   ] as const);
   const providerStatus = readFirstStringAtPaths(data, [
+    ["new_reputation"],
+    ["new_reputation", "status"],
+    ["new_health_status"],
+    ["new_health_status", "status"],
+    ["new_status"],
     ["status"],
     ["phone_number", "status"],
     ["line", "status"],
     ["state"],
   ] as const);
   const providerReason = readFirstStringAtPaths(data, [
+    ["new_reputation", "doc_url"],
+    ["new_health_status", "doc_url"],
     ["reason"],
     ["status_reason"],
     ["statusReason"],
     ["details"],
   ] as const);
+  const providerCreatedAt = input.event.event_type === "phone_number.status_updated"
+    ? parseProviderDate(readFirstStringAtPaths(data, [
+      ["changed_at"],
+      ["changedAt"],
+      ["updated_at"],
+      ["updatedAt"],
+    ] as const))
+    : null;
   const failureCode = readFirstStringAtPaths(data, [
     ["code"],
     ["error_code"],
@@ -222,6 +237,7 @@ function parseGenericHostedLinqProviderEvent(input: {
     messageId,
     phoneNumber,
     phoneNumberRole,
+    providerCreatedAt,
     providerReason,
     providerStatus,
     rawBody: input.rawBody,
@@ -240,12 +256,13 @@ function buildParsedProviderEvent(input: {
   messageId: string | null;
   phoneNumber: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
+  providerCreatedAt?: Date | null;
   providerReason: string | null;
   providerStatus: string | null;
   rawBody?: string | null;
   service: string | null;
 }): ParsedHostedLinqProviderEvent {
-  const providerCreatedAt = parseProviderCreatedAt(input.event.created_at);
+  const providerCreatedAt = input.providerCreatedAt ?? parseProviderCreatedAt(input.event.created_at);
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const phoneNumberIsLine = input.phoneNumberRole === "line";
   const phoneNumberLookupKey = phoneNumberIsLine ? createHostedPhoneLookupKey(phoneNumber) : null;
@@ -307,9 +324,17 @@ function readHostedLinqProviderWebhookEvent(
 }
 
 function parseProviderCreatedAt(value: string): Date {
+  return parseProviderDate(value) ?? new Date();
+}
+
+function parseProviderDate(value: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return new Date();
+    return null;
   }
 
   return parsed;

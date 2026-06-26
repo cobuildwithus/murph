@@ -78,10 +78,14 @@ describe("parseHostedLinqProviderEvent", () => {
   it("parses phone number status updates conservatively", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
+        createdAt: "2026-03-26T11:59:59.000Z",
         data: {
+          changed_at: "2026-03-26T12:00:00.000Z",
+          new_reputation: "CRITICAL",
+          new_status: "FLAGGED",
           phone_number: "+15550000000",
-          reason: "carrier review",
-          status: "flagged",
+          previous_reputation: "AT_RISK",
+          previous_status: "ACTIVE",
         },
         eventType: "phone_number.status_updated",
       }),
@@ -90,8 +94,9 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(parsed).toMatchObject({
       eventType: "phone_number.status_updated",
       phoneNumberRole: "line",
-      providerReason: "carrier review",
-      providerStatus: "flagged",
+      providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      providerReason: null,
+      providerStatus: "CRITICAL",
     });
   });
 
@@ -165,12 +170,13 @@ function buildMessageReceivedEvent(input: {
 }
 
 function buildGenericEvent(input: {
+  createdAt?: string;
   data: Record<string, unknown>;
   eventType: string;
 }): HostedLinqWebhookEvent {
   return {
     api_version: "v3",
-    created_at: "2026-03-26T12:00:00.000Z",
+    created_at: input.createdAt ?? "2026-03-26T12:00:00.000Z",
     data: input.data,
     event_id: "evt_123",
     event_type: input.eventType,
