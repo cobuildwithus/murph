@@ -4,8 +4,8 @@ import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
+import { ComputerHandoffReplyAction } from "@/src/components/computer-use/computer-handoff-reply-action";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
@@ -120,20 +120,8 @@ export default async function ComputerHandoffPage({
                 </p>
               </div>
             ) : contactOptions.length > 0 ? (
-              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {contactOptions.map((option) => (
-                  <MurphContactLink
-                    key={`${option.kind}:${option.href}`}
-                    actionLabel="Reply to Murph"
-                    option={option}
-                    className={cn(
-                      buttonVariants({ size: "lg" }),
-                      "w-full sm:w-auto",
-                    )}
-                  >
-                    Reply in {option.webmail?.label ?? option.label}
-                  </MurphContactLink>
-                ))}
+              <div className="mt-6">
+                <ComputerHandoffReplyAction options={contactOptions} />
               </div>
             ) : canSendDoneReply ? (
               <div className="mt-6 border-t border-border pt-4">
