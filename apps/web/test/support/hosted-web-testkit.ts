@@ -18,10 +18,6 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedSensitiveActionChallenge,
-  Prisma,
-} from "@prisma/client";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
@@ -63,18 +59,40 @@ interface HostedTestPrismaFactoryClient {
 interface HostedActionApprovalForTestPrismaClient {
   hostedSensitiveActionChallenge: {
     findFirst(
-      args: Prisma.HostedSensitiveActionChallengeFindFirstArgs,
-    ): Promise<HostedSensitiveActionChallenge | null>;
-    update(
-      args: Prisma.HostedSensitiveActionChallengeUpdateArgs,
-    ): Promise<HostedSensitiveActionChallenge>;
-    updateMany(
-      args: Prisma.HostedSensitiveActionChallengeUpdateManyArgs,
-    ): Promise<Prisma.BatchPayload>;
-    upsert(
-      args: Prisma.HostedSensitiveActionChallengeUpsertArgs,
-    ): Promise<HostedSensitiveActionChallenge>;
+      args: unknown,
+    ): Promise<HostedSensitiveActionChallengeForTest | null>;
+    update(args: unknown): Promise<HostedSensitiveActionChallengeForTest>;
+    updateMany(args: unknown): Promise<HostedBatchPayloadForTest>;
+    upsert(args: unknown): Promise<HostedSensitiveActionChallengeForTest>;
   };
+}
+
+type HostedSensitiveActionApprovalStatusForTest =
+  | "approved"
+  | "denied"
+  | "pending";
+
+export interface HostedSensitiveActionChallengeForTest {
+  actionHash: string | null;
+  actionId: string | null;
+  approvalKey: string | null;
+  approvalStatus: HostedSensitiveActionApprovalStatusForTest | null;
+  bindingHash: string;
+  consumedAt: Date | null;
+  consumedBy: string | null;
+  createdAt: Date;
+  decidedAt: Date | null;
+  expiresAt: Date;
+  kind: string;
+  memberId: string;
+  presentationBody: string | null;
+  presentationTitle: string | null;
+  returnContactKind: string | null;
+  tokenHash: string;
+}
+
+interface HostedBatchPayloadForTest {
+  count: number;
 }
 
 interface HostedTestPrismaModule {

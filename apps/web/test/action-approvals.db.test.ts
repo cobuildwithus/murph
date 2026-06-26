@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import type { HostedSensitiveActionChallenge } from "@prisma/client";
 import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedWebTestkitDeps } from "./support/hosted-web-testkit";
+import type {
+  HostedSensitiveActionChallengeForTest,
+  HostedWebTestkitDeps,
+} from "./support/hosted-web-testkit";
 import {
   createHostedWebTestkitDeps,
   seedHostedActiveMember,
@@ -368,7 +370,7 @@ function consumeRequest(
 async function requireApprovalRow(
   deps: HostedWebTestkitDeps,
   approvalId: string,
-): Promise<HostedSensitiveActionChallenge> {
+): Promise<HostedSensitiveActionChallengeForTest> {
   const row = await deps.prisma.hostedSensitiveActionChallenge.findFirst({
     where: { approvalKey: approvalId },
   });
