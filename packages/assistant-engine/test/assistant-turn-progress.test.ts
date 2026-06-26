@@ -43,6 +43,32 @@ describe('assistant turn progress', () => {
     expect(normalizeAssistantProgressText(longText)).toBe(longText)
   })
 
+  it('runs follow-up activity after successful progress delivery only', async () => {
+    const deliver = vi.fn(async (): Promise<void> => {})
+    const afterSent = vi.fn()
+    const progress = createAssistantProgressDelivery({
+      afterSent,
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    expect(afterSent).toHaveBeenCalledTimes(1)
+
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'duplicate',
+      source: 'model',
+    })
+    expect(afterSent).toHaveBeenCalledTimes(1)
+  })
+
   it('dedupes and limits progress updates inside one turn', async () => {
     const delivered: DeliverProgressInput[] = []
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {

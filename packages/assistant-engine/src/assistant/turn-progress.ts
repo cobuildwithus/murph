@@ -118,6 +118,7 @@ export function resolveAssistantProductFeedbackAcceptedInputIds(
 }
 
 export function createAssistantProgressDelivery(input: {
+  afterSent?: () => Promise<void> | void
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
@@ -179,6 +180,12 @@ export function createAssistantProgressDelivery(input: {
           turnId: input.turnId,
         }
         await deliver(progressInput)
+        void Promise.resolve(input.afterSent?.()).catch((error) => {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: 'progress update follow-up activity',
+          })
+        })
         return {
           kind: 'sent',
           source,

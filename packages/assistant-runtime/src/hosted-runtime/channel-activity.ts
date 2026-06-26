@@ -2,7 +2,6 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
-  type AssistantChannelActivityHandle,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
@@ -23,8 +22,6 @@ import {
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
 
-const HOSTED_LINQ_TYPING_REFRESH_MS = 45_000;
-const HOSTED_LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000;
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
@@ -118,11 +115,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Linq typing indicator");
-      const handle = await startLinqTypingIndicator(request, {
-        ...dependencies,
-        refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
-      });
-      return limitHostedLinqTypingSession(handle);
+      return startLinqTypingIndicator(request, dependencies);
     },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
@@ -171,46 +164,6 @@ export async function markHostedConversationReadBestEffort(input: {
     );
   } catch {
     // Best-effort provider-visible acknowledgement; local import remains authoritative.
-  }
-}
-
-function limitHostedLinqTypingSession(
-  handle: AssistantChannelActivityHandle | void,
-): AssistantChannelActivityHandle | void {
-  if (!handle) {
-    return handle;
-  }
-
-  let stopped = false;
-  const timeout = setTimeout(() => {
-    if (stopped) {
-      return;
-    }
-    stopped = true;
-    void handle.stop().catch(() => {});
-  }, HOSTED_LINQ_TYPING_MAX_SESSION_MS);
-  unrefHostedTimer(timeout);
-
-  return {
-    async stop() {
-      if (stopped) {
-        return;
-      }
-      stopped = true;
-      clearTimeout(timeout);
-      await handle.stop();
-    },
-  };
-}
-
-function unrefHostedTimer(timer: ReturnType<typeof setTimeout>): void {
-  if (typeof timer !== "object" || timer === null || !("unref" in timer)) {
-    return;
-  }
-
-  const unref = (timer as { unref?: () => void }).unref;
-  if (typeof unref === "function") {
-    unref.call(timer);
   }
 }
 

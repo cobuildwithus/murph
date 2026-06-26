@@ -475,6 +475,7 @@ export async function sendAssistantMessageLocal(
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
+              afterSent: () => typingIndicator?.refreshNow?.(),
               deliver: async (progressInput) => {
                 const hosted = hostedExecutionContext
                 if (hosted) {

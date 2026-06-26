@@ -22,10 +22,6 @@ export function startAssistantChannelTypingIndicator(input: {
     return null
   }
 
-  if (input.input.deliveryDispatchMode === 'queue-only') {
-    return null
-  }
-
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     precedence: input.precedence,
@@ -67,6 +63,21 @@ export function startAssistantChannelTypingIndicator(input: {
     .catch(() => null)
 
   return {
+    async refreshNow() {
+      if (activeIndicator?.refreshNow) {
+        const indicator = activeIndicator
+        await runAssistantTypingBestEffort(() => indicator.refreshNow!())
+        return
+      }
+
+      await indicatorReady.then((indicator) => {
+        if (indicator?.refreshNow) {
+          return runAssistantTypingBestEffort(() => indicator.refreshNow!())
+        }
+
+        return undefined
+      })
+    },
     async stop() {
       stopRequested = true
       if (activeIndicator) {

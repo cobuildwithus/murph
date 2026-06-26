@@ -1339,7 +1339,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
-  it('refreshes the Linq typing indicator every two seconds by default', async () => {
+  it('refreshes the Linq typing indicator at the low-volume default cadence', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
     runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
@@ -1355,19 +1355,73 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
-    await vi.advanceTimersByTimeAsync(1_999)
+    await vi.advanceTimersByTimeAsync(44_999)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
 
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(45_000)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
 
     await handle.stop()
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(45_000)
 
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('restarts the Linq typing refresh timer after an explicit activity refresh', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(40_000)
+    await handle.refreshNow?.()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('stops the Linq typing indicator after the max session cap', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await handle.stop()
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
