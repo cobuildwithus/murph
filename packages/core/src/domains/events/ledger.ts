@@ -18,6 +18,7 @@ import { walkVaultFiles } from "../../fs.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
+  compareEventSpineEntries,
   eventSpineRevision,
   isDeletedEventSpineRecord,
   parseEventSpineAttachments,
@@ -303,7 +304,7 @@ export async function findEventByExternalRef(
   const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
-  const matches: MatchedEventRecord[] = [];
+  const candidateIds = new Set<string>();
 
   for (const relativePath of relativePaths) {
     const records = await readJsonlRecords({
@@ -313,13 +314,47 @@ export async function findEventByExternalRef(
 
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
+
       if (externalRefMatches(record, input)) {
-        matches.push({ relativePath, record });
+        candidateIds.add(record.id);
       }
     }
   }
 
-  const latest = selectLatestEventSpineEntry(matches);
+  if (candidateIds.size === 0) {
+    return null;
+  }
+
+  const latestByCandidateId = new Map<string, MatchedEventRecord>();
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    });
+
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (!candidateIds.has(record.id)) {
+        continue;
+      }
+
+      const entry = { relativePath, record };
+      const latest = latestByCandidateId.get(record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
+        latestByCandidateId.set(record.id, entry);
+      }
+    }
+  }
+
+  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
+    externalRefMatches(entry.record, input)
+  );
+  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
+    !isDeletedEventSpineRecord(entry.record)
+  );
+  const latest = selectLatestEventSpineEntry(
+    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
+  );
   if (!latest || isDeletedEventSpineRecord(latest.record)) {
     return null;
   }

@@ -844,6 +844,110 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("checkpoint-gates projected wakes while durable effects remain pending after an external wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: "2026-04-27T00:02:00.000Z",
+        nextWakeReason: "system-mailbox",
+      };
+    });
+    let assistantPass = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_durable_effect_external_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              return {
+                afterCheckpoint: async () => {
+                  runtimeWakeSignal.notify();
+                  return {
+                    afterDurableCheckpoint: durableEffect,
+                    checkpointReason: "system_mailbox_receipt",
+                    nextWakeAt: TEST_NOW,
+                    nextWakeReason: "assistant",
+                  };
+                },
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              return {
+                checkpointReason: "canonical_runtime_commit",
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            throw new Error("Self-projected wake ran before durable effect checkpoint.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2);
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.ok(events.indexOf("assistant:2") < events.indexOf("workspace.checkpoint"));
+      assert.ok(events.indexOf("workspace.checkpoint") < events.indexOf("durable-effect"));
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("carries inbox media retention wake through the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

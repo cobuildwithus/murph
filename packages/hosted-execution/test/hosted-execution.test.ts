@@ -522,6 +522,7 @@ describe("hosted execution coverage gaps", () => {
       "./legacy-dashboard-replica",
       "./orchestration-control",
       "./parsers",
+      "./return-contact",
       "./routes",
       "./runtime-control",
       "./side-effects",

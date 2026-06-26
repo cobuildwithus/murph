@@ -8,10 +8,17 @@ import type {
 
 export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {}
 
+export interface DeviceProviderNormalizationContext {
+  defaultTimeZone?: string;
+}
+
 export interface DeviceProviderAdapter<TSnapshot = unknown> extends DeviceProviderDescriptor {
   parseSnapshot?(snapshot: unknown): TSnapshot;
   sanitizeRawSnapshot?(snapshot: TSnapshot): unknown;
-  normalizeSnapshot(snapshot: TSnapshot): Promise<NormalizedDeviceBatch> | NormalizedDeviceBatch;
+  normalizeSnapshot(
+    snapshot: TSnapshot,
+    context?: DeviceProviderNormalizationContext,
+  ): Promise<NormalizedDeviceBatch> | NormalizedDeviceBatch;
 }
 
 export interface WearableIngestContext {

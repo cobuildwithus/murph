@@ -17,7 +17,7 @@ import {
   type AutomationStatus,
 } from "@murphai/contracts";
 
-import { readMarkdownDocument, walkRelativeFiles } from "./health/loaders.ts";
+import { readMarkdownDocument, readOptionalMarkdownDocumentOutcome, walkRelativeFiles } from "./health/loaders.ts";
 import {
   applyLimit,
   compareNullableStrings,
@@ -90,6 +90,25 @@ function requireStringValue(value: unknown, fieldName: string): string {
   }
 
   return normalized;
+}
+
+function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireStringValue(value, "schedule.afterEntityId");
+}
+
+function assertDeviceActivityCursorShape(input: {
+  afterEntityId?: string;
+  afterOccurredAt?: string;
+}): void {
+  const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
+  const hasScalarEntityId = input.afterEntityId !== undefined;
+  if (hasScalarOccurredAt !== hasScalarEntityId) {
+    throw new Error("schedule.afterOccurredAt and schedule.afterEntityId must be provided together.");
+  }
 }
 
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
@@ -205,11 +224,24 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       if (Number.isNaN(Date.parse(after))) {
         throw new Error("schedule.after must be a valid ISO timestamp.");
       }
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : requireStringValue(object.afterOccurredAt, "schedule.afterOccurredAt");
+      if (afterOccurredAt && Number.isNaN(Date.parse(afterOccurredAt))) {
+        throw new Error("schedule.afterOccurredAt must be a valid ISO timestamp.");
+      }
+      const afterEntityId = normalizeDeviceActivityCursorEntityId(object.afterEntityId);
       const source = normalizeDeviceActivitySource(object.source);
       const activityKind = normalizeDeviceActivityKind(object.activityKind);
+      assertDeviceActivityCursorShape({
+        afterEntityId,
+        afterOccurredAt,
+      });
       return {
         kind,
         after,
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -385,6 +417,30 @@ export async function readAutomation(
   return records.find((record) => record.automationId === automationId) ?? null;
 }
 
+export async function readAutomationByRelativePath(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<AutomationQueryRecord | null> {
+  const normalizedPath = normalizeAutomationRelativePath(relativePath);
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, normalizedPath);
+  if (!outcome) {
+    return null;
+  }
+  if (!outcome.ok) {
+    throw new Error(`Failed to parse automation at ${outcome.relativePath}: ${outcome.reason}`);
+  }
+
+  return parseAutomationRecord(
+    outcome.document.attributes,
+    outcome.document.relativePath,
+    outcome.document.markdown,
+  );
+}
+
 export async function showAutomation(
   vaultRoot: string,
   lookup: string,
@@ -396,4 +452,20 @@ export async function showAutomation(
       matchesLookup(normalized, record.automationId, record.slug, record.title)
     ) ?? null
   );
+}
+
+function normalizeAutomationRelativePath(relativePath: string): string | null {
+  const normalized = relativePath.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.includes("\\") ||
+    normalized.startsWith("/") ||
+    normalized.split("/").includes("..") ||
+    !normalized.startsWith(`${AUTOMATIONS_DIRECTORY}/`) ||
+    !normalized.endsWith(".md")
+  ) {
+    return null;
+  }
+
+  return normalized;
 }

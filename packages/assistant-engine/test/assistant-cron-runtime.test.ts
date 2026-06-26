@@ -2,12 +2,12 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
+import type { AutomationSchedule } from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
   type AssistantCronJob,
-  type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
@@ -26,7 +26,8 @@ type MockAutomationRecord = {
     participantId: string | null
     threadId: string | null
   }
-  schedule: AssistantCronSchedule
+  schedule: AutomationSchedule
+  relativePath?: string
   slug?: string
   status: 'active' | 'paused' | 'archived'
   summary?: string | null
@@ -47,6 +48,7 @@ const cronMocks = vi.hoisted(() => ({
   loadVault: vi.fn(),
   nextAutomationId: 1,
   renderAutoLoggedFoodMealNote: vi.fn(),
+  readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock('@murphai/query', async (importOriginal) => {
     ...actual,
     listAutomations: cronMocks.listCanonicalAutomations,
     listScheduledLogs: cronMocks.listCanonicalScheduledLogs,
+    readAutomationByRelativePath: cronMocks.readAutomationByRelativePath,
     showAutomation: cronMocks.showCanonicalAutomation,
   }
 })
@@ -145,11 +148,17 @@ import {
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
 import {
+  appendAssistantDeviceActivityCronJobMetadata,
+  buildAssistantDeviceActivityAuthorityKey,
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
+} from '../src/assistant/device-activity-cron-tags.ts'
+import {
   completeAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
+  dispatchAssistantOutboxIntent,
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
   saveAssistantOutboxIntent,
@@ -291,6 +300,12 @@ beforeEach(() => {
       )
     },
   )
+  cronMocks.readAutomationByRelativePath.mockReset().mockImplementation(
+    async (vault: string, relativePath: string) =>
+      getVaultAutomationStore(vault).find((record) =>
+        record.relativePath === relativePath
+      ) ?? null,
+  )
   cronMocks.listCanonicalScheduledLogs.mockReset().mockImplementation(
     async (
       vault: string,
@@ -324,7 +339,7 @@ beforeEach(() => {
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
       route: MockAutomationRecord['route']
-      schedule: AssistantCronSchedule
+      schedule: AutomationSchedule
       slug?: string
       status: MockAutomationRecord['status']
       summary?: string | null
@@ -1041,6 +1056,318 @@ describe('assistant cron runtime orchestration', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_INVALID_STATE',
     })
+  })
+
+  it('skips a device activity local job when the parent listener is no longer active', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-authority-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'device-activity-listener',
+      status: 'paused',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener',
+      keepAfterRun: true,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity listener',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345678',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    const runs = await listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })
+    expect(runs.runs).toEqual([
+      expect.objectContaining({
+        error: expect.stringContaining('parent listener is no longer authorized'),
+        response: null,
+        status: 'skipped',
+      }),
+    ])
+    await expect(getAssistantCronJob(vaultRoot, localJob.jobId)).resolves.toMatchObject({
+      enabled: false,
+      state: expect.objectContaining({
+        lastSucceededAt: '2026-04-08T09:00:00.000Z',
+        nextRunAt: null,
+      }),
+    })
+  })
+
+  it('uses automation id fallback when device activity parent listener path changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-renamed-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-renamed-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      relativePath: 'bank/automations/renamed-device-activity-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'renamed-device-activity-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Renamed device activity listener',
+      updatedAt: '2026-04-08T08:30:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener_renamed',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity listener',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345679',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    expect(cronMocks.listCanonicalAutomations).toHaveBeenCalledWith(vaultRoot, {
+      status: ['active', 'paused', 'archived'],
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: 'Ask about the imported run.',
+      }),
+    )
+  })
+
+  it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-outbox-stale-',
+    )
+    const parentAutomationId = 'auto_device_activity_outbox'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about the imported run.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      slug: 'device-activity-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const metadata = {
+      authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+      occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef12',
+      parentAutomationId,
+      parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
+    }
+    const intent = buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T08:01:00.000Z',
+      intentId: 'outbox_device_activity_stale',
+      message: 'How did that run feel?',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+        discriminator: {
+          jobId: 'cron_device_activity_listener',
+          target: intent.targetFingerprint,
+        },
+        metadata,
+      }),
+      nextAttemptAt: '2026-04-08T08:02:00.000Z',
+    })
+
+    parentAutomation.status = 'paused'
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
+    const prepareDispatchIntent = vi.fn()
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        prepareDispatchIntent,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-04-08T08:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(prepareDispatchIntent).not.toHaveBeenCalled()
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      }),
+    )
   })
 
   it('toggles canonical jobs and persists active and paused states through automation storage', async () => {
@@ -4136,6 +4463,20 @@ function getVaultAutomationStore(vault: string): MockAutomationRecord[] {
   const created: MockAutomationRecord[] = []
   cronMocks.automationsByVault.set(vault, created)
   return created
+}
+
+function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): string {
+  if (automation.schedule.kind !== 'deviceActivity') {
+    throw new Error('Expected device activity automation.')
+  }
+
+  return buildAssistantDeviceActivityAuthorityKey({
+    ...automation,
+    schedule: {
+      activityKind: automation.schedule.activityKind,
+      source: automation.schedule.source,
+    },
+  })
 }
 
 function getVaultScheduledLogStore(vault: string): ScheduledLogQueryRecord[] {
