@@ -15,9 +15,10 @@ const HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND = "/usr/bin/pdftotext";
 
 export function createHostedRunnerNativeParserToolchain(
   source: Readonly<Record<string, string | undefined>> = process.env,
+  input: { providerEgressCredential?: string | null } = {},
 ):
   HostedAssistantRuntimeParserToolchainConfig {
-  const localE2eToolchain = createHostedRunnerLocalE2eParserToolchain(source);
+  const localE2eToolchain = createHostedRunnerLocalE2eParserToolchain(source, input);
   if (localE2eToolchain) {
     return localE2eToolchain;
   }
@@ -34,7 +35,7 @@ export function createHostedRunnerNativeParserToolchain(
         command: HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND,
       },
       transcription: {
-        endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+        ...buildHostedRunnerTranscribeConfig(input.providerEgressCredential ?? null),
       },
     },
   };
@@ -42,6 +43,7 @@ export function createHostedRunnerNativeParserToolchain(
 
 export function createHostedRunnerLocalE2eParserToolchain(
   source: Readonly<Record<string, string | undefined>>,
+  input: { providerEgressCredential?: string | null } = {},
 ): HostedAssistantRuntimeParserToolchainConfig | null {
   if (source[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] !== "1") {
     return null;
@@ -66,7 +68,7 @@ export function createHostedRunnerLocalE2eParserToolchain(
       // suite proves the real worker transcribe route; only the AI binding is
       // faked in the hosted-local test entrypoint.
       transcription: {
-        endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+        ...buildHostedRunnerTranscribeConfig(input.providerEgressCredential ?? null),
       },
     },
   };
@@ -103,6 +105,46 @@ export function isHostedRunnerLocalE2eParserToolchain(
   return tools.ffmpeg?.command === HOSTED_LOCAL_E2E_FFMPEG_COMMAND &&
     tools.pdfinfo?.command === HOSTED_RUNNER_DEFAULT_PDFINFO_COMMAND &&
     tools.pdftotext?.command === HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND &&
-    tools.transcription?.endpoint === CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT &&
+    isHostedRunnerTranscribeEndpoint(tools.transcription?.endpoint) &&
     tools.whisper === undefined;
+}
+
+export function isHostedRunnerNativeParserToolchain(
+  parserToolchain: HostedAssistantRuntimeParserToolchainConfig,
+): boolean {
+  const tools = parserToolchain.tools;
+  return tools.ffmpeg?.command === HOSTED_RUNNER_DEFAULT_FFMPEG_COMMAND &&
+    tools.pdfinfo?.command === HOSTED_RUNNER_DEFAULT_PDFINFO_COMMAND &&
+    tools.pdftotext?.command === HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND &&
+    isHostedRunnerTranscribeEndpoint(tools.transcription?.endpoint) &&
+    tools.whisper === undefined;
+}
+
+function buildHostedRunnerTranscribeConfig(providerEgressCredential: string | null): {
+  authorizationHeader?: string;
+  endpoint: string;
+} {
+  return {
+    ...(providerEgressCredential
+      ? { authorizationHeader: `Bearer ${providerEgressCredential}` }
+      : {}),
+    endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+  };
+}
+
+function isHostedRunnerTranscribeEndpoint(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  const expected = new URL(CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT);
+  return parsed.origin === expected.origin &&
+    parsed.pathname === expected.pathname &&
+    parsed.search === "" &&
+    parsed.hash === "";
 }

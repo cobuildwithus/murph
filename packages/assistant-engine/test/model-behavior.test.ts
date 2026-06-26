@@ -404,6 +404,21 @@ describe('assistant execution prompt contract', () => {
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
     )
   })
+
+  it('warns before creating off-hours Linq/iMessage reminder automations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Linq/iMessage off-hours reminder guard')
+    expect(prompt).toContain('23:00 through 04:59')
+    expect(prompt).toContain("recipient's local timezone")
+    expect(prompt).toContain('channel=linq')
+    expect(prompt).toContain(
+      'A clear user confirmation for that exact off-hours time is enough to proceed',
+    )
+    expect(prompt).toContain(
+      'Do not add this extra confirmation for non-Linq channels',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
@@ -863,6 +878,9 @@ describe('assistant user-facing wording guidance', () => {
       'Do not write any substring shaped like `[text](url)`',
     )
     expect(prompt).toContain(
+      'If a URL must be shown, show only the clean raw URL',
+    )
+    expect(prompt).toContain(
       'Source links are not action links',
     )
     expect(prompt).toContain(
@@ -887,7 +905,7 @@ describe('assistant user-facing wording guidance', () => {
       'provide raw URLs only',
     )
     expect(prompt).toContain(
-      'Never copy citation helper URLs, citationMarker parameters, tracking parameters, or generated source wrappers into the user reply',
+      'Never copy citation helper URLs, citationMarker parameters, tracking parameters such as `utm_*`, or generated source wrappers into the user reply',
     )
     expect(prompt).toContain(
       'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default',
@@ -1158,7 +1176,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '9bc3fd71a8785e25a79376fe2b66720df0c529fe56c9b1ea2ef7080a4250e41d',
+      '3bd4e168aadc1b871827878964baa668c063a25d82017fb0a7a4d8f4fa3ca9ee',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

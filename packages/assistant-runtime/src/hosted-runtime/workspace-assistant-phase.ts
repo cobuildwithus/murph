@@ -7,11 +7,11 @@ import {
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceCheckpointReason,
-  HostedRuntimeRedactedJson,
-  HostedRuntimeRedactedObject,
-  HostedRuntimeRedactedScalar,
+import {
+  type HostedWorkspaceCheckpointReason,
+  type HostedRuntimeRedactedJson,
+  type HostedRuntimeRedactedObject,
+  type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   applyMurphManagedAutomations,

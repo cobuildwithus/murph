@@ -650,7 +650,10 @@ function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
     outcome.artifact.kind === 'result' || outcome.artifact.kind === 'deferred'
       ? outcome.artifact.result
       : null
-  return result?.deliveryIntentId ? [result.deliveryIntentId] : []
+  if (!result?.deliveryIntentId) {
+    return []
+  }
+  return [result.deliveryIntentId]
 }
 
 async function writeAssistantAutoReplyOutcomeArtifacts(input: {
