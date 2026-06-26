@@ -89,6 +89,11 @@ type HostedLinqFirstContactEventReceiptStore = {
         eventId: string;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord>;
+    deleteMany(input: {
+      where: {
+        eventId: string;
+      };
+    }): Promise<{ count: number }>;
     findUnique(input: {
       where: {
         eventId: string;
@@ -294,6 +299,17 @@ export async function recordHostedLinqFirstContactEventConsumed(input: {
     }
     throw error;
   }
+}
+
+export async function deleteHostedLinqFirstContactEventReceipt(input: {
+  eventId: string;
+  prisma: HostedLinqFirstContactEventReceiptStore;
+}): Promise<void> {
+  await input.prisma.hostedLinqFirstContactEventReceipt.deleteMany({
+    where: {
+      eventId: input.eventId,
+    },
+  });
 }
 
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {

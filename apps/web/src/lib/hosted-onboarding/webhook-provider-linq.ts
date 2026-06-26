@@ -616,6 +616,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  await recordHostedLinqFirstContactEventConsumed({
+    eventId: input.event.event_id,
+    prisma: input.prisma,
+  });
   const invite = await issueHostedInviteTx({
     channel: "linq",
     memberId: member.id,

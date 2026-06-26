@@ -19,6 +19,7 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
+  deleteHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
 } from "./linq-first-contact-admission";
 import {
@@ -207,6 +208,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
   for (const effect of input.sideEffects) {
     const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
     if (!noticeClaimed) {
+      await recordSkippedHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
       continue;
     }
 
@@ -216,13 +218,8 @@ export async function drainHostedLinqSideEffectsDirect(input: {
         signal: input.signal,
       });
 
-      if (effect.payload.template === "invite_signup") {
-        await recordHostedLinqFirstContactEventConsumed({
-          eventId: effect.payload.sourceEventId,
-          prisma: input.prisma,
-        });
-      }
     } catch (error) {
+      await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
     }
@@ -231,6 +228,34 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
   }
+}
+
+async function recordSkippedHostedLinqInviteSignupSideEffectConsumed(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "invite_signup") {
+    return;
+  }
+
+  await recordHostedLinqFirstContactEventConsumed({
+    eventId: effect.payload.sourceEventId,
+    prisma,
+  });
+}
+
+async function deleteHostedLinqInviteSignupSideEffectReceipt(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "invite_signup") {
+    return;
+  }
+
+  await deleteHostedLinqFirstContactEventReceipt({
+    eventId: effect.payload.sourceEventId,
+    prisma,
+  });
 }
 
 async function sendHostedLinqSideEffect(

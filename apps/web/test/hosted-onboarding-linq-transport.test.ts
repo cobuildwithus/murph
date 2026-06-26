@@ -536,6 +536,9 @@ describe("hosted Linq webhook transport", () => {
         }),
         update: vi.fn().mockResolvedValue({}),
       },
+      hostedLinqFirstContactEventReceipt: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -563,6 +566,11 @@ describe("hosted Linq webhook transport", () => {
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+    });
+    expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).toHaveBeenCalledWith({
+      where: {
+        eventId: "event-1",
+      },
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
