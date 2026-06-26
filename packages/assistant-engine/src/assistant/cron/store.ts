@@ -372,10 +372,7 @@ function normalizeAssistantCronStore(store: AssistantCronStore): AssistantCronSt
 function sanitizeAssistantCronStoreForPersistence(store: AssistantCronStore): AssistantCronStore {
   return {
     ...store,
-    jobs: store.jobs.map((job) => {
-      const { tags: _tags, ...persisted } = job
-      return assistantCronJobSchema.parse(persisted)
-    }),
+    jobs: store.jobs.map((job) => assistantCronJobSchema.parse(job)),
   }
 }
 

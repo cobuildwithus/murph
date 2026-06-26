@@ -211,7 +211,7 @@ async function executeHostedSystemWake(input: {
         ),
         createHostedRuntimeWakeCandidate(
           activityAutomation.nextWakeAt,
-          HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+          HOSTED_ASSISTANT_WAKE_REASON,
         ),
       ]);
       return createNoopMailboxEffect({

@@ -125,7 +125,7 @@ describe('device activity triggered automations', () => {
     expect(jobs[0]).toEqual(
       expect.objectContaining({
         enabled: true,
-        keepAfterRun: true,
+        keepAfterRun: false,
         prompt: expect.stringContaining('Lunch walk'),
         schedule: {
           kind: 'at',
@@ -133,7 +133,6 @@ describe('device activity triggered automations', () => {
         },
       }),
     )
-    expect(jobs[0]?.tags).toBeUndefined()
     const metadata = readAssistantDeviceActivityCronJobMetadata(jobs[0]?.name ?? '')
     expect(metadata).toEqual({
       authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
@@ -256,7 +255,6 @@ describe('device activity triggered automations', () => {
     })
 
     const [queued] = await readQueuedCronJobs(vaultRoot)
-    expect(queued?.tags).toBeUndefined()
     expect(readAssistantDeviceActivityCronJobMetadata(queued?.name ?? '')).toEqual({
       authorityKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       occurrenceKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
@@ -377,7 +375,7 @@ describe('device activity triggered automations', () => {
     )
   })
 
-  it('queues the next matching activity for a listener and leaves an immediate wake for later matches', async () => {
+  it('queues every matching activity for a listener up to the pass cap', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
         activityKind: 'run',
@@ -410,21 +408,32 @@ describe('device activity triggered automations', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
-      matched: 1,
+      matched: 2,
       nextWakeAt: '2026-06-07T13:01:00.000Z',
-      scheduled: 1,
+      scheduled: 2,
     })
 
     const scheduled = await readQueuedCronJobs(vaultRoot)
-    expect(scheduled).toHaveLength(1)
+    expect(scheduled).toHaveLength(2)
     expect(scheduled[0]?.prompt).toContain('Morning run')
-    expect(scheduled[0]?.prompt).not.toContain('Afternoon run')
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledTimes(1)
+    expect(scheduled[1]?.prompt).toContain('Afternoon run')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledTimes(2)
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:00:00.000Z',
         afterOccurredAt: '2026-06-07T12:00:00.000Z',
         afterEntityId: 'evt_run_1',
+        expectedActivityKind: 'run',
+        expectedSource: undefined,
+        lookup: 'auto_run',
+        vaultRoot,
+      }),
+    )
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T13:00:00.000Z',
+        afterOccurredAt: '2026-06-07T13:00:00.000Z',
+        afterEntityId: 'evt_run_2',
         expectedActivityKind: 'run',
         expectedSource: undefined,
         lookup: 'auto_run',
@@ -530,10 +539,10 @@ describe('device activity triggered automations', () => {
 
     const scheduled = await readQueuedCronJobs(vaultRoot)
     expect(scheduled).toHaveLength(1)
-    expect(scheduled[0]?.jobId).toBe(firstJobId)
+    expect(scheduled[0]?.jobId).not.toBe(firstJobId)
     expect(scheduled[0]?.prompt).not.toContain('First imported run')
     expect(scheduled[0]?.prompt).toContain('Second imported run')
-    expect(scheduled[0]?.target.sessionId).toBe('asst_existing')
+    expect(scheduled[0]?.target.sessionId).toBeNull()
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:05:00.000Z',
@@ -630,7 +639,7 @@ describe('device activity triggered automations', () => {
     expect(scheduled?.target.sessionId).toBeNull()
   })
 
-  it('does not recreate a consumed deterministic occurrence after a listener cursor patch failure', async () => {
+  it('rolls back a newly queued occurrence after a listener cursor patch failure', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
         activityKind: 'run',
@@ -659,9 +668,7 @@ describe('device activity triggered automations', () => {
       }),
     ).rejects.toThrow('cursor write failed')
 
-    const [queued] = await readQueuedCronJobs(vaultRoot)
-    expect(queued?.prompt).toContain('Consumed run')
-    await markQueuedCronJobsConsumed(vaultRoot, '2026-06-07T12:06:30.000Z')
+    await expect(readQueuedCronJobs(vaultRoot)).resolves.toEqual([])
     deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
 
     await expect(
@@ -672,12 +679,12 @@ describe('device activity triggered automations', () => {
     ).resolves.toEqual({
       matched: 1,
       nextWakeAt: '2026-06-07T12:07:00.000Z',
-      scheduled: 0,
+      scheduled: 1,
     })
 
-    const retainedJobs = await readQueuedCronJobs(vaultRoot)
-    expect(retainedJobs).toHaveLength(1)
-    expect(retainedJobs[0]?.enabled).toBe(false)
+    const queuedJobs = await readQueuedCronJobs(vaultRoot)
+    expect(queuedJobs).toHaveLength(1)
+    expect(queuedJobs[0]?.enabled).toBe(true)
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:05:00.000Z',
@@ -691,7 +698,7 @@ describe('device activity triggered automations', () => {
     )
   })
 
-  it('does not treat a stale live occurrence slot as current cursor coverage', async () => {
+  it('rolls back a newly queued occurrence when the listener cursor refuses to advance', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'run',
       after: '2026-06-07T12:00:00.000Z',
@@ -725,10 +732,7 @@ describe('device activity triggered automations', () => {
       scheduled: 0,
     })
 
-    const [staleJob] = await readQueuedCronJobs(vaultRoot)
-    expect(staleJob?.enabled).toBe(true)
-    const staleMetadata = readAssistantDeviceActivityCronJobMetadata(staleJob?.name ?? '')
-    expect(staleMetadata?.parentAutomationId).toBe('auto_run_stale_slot')
+    await expect(readQueuedCronJobs(vaultRoot)).resolves.toEqual([])
 
     deviceActivityMocks.automations = [{
       ...automation,
@@ -742,11 +746,11 @@ describe('device activity triggered automations', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
-      matched: 0,
+      matched: 1,
       nextWakeAt: '2026-06-07T12:07:00.000Z',
-      scheduled: 0,
+      scheduled: 1,
     })
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledTimes(1)
   })
 
   it('does not recreate a consumed occurrence when the same activity is rescored later', async () => {
@@ -814,12 +818,13 @@ describe('device activity triggered automations', () => {
     ).resolves.toEqual({
       matched: 1,
       nextWakeAt: '2026-06-07T12:31:00.000Z',
-      scheduled: 0,
+      scheduled: 1,
     })
 
-    const retainedJobs = await readQueuedCronJobs(vaultRoot)
-    expect(retainedJobs).toHaveLength(1)
-    expect(retainedJobs[0]?.enabled).toBe(false)
+    const queuedJobs = await readQueuedCronJobs(vaultRoot)
+    expect(queuedJobs).toHaveLength(1)
+    expect(queuedJobs[0]?.enabled).toBe(true)
+    expect(queuedJobs[0]?.prompt).toContain('Recorded at: 2026-06-07T12:30:00.000Z')
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:30:00.000Z',
@@ -831,7 +836,7 @@ describe('device activity triggered automations', () => {
     )
   })
 
-  it('bounds activity handoff to one queued occurrence per listener pass', async () => {
+  it('bounds activity handoff to the queued occurrence cap per listener pass', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
         activityKind: 'run',
@@ -858,21 +863,33 @@ describe('device activity triggered automations', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
-      matched: 1,
+      matched: 25,
       nextWakeAt: '2026-06-07T12:30:00.000Z',
-      scheduled: 1,
+      scheduled: 25,
     })
 
     const scheduled = await readQueuedCronJobs(vaultRoot)
-    expect(scheduled).toHaveLength(1)
+    expect(scheduled).toHaveLength(25)
     expect(scheduled[0]?.prompt).toContain('Run 0')
-    expect(scheduled[0]?.prompt).not.toContain('Run 1')
-    expect(scheduled[0]?.prompt).not.toContain('Run 25')
+    expect(scheduled[1]?.prompt).toContain('Run 1')
+    expect(scheduled[24]?.prompt).toContain('Run 24')
+    expect(scheduled.some((job) => job.prompt.includes('Run 25'))).toBe(false)
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:01:00.000Z',
         afterOccurredAt: '2026-06-07T12:01:00.000Z',
         afterEntityId: 'evt_run_00',
+        expectedActivityKind: 'run',
+        expectedSource: undefined,
+        lookup: 'auto_run',
+        vaultRoot,
+      }),
+    )
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:25:00.000Z',
+        afterOccurredAt: '2026-06-07T12:25:00.000Z',
+        afterEntityId: 'evt_run_24',
         expectedActivityKind: 'run',
         expectedSource: undefined,
         lookup: 'auto_run',
@@ -1008,9 +1025,9 @@ async function markQueuedCronJobsConsumed(
   const store = await readAssistantCronStore(paths)
   await writeAssistantCronStore(paths, {
     ...store,
-    jobs: store.jobs.map((job) => {
+    jobs: store.jobs.flatMap((job) => {
       const updated = update?.(job) ?? job
-      return {
+      const consumed = {
         ...updated,
         enabled: false,
         updatedAt: timestamp,
@@ -1023,6 +1040,7 @@ async function markQueuedCronJobsConsumed(
           runningPid: null,
         },
       }
+      return updated.keepAfterRun ? [consumed] : []
     }),
   })
 }

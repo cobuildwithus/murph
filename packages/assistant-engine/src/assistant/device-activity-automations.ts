@@ -27,7 +27,6 @@ import {
 import {
   appendAssistantDeviceActivityCronJobMetadata,
   buildAssistantDeviceActivityAuthorityKey,
-  readAssistantDeviceActivityOccurrenceTag,
   readAssistantDeviceActivityCronJobMetadata,
 } from './device-activity-cron-tags.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -55,9 +54,17 @@ interface MatchedDeviceActivity extends DeviceActivityCandidate {
 }
 
 type DeviceActivityNotificationScheduleResult =
-  | 'alreadyQueued'
-  | 'blocked'
-  | 'queued'
+  | {
+      cursor: DeviceActivityCursor
+      status: 'alreadyQueued' | 'queued'
+    }
+  | { status: 'blocked' | 'notAdvanced' }
+
+type DeviceActivityCursor = {
+  after: string
+  afterEntityId: string
+  afterOccurredAt: string
+}
 
 export interface ScheduleDeviceActivityTriggeredAutomationsInput {
   now?: () => string
@@ -125,6 +132,7 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
       continue
     }
 
+    let currentAutomation = automation
     for (const activity of matchBatch.activities) {
       if (input.signal?.aborted) {
         break
@@ -132,23 +140,17 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
 
       const enqueued = await scheduleDeviceActivityAutomationNotification({
         activity,
-        automation,
+        automation: currentAutomation,
         nowIso: input.nowIso,
         vault: input.vault,
       })
-      if (enqueued === 'blocked') {
+      if (enqueued.status !== 'queued' && enqueued.status !== 'alreadyQueued') {
         break
       }
-      const advanced = await advanceDeviceActivityAutomationCursor({
-        activity,
-        automation,
-        vault: input.vault,
-      })
-      if (advanced) {
-        matched += 1
-        if (enqueued === 'queued') {
-          scheduled += 1
-        }
+      currentAutomation = withAdvancedDeviceActivityCursor(currentAutomation, enqueued.cursor)
+      matched += 1
+      if (enqueued.status === 'queued') {
+        scheduled += 1
       }
     }
   }
@@ -196,10 +198,7 @@ async function hasDueAssistantRequireSendCronJob(input: {
   const store = await readAssistantCronStore(paths)
 
   return store.jobs.some((job) =>
-    (
-      job.tags?.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG) === true ||
-      readAssistantDeviceActivityCronJobMetadata(job.name) !== null
-    ) &&
+    readAssistantDeviceActivityCronJobMetadata(job.name) !== null &&
     isAssistantCronJobDue(job, input.nowIso)
   )
 }
@@ -436,17 +435,16 @@ async function scheduleDeviceActivityAutomationNotification(input: {
       : store.jobs[existingIndex] as AssistantCronJob
     if (existing) {
       const existingMetadata = readAssistantDeviceActivityCronJobMetadata(existing.name)
-      const existingOccurrenceKey =
-        existingMetadata?.occurrenceKey ??
-        readAssistantDeviceActivityOccurrenceTag(existing.tags)?.trim() ??
-        null
       if (
-        existingOccurrenceKey === occurrenceKey &&
+        existingMetadata?.occurrenceKey === occurrenceKey &&
         existingMetadata?.parentAutomationId === input.automation.automationId &&
         existingMetadata.authorityKey === authorityKey &&
         deviceActivityOccurrenceJobHasCoverage(existing)
       ) {
-        return 'alreadyQueued'
+        const cursor = await advanceDeviceActivityAutomationCursor(input)
+        return cursor
+          ? { status: 'alreadyQueued', cursor }
+          : { status: 'notAdvanced' }
       }
       if (
         existing.enabled ||
@@ -454,7 +452,7 @@ async function scheduleDeviceActivityAutomationNotification(input: {
         existing.state.pendingDeliveryIntentId ||
         existing.state.runningAt !== null
       ) {
-        return 'blocked'
+        return { status: 'blocked' }
       }
     }
 
@@ -471,7 +469,18 @@ async function scheduleDeviceActivityAutomationNotification(input: {
       store.jobs = sortAssistantCronJobs(store.jobs)
     }
     await writeAssistantCronStore(paths, store)
-    return 'queued'
+
+    try {
+      const cursor = await advanceDeviceActivityAutomationCursor(input)
+      if (cursor) {
+        return { status: 'queued', cursor }
+      }
+      await removeAssistantCronJobFromStore(paths, jobId)
+      return { status: 'notAdvanced' }
+    } catch (error) {
+      await removeAssistantCronJobFromStore(paths, jobId)
+      throw error
+    }
   })
 }
 
@@ -496,7 +505,7 @@ function buildDeviceActivityAutomationNotificationJob(input: {
       },
     ),
     enabled: true,
-    keepAfterRun: true,
+    keepAfterRun: false,
     prompt: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
     schedule: {
       kind: 'at',
@@ -532,13 +541,10 @@ function deviceActivityOccurrenceJobHasCoverage(job: AssistantCronJob): boolean 
 }
 
 function buildDeviceActivityAutomationNotificationJobId(input: {
+  activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
 }): string {
-  const digest = createHash('sha256')
-    .update(input.automation.automationId)
-    .digest('hex')
-    .slice(0, 40)
-  return `cron_device_activity_${digest}`
+  return `cron_device_activity_${buildDeviceActivityAutomationNotificationOccurrenceKey(input)}`
 }
 
 function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
@@ -549,6 +555,10 @@ function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
     .update(input.automation.automationId)
     .update('\0')
     .update(input.activity.entityId)
+    .update('\0')
+    .update(input.activity.triggeredAt)
+    .update('\0')
+    .update(input.activity.occurredAt)
     .digest('hex')
     .slice(0, 40)
 }
@@ -603,13 +613,13 @@ async function advanceDeviceActivityAutomationCursor(input: {
   activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
   vault: string
-}): Promise<boolean> {
+}): Promise<DeviceActivityCursor | null> {
   const cursor = resolveNextDeviceActivityCursor({
     activities: [input.activity],
     schedule: input.automation.schedule,
   })
   if (!cursor) {
-    return false
+    return null
   }
 
   const result = await advanceAutomationDeviceActivityCursor({
@@ -624,16 +634,47 @@ async function advanceDeviceActivityAutomationCursor(input: {
     expectedRoute: input.automation.route,
     expectedSource: input.automation.schedule.source,
   })
-  return result.advanced
+  return result.advanced ? cursor : null
 }
 
 function resolveNextDeviceActivityCursor(input: {
   activities: readonly MatchedDeviceActivity[]
   schedule: DeviceActivitySchedule
-}): { after: string; afterOccurredAt: string; afterEntityId: string } | null {
+}): DeviceActivityCursor | null {
   return resolveNextDeviceActivityCoverageCursor({
     cursor: input.schedule,
     keys: input.activities,
+  })
+}
+
+function withAdvancedDeviceActivityCursor(
+  automation: DeviceActivityAutomation,
+  cursor: DeviceActivityCursor,
+): DeviceActivityAutomation {
+  return {
+    ...automation,
+    schedule: {
+      ...automation.schedule,
+      after: cursor.after,
+      afterEntityId: cursor.afterEntityId,
+      afterOccurredAt: cursor.afterOccurredAt,
+    },
+  }
+}
+
+async function removeAssistantCronJobFromStore(
+  paths: ReturnType<typeof resolveAssistantStatePaths>,
+  jobId: string,
+): Promise<void> {
+  const store = await readAssistantCronStore(paths)
+  const jobs = store.jobs.filter((job) => job.jobId !== jobId)
+  if (jobs.length === store.jobs.length) {
+    return
+  }
+
+  await writeAssistantCronStore(paths, {
+    ...store,
+    jobs,
   })
 }
 

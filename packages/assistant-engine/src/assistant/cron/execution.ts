@@ -695,7 +695,7 @@ function listAssistantCronNotificationTags(
     return job.source.tags
   }
 
-  return job.job.tags ?? []
+  return []
 }
 
 function finalizeAssistantCronJobAfterRun(input: {
@@ -896,9 +896,7 @@ async function resolveDeviceActivityParentAuthorityError(input: {
 
   const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.job.name)
   if (!metadata) {
-    return input.job.job.tags?.length
-      ? ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
-      : null
+    return null
   }
 
   const parentAutomation = await readDeviceActivityParentAutomation({
