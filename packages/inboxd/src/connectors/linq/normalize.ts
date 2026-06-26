@@ -298,40 +298,31 @@ async function buildLinqAttachments(
       isLinqAttachmentPart(entry.part)
     );
   const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
-  const budgetController = normalizedTimeoutMs !== null ? new AbortController() : null;
-  const downloadSignal = budgetController?.signal ?? signal;
-  const releaseRelay = signal && budgetController ? relayAbort(signal, budgetController) : () => {};
-  const timeout = budgetController && normalizedTimeoutMs !== null
-    ? setTimeout(() => budgetController.abort(), normalizedTimeoutMs)
-    : null;
 
-  try {
-    return await Promise.all(attachmentParts.map(async ({ index, part }) => {
-      const data = await downloadLinqAttachmentInlineBestEffort(
+  return await Promise.all(attachmentParts.map(async ({ index, part }) => {
+    const data = await runLinqAttachmentDownloadWithTimeout(
+      (downloadSignal) => downloadLinqAttachmentInlineBestEffort(
         part,
         downloadDriver,
         downloadSignal,
-      );
-      const mime = normalizeTextValue(part.mime_type ?? null);
-      const fileName = normalizeTextValue(part.filename ?? null)
-        ?? inferAttachmentFileName(part)
-        ?? inferFallbackAttachmentFileName(part, mime, index);
+      ),
+      normalizedTimeoutMs,
+      signal,
+    );
+    const mime = normalizeTextValue(part.mime_type ?? null);
+    const fileName = normalizeTextValue(part.filename ?? null)
+      ?? inferAttachmentFileName(part)
+      ?? inferFallbackAttachmentFileName(part, mime, index);
 
-      return {
-        externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
-        kind: inferLinqAttachmentKind(part.type, mime, fileName),
-        mime,
-        fileName,
-        byteSize: normalizeAttachmentByteSize(part.size, data),
-        data,
-      };
-    }));
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-    releaseRelay();
-  }
+    return {
+      externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
+      kind: inferLinqAttachmentKind(part.type, mime, fileName),
+      mime,
+      fileName,
+      byteSize: normalizeAttachmentByteSize(part.size, data),
+      data,
+    };
+  }));
 }
 
 async function downloadLinqAttachmentInlineBestEffort(
@@ -368,6 +359,40 @@ async function downloadLinqAttachmentInlineBestEffort(
     return await downloadOperation(signal);
   } catch {
     return null;
+  }
+}
+
+async function runLinqAttachmentDownloadWithTimeout(
+  downloadOperation: (signal?: AbortSignal) => Promise<Uint8Array | null>,
+  timeoutMs: number | null,
+  signal?: AbortSignal,
+): Promise<Uint8Array | null> {
+  if (timeoutMs === null) {
+    return await downloadOperation(signal);
+  }
+
+  const controller = new AbortController();
+  const releaseRelay = signal ? relayAbort(signal, controller) : () => {};
+
+  try {
+    return await new Promise<Uint8Array | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, timeoutMs);
+
+      void downloadOperation(controller.signal)
+        .then((data) => {
+          clearTimeout(timeout);
+          resolve(data);
+        })
+        .catch(() => {
+          clearTimeout(timeout);
+          resolve(null);
+        });
+    });
+  } finally {
+    releaseRelay();
   }
 }
 

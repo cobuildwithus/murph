@@ -554,6 +554,66 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).resolves.toEqual(Uint8Array.from([4, 5, 6]));
   });
 
+  it("refreshes hosted attachment downloads when the direct URL stalls", async () => {
+    vi.useFakeTimers();
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      assert.equal(
+        String(input),
+        "https://api.linqapp.com/api/partner/v3/attachments/att_voice_stalled_direct",
+      );
+      expect(init?.signal?.aborted).toBe(false);
+      return new Response(JSON.stringify({
+        download_url: "https://cdn.linqapp.com/files/fresh-stalled-voice.m4a",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === "https://cdn.linqapp.com/files/stalled-voice.m4a") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+
+      assert.equal(url, "https://cdn.linqapp.com/files/fresh-stalled-voice.m4a");
+      expect(init?.signal?.aborted).toBe(false);
+      return Promise.resolve(new Response(Uint8Array.from([6, 5, 4]), { status: 200 }));
+    });
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        providerFetch,
+        publicInternetFetch,
+      },
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    const downloadPromise = driver.downloadPart({
+      attachmentId: "att_voice_stalled_direct",
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/stalled-voice.m4a",
+    }, undefined);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(downloadPromise).resolves.toEqual(Uint8Array.from([6, 5, 4]));
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(2);
+  });
+
   it("downloads hosted voice memos from an explicit local CDN override after metadata lookup", async () => {
     process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
     process.env.LINQ_API_TOKEN = "linq-token";

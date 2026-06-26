@@ -697,7 +697,7 @@ test("normalizeHostedLinqConversationMessage uses downloadUrl when downloadPart 
   ]);
 });
 
-test("normalizeHostedLinqConversationMessage applies one timeout budget across attachments", async () => {
+test("normalizeHostedLinqConversationMessage starts attachment timeout budgets concurrently", async () => {
   vi.useFakeTimers();
 
   try {

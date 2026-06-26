@@ -74,6 +74,7 @@ interface HostedLinqAttachmentDownloadAttemptLog {
 export const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_HOSTED_LINQ_ATTACHMENT_DOWNLOAD_RETRY_DELAYS_MS = [250, 1_000] as const;
 export const HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const HOSTED_LINQ_ATTACHMENT_DIRECT_DOWNLOAD_TIMEOUT_MS = 5_000;
 const DEFAULT_HOSTED_LINQ_ATTACHMENT_CDN_BASE_URL = "https://cdn.linqapp.com";
 const DEFAULT_HOSTED_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const HOSTED_LINQ_ATTACHMENT_METADATA_TIMEOUT_MS = 5_000;
@@ -129,6 +130,7 @@ export function createHostedLinqAttachmentDownloadDriver(
         const bytes = await downloadHostedLinqAttachmentBytes(normalizedUrl, {
           fetchImplementation: downloadFetch,
           signal,
+          timeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
         });
         await writeHostedLinqAttachmentDownloadAttemptLog({
           attempt: {
@@ -304,6 +306,7 @@ async function downloadHostedLinqAttachmentPart(input: {
         declaredSize,
         fetchImplementation: input.downloadFetch,
         signal: input.signal,
+        timeoutMs: HOSTED_LINQ_ATTACHMENT_DIRECT_DOWNLOAD_TIMEOUT_MS,
       });
       await writeHostedLinqAttachmentDownloadAttemptLog({
         attempt: {
@@ -426,6 +429,7 @@ async function downloadHostedLinqAttachmentPart(input: {
       declaredSize,
       fetchImplementation: input.downloadFetch,
       signal: input.signal,
+      timeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
     });
     await writeHostedLinqAttachmentDownloadAttemptLog({
       attempt: {
@@ -476,35 +480,96 @@ async function downloadHostedLinqAttachmentBytes(
     declaredSize?: number | null;
     fetchImplementation: typeof fetch;
     signal?: AbortSignal;
+    timeoutMs?: number | null;
   },
 ): Promise<Uint8Array> {
   assertHostedLinqAttachmentWithinByteLimit(input.declaredSize ?? null);
 
-  const response = await input.fetchImplementation(url, {
-    method: "GET",
-    signal: input.signal,
-  });
+  return await runHostedLinqAttachmentByteFetchWithTimeout(
+    async (signal) => {
+      const response = await input.fetchImplementation(url, {
+        method: "GET",
+        signal,
+      });
 
-  if (!response.ok) {
-    throw new HostedLinqAttachmentDownloadError(
-      "download_http_status",
-      `Hosted Linq attachment download failed with ${response.status} ${response.statusText}.`,
-      response.status,
-    );
+      if (!response.ok) {
+        throw new HostedLinqAttachmentDownloadError(
+          "download_http_status",
+          `Hosted Linq attachment download failed with ${response.status} ${response.statusText}.`,
+          response.status,
+        );
+      }
+
+      assertHostedLinqAttachmentWithinByteLimit(
+        parseHostedLinqAttachmentContentLength(response.headers.get("content-length")),
+      );
+
+      const reader = response.body?.getReader();
+      if (reader) {
+        return readHostedLinqAttachmentBodyWithLimit(reader);
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      assertHostedLinqAttachmentWithinByteLimit(bytes.byteLength);
+      return bytes;
+    },
+    {
+      signal: input.signal,
+      timeoutMs: input.timeoutMs ?? null,
+    },
+  );
+}
+
+async function runHostedLinqAttachmentByteFetchWithTimeout(
+  operation: (signal?: AbortSignal) => Promise<Uint8Array>,
+  input: {
+    signal?: AbortSignal;
+    timeoutMs: number | null;
+  },
+): Promise<Uint8Array> {
+  if (
+    input.timeoutMs === null
+    || !Number.isFinite(input.timeoutMs)
+    || input.timeoutMs < 0
+  ) {
+    return await operation(input.signal);
   }
 
-  assertHostedLinqAttachmentWithinByteLimit(
-    parseHostedLinqAttachmentContentLength(response.headers.get("content-length")),
+  const timeoutMs = Math.floor(input.timeoutMs);
+  const controller = new AbortController();
+  const releaseRelay = input.signal ? relayAbortSignal(input.signal, controller) : () => {};
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutError = (cause?: unknown) => new HostedLinqAttachmentDownloadError(
+    "download_timeout",
+    `Hosted Linq attachment download timed out after ${timeoutMs}ms.`,
+    null,
+    { cause },
   );
 
-  const reader = response.body?.getReader();
-  if (reader) {
-    return readHostedLinqAttachmentBodyWithLimit(reader);
-  }
+  try {
+    const operationPromise = operation(controller.signal).catch((error: unknown) => {
+      if (timedOut && !input.signal?.aborted) {
+        throw timeoutError(error);
+      }
+      throw error;
+    });
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(timeoutError());
+      }, timeoutMs);
+    });
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  assertHostedLinqAttachmentWithinByteLimit(bytes.byteLength);
-  return bytes;
+    return await Promise.race([operationPromise, timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    releaseRelay();
+  }
 }
 
 async function readHostedLinqAttachmentBodyWithLimit(
