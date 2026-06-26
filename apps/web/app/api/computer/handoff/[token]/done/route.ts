@@ -23,8 +23,7 @@ export async function POST(
   const contactOptions = await resolveHostedMurphContactOptions({
     message: { body: HANDOFF_DONE_REPLY_BODY },
   });
-  const fallbackHref = `/computer/handoff/${encodeURIComponent(token)}`;
-  const redirectTo = contactOptions[0]?.href ?? fallbackHref;
+  const redirectTo = `/computer/handoff/${encodeURIComponent(token)}`;
 
-  return NextResponse.json({ contactOptions, fallbackHref, redirectTo });
+  return NextResponse.json({ contactOptions, redirectTo });
 }
