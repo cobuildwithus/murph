@@ -4,6 +4,9 @@ import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingTelegramPrivateState,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  createHostedTelegramUsernameLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -395,6 +398,59 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
+  });
+
+  it("ignores Telegram family invite tokens that are not acceptable for the sender", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue({
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      status: "pending",
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Alice_User"),
+    });
+    const hostedMemberRoutingFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupInvite: {
+        findUnique: hostedAccountGroupInviteFindUnique,
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Bob",
+            id: 456,
+            username: "bob_user",
+          },
+          message_id: 3,
+          text: "/start family_invite_telegram",
+        },
+        update_id: 323,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-not-accepted",
+    });
+
+    expect(hostedAccountGroupInviteFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        inviteCode: "invite_telegram",
+      },
+    }));
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("refreshes the persisted Telegram routing target when the inbound direct thread carries business context", async () => {

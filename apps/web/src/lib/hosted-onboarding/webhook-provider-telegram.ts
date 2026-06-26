@@ -6,10 +6,14 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  isHostedOnboardingError,
+} from "./errors";
+import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromTelegramTx,
   hasHostedMemberEffectiveActiveAccessForMember,
+  parseHostedFamilyInviteStartToken,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
 import {
@@ -56,14 +60,26 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   const telegramMessage = buildHostedTelegramMessagePayload(input.update);
-  const familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
-    now: new Date(summary.occurredAt),
-    telegramThreadId: telegramMessage?.threadId ?? null,
-    telegramUsername: summary.senderTelegramUsername,
-    telegramUserId: summary.senderTelegramUserId,
-    text: telegramMessage?.text ?? null,
-    tx: input.prisma,
-  });
+  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(
+    telegramMessage?.text ?? null,
+  ) !== null;
+  let familyInviteNotAccepted = false;
+  let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
+  try {
+    familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
+      now: new Date(summary.occurredAt),
+      telegramThreadId: telegramMessage?.threadId ?? null,
+      telegramUsername: summary.senderTelegramUsername,
+      telegramUserId: summary.senderTelegramUserId,
+      text: telegramMessage?.text ?? null,
+      tx: input.prisma,
+    });
+  } catch (error) {
+    if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
+      throw error;
+    }
+    familyInviteNotAccepted = true;
+  }
   if (familyAcceptance) {
     const route = await resolveHostedFamilyChatNotificationRouteTx({
       fallbackTelegramThreadId: telegramMessage?.threadId ?? null,
@@ -92,6 +108,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           }
         : {}),
     };
+  }
+
+  if (familyInviteTokenPresent || familyInviteNotAccepted) {
+    return buildIgnoredTelegramWebhookPlan("family-invite-not-accepted");
   }
 
   const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
@@ -165,4 +185,21 @@ function buildIgnoredTelegramWebhookPlan(
       reason,
     },
   };
+}
+
+const HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
+  "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+  "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+  "HOSTED_FAMILY_INVITE_NOT_FOUND",
+  "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+  "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+  "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
+  "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+  "HOSTED_FAMILY_TELEGRAM_IDENTITY_AMBIGUOUS",
+]);
+
+function isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && !error.retryable
+    && HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);
 }
