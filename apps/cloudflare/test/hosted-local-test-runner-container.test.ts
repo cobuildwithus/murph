@@ -74,7 +74,7 @@ function createOutboundEnv(input: {
     USER_RUNNER: {
       getByName: () => ({
         validateActiveRuntimeWriteFence: async (fenceInput: { userId: string }) => ({
-          attemptId: "attempt_active_user_fence",
+          attemptId: "attempt_active_runtime",
           leaseGeneration: "7",
           owns: true,
           userId: fenceInput.userId,

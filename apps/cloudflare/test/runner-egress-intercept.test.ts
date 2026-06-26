@@ -196,7 +196,7 @@ function createActiveRuntimeWriteFenceValidationResult(input: {
   userId: string;
 }): WorkerActiveRuntimeWriteFenceValidationResult {
   return {
-    attemptId: "attempt_active_user_fence",
+    attemptId: "attempt_active_runtime",
     leaseGeneration: "7",
     owns: true,
     userId: input.userId,
@@ -1590,7 +1590,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "provider_egress_credential",
@@ -1890,7 +1889,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerRequestAuthorized: false,
           providerEgressAuthMode: "provider_egress_token",
@@ -1986,7 +1984,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerRequestAuthorized: false,
