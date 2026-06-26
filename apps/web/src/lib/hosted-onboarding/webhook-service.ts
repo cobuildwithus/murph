@@ -163,7 +163,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             signal: input.signal,
           });
           firstContactAdmissionClassified = true;
-          const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
+          const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecisionForEvent({
             decision: classifiedAdmission,
             eventId: event.event_id,
             prisma,
@@ -183,15 +183,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           }
 
           firstContactAdmissionUnavailable = true;
-          logHostedLinqFirstContactAdmissionFailOpen({
-            error,
-            eventId: event.event_id,
-          });
           plan = await planHostedOnboardingLinqWebhookAfterFirstContactAdmission({
             event,
             prisma,
             requireFirstContactAdmission,
+            respectRecordedAdmission: true,
           });
+          if (plan.response.reason !== "blocked-first-contact-admission") {
+            logHostedLinqFirstContactAdmissionFailOpen({
+              error,
+              eventId: event.event_id,
+            });
+          }
         }
       }
 
@@ -352,17 +355,72 @@ async function planHostedOnboardingLinqWebhookAfterFirstContactAdmission(input: 
   event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
   prisma: PrismaClient;
   requireFirstContactAdmission: boolean;
+  respectRecordedAdmission?: boolean;
 }): Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>> {
   return await runHostedOnboardingWebhookTransaction(
     input.prisma,
-    (transaction) =>
-      planHostedOnboardingLinqWebhook({
+    async (transaction) => {
+      await acquireHostedLinqFirstContactAdmissionEventLockTx({
+        eventId: input.event.event_id,
+        transaction,
+      });
+
+      if (input.respectRecordedAdmission === true) {
+        const recordedAdmission = await readRecordedHostedLinqFirstContactAdmissionDecision({
+          eventId: input.event.event_id,
+          prisma: transaction,
+        });
+        if (recordedAdmission?.kind === "block") {
+          return buildBlockedHostedLinqFirstContactAdmissionPlan();
+        }
+      }
+
+      return planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: true,
         requireFirstContactAdmission: input.requireFirstContactAdmission,
         prisma: transaction,
-      }),
+      });
+    },
   );
+}
+
+async function recordHostedLinqFirstContactAdmissionDecisionForEvent(input: {
+  decision: Parameters<typeof recordHostedLinqFirstContactAdmissionDecision>[0]["decision"];
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof recordHostedLinqFirstContactAdmissionDecision>>> {
+  return await runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    async (transaction) => {
+      await acquireHostedLinqFirstContactAdmissionEventLockTx({
+        eventId: input.eventId,
+        transaction,
+      });
+      return recordHostedLinqFirstContactAdmissionDecision({
+        decision: input.decision,
+        eventId: input.eventId,
+        prisma: transaction,
+      });
+    },
+  );
+}
+
+async function acquireHostedLinqFirstContactAdmissionEventLockTx(input: {
+  eventId: string;
+  transaction: Prisma.TransactionClient;
+}): Promise<void> {
+  const eventId = input.eventId.trim();
+  if (!eventId) {
+    throw new TypeError("Hosted Linq first-contact admission lock requires an event id.");
+  }
+
+  await input.transaction.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted-linq-first-contact-admission:event'),
+      hashtext(${eventId})
+    )
+  `;
 }
 
 function isHostedLinqFirstContactAdmissionClassifierUnavailableError(error: unknown): boolean {
