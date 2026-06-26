@@ -504,7 +504,7 @@ describe("RunnerStateStore schema guard", () => {
     });
 
     await expect(store.validateProviderEgressCredential({
-      providerKind: "exa",
+      providerKind: "unsupported_provider",
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     })).resolves.toEqual({

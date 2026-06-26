@@ -120,6 +120,19 @@ Hosted Linq typing events are verified and ignored. There is no direct
 web-to-Cloudflare prewarm or nudge path; the Temporal mailbox signal is the
 only wake authority for hosted runtime work.
 
+Hosted Linq unknown first-contact admission is a web-owned classifier gate on
+the signup-link path only. It runs after cheap deterministic ingress filters and
+before member/invite mutation, calls OpenAI through an env-only key with bounded
+message metadata/text, reduces provider service metadata to a fixed enum,
+persists only the event-id keyed terminal allow/block decision, stores no
+classifier payload or response body, and fails closed without sending a reply
+when enforcement is enabled and intent is not classified as allowed. OpenAI
+refusal and content-filter outcomes are terminal unsupported content blocks,
+while malformed, non-completed, or otherwise classifier-unavailable states return
+typed retryable errors before side effects. Active members, explicit thread routes, own messages,
+group chats, local guard rejects, deterministic URL/STOP-style spam, and other
+non-invite paths bypass the classifier.
+
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active
 owner of execution and commit authority rather than mailbox-work truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag

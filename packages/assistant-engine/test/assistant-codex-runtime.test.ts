@@ -35,6 +35,7 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
+  executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
   snapshotExpectedCodexRootProcess,
@@ -8340,6 +8341,108 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
+  it('waits for the Codex account update before verifying managed ChatGPT connect', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-managed-auth-work-')
+    const codexHome = await createTempDir('assistant-codex-managed-auth-home-')
+    const child = new MockChildProcess()
+    const loginStarted = createDeferred<void>()
+    const onDeviceCode = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'account/updated',
+            params: {
+              authMode: 'chatgpt',
+              planType: 'pro',
+            },
+          }))
+
+          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
+          child.stdout.write(jsonLine({
+            id: initialRead.id,
+            result: {
+              account: null,
+              requiresOpenaiAuth: true,
+            },
+          }))
+
+          const loginStart = await waitForRpcMethod(child, 'account/login/start')
+          expect(loginStart.params).toEqual({
+            type: 'chatgptDeviceCode',
+          })
+          child.stdout.write(jsonLine({
+            id: loginStart.id,
+            result: {
+              type: 'chatgptDeviceCode',
+              loginId: 'login-managed-chatgpt',
+              verificationUrl: 'https://auth.openai.com/codex/device',
+              userCode: 'ABCD-1234',
+            },
+          }))
+          loginStarted.resolve()
+        })()
+      })
+
+      return child
+    })
+
+    const operation = executeCodexManagedAccountOperation({
+      action: 'connect',
+      codexHome,
+      onDeviceCode,
+      timeoutMs: 1_000,
+      workingDirectory,
+    })
+
+    await loginStarted.promise
+    await waitForMockCall(onDeviceCode, 1)
+    expect(onDeviceCode).toHaveBeenCalledWith({
+      userCode: 'ABCD-1234',
+      verificationUrl: 'https://auth.openai.com/codex/device',
+    })
+
+    child.stdout.write(jsonLine({
+      method: 'account/login/completed',
+      params: {
+        loginId: 'login-managed-chatgpt',
+        success: true,
+      },
+    }))
+    await waitForStableMicrotask()
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/read',
+    )).toHaveLength(1)
+
+    child.stdout.write(jsonLine({
+      method: 'account/updated',
+      params: {
+        authMode: 'chatgpt',
+        planType: 'pro',
+      },
+    }))
+
+    const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
+    child.stdout.write(jsonLine({
+      id: verifiedRead.id,
+      result: {
+        account: {
+          type: 'chatgpt',
+          email: 'user@example.com',
+          planType: 'pro',
+        },
+        requiresOpenaiAuth: true,
+      },
+    }))
+
+    await expect(operation).resolves.toEqual({
+      kind: 'connected',
+    })
+  })
+
   it('preserves missing Codex startup errors emitted before turn binding', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prebind-not-found-')
 
@@ -14455,6 +14558,25 @@ async function waitForRpcMethodCount(
   }
 
   throw new Error(`Expected ${count} RPC ${method} messages from Murph.`)
+}
+
+async function waitForMockCall(
+  mock: { mock: { calls: unknown[] } },
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (mock.mock.calls.length >= count) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  throw new Error(`Expected mock to be called at least ${count} time(s).`)
+}
+
+async function waitForStableMicrotask(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 async function waitForProcessKill(

@@ -351,10 +351,12 @@ async function fetchLabelsApi<TSource extends string>(
   } = {},
 ): Promise<Response> {
   let response: Response
+  const providerCredential = readHostedDataApiProviderCredential(config, env)
 
   try {
     const headers = new Headers(options.headers)
     headers.set('accept', 'application/json')
+    headers.set('authorization', `Bearer ${providerCredential}`)
     response = await fetchImpl(url, {
       body: options.body,
       headers,
@@ -380,6 +382,21 @@ async function fetchLabelsApi<TSource extends string>(
   }
 
   return response
+}
+
+function readHostedDataApiProviderCredential<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  env: NodeJS.ProcessEnv,
+): string {
+  const credential = normalizeNullableString(env.MURPH_DATA_API_KEY)
+  if (credential) {
+    return credential
+  }
+
+  throw new VaultCliError(
+    `${config.errorCodePrefix}_credential_missing`,
+    `${config.searchDescription} requires the hosted Murph data API provider credential.`,
+  )
 }
 
 async function parseLabelsApiPayload(

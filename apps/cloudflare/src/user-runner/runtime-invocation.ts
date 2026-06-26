@@ -69,6 +69,16 @@ import { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
+const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
+  EXA_API_KEY: "exa",
+  MAPBOX_ACCESS_TOKEN: "mapbox",
+  MURPH_DATA_API_KEY: "murph_data_api",
+  OPENAI_API_KEY: "openai",
+} as const;
+const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
+
+type HostedRunnerNativeProviderCredentialEnvName =
+  keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
 
 type RuntimeAttemptLivenessProbeOutcome =
   | "active"
@@ -641,24 +651,40 @@ export class RuntimeInvocationService {
     const openAiCredentialBeforeMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
     let openAiProviderCredentialMinted = false;
-    if (
-      isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
-      && typeof forwardedEnv.OPENAI_API_KEY === "string"
-      && forwardedEnv.OPENAI_API_KEY.length > 0
-    ) {
-      forwardedEnv.OPENAI_API_KEY = await createHostedProviderEgressCredential({
-        providerKind: "openai",
+    const createProviderCredential = async (providerKind: string) =>
+      await createHostedProviderEgressCredential({
+        providerKind,
         runnerContainerName,
         source: this.input.runnerRuntimeEnvSource,
         userId: input.userId,
       });
-      openAiProviderCredentialMinted = true;
+    for (const [envKey, providerKind] of Object.entries(
+      HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV,
+    ) as Array<[HostedRunnerNativeProviderCredentialEnvName, string]>) {
+      if (
+        envKey === "OPENAI_API_KEY" &&
+        !isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
+      ) {
+        continue;
+      }
+      if (typeof forwardedEnv[envKey] === "string" && forwardedEnv[envKey].length > 0) {
+        forwardedEnv[envKey] = await createProviderCredential(providerKind);
+        if (envKey === "OPENAI_API_KEY") {
+          openAiProviderCredentialMinted = true;
+        }
+      }
     }
     const openAiCredentialAfterMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    const workersAiTranscribeProviderEgressCredential = await createProviderCredential(
+      HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND,
+    );
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource,
       forwardedEnv,
+      providerEgressCredentials: {
+        workersAiTranscribe: workersAiTranscribeProviderEgressCredential,
+      },
       rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
