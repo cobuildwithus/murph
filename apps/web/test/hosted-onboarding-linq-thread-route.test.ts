@@ -211,30 +211,11 @@ function createPrisma(input: {
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
-  const hostedLinqConversationState = createHostedLinqConversationStateMock(
-    routeContainerMemberId ?? "member_thread_container_123",
-  );
-
   return {
-    hostedLinqConversationState,
     hostedMember,
     hostedMemberRouting,
     hostedThreadRoute,
     hostedWorkspace,
-  };
-}
-
-function createHostedLinqConversationStateMock(memberId: string) {
-  return {
-    findUnique: vi.fn().mockResolvedValue({
-      healthStatus: "AT_RISK",
-      lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
-      memberId,
-      outboundSinceLastInboundCount: 0,
-      recipientReplyCount: 3,
-    }),
-    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    upsert: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -387,12 +368,10 @@ function createStatefulThreadRoutePrisma() {
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
-  const hostedLinqConversationState = createHostedLinqConversationStateMock(ownerState.id);
   const executeRaw = vi.fn().mockResolvedValue(undefined);
 
   return {
     $executeRaw: executeRaw,
-    hostedLinqConversationState,
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainer,

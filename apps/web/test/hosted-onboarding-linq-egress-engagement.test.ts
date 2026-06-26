@@ -85,10 +85,6 @@ describe("hosted Linq egress engagement", () => {
         create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
         findUnique: vi.fn().mockResolvedValue(null),
       },
-      hostedLinqConversationState: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn().mockResolvedValue(undefined),
-      },
       hostedLinqLine: {
         upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
           Promise.resolve({

@@ -1750,18 +1750,6 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.linqEnv,
-      fetchImplementation: input.providerFetch,
-      ...(signal ? { signal } : {}),
-    }, "Hosted assistant Linq delivery");
-    const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
-      actionApprovalPort: input.actionApprovalPort ?? null,
-      expectedDedupeKey: input.expectedDedupeKey ?? null,
-      intentId: input.intentId ?? null,
-      media: request.media ?? [],
-      vaultRoot: input.vaultRoot ?? null,
-    });
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
@@ -1780,6 +1768,18 @@ function createHostedAssistantLinqSendDependency(input: {
       signal: signal ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
+    });
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: input.providerFetch,
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq delivery");
+    const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
+      actionApprovalPort: input.actionApprovalPort ?? null,
+      expectedDedupeKey: input.expectedDedupeKey ?? null,
+      intentId: input.intentId ?? null,
+      media: request.media ?? [],
+      vaultRoot: input.vaultRoot ?? null,
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({

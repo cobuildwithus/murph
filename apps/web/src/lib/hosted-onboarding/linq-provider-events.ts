@@ -9,6 +9,7 @@ import {
 } from "./contact-privacy";
 import {
   type HostedLinqWebhookEvent,
+  type HostedLinqMessageReceivedEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqRecipientPhoneNumber,
 } from "./linq";
@@ -114,11 +115,14 @@ function parseHostedLinqMessageReceivedProviderEvent(input: {
   rawBody?: string | null;
 }): ParsedHostedLinqProviderEvent {
   const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
-  const linePhoneNumber = normalizePhoneNumber(resolveHostedLinqRecipientPhoneNumber(messageEvent));
   const messageId = normalizeNullableString(messageEvent.data.message.id);
   const chatId = normalizeNullableString(messageEvent.data.chat_id);
   const direction = normalizeNullableString(messageEvent.data.direction)
     ?? (messageEvent.data.is_from_me ? "outbound" : "inbound");
+  const linePhoneNumber = resolveHostedLinqMessageReceivedLinePhoneNumber({
+    direction,
+    event: messageEvent,
+  });
 
   return buildParsedProviderEvent({
     chatId,
@@ -143,6 +147,42 @@ function parseHostedLinqMessageReceivedProviderEvent(input: {
     rawBody: input.rawBody,
     service: normalizeNullableString(messageEvent.data.service),
   });
+}
+
+function resolveHostedLinqMessageReceivedLinePhoneNumber(input: {
+  direction: string | null;
+  event: HostedLinqMessageReceivedEvent;
+}): string | null {
+  if (input.direction === "outbound" || input.event.data.is_from_me) {
+    return resolveHostedLinqOutboundMessageLinePhoneNumber(input.event);
+  }
+
+  return normalizePhoneNumber(resolveHostedLinqRecipientPhoneNumber(input.event));
+}
+
+function resolveHostedLinqOutboundMessageLinePhoneNumber(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  const ownerPhoneNumber = normalizePhoneNumber(event.data.chat?.owner_handle?.handle);
+  if (ownerPhoneNumber) {
+    return ownerPhoneNumber;
+  }
+
+  if (event.data.sender_handle?.is_me === true) {
+    const senderPhoneNumber = normalizePhoneNumber(event.data.sender_handle.handle);
+    if (senderPhoneNumber) {
+      return senderPhoneNumber;
+    }
+  }
+
+  if (event.data.from_handle?.is_me === true) {
+    const fromHandlePhoneNumber = normalizePhoneNumber(event.data.from_handle.handle);
+    if (fromHandlePhoneNumber) {
+      return fromHandlePhoneNumber;
+    }
+  }
+
+  return null;
 }
 
 function parseGenericHostedLinqProviderEvent(input: {

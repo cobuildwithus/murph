@@ -31,6 +31,44 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("private member text");
   });
 
+  it("does not treat outbound recipient_phone as the hosted line", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildMessageReceivedEvent({
+        direction: "outbound",
+        isFromMe: true,
+        recipientPhone: "+15551234567",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      direction: "outbound",
+      phoneNumberHint: expect.stringContaining("0000"),
+      phoneNumberRole: "line",
+    });
+    expect(parsed?.phoneNumberLookupKey).toEqual(expect.stringMatching(/^hbidx:phone:/u));
+    expect(JSON.stringify(parsed)).not.toContain("+15551234567");
+  });
+
+  it("skips line projection for outbound echoes without a confident hosted line", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildMessageReceivedEvent({
+        direction: "outbound",
+        isFromMe: true,
+        ownerHandle: null,
+        recipientPhone: "+15551234567",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      direction: "outbound",
+      phoneNumber: null,
+      phoneNumberHint: null,
+      phoneNumberLookupKey: null,
+      phoneNumberRole: "unknown",
+    });
+    expect(JSON.stringify(parsed)).not.toContain("+15551234567");
+  });
+
   it("parses delivered and failed events with shape metadata only", () => {
     const delivered = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
@@ -176,32 +214,43 @@ describe("parseHostedLinqProviderEvent", () => {
 });
 
 function buildMessageReceivedEvent(input: {
+  direction?: "inbound" | "outbound";
+  isFromMe?: boolean;
+  ownerHandle?: string | null;
+  recipientPhone?: string | null;
   text?: string;
 } = {}): HostedLinqWebhookEvent {
+  const isFromMe = input.isFromMe ?? false;
+  const ownerHandle = input.ownerHandle === undefined ? "+15550000000" : input.ownerHandle;
   return {
     api_version: "v3",
     created_at: "2026-03-26T12:00:00.000Z",
     data: {
       chat: {
         id: "chat_123",
-        owner_handle: {
-          handle: "+15550000000",
-          id: "handle_owner_123",
-          is_me: true,
-          service: "iMessage",
-        },
+        owner_handle: ownerHandle
+          ? {
+              handle: ownerHandle,
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            }
+          : null,
       },
-      direction: "inbound",
+      direction: input.direction ?? (isFromMe ? "outbound" : "inbound"),
       id: "msg_123",
+      is_from_me: isFromMe,
       parts: [
         {
           type: "text",
           value: input.text ?? "hello",
         },
       ],
+      recipient_phone: input.recipientPhone ?? undefined,
       sender_handle: {
         handle: "+15551234567",
         id: "handle_sender_123",
+        is_me: false,
         service: "iMessage",
       },
       sent_at: "2026-03-26T12:00:00.000Z",

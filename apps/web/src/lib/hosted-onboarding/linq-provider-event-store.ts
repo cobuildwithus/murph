@@ -2,9 +2,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { applyHostedLinqDeliveryReceiptTx } from "./linq-delivery-store";
 import {
-  projectHostedLinqConversationForProviderEventTx,
-} from "./linq-conversation-state";
-import {
   ensureHostedLinqLineForProviderEventTx,
   projectHostedLinqLineForProviderEventTx,
 } from "./linq-line-store";
@@ -82,13 +79,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
     lineLookupKey,
     lineProjectionAdvanced,
   });
-  if (!staleDeliveryReceipt) {
-    await projectHostedLinqConversationForProviderEventTx({
-      event: input.event,
-      lineLookupKey,
-      prisma: input.prisma,
-    });
-  }
   if (
     staleDeliveryReceipt
     || staleLineReceipt

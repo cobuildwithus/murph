@@ -4936,6 +4936,100 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("authorizes routed Linq sends before vault-file approval or reads", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_media_revoked",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the routed wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const media = {
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "derived/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      media: [media],
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      request: vi.fn(async () => ({
+        approvalId: "approval_123",
+        status: "approved" as const,
+      })),
+    };
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      dedupeKey: effect.fingerprint,
+      intentId: effect.effectId,
+      media: [media],
+      status: "sending",
+    });
+    mocks.readAssistantVaultFileMedia.mockReturnValueOnce(media);
+    const assertAuthority = vi.fn(async () => {
+      throw new Error("route revoked before media work");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        media: [media],
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+
+      throw new Error("unreachable after route assertion failure");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toThrow("route revoked before media work");
+
+    expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
+      signal: null,
+    });
+    expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "thread",

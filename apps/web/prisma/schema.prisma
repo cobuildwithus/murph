@@ -332,7 +332,6 @@ model HostedMember {
   invites                        HostedInvite[]
   aiUsage                        HostedAiUsage[]
   linqDailyStates                HostedLinqDailyState[]
-  linqConversationStates         HostedLinqConversationState[]
   identity                       HostedMemberIdentity?
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
@@ -962,7 +961,6 @@ model HostedLinqLine {
   providerEvents             HostedLinqProviderEvent[]
   deliveries                 HostedLinqDelivery[]
   alerts                     HostedLinqAlert[]
-  conversationStates         HostedLinqConversationState[]
 
   @@index([healthStatus, egressPolicy])
   @@index([providerStatus])
@@ -1071,47 +1069,6 @@ model HostedLinqAlert {
   @@index([status, claimedAt])
   @@index([phoneNumberLookupKey, createdAt])
   @@map("hosted_linq_alert")
-}
-
-model HostedLinqConversationState {
-  linqChatLookupKey             String   @id @map("linq_chat_lookup_key")
-  memberId                      String   @map("member_id")
-  linePhoneNumberLookupKey      String?  @map("line_phone_number_lookup_key")
-  healthStatus                  String   @default("AT_RISK") @map("health_status")
-  providerHealthStatus          String?  @map("provider_health_status")
-  providerHealthReason          String?  @map("provider_health_reason")
-  providerHealthCheckedAt       DateTime? @map("provider_health_checked_at")
-  healthReason                  String?  @map("health_reason")
-  pausedAt                      DateTime? @map("paused_at")
-  terminalAt                    DateTime? @map("terminal_at")
-  recipientReplyCount           Int      @default(0) @map("recipient_reply_count")
-  totalOutboundCount            Int      @default(0) @map("total_outbound_count")
-  outboundSinceLastInboundCount Int      @default(0) @map("outbound_since_last_inbound_count")
-  trustedAt                     DateTime? @map("trusted_at")
-  firstInboundAt                DateTime? @map("first_inbound_at")
-  lastInboundAt                 DateTime? @map("last_inbound_at")
-  lastInboundEventId            String?   @map("last_inbound_event_id")
-  lastOutboundAt                DateTime? @map("last_outbound_at")
-  lastOutboundEventId           String?   @map("last_outbound_event_id")
-  lastDeliveredAt               DateTime? @map("last_delivered_at")
-  lastFailedAt                  DateTime? @map("last_failed_at")
-  lastReceiptAt                 DateTime? @map("last_receipt_at")
-  lastReceiptEventId            String?   @map("last_receipt_event_id")
-  consecutiveFailures           Int      @default(0) @map("consecutive_failures")
-  recoveredFromChatLookupKey    String?  @map("recovered_from_chat_lookup_key")
-  replacedByChatLookupKey       String?  @map("replaced_by_chat_lookup_key")
-  replacedAt                    DateTime? @map("replaced_at")
-  createdAt                     DateTime @default(now()) @map("created_at")
-  updatedAt                     DateTime @updatedAt @map("updated_at")
-  member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  line                          HostedLinqLine? @relation(fields: [linePhoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
-
-  @@index([memberId, healthStatus])
-  @@index([linePhoneNumberLookupKey, healthStatus])
-  @@index([trustedAt])
-  @@index([lastInboundAt])
-  @@index([lastReceiptAt])
-  @@map("hosted_linq_conversation_state")
 }
 
 model HostedAiUsage {
