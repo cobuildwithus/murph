@@ -125,12 +125,14 @@ the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
 persists only the event-id keyed terminal allow/block decision, stores no
-classifier payload or response body, and fails closed without sending a reply
+classifier payload or response body, and blocks without sending a reply
 when enforcement is enabled and intent is not classified as allowed. OpenAI
 refusal and content-filter outcomes are terminal unsupported content blocks,
-while malformed, non-completed, or otherwise classifier-unavailable states return
-typed retryable errors before side effects. Active members, explicit thread routes, own messages,
-group chats, local guard rejects, deterministic URL/STOP-style spam, and other
+while missing keys, timeouts, non-2xx responses, malformed output,
+non-completed output, max-output exhaustion, and other classifier-unavailable
+states do not persist a decision and admit the first contact through the normal
+signup-link path. Active members, explicit thread routes, own messages, group
+chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active

@@ -2730,7 +2730,7 @@ https://join.example.test/join/code_first_text`);
     });
   });
 
-  it("throws retryable classifier failures before member or invite side effects", async () => {
+  it("admits unknown Linq first contacts when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
@@ -2743,6 +2743,15 @@ https://join.example.test/join/code_first_text`);
       retryable: true,
     }));
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invite = {
+      channel: "linq",
+      id: "invite_classifier_unavailable",
+      inviteCode: "code_classifier_unavailable",
+      memberId: "member_classifier_unavailable",
+      sentAt: null,
+      status: "pending",
+    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -2757,14 +2766,25 @@ https://join.example.test/join/code_first_text`);
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn(),
-        findUnique: vi.fn(),
-        update: vi.fn(),
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
         updateMany: vi.fn(),
       },
-      hostedMember: {
+      hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_classifier_unavailable",
+          phoneLookupKey: "+15551234567",
+        }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
@@ -2778,18 +2798,45 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
-      httpStatus: 503,
-      retryable: true,
+    })).resolves.toMatchObject({
+      inviteCode: "code_classifier_unavailable",
+      joinUrl: "https://join.example.test/join/code_classifier_unavailable",
+      ok: true,
+      reason: "sent-signup-link",
     });
 
-    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: "member_classifier_unavailable",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: "member_classifier_unavailable",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_classifier_unavailable",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
+      expect.objectContaining({
+        errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+        eventIdSuffix: "_retry",
+        type: "transport",
+      }),
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
