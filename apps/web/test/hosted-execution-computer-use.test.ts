@@ -39,6 +39,11 @@ describe("ComputerUseService", () => {
     const result = await service.pauseForUser({
       handoffPurpose: "login",
       memberId: "member_123",
+      pauseDeliveryContext: {
+        conversationId: null,
+        recipientKey: null,
+        returnContactKind: "email",
+      },
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
@@ -66,6 +71,7 @@ describe("ComputerUseService", () => {
       id: "hch_handoff123",
       memberId: "member_123",
       purpose: "login",
+      returnContactKind: "email",
       runId: "hcr_run123",
       status: "open",
       suggestedReply: "done",
@@ -424,6 +430,7 @@ describe("ComputerUseService", () => {
     const oldHandoff = createHandoffRecord({
       id: "hch_handoff123",
       purpose: "manual_browser_help",
+      returnContactKind: "email",
       status: "open",
       suggestedReply: "yes",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
@@ -458,6 +465,7 @@ describe("ComputerUseService", () => {
       pauseDeliveryContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
+        returnContactKind: "telegram",
       },
       reason: "login_needed",
       runId: "hcr_run123",
@@ -483,6 +491,7 @@ describe("ComputerUseService", () => {
     });
     expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
       purpose: "manual_browser_help",
+      returnContactKind: "email",
       status: "open",
       suggestedReply: "yes",
     });
@@ -527,6 +536,7 @@ describe("ComputerUseService", () => {
       pauseDeliveryContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
+        returnContactKind: null,
       },
       reason: "final_confirmation",
       runId: "hcr_run123",
@@ -649,6 +659,7 @@ describe("ComputerUseService", () => {
       pauseDeliveryContext: {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
+        returnContactKind: null,
       },
       reason: "login_needed",
       runId: "hcr_run123",
@@ -1116,6 +1127,7 @@ describe("ComputerUseService", () => {
       resumeDeliveryContext: {
         conversationId: "conversation-b",
         recipientKey: "recipient-a",
+        returnContactKind: null,
       },
       startUrl: null,
     })).rejects.toMatchObject({
@@ -3060,6 +3072,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       kind: "expired",
+      returnContactKind: null,
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -3101,6 +3114,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       kind: "expired",
+      returnContactKind: null,
       suggestedReply: "yes",
     });
     expect(store.handoff).toMatchObject({
@@ -3142,6 +3156,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       kind: "checkpointing",
+      returnContactKind: null,
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -3266,6 +3281,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       kind: "expired",
+      returnContactKind: null,
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -3770,7 +3786,10 @@ describe("ComputerUseService", () => {
     await expect(service.completeHandoff({
       memberId: "member_123",
       token: "handoff-token",
-    })).resolves.toEqual({ suggestedReply: "done" });
+    })).resolves.toEqual({
+      returnContactKind: null,
+      suggestedReply: "done",
+    });
 
     expect(store.handoff).toMatchObject({
       completedAt: now,
@@ -3819,7 +3838,10 @@ describe("ComputerUseService", () => {
     await expect(service.completeHandoff({
       memberId: "member_123",
       token: "handoff-token",
-    })).resolves.toEqual({ suggestedReply: "done" });
+    })).resolves.toEqual({
+      returnContactKind: null,
+      suggestedReply: "done",
+    });
 
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
@@ -3862,7 +3884,10 @@ describe("ComputerUseService", () => {
     await expect(service.completeHandoff({
       memberId: "member_123",
       token: "handoff-token",
-    })).resolves.toEqual({ suggestedReply: "done" });
+    })).resolves.toEqual({
+      returnContactKind: null,
+      suggestedReply: "done",
+    });
 
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
@@ -3949,6 +3974,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      returnContactKind: null,
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -4157,6 +4183,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      returnContactKind: null,
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -5703,6 +5730,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       id,
       memberId: input.memberId,
       purpose: input.purpose,
+      returnContactKind: input.returnContactKind,
       runId: input.runId,
       status: "open",
       suggestedReply: input.suggestedReply,
@@ -6521,6 +6549,7 @@ function createHandoffRecord(overrides: Partial<ComputerHandoffRecord> = {}): Co
     id: "hch_handoff123",
     memberId: "member_123",
     purpose: "login",
+    returnContactKind: null,
     runId: "hcr_run123",
     status: "open",
     suggestedReply: "done",

@@ -390,6 +390,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const computerHandoffReturnContactKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062600_computer_handoff_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
@@ -456,6 +463,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260625150000_hosted_action_approval_consumed_at",
       "20260626000000_linq_first_contact_admission_decision",
+      "2026062600_computer_handoff_return_contact_kind",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -536,6 +544,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(actionApprovalConsumedAtMigrationSql).toContain(
       '"approval_status" = \'approved\'',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
     );
     expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_first_contact_admission_decision"',

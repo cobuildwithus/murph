@@ -5,7 +5,6 @@ import path from 'node:path'
 import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
-  HostedActionApprovalReturnContactKind,
 } from '@murphai/hosted-execution/action-approval'
 import {
   assistantOutboxIntentSchema,
@@ -24,6 +23,9 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import {
+  resolveAssistantHostedReturnContactKind,
+} from './return-contact-kind.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
@@ -221,8 +223,7 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
       body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
-    returnContactKind: resolveAssistantVaultFileSendReturnContactKind({
-      channel,
+    returnContactKind: resolveAssistantHostedReturnContactKind(channel, {
       threadIsDirect: input.threadIsDirect ?? null,
     }),
   }
@@ -277,22 +278,6 @@ function requireAssistantVaultFileSendTargetFingerprint(input: Parameters<
     )
   }
   return targetFingerprint
-}
-
-function resolveAssistantVaultFileSendReturnContactKind(input: {
-  channel: string | null | undefined
-  threadIsDirect?: boolean | null
-}): HostedActionApprovalReturnContactKind | null {
-  switch (input.channel?.trim().toLowerCase()) {
-    case 'linq':
-      return input.threadIsDirect === false ? null : 'text'
-    case 'telegram':
-      return 'telegram'
-    case 'email':
-      return 'email'
-    default:
-      return null
-  }
 }
 
 export function applyAssistantVaultFileSendApprovalResult(input: {

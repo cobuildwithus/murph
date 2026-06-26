@@ -289,6 +289,14 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')
     expect(reviewGptConfig).toContain('attach_artifacts=0')
     expect(reviewGptConfig).toContain('app_connector="github"')
+    const prDeepReviewPrompt = readFileSync(
+      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
+      'utf8',
+    )
+    expect(prDeepReviewPrompt).toContain('Use the connected GitHub repository or attached zip files')
+    expect(prDeepReviewPrompt).toContain('Do not review the diff in isolation.')
+    expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files through either the connected repository or attached zip files')
+    expect(prDeepReviewPrompt).toContain('do not review from memory or from the PR description alone')
     expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
