@@ -193,83 +193,46 @@ I'm especially good with small experiments. A new supplement, a workout change, 
 Ready to dive in?`,
   ],
   "linq.invite_signup": [
-    `Hey, I'm Murph. Quick verify so I can reply from this number:
-{joinUrl}
-
-Is this still you?`,
-    `Welcome to Murph. Tap to confirm this is your phone:
-{joinUrl}
-
-Good number for you?`,
-    `Hi, Murph here. Verify this number to start:
-{joinUrl}
-
-Your number?`,
-    `Tap to verify and we can get going:
-{joinUrl}
-
-Sound good?`,
-    `Murph here. One tap to confirm your number:
-{joinUrl}
-
-Was this you signing up?`,
-    `Welcome in. Verify your phone here:
-{joinUrl}
-
-All good?`,
-    `Hi, I'm Murph. Tap to verify:
-{joinUrl}
-
-All you?`,
-    `Confirm this is your number to start:
-{joinUrl}
-
-Ready?`,
-    `Quick verify before we get started:
-{joinUrl}
-
-This the right number?`,
-    `Murph here, glad you're texting. Tap to verify your phone:
-{joinUrl}
-
-Save this number?`,
-    `Welcome. Tap to confirm this number is yours:
-{joinUrl}
-
-OK to text from here?`,
-    `This is Murph. Verify your number to get going:
-{joinUrl}
-
-Want me to use this number?`,
-    `Hi from Murph. Quick verify here:
-{joinUrl}
-
-Make sense?`,
-    `Murph here. Tap the link to verify and I'll reply from this number: {joinUrl}
-
-Good?`,
-    `All set once you verify:
-{joinUrl}
-
-That you?`,
-    `Quick one. Tap to verify this is your number:
-{joinUrl}
-
-Is this you?`,
-    `Tap to confirm and we're set: {joinUrl}
-
-Cool?`,
-    `Hello, I'm Murph. Verify this number to start:
-{joinUrl}
-
-Sound right?`,
-    `Murph here. One tap and we're in: {joinUrl}
-
-Good number?`,
-    `One tap and I can text back from this number:
-{joinUrl}
-
-Want me to keep texting from here?`,
+    `Hey, I'm Murph. Quick verify so I can reply from this number. Is this still you?
+{joinUrl}`,
+    `Welcome to Murph. Tap to confirm this is your phone. Good number for you?
+{joinUrl}`,
+    `Hi, Murph here. Verifying so I can text back. Sound good?
+{joinUrl}`,
+    `Murph here. Tap to verify and we can get going. Ready?
+{joinUrl}`,
+    `Murph here. One tap to confirm your number. Was this you signing up?
+{joinUrl}`,
+    `Welcome in to Murph. Phone verify lives here. All good?
+{joinUrl}`,
+    `Hi, I'm Murph. Quick tap to verify. All you?
+{joinUrl}`,
+    `Confirm this is your Murph number so I can reply. Ready?
+{joinUrl}`,
+    `Quick Murph verify before we get started. Is this the right number?
+{joinUrl}`,
+    `Murph here, glad you're texting. Save this number?
+{joinUrl}`,
+    `Welcome to Murph. Tap to confirm this number is yours. OK to text from here?
+{joinUrl}`,
+    `This is Murph. Verifying so I can reply on this line. Want me to use this number?
+{joinUrl}`,
+    `Hi from Murph. Quick verify on your end. Make sense?
+{joinUrl}`,
+    `Murph here. Tap to verify and I'll reply from this number. Good?
+{joinUrl}`,
+    `All set with Murph once you verify. That you?
+{joinUrl}`,
+    `Quick Murph check. Tap to verify this is your number. Is this you?
+{joinUrl}`,
+    `Tap to confirm and Murph is set. Cool?
+{joinUrl}`,
+    `Hello, I'm Murph. Verifying your number to start. Sound right?
+{joinUrl}`,
+    `Murph here. One tap and we're in. Good number?
+{joinUrl}`,
+    `One tap and Murph can text back from this number. Want me to keep texting from here?
+{joinUrl}`,
   ],
   "linq.daily_quota": [
     `That's the {dailyTextLimit}/day cap on this thread. Email or Telegram still work today, otherwise back tomorrow.`,
@@ -302,35 +265,38 @@ Want me to keep texting from here?`,
 {homeRecipientPhone}`,
     `Quick redirect. I reply from your main Murph number:
 {homeRecipientPhone}`,
-    `{homeRecipientPhone} is your active Murph line. Easier if we keep things there.`,
+    `Your active Murph line lives here. Easier if we keep things on:
+{homeRecipientPhone}`,
     `Looks like you're texting the wrong thread. Your active line is:
 {homeRecipientPhone}`,
     `I'm on another number for you. Move the conversation over to:
 {homeRecipientPhone}`,
     `You're connected, just not on the right line. Continue here:
 {homeRecipientPhone}`,
-    `Save {homeRecipientPhone} and we'll continue there.`,
+    `Save my number and we'll continue there:
+{homeRecipientPhone}`,
     `Two threads going. The one I actually reply on is:
 {homeRecipientPhone}`,
     `I'm running from a different number for you. Switch to:
 {homeRecipientPhone}`,
     `Hey, this isn't your home Murph thread. Text me at:
 {homeRecipientPhone}`,
-    `Your Murph number is {homeRecipientPhone}. Move over there and I'll meet you.`,
+    `Move over to your Murph line and I'll meet you there:
+{homeRecipientPhone}`,
     `Already running on another line for you. Save:
 {homeRecipientPhone}`,
     `Wrong thread, easy fix. Your Murph line is:
 {homeRecipientPhone}`,
-    `Continue our Murph chat at:
-{homeRecipientPhone}
-
-That's the line I reply on for you.`,
+    `That's the line I reply on for you. Continue our Murph chat at:
+{homeRecipientPhone}`,
     `Tap to save and we can pick this up at:
 {homeRecipientPhone}`,
-    `I keep replies on one Murph line per person. Yours is {homeRecipientPhone}.`,
+    `I keep replies on one Murph line per person. Yours is here:
+{homeRecipientPhone}`,
     `Got you, just on a different number than this one. Your line:
 {homeRecipientPhone}`,
-    `Let's move this over. My number for you is {homeRecipientPhone}.`,
+    `Let's move this over. My number for you:
+{homeRecipientPhone}`,
   ],
   "linq.ai_usage.trial_conversion_pending": [
     `Trial's done. Head to the site to keep this going:
@@ -345,7 +311,8 @@ That's the line I reply on for you.`,
 {homeUrl}`,
     `Heads up, your trial finished. Setup to take care of to keep me on:
 {homeUrl}`,
-    `Trial done. {homeUrl} is where you finish setup.`,
+    `Trial done. Setup waits on the site:
+{homeUrl}`,
     `Setup to finish after the trial to keep things going:
 {homeUrl}`,
     `If the trial was useful, there's setup to finish here:

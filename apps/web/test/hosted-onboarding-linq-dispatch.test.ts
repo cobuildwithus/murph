@@ -558,7 +558,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(reply).toContain("https://join.example.test/join/code_first_text");
-    expect(reply.trim().length).toBeGreaterThan(0);
+    expect(reply.trim().length).toBeGreaterThan(
+      "https://join.example.test/join/code_first_text".length,
+    );
   });
 
   it("accepts Linq typing events without signaling runtime work", async () => {

@@ -109,6 +109,12 @@ export type ComputerManagedLoginContinuation =
       url: string;
     };
 
+export interface ComputerHandoffCompletion {
+  returnContactKind: HostedComputerReturnContactKind | null;
+  status: ComputerHandoffRecord["status"];
+  suggestedReply: string | null;
+}
+
 export type ComputerHandoffPageState =
   | {
       kind: "completed";
@@ -1244,10 +1250,7 @@ export class ComputerUseService {
   async completeHandoff(input: {
     memberId: string;
     token: string;
-  }): Promise<{
-    returnContactKind: HostedComputerReturnContactKind | null;
-    suggestedReply: string | null;
-  }> {
+  }): Promise<ComputerHandoffCompletion> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -1257,10 +1260,7 @@ export class ComputerUseService {
   private async completeHandoffWithStore(input: {
     memberId: string;
     token: string;
-  }, store: ComputerUseStore): Promise<{
-    returnContactKind: HostedComputerReturnContactKind | null;
-    suggestedReply: string | null;
-  }> {
+  }, store: ComputerUseStore): Promise<ComputerHandoffCompletion> {
     const now = this.now();
     const tokenHash = sha256Hex(input.token);
     const handoff = await store.requireHandoffByTokenHash({
@@ -1279,6 +1279,7 @@ export class ComputerUseService {
     if (openHandoff.status === "completed") {
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1286,6 +1287,7 @@ export class ComputerUseService {
     if (isFreshCheckpointingHandoff(openHandoff, now)) {
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1300,11 +1302,13 @@ export class ComputerUseService {
         });
         return {
           returnContactKind: expired.returnContactKind,
+          status: expired.status,
           suggestedReply: expired.suggestedReply,
         };
       }
       return {
         returnContactKind: openHandoff.returnContactKind,
+        status: openHandoff.status,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1327,6 +1331,7 @@ export class ComputerUseService {
       });
       return {
         returnContactKind: latest.returnContactKind,
+        status: latest.status,
         suggestedReply: latest.suggestedReply,
       };
     }
@@ -1345,6 +1350,7 @@ export class ComputerUseService {
         });
         return {
           returnContactKind: expired.returnContactKind,
+          status: expired.status,
           suggestedReply: expired.suggestedReply,
         };
       }
@@ -1365,6 +1371,7 @@ export class ComputerUseService {
 
       return {
         returnContactKind: completed.returnContactKind,
+        status: completed.status,
         suggestedReply: completed.suggestedReply,
       };
     } catch (error) {
@@ -2999,10 +3006,87 @@ function doesResumeContextMatchCheckpoint(input: {
     return false;
   }
 
-  return (!input.expected.conversationId ||
-      input.expected.conversationId === received.conversationId) &&
-    (!input.expected.recipientKey ||
-      input.expected.recipientKey === received.recipientKey);
+  return doesResumeContextPartMatchCheckpoint({
+    expected: input.expected.conversationId,
+    received: received.conversationId,
+    receivedReturnContactKind: input.received?.returnContactKind ?? null,
+  }) && doesResumeContextPartMatchCheckpoint({
+    expected: input.expected.recipientKey,
+    received: received.recipientKey,
+    receivedReturnContactKind: input.received?.returnContactKind ?? null,
+  });
+}
+
+function doesResumeContextPartMatchCheckpoint(input: {
+  expected: string | null;
+  received: string | null;
+  receivedReturnContactKind: HostedComputerReturnContactKind | null;
+}): boolean {
+  if (!input.expected) {
+    return true;
+  }
+  if (input.expected === input.received) {
+    return true;
+  }
+  if (!input.received || !input.receivedReturnContactKind) {
+    return false;
+  }
+
+  const scoped = readScopedComputerCheckpointPart(input.received);
+  if (scoped?.value === input.expected &&
+    resolveComputerCheckpointScopedReturnContactKind(scoped.channel) ===
+      input.receivedReturnContactKind
+  ) {
+    return true;
+  }
+
+  const expectedScoped = readScopedComputerCheckpointPart(input.expected);
+  return expectedScoped?.value === input.received &&
+    resolveComputerCheckpointScopedReturnContactKind(expectedScoped.channel) ===
+      input.receivedReturnContactKind;
+}
+
+function readScopedComputerCheckpointPart(value: string): {
+  channel: string;
+  value: string;
+} | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length !== 2) {
+      return null;
+    }
+    const channel = normalizeComputerCheckpointChannel(parsed[0]);
+    const rawValue = normalizeComputerCheckpointValue(parsed[1]);
+    return channel && rawValue ? { channel, value: rawValue } : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveComputerCheckpointScopedReturnContactKind(
+  channel: string,
+): HostedComputerReturnContactKind | null {
+  switch (channel) {
+    case "linq":
+      return "text";
+    case "telegram":
+      return "telegram";
+    case "email":
+      return "email";
+    default:
+      return null;
+  }
+}
+
+function normalizeComputerCheckpointChannel(value: unknown): string | null {
+  const normalized = normalizeComputerCheckpointValue(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
+
+function normalizeComputerCheckpointValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
