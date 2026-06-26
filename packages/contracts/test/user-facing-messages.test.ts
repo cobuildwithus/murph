@@ -2,13 +2,22 @@ import { describe, expect, it } from "vitest";
 
 import {
   renderUserFacingMessage,
-  renderUserFacingMessageVariant,
-  readUserFacingMessageVariantCount,
-  USER_FACING_MESSAGE_MIN_VARIANT_COUNT,
-  USER_FACING_MESSAGE_TEMPLATE_KEYS,
   type UserFacingMessageContextByKey,
   type UserFacingMessageTemplateKey,
 } from "../src/user-facing-messages.ts";
+
+const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
+
+const TEST_TEMPLATE_KEYS = [
+  "assistant.signup_welcome",
+  "linq.invite_signup",
+  "linq.daily_quota",
+  "linq.home_redirect",
+  "linq.ai_usage.trial_conversion_pending",
+  "linq.ai_usage.trial_limit_reached",
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 const TEST_CONTEXT_BY_KEY = {
   "assistant.signup_welcome": {},
@@ -39,10 +48,8 @@ const TEST_CONTEXT_BY_KEY = {
 
 describe("user-facing message variants", () => {
   it("keeps at least 20 variants for every rotating message class", () => {
-    for (const key of USER_FACING_MESSAGE_TEMPLATE_KEYS) {
-      expect(readUserFacingMessageVariantCount(key)).toBeGreaterThanOrEqual(
-        USER_FACING_MESSAGE_MIN_VARIANT_COUNT,
-      );
+    for (const key of TEST_TEMPLATE_KEYS) {
+      expect(collectRenderedTexts(key).size).toBeGreaterThanOrEqual(USER_FACING_MESSAGE_MIN_VARIANT_COUNT);
     }
   });
 
@@ -57,31 +64,25 @@ describe("user-facing message variants", () => {
   });
 
   it("varies content across different seeds", () => {
-    const variantIds = new Set<string>();
+    const texts = new Set<string>();
 
     for (let index = 0; index < 80; index += 1) {
-      variantIds.add(renderUserFacingMessage({
+      texts.add(renderUserFacingMessage({
         context: TEST_CONTEXT_BY_KEY["assistant.signup_welcome"],
         key: "assistant.signup_welcome",
         seed: `seed-${index}`,
-      }).variantId);
+      }).text);
     }
 
-    expect(variantIds.size).toBeGreaterThan(1);
+    expect(texts.size).toBeGreaterThan(1);
   });
 
-  it("renders every variant without leaving required placeholders behind", () => {
-    for (const key of USER_FACING_MESSAGE_TEMPLATE_KEYS) {
-      for (let variantIndex = 0; variantIndex < readUserFacingMessageVariantCount(key); variantIndex += 1) {
-        const rendered = renderUserFacingMessageVariant({
-          context: TEST_CONTEXT_BY_KEY[key],
-          key,
-          variantIndex,
-        });
-
-        expect(rendered.text).not.toMatch(/\{[a-z][a-zA-Z0-9]*\}/u);
-        expect(rendered.text.trim()).toBe(rendered.text);
-        expect(rendered.text.length).toBeGreaterThan(0);
+  it("renders the seed corpus without leaving required placeholders behind", () => {
+    for (const key of TEST_TEMPLATE_KEYS) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).not.toMatch(/\{[a-z][a-zA-Z0-9]*\}/u);
+        expect(text.trim()).toBe(text);
+        expect(text.length).toBeGreaterThan(0);
       }
     }
   });
@@ -101,11 +102,21 @@ function expectEveryVariantContains<K extends UserFacingMessageTemplateKey>(
   key: K,
   expected: string,
 ): void {
-  for (let variantIndex = 0; variantIndex < readUserFacingMessageVariantCount(key); variantIndex += 1) {
-    expect(renderUserFacingMessageVariant({
+  for (const text of collectRenderedTexts(key)) {
+    expect(text).toContain(expected);
+  }
+}
+
+function collectRenderedTexts<K extends UserFacingMessageTemplateKey>(key: K): Set<string> {
+  const texts = new Set<string>();
+
+  for (let index = 0; index < 400; index += 1) {
+    texts.add(renderUserFacingMessage({
       context: TEST_CONTEXT_BY_KEY[key],
       key,
-      variantIndex,
-    }).text).toContain(expected);
+      seed: `${key}:seed-${index}`,
+    }).text);
   }
+
+  return texts;
 }

@@ -1,6 +1,6 @@
-export const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
+const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
-export const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
+const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
   "linq.invite_signup",
   "linq.daily_quota",
@@ -45,16 +45,8 @@ export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplat
   seed: string
 }
 
-export interface RenderUserFacingMessageVariantInput<K extends UserFacingMessageTemplateKey> {
-  context: UserFacingMessageContextByKey[K]
-  key: K
-  variantIndex: number
-}
-
 export interface RenderedUserFacingMessage {
-  key: UserFacingMessageTemplateKey
   text: string
-  variantId: string
 }
 
 const USER_FACING_MESSAGE_TEMPLATES = {
@@ -502,6 +494,8 @@ Please use:
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 
+assertUserFacingMessageTemplateCoverage()
+
 export function renderUserFacingMessage<K extends UserFacingMessageTemplateKey>(
   input: RenderUserFacingMessageInput<K>,
 ): RenderedUserFacingMessage {
@@ -511,15 +505,19 @@ export function renderUserFacingMessage<K extends UserFacingMessageTemplateKey>(
     variantCount: templates.length,
   })
 
-  return renderUserFacingMessageVariant({
+  return renderUserFacingMessageAtIndex({
     context: input.context,
     key: input.key,
     variantIndex,
   })
 }
 
-export function renderUserFacingMessageVariant<K extends UserFacingMessageTemplateKey>(
-  input: RenderUserFacingMessageVariantInput<K>,
+function renderUserFacingMessageAtIndex<K extends UserFacingMessageTemplateKey>(
+  input: {
+    context: UserFacingMessageContextByKey[K]
+    key: K
+    variantIndex: number
+  },
 ): RenderedUserFacingMessage {
   const templates = USER_FACING_MESSAGE_TEMPLATES[input.key]
   if (input.variantIndex < 0 || input.variantIndex >= templates.length) {
@@ -531,17 +529,7 @@ export function renderUserFacingMessageVariant<K extends UserFacingMessageTempla
     throw new RangeError(`User-facing message variant is missing for ${input.key}.`)
   }
 
-  return {
-    key: input.key,
-    text: renderUserFacingMessageTemplate(template, input.context),
-    variantId: formatUserFacingMessageVariantId(input.key, input.variantIndex),
-  }
-}
-
-export function readUserFacingMessageVariantCount(
-  key: UserFacingMessageTemplateKey,
-): number {
-  return USER_FACING_MESSAGE_TEMPLATES[key].length
+  return { text: renderUserFacingMessageTemplate(template, input.context) }
 }
 
 function selectUserFacingMessageVariantIndex(input: {
@@ -555,6 +543,17 @@ function selectUserFacingMessageVariantIndex(input: {
   return hashUserFacingMessageSeed(input.seed) % input.variantCount
 }
 
+function assertUserFacingMessageTemplateCoverage(): void {
+  for (const key of USER_FACING_MESSAGE_TEMPLATE_KEYS) {
+    const variantCount = USER_FACING_MESSAGE_TEMPLATES[key].length
+    if (variantCount < USER_FACING_MESSAGE_MIN_VARIANT_COUNT) {
+      throw new TypeError(
+        `User-facing message template ${key} requires at least ${USER_FACING_MESSAGE_MIN_VARIANT_COUNT} variants.`,
+      )
+    }
+  }
+}
+
 function hashUserFacingMessageSeed(seed: string): number {
   const normalized = seed.trim().length > 0 ? seed : "default"
   let hash = 2166136261
@@ -565,13 +564,6 @@ function hashUserFacingMessageSeed(seed: string): number {
   }
 
   return hash >>> 0
-}
-
-function formatUserFacingMessageVariantId(
-  key: UserFacingMessageTemplateKey,
-  variantIndex: number,
-): string {
-  return `${key}.v${String(variantIndex + 1).padStart(2, "0")}`
 }
 
 function renderUserFacingMessageTemplate<K extends UserFacingMessageTemplateKey>(
