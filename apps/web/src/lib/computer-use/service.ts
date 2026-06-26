@@ -5,6 +5,7 @@ import {
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
   type HostedComputerOsControlRequest,
+  type HostedComputerReturnContactKind,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -111,14 +112,17 @@ export type ComputerManagedLoginContinuation =
 export type ComputerHandoffPageState =
   | {
       kind: "completed";
+      returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
   | {
       kind: "expired";
+      returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
   | {
       kind: "checkpointing";
+      returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
   | {
@@ -519,6 +523,7 @@ export class ComputerUseService {
       ? await this.createHandoff({
           memberId: input.memberId,
           purpose: input.handoffPurpose,
+          returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
           runExpiresAt: run.expiresAt,
           runId: run.id,
           suggestedReply: input.suggestedReply,
@@ -656,6 +661,7 @@ export class ComputerUseService {
     if (handoff.status === "completed") {
       return {
         kind: "completed",
+        returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
     }
@@ -663,6 +669,7 @@ export class ComputerUseService {
     if (isFreshCheckpointingHandoff(handoff, now)) {
       return {
         kind: "checkpointing",
+        returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
     }
@@ -678,6 +685,7 @@ export class ComputerUseService {
         : handoff;
       return {
         kind: "expired",
+        returnContactKind: expired.returnContactKind,
         suggestedReply: expired.suggestedReply,
       };
     }
@@ -696,6 +704,7 @@ export class ComputerUseService {
       });
       return {
         kind: "expired",
+        returnContactKind: expired.returnContactKind,
         suggestedReply: expired.suggestedReply,
       };
     }
@@ -709,6 +718,7 @@ export class ComputerUseService {
       });
       return {
         kind: "expired",
+        returnContactKind: expired.returnContactKind,
         suggestedReply: expired.suggestedReply,
       };
     }
@@ -1192,6 +1202,7 @@ export class ComputerUseService {
     const fallback = await this.createHandoff({
       memberId: input.memberId,
       purpose: "login",
+      returnContactKind: released.returnContactKind,
       runExpiresAt: run.expiresAt,
       runId: run.id,
       suggestedReply: released.suggestedReply,
@@ -1233,7 +1244,10 @@ export class ComputerUseService {
   async completeHandoff(input: {
     memberId: string;
     token: string;
-  }): Promise<{ suggestedReply: string | null }> {
+  }): Promise<{
+    returnContactKind: HostedComputerReturnContactKind | null;
+    suggestedReply: string | null;
+  }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -1243,7 +1257,10 @@ export class ComputerUseService {
   private async completeHandoffWithStore(input: {
     memberId: string;
     token: string;
-  }, store: ComputerUseStore): Promise<{ suggestedReply: string | null }> {
+  }, store: ComputerUseStore): Promise<{
+    returnContactKind: HostedComputerReturnContactKind | null;
+    suggestedReply: string | null;
+  }> {
     const now = this.now();
     const tokenHash = sha256Hex(input.token);
     const handoff = await store.requireHandoffByTokenHash({
@@ -1261,12 +1278,14 @@ export class ComputerUseService {
 
     if (openHandoff.status === "completed") {
       return {
+        returnContactKind: openHandoff.returnContactKind,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
 
     if (isFreshCheckpointingHandoff(openHandoff, now)) {
       return {
+        returnContactKind: openHandoff.returnContactKind,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1280,10 +1299,12 @@ export class ComputerUseService {
           now,
         });
         return {
+          returnContactKind: expired.returnContactKind,
           suggestedReply: expired.suggestedReply,
         };
       }
       return {
+        returnContactKind: openHandoff.returnContactKind,
         suggestedReply: openHandoff.suggestedReply,
       };
     }
@@ -1305,6 +1326,7 @@ export class ComputerUseService {
         tokenHash,
       });
       return {
+        returnContactKind: latest.returnContactKind,
         suggestedReply: latest.suggestedReply,
       };
     }
@@ -1322,6 +1344,7 @@ export class ComputerUseService {
           now,
         });
         return {
+          returnContactKind: expired.returnContactKind,
           suggestedReply: expired.suggestedReply,
         };
       }
@@ -1341,6 +1364,7 @@ export class ComputerUseService {
       });
 
       return {
+        returnContactKind: completed.returnContactKind,
         suggestedReply: completed.suggestedReply,
       };
     } catch (error) {
@@ -1447,6 +1471,7 @@ export class ComputerUseService {
   private async createHandoff(input: {
     memberId: string;
     purpose: HostedComputerHandoffPurpose;
+    returnContactKind: HostedComputerReturnContactKind | null;
     runExpiresAt: Date;
     runId: string;
     suggestedReply: string | null;
@@ -1463,6 +1488,7 @@ export class ComputerUseService {
       expiresAt,
       memberId: input.memberId,
       purpose: input.purpose,
+      returnContactKind: input.returnContactKind,
       runId: input.runId,
       suggestedReply: input.suggestedReply,
       tokenHash: sha256Hex(token),
@@ -1598,6 +1624,7 @@ export class ComputerUseService {
     const handoff = await this.createHandoff({
       memberId: input.memberId,
       purpose: replacementPurpose,
+      returnContactKind: existing.returnContactKind,
       runExpiresAt: run.expiresAt,
       runId: run.id,
       suggestedReply: existing.suggestedReply,
@@ -1645,6 +1672,7 @@ export class ComputerUseService {
     handoffPurpose: HostedComputerHandoffPurpose;
     memberId: string;
     now: Date;
+    pauseDeliveryContext: HostedComputerDeliveryContext | null;
     run: ComputerRunRecord;
     store: ComputerUseStore;
   }): Promise<ComputerPauseForUserResult | null> {
@@ -1655,6 +1683,7 @@ export class ComputerUseService {
     const handoff = await this.createHandoff({
       memberId: input.memberId,
       purpose: input.handoffPurpose,
+      returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
       runExpiresAt: input.run.expiresAt,
       runId: input.run.id,
       suggestedReply: input.run.suggestedReply,
