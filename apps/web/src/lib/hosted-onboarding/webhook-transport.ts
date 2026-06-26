@@ -35,6 +35,7 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import {
+  assertHostedThreadRouteEgressAuthority,
   type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -265,6 +266,7 @@ async function sendHostedLinqSideEffect(
   });
 
   try {
+    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
     const currentInboundReply = isHostedLinqCurrentInboundSideEffect(
       effect,
       options.currentInboundReply,
@@ -326,6 +328,23 @@ async function sendHostedLinqSideEffect(
   }
 
   return { status: "sent" };
+}
+
+async function assertHostedLinqSideEffectRouteAuthority(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  const routeAuthority = "routeAuthority" in effect.payload
+    ? effect.payload.routeAuthority ?? null
+    : null;
+  if (!routeAuthority) {
+    return;
+  }
+
+  await assertHostedThreadRouteEgressAuthority({
+    authority: routeAuthority,
+    prisma,
+  });
 }
 
 function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
