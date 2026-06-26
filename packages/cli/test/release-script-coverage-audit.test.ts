@@ -302,6 +302,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
     expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files from the required ZIP/repomix attachments')
     expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR description alone')
+    expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
+    expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     const prDeepReviewLoop = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
       'utf8',

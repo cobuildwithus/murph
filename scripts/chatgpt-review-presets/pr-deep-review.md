@@ -67,6 +67,7 @@ Constraints:
 Final response contract:
 
 - return one concise plain-text review
+- start the final message with a single `Checked:` line naming the review target, using the PR number from the prompt or PR URL when available and the checked commit hash when it is available from the prompt or attachments; examples: `Checked: PR #123 @ abc1234`, `Checked: PR #123`, or `Checked: commit abc1234`
 - if you find nothing worth changing after a thorough pass, say so explicitly in a short summary rather than inventing low-value findings
 - do all repository reading and analysis silently, then reply with exactly ONE message containing your complete ranked findings; never send a preliminary status or acknowledgment message first, because the response capture treats your first settled message as the final review
 - end your final message with the exact line REVIEW_COMPLETE on its own line; the response capture tooling waits for that marker, and do not write that token anywhere else in any message
