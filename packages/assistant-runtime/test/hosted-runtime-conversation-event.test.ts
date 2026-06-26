@@ -1224,7 +1224,6 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           parserFailed: 2,
           parserObservedFailedJobs: 0,
           parserProcessed: 3,
-          parserRequeuedFailedJobs: 0,
           parserSucceeded: 1,
           safeErrorMessage: "One or more hosted conversation parser jobs failed.",
         },
@@ -1232,7 +1231,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ]);
   });
 
-  it("logs failed parser job state when drain returns no job result", async () => {
+  it("logs failed parser job state without requeueing terminal failures", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runtime = mockOpenInboxRuntimeWithParseJobs({
       failedJobs: [
@@ -1250,40 +1249,30 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
 
-    let importResult: Awaited<ReturnType<typeof importHostedConversationMessageWakeIntoLocalInbox>>;
-    try {
-      importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-        runtime: createRuntimeWithLogPort(logRequests),
-        vaultRoot: "/tmp/assistant-runtime-conversation",
-        wake: buildHostedExecutionLinqConversationMessageWake({
-          eventId: "evt_linq_parser_state_failure",
-          linqMessage: {
-            chatId: "chat_after_parser_state_failure",
-            from: "+15551234567",
-            isFromMe: false,
-            messageId: "msg_123",
-            parts: [],
-          },
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          phoneLookupKey: "15551234567",
-          userId: "member_123",
-        }),
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: createRuntimeWithLogPort(logRequests),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_state_failure",
+        linqMessage: {
+          chatId: "chat_after_parser_state_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
 
     expect(importResult.metrics).toEqual({
-      nextWakeAt: "2026-04-08T00:01:00.000Z",
+      nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(runtime.requeueAttachmentParseJobs).toHaveBeenCalledWith({
-      captureId: "capture_123",
-      state: "failed",
-    });
+    expect(runtime.requeueAttachmentParseJobs).not.toHaveBeenCalled();
     expect(logRequests).toHaveLength(1);
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
@@ -1296,11 +1285,10 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureIdPresent: true,
           errorCode: "parser_jobs_failed",
           errorCodes: ["ffmpeg_unavailable"],
-          nextWakeAtPresent: true,
+          nextWakeAtPresent: false,
           parserFailed: 1,
           parserObservedFailedJobs: 1,
           parserProcessed: 0,
-          parserRequeuedFailedJobs: 1,
           parserSucceeded: 0,
           safeErrorMessage: "One or more hosted conversation parser jobs failed.",
         },

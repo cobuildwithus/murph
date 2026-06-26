@@ -180,17 +180,7 @@ async function drainHostedConversationParsers(input: {
       failedJobs: observedFailedJobs,
       failedResults,
     });
-    let requeuedFailedJobs = 0;
-    let nextWakeAt: string | null = null;
     if (parserFailures.length > 0) {
-      requeuedFailedJobs = input.runtime.requeueAttachmentParseJobs({
-        captureId: input.captureId,
-        state: "failed",
-      });
-      nextWakeAt = requeuedFailedJobs > 0
-        ? new Date(Date.now() + HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS)
-          .toISOString()
-        : null;
       await writeHostedRuntimeLogBestEffort({
         entry: {
           component: "mailbox",
@@ -204,12 +194,11 @@ async function drainHostedConversationParsers(input: {
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
-            nextWakeAtPresent: nextWakeAt !== null,
+            nextWakeAtPresent: false,
             safeErrorMessage: "One or more hosted conversation parser jobs failed.",
             parserFailed: parserFailures.length,
             parserObservedFailedJobs: observedFailedJobs.length,
             parserProcessed: results.length,
-            parserRequeuedFailedJobs: requeuedFailedJobs,
             parserSucceeded: results.length - failedResults.length,
           },
         },
@@ -217,7 +206,7 @@ async function drainHostedConversationParsers(input: {
       });
     }
     return createHostedConversationParserMetrics({
-      nextWakeAt,
+      nextWakeAt: null,
       parserProcessed: results.length,
     });
   } catch (error) {
