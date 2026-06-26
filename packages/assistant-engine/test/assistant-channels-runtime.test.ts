@@ -1468,6 +1468,31 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
+  it('retries Linq typing stop on explicit cleanup after a failed max session stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator
+      .mockRejectedValueOnce(new Error('temporary Linq stop failure'))
+      .mockResolvedValueOnce(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await handle.stop()
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+  })
+
   it('recovers Linq thread sends when the stored chat id is stale', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(

@@ -743,7 +743,9 @@ export async function startAssistantChannelActivitySession(input: {
   scheduleNextRefresh()
   if (maxSessionMs !== null) {
     maxSessionTimer = setTimeout(() => {
-      void stopActivity().catch(() => {})
+      void stopActivity({
+        retryableFailure: true,
+      }).catch(() => {})
     }, maxSessionMs)
     unrefAssistantChannelActivityTimer(maxSessionTimer)
   }
@@ -788,12 +790,45 @@ export async function startAssistantChannelActivitySession(input: {
     return refreshTail
   }
 
-  async function stopActivity(): Promise<void> {
+  async function stopActivity(
+    options: {
+      retryableFailure?: boolean
+    } = {},
+  ): Promise<void> {
     if (!stopPromise) {
-      stopPromise = stopActivityOnce()
+      startStopActivity(options)
     }
 
-    await stopPromise
+    try {
+      await stopPromise
+    } catch (error) {
+      if (options.retryableFailure || stopPromise) {
+        throw error
+      }
+
+      startStopActivity()
+      await stopPromise
+    }
+  }
+
+  function startStopActivity(
+    options: {
+      retryableFailure?: boolean
+    } = {},
+  ): void {
+    const attempt = stopActivityOnce()
+    if (!options.retryableFailure) {
+      stopPromise = attempt
+      return
+    }
+
+    const retryableAttempt = attempt.catch((error) => {
+      if (stopPromise === retryableAttempt) {
+        stopPromise = null
+      }
+      throw error
+    })
+    stopPromise = retryableAttempt
   }
 
   async function stopActivityOnce(): Promise<void> {

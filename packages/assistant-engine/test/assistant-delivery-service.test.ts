@@ -475,6 +475,82 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
   expect(stopResolved).toBe(true)
 })
 
+test('typing indicator stop is bounded when the underlying stop stalls', async () => {
+  vi.useFakeTimers()
+  try {
+    const session = createAssistantSession({
+      binding: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'linq-thread',
+        },
+        identityId: null,
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    })
+    const input: AssistantMessageInput = {
+      channel: 'linq',
+      deliverResponse: true,
+      participantId: 'linq-participant',
+      prompt: 'Send the reminder.',
+      threadId: 'linq-thread',
+      vault: '/vaults/test',
+    }
+    const stopStarted = vi.fn()
+    const startLinqTyping = vi.fn(async () => ({
+      stop: vi.fn(
+        () =>
+          new Promise<void>(() => {
+            stopStarted()
+          }),
+      ),
+    }))
+
+    const indicator = startAssistantChannelTypingIndicator({
+      channelDependencies: {
+        startLinqTyping,
+      },
+      input,
+      precedence: 'audience-first',
+      session,
+      sharedPlan: createSharedPlan({
+        audience: {
+          actorId: 'linq-participant',
+          channel: 'linq',
+          threadId: 'linq-thread',
+          threadIsDirect: false,
+        },
+      }),
+    })
+
+    if (!indicator) {
+      throw new Error('expected typing indicator')
+    }
+    await Promise.resolve()
+
+    const stopPromise = indicator.stop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(stopStarted).toHaveBeenCalledTimes(1)
+
+    let stopResolved = false
+    stopPromise.then(() => {
+      stopResolved = true
+    })
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(stopResolved).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await stopPromise
+    expect(stopResolved).toBe(true)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('Linq reactions fail closed when the current message is not reaction-capable', async () => {
   const session = createAssistantSession()
   const result = await deliverAssistantReaction({
