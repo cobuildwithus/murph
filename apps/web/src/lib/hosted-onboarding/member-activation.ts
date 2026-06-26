@@ -506,10 +506,8 @@ function buildHostedMemberSignupWelcomePayload(input: {
 
 function buildHostedMemberSignupWelcomeMessageSeed(input: {
   memberId: string;
-  sourceEventId: string;
-  sourceType: string;
 }): string {
-  return `assistant.signup_welcome:${input.memberId}:${input.sourceType}:${input.sourceEventId}`;
+  return buildHostedMemberSignupWelcomeDeliveryIdentity(input.memberId);
 }
 
 function buildHostedMemberSignupWelcomeNotificationWake(input: {
@@ -520,14 +518,15 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
   if (!signupWelcome) {
     return null;
   }
+  const deliveryIdentity = buildHostedMemberSignupWelcomeDeliveryIdentity(input.activationWake.userId);
 
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
     memberId: input.activationWake.userId,
     notification: {
-      deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
+      deliveryDedupeToken: deliveryIdentity,
       deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
+      deliveryIdempotencyKey: deliveryIdentity,
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
@@ -540,6 +539,10 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     },
     occurredAt: input.occurredAt,
   });
+}
+
+function buildHostedMemberSignupWelcomeDeliveryIdentity(memberId: string): string {
+  return `signup-welcome:${memberId}`;
 }
 
 function buildHostedMemberSignupWelcomeInstructions(text: string): string {

@@ -99,17 +99,11 @@ function expectedTelegramAssistantThreadId(input: {
   return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
 }
 
-function expectedSignupWelcomeText(input: {
-  sourceEventId?: string;
-  sourceType?: string;
-} = {}): string {
-  const sourceEventId = input.sourceEventId ?? "evt_123";
-  const sourceType = input.sourceType ?? "stripe.invoice.paid";
-
+function expectedSignupWelcomeText(): string {
   return renderUserFacingMessage({
     context: {},
     key: "assistant.signup_welcome",
-    seed: `assistant.signup_welcome:member_123:${sourceType}:${sourceEventId}`,
+    seed: "signup-welcome:member_123",
   }).text;
 }
 
@@ -118,9 +112,7 @@ function expectLegacySignupWelcomeCompatibilityWake(input: {
   route: unknown;
   sourceEventId?: string;
 }): void {
-  const expectedText = expectedSignupWelcomeText({
-    sourceEventId: input.sourceEventId,
-  });
+  const expectedText = expectedSignupWelcomeText();
 
   expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(input.callIndex, {
     envelope: expect.objectContaining({
@@ -278,6 +270,59 @@ describe("hosted onboarding member activation", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps signup welcome text stable across source events sharing the per-member delivery identity", async () => {
+    const member = makeMemberSnapshot();
+
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_checkout_activation",
+        sourceType: "stripe.checkout.session.completed",
+      },
+      emailLinked: true,
+      memberId: member.core.id,
+      prisma: makeTransactionHarness() as never,
+    });
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:01:00.000Z"),
+        occurredAt: "2026-04-12T00:01:00.000Z",
+        sourceEventId: "evt_invoice_activation",
+        sourceType: "stripe.invoice.paid",
+      },
+      emailLinked: true,
+      memberId: member.core.id,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    const expectedText = expectedSignupWelcomeText();
+    const firstActivationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    const firstNotificationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[1]?.[0]?.envelope;
+    const secondActivationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[2]?.[0]?.envelope;
+    const secondNotificationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[3]?.[0]?.envelope;
+
+    expect(firstActivationEnvelope.signupWelcome?.text).toBe(expectedText);
+    expect(secondActivationEnvelope.signupWelcome?.text).toBe(expectedText);
+    expect(firstNotificationEnvelope.notification).toMatchObject({
+      deliveryDedupeToken: "signup-welcome:member_123",
+      deliveryIdempotencyKey: "signup-welcome:member_123",
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: expectedText,
+      },
+    });
+    expect(secondNotificationEnvelope.notification).toMatchObject({
+      deliveryDedupeToken: "signup-welcome:member_123",
+      deliveryIdempotencyKey: "signup-welcome:member_123",
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: expectedText,
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(4);
   });
 
   it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {
