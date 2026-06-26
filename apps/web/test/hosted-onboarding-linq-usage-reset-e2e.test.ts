@@ -94,6 +94,7 @@ const mocks = vi.hoisted(() => {
       id: input.mailboxItemId,
       userId: "member_usage_reset",
     })),
+    readHostedLinqFirstContactEventReceipt: vi.fn(async () => null),
     readHostedMemberHomeLinqRoute: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -171,6 +172,17 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     ...actual,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
     incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-first-contact-admission")
+  >("@/src/lib/hosted-onboarding/linq-first-contact-admission");
+
+  return {
+    ...actual,
+    readHostedLinqFirstContactEventReceipt: mocks.readHostedLinqFirstContactEventReceipt,
   };
 });
 

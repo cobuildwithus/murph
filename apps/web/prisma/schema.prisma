@@ -812,6 +812,17 @@ model HostedLinqFirstContactAdmissionDecision {
   @@map("hosted_linq_first_contact_admission_decision")
 }
 
+model HostedLinqFirstContactEventReceipt {
+  eventId   String   @id @map("event_id")
+  handling  String
+  memberId  String   @map("member_id")
+  inviteId  String   @map("invite_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hosted_linq_first_contact_event_receipt")
+}
+
 model HostedStripeEvent {
   eventId          String                  @id @map("event_id")
   type             String

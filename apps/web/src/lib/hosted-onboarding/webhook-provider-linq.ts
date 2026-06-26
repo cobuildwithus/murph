@@ -72,6 +72,9 @@ import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
 import {
+  readHostedLinqFirstContactEventReceipt,
+} from "./linq-first-contact-admission";
+import {
   readHostedThreadRouteByExternalThread,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -135,6 +138,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhoneNumber,
     summary,
   } = context;
+
+  const existingFirstContactReceipt = await readHostedLinqFirstContactEventReceipt({
+    eventId: input.event.event_id,
+    prisma: input.prisma,
+  });
+  if (existingFirstContactReceipt) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildLinqDuplicateWebhookEventPlan(),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        duplicate: true,
+        existingMemberActive: false,
+        existingMemberMatch: "none",
+        reason: "duplicate-webhook-event",
+        routeStage: "first-contact-event-duplicate",
+      }),
+    );
+  }
 
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,
@@ -960,6 +980,18 @@ function buildFirstContactAdmissionRequiredPlan(input: {
     }),
     firstContactAdmissionRequest: input.request,
   };
+}
+
+function buildLinqDuplicateWebhookEventPlan(): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [],
+    response: {
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    },
+  });
 }
 
 function buildHostedLinqFirstContactAdmissionRequest(input: {

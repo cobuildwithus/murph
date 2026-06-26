@@ -45,6 +45,16 @@ vi.mock("../src/lib/hosted-onboarding/linq-daily-state", async (importOriginal) 
   };
 });
 
+vi.mock("../src/lib/hosted-onboarding/linq-first-contact-admission", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-onboarding/linq-first-contact-admission")
+  >();
+  return {
+    ...actual,
+    readHostedLinqFirstContactEventReceipt: vi.fn(async () => null),
+  };
+});
+
 vi.mock("../src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/hosted-crypto/domain-root-store")>();
   return {

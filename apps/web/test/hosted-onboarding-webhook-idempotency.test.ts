@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+  readHostedLinqFirstContactEventReceipt: vi.fn(),
+  recordHostedLinqFirstContactSignupLinkSent: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
@@ -118,6 +120,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-first-contact-admission")
+  >("@/src/lib/hosted-onboarding/linq-first-contact-admission");
+
+  return {
+    ...actual,
+    readHostedLinqFirstContactEventReceipt: mocks.readHostedLinqFirstContactEventReceipt,
+    recordHostedLinqFirstContactSignupLinkSent: mocks.recordHostedLinqFirstContactSignupLinkSent,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
     "@/src/lib/hosted-onboarding/linq",
@@ -149,6 +163,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
+    mocks.readHostedLinqFirstContactEventReceipt.mockResolvedValue(null);
+    mocks.recordHostedLinqFirstContactSignupLinkSent.mockResolvedValue({
+      eventId: "evt_123",
+      handling: "signup_link_sent",
+      inviteId: "invite_123",
+      memberId: "member_123",
+    });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({
       dayUtc: new Date("2026-03-26T00:00:00.000Z"),

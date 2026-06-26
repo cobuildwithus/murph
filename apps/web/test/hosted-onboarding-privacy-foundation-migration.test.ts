@@ -388,6 +388,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqFirstContactEventReceiptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260626010000_linq_first_contact_event_receipt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -446,6 +453,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260626000000_linq_first_contact_admission_decision",
+      "20260626010000_linq_first_contact_event_receipt",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -532,6 +540,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
       "response",
+    );
+    expect(linqFirstContactEventReceiptMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_first_contact_event_receipt"',
+    );
+    expect(linqFirstContactEventReceiptMigrationSql).toContain(
+      "CHECK (\"handling\" IN ('signup_link_sent'))",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

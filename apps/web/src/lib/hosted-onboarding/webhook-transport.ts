@@ -19,6 +19,9 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
+  recordHostedLinqFirstContactSignupLinkSent,
+} from "./linq-first-contact-admission";
+import {
   buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
@@ -89,6 +92,7 @@ export type HostedLinqInviteSignupMessagePayload = {
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  sourceEventId: string;
   template: "invite_signup";
 };
 
@@ -211,6 +215,15 @@ export async function drainHostedLinqSideEffectsDirect(input: {
         prisma: input.prisma,
         signal: input.signal,
       });
+
+      if (effect.payload.template === "invite_signup") {
+        await recordHostedLinqFirstContactSignupLinkSent({
+          eventId: effect.payload.sourceEventId,
+          inviteId: effect.payload.inviteId,
+          memberId: effect.payload.memberId,
+          prisma: input.prisma,
+        });
+      }
     } catch (error) {
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
@@ -490,6 +503,7 @@ function buildHostedWebhookLinqMessagePayload(
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,
+        sourceEventId: input.sourceEventId,
         template: input.template,
       };
   }
