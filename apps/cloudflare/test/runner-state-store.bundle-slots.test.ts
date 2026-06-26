@@ -451,11 +451,87 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("validates provider egress credentials against the active runner", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    const lease = await store.beginWriteFence({
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-write",
+    });
+    const boundLease = await store.bindWriteFenceWorkspaceVersion({
+      token: lease,
+      workspaceVersion: "6",
+    });
+
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "openai",
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-write",
+    })).resolves.toMatchObject({
+      attemptId: boundLease.attemptId,
+      leaseGeneration: boundLease.leaseGeneration,
+      owns: true,
+      record: {
+        writeFence: {
+          runnerContainerName: "user-write--v-worker-current",
+        },
+      },
+      userId: "user-write",
+      workspaceVersion: "6",
+    });
+
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "openai",
+      runnerContainerName: "user-write--v-worker-stale",
+      userId: "user-write",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "runner_container_mismatch",
+      record: {
+        writeFence: {
+          attemptId: boundLease.attemptId,
+          runnerContainerName: "user-write--v-worker-current",
+        },
+      },
+    });
+
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "openai",
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-other",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "write_fence_mismatch",
+    });
+
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "unsupported_provider",
+      runnerContainerName: "user-write--v-worker-current",
+      userId: "user-write",
+    })).resolves.toEqual({
+      owns: false,
+      reason: "provider_egress_not_allowed",
+    });
+  });
+
   it("fails closed without initializing state when provider egress validation reaches an unbound runner", async () => {
     const { db, store } = createRunnerStateStoreHarness();
 
     await expect(store.validateProviderEgressToken({
       providerEgressToken: "provider-egress-token",
+      userId: "user-unbound",
+    })).resolves.toEqual({
+      owns: false,
+      reason: "missing_runner_state",
+    });
+    expect(readRunnerMetaRowCount(db)).toBe(0);
+  });
+
+  it("fails closed without initializing state when provider credential validation reaches an unbound runner", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+
+    await expect(store.validateProviderEgressCredential({
+      providerKind: "openai",
+      runnerContainerName: "user-unbound",
       userId: "user-unbound",
     })).resolves.toEqual({
       owns: false,

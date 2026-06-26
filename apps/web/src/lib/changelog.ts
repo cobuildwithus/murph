@@ -106,6 +106,38 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["assistant", "exercise", "images", "polish"],
         sourcePullRequests: [],
       },
+      {
+        id: "openweather-tool",
+        kind: "feature",
+        priority: 4,
+        title: "Real weather, current and five days out",
+        summary:
+          "Ask about today's heat, tomorrow's rain, or the forecast for your long run on Saturday — Murph now pulls live current conditions and a five-day forecast from OpenWeather, scoped to wherever you ask about.",
+        relevanceTags: ["assistant", "weather", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Check the forecast",
+          prompt:
+            "What's the weather looking like for my long run Saturday morning?",
+        },
+      },
+      {
+        id: "composio-search-tools",
+        kind: "feature",
+        priority: 4,
+        title: "Search Amazon, Walmart, Google Maps, and find a clinician",
+        summary:
+          "Murph can now search Amazon and Walmart for products, look places up on Google Maps, and find providers by name or specialty through the national NPI directory — all in chat, no app switch.",
+        details:
+          "Product and place search lands the actual listing instead of guessing. The NPI lookup returns a real provider record — NPI number, address, taxonomy — so referrals and verifications stop being a dead end.",
+        relevanceTags: ["assistant", "search", "shopping", "providers", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Try a search",
+          prompt:
+            "Find a cardiologist near me on the NPI registry, and price magnesium glycinate on Amazon and Walmart while you're at it.",
+        },
+      },
     ],
   },
   {

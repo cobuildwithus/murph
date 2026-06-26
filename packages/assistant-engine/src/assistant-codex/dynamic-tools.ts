@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -198,7 +199,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -219,6 +220,8 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minItems: 0,
         maxItems: 7,
         default: [],
+        description:
+          'Optional metadata for known shipped changelog item ids. Leave empty for general product interest, feature requests, frustrations, inferred workflow friction, or assistant-observed product/tool friction.',
         items: {
           type: 'string',
           maxLength: 120,
@@ -227,24 +230,6 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
       },
     },
     required: ['kind', 'summary'],
-    oneOf: [
-      {
-        properties: {
-          kind: { enum: ['feature_interest'] },
-          relatedChangelogItemIds: {
-            type: 'array',
-            minItems: 1,
-          },
-        },
-        required: ['kind', 'relatedChangelogItemIds'],
-      },
-      {
-        properties: {
-          kind: { enum: ['feature_request', 'frustration'] },
-        },
-        required: ['kind'],
-      },
-    ],
   },
 } as const
 
@@ -252,7 +237,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; when approval is pending, include the returned approval link in your normal reply. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -410,7 +395,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input, direct user takeover, or view-only screen inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
+    'Pause a computer run for missing user input, direct user takeover, or browser inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -426,7 +411,6 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
               'card',
               'captcha',
               'manual_browser_help',
-              'screen_inspection',
             ],
           },
           { type: 'null' },
@@ -592,23 +576,14 @@ const submitProductFeedbackArgumentsSchema = z
       .string()
       .trim()
       .min(1)
-      .max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
-      .transform((value) => value.replace(/\s+/gu, ' ')),
+      .transform(sanitizeHostedProductFeedbackSummary)
+      .pipe(z.string().min(1).max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
       .max(7)
       .default([]),
   })
   .strict()
-  .superRefine((feedback, context) => {
-    if (feedback.kind === 'feature_interest' && feedback.relatedChangelogItemIds.length === 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'feature_interest requires relatedChangelogItemIds',
-        path: ['relatedChangelogItemIds'],
-      })
-    }
-  })
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -1288,7 +1263,13 @@ export async function executeMurphDynamicToolRequest(input: {
       ) {
         return toolTextResult(
           false,
-          'secure vault-file sending is unavailable for this conversation',
+          'secure vault-file approval is unavailable for this conversation',
+        )
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'vault-file sending cannot be combined with other response media',
         )
       }
       try {
@@ -1307,8 +1288,17 @@ export async function executeMurphDynamicToolRequest(input: {
             }
           case 'approved':
             return {
-              ...toolTextResult(true, 'approved vault file queued for delivery'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
+              responseMediaPatch: {
+                media: [result.file],
+                op: 'append' as const,
+              },
             }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
@@ -1316,7 +1306,7 @@ export async function executeMurphDynamicToolRequest(input: {
             return toolTextResult(false, 'vault-file delivery approval expired')
         }
       } catch {
-        return toolTextResult(false, 'secure vault-file delivery could not be queued')
+        return toolTextResult(false, 'secure vault-file approval could not be prepared')
       }
     }
     case 'create-phone-call': {

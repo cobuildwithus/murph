@@ -4,6 +4,7 @@ import { test } from 'vitest'
 
 import {
   renderMarkdownMessageText,
+  sanitizeUserFacingMessageLinks,
   splitDecoratedMessageText,
 } from '../src/message-formatting.ts'
 
@@ -99,6 +100,77 @@ test('message formatting leaves ambiguous markdown-like text untouched', () => {
     {
       decorations: [],
       text: 'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, 变量_名称_值, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
+    },
+  )
+})
+
+test('message formatting converts markdown links to clean raw URLs', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'Found it: [amazon.com](https://www.amazon.com/Blueprint-Bryan-Johnson-Longevity-Protein/dp/B0DNGJRLQF?utm_source=openai&utm_medium=chatgpt).',
+    ),
+    'Found it: https://www.amazon.com/Blueprint-Bryan-Johnson-Longevity-Protein/dp/B0DNGJRLQF.',
+  )
+})
+
+test('message formatting cleans tracking parameters from raw URLs', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'Open https://example.com/path?keep=1&utm_source=openai&fbclid=abc#section when ready.',
+    ),
+    'Open https://example.com/path?keep=1#section when ready.',
+  )
+})
+
+test('message formatting cleans tracking parameters from raw URLs with parenthesized paths', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'Open https://example.com/path(foo)?utm_source=openai&keep=1#section when ready.',
+    ),
+    'Open https://example.com/path(foo)?keep=1#section when ready.',
+  )
+})
+
+test('message formatting unwraps parenthesized markdown source links', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'I found the product. ([amazon.com](https://www.amazon.com/item?utm_campaign=openai))',
+    ),
+    'I found the product. https://www.amazon.com/item',
+  )
+})
+
+test('message formatting converts markdown links with parenthesized paths to clean raw URLs', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'Found it: [source](https://example.com/path(foo)?utm_source=openai&keep=1#section).',
+    ),
+    'Found it: https://example.com/path(foo)?keep=1#section.',
+  )
+})
+
+test('message formatting unwraps parenthesized raw URLs', () => {
+  assert.equal(
+    sanitizeUserFacingMessageLinks(
+      'Source (https://example.com/report?utm_campaign=openai&keep=yes).',
+    ),
+    'Source https://example.com/report?keep=yes.',
+  )
+})
+
+test('message formatting preserves native text decorations after link cleanup', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText(
+      '**Protein**: [label](https://example.com/a?utm_campaign=x)',
+    ),
+    {
+      decorations: [
+        {
+          range: [0, 7],
+          style: 'bold',
+        },
+      ],
+      text: 'Protein: https://example.com/a',
     },
   )
 })

@@ -193,8 +193,10 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     effectsPort: createCloudflareEffectsPort({
+      boundUserId: input.boundUserId,
       fetchImpl: trustedInternalFetchImpl,
       timeoutMs,
+      webControlTransport: transport,
       workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
     }),
     ...(transport

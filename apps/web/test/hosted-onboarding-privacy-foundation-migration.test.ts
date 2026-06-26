@@ -135,6 +135,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsagePeriod",
   "HostedConsentEvent",
   "HostedConsentGrant",
+  "HostedThreadContainer",
   "HostedInvite",
   "HostedLinqDailyState",
   "HostedConnectedAppConnectIntent",
@@ -360,6 +361,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadRoutesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260624120000_hosted_thread_routes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const sensitiveActionApprovalMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260624150000_hosted_sensitive_action_approval/migration.sql",
@@ -377,6 +385,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedPhoneCallsMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260625000100_hosted_phone_calls/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -435,11 +450,40 @@ describe("hosted Prisma baseline migration", () => {
       "20260623193000_hosted_product_feedback_summary",
       "20260624000000_clear_hosted_codex_auth_connected",
       "20260624090000_hosted_sensitive_action_challenge",
+      "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260625000100_hosted_phone_calls",
+      "20260626000000_linq_first_contact_admission_decision",
       "migration_lock.toml",
     ]);
+    expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
+    expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'PRIMARY KEY ("channel", "thread_identity_lookup_key")',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain('"thread_lookup_key" TEXT NOT NULL');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"thread_identity_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"hosted_thread_route_channel_thread_lookup_key_idx"',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain('"owner_member_id" TEXT NOT NULL');
+    expect(hostedThreadRoutesMigrationSql).toContain('"monthly_usage_limit_usd_micros" BIGINT NOT NULL DEFAULT 4500000');
+    expect(hostedThreadRoutesMigrationSql).toContain('REFERENCES "hosted_thread_container"("member_id")');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id")\n  ON DELETE CASCADE',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'CONSTRAINT "hosted_thread_container_owner_member_id_fkey"',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain("ON DELETE RESTRICT");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("group_chat");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("linq_group");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
+    expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
+    expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
     expect(singleMemberComputerProfileMigrationSql).toContain(
@@ -492,6 +536,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(sensitiveActionApprovalMigrationSql).not.toContain("wallet_address");
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'PRIMARY KEY ("event_id")',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

@@ -21,6 +21,9 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
+    expect(environment.linqFirstContactAdmissionMode).toBe("off");
+    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-nano");
+    expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
@@ -35,6 +38,9 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         "+1 (555) 000-0003, +15550000003",
       HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER: "250",
+      HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
+      HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
+      HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY: "first-contact-openai-key",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
@@ -50,6 +56,9 @@ describe("readHostedOnboardingEnvironment", () => {
       "+15550000003",
     ]);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(250);
+    expect(environment.linqFirstContactAdmissionMode).toBe("enforce");
+    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-mini");
+    expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("first-contact-openai-key");
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
@@ -113,6 +122,22 @@ describe("readHostedOnboardingEnvironment", () => {
         NODE_ENV: "production",
       })),
     ).toThrow(/local-development only/u);
+  });
+
+  it("rejects invalid Linq first-contact admission modes", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "shadow",
+      })),
+    ).toThrow(/FIRST_CONTACT_ADMISSION_MODE/u);
+  });
+
+  it("falls back to OPENAI_API_KEY for Linq first-contact admission", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      OPENAI_API_KEY: "shared-openai-key",
+    }));
+
+    expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("shared-openai-key");
   });
 
   it("requires contact privacy keys even outside production", () => {

@@ -43,6 +43,20 @@ describe("createHostedRunnerNativeParserToolchain", () => {
     );
   });
 
+  it("passes the transcription provider credential as an authorization header", () => {
+    const toolchain = createHostedRunnerNativeParserToolchain({}, {
+      providerEgressCredential: "signed-transcribe-credential",
+    });
+
+    expect(toolchain.tools.transcription).toEqual({
+      authorizationHeader: "Bearer signed-transcribe-credential",
+      endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+    });
+    expect(toolchain.tools.transcription?.endpoint).not.toContain(
+      "signed-transcribe-credential",
+    );
+  });
+
   it("uses explicit local e2e parser tools only when the local marker is set", () => {
     vi.stubEnv(HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV, "1");
     vi.stubEnv("FFMPEG_COMMAND", "/app/test-parser-toolchain/ffmpeg");

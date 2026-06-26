@@ -32,10 +32,40 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
   {
+    slug: 'competition-training',
+    name: 'competition-training',
+    triggerHint:
+      'Use when a user is preparing for a target fitness race or competition and needs feasibility, phase selection, event-demand classification, pacing, tapering, event rehearsal, execution, logistics, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events. For pure strength-sport meets such as powerlifting, weightlifting, or strongman, use strength-training first for strength or resistance programming, loading, progression, plateaus, and exercise selection; use competition-training only for event-demand classification, current rule or standard checks, taper, execution, logistics, or post-event review. Do not use for ordinary exercise without a target event or as the primary skill for a new pain or injury complaint.',
+  },
+  {
+    slug: 'strength-training',
+    name: 'strength-training',
+    triggerHint:
+      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+  },
+  {
+    slug: 'stress-regulation',
+    name: 'stress-regulation',
+    triggerHint:
+      'Use when stress or overload is the immediate bottleneck: acute activation, trouble winding down, possible occupational burnout, symptom or pain fear, stress-linked eating or training avoidance, or stress-driven low motivation on a hard day. Offer one brief state- or load-shifting action, then hand off recurring, domain-specific, clinical, urgent, or crisis work.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
       'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+  },
+  {
+    slug: 'nutrition-strategy',
+    name: 'nutrition-strategy',
+    triggerHint:
+      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, body composition, training fuel and recovery, hydration, appetite or under-fueling, GI comfort, and real-life constraints. Use food-journal for meal capture or retrospective pattern finding.',
+  },
+  {
+    slug: 'sleep-recovery-readiness',
+    name: 'sleep-recovery-readiness',
+    triggerHint:
+      'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
   },
   {
     slug: 'computer-use',
@@ -72,6 +102,12 @@ export const ASSISTANT_SKILLS = [
     name: 'physical-therapy',
     triggerHint:
       'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before suggesting exercises for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
+  },
+  {
+    slug: 'running-cardio',
+    name: 'running-cardio',
+    triggerHint:
+      'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
 ] as const
 

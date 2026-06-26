@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
@@ -6,6 +7,7 @@ export interface HostedAssistantLinqDeliveryContext {
   directRecipientPhoneNumber: string | null;
   fromPhoneNumber: string | null;
   replyToMessageId: string | null;
+  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
 }
 
@@ -23,6 +25,7 @@ export function buildHostedAssistantLinqDeliveryContextFromWake(
     directRecipientPhoneNumber: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.from),
     fromPhoneNumber: null,
     replyToMessageId: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.messageId),
+    routeAuthority: wake.message.routeAuthority ?? null,
     target: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.chatId),
   };
 }
@@ -45,9 +48,35 @@ export function resolveHostedAssistantLinqDeliveryContextForRequest(input: {
     return input.context;
   }
 
+  if (input.context.routeAuthority) {
+    return null;
+  }
+
   const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
   return replyToMessageId && replyToMessageId === input.context.replyToMessageId
     ? input.context
+    : null;
+}
+
+export function resolveHostedAssistantLinqReactionDeliveryContextForRequest(input: {
+  context: HostedAssistantLinqDeliveryContext | null;
+  target: string;
+  targetMessageId: string;
+}): HostedAssistantLinqDeliveryContext | null {
+  const context = resolveHostedAssistantLinqDeliveryContextForRequest({
+    context: input.context,
+    replyToMessageId: input.targetMessageId,
+    target: input.target,
+    targetKind: "thread",
+  });
+
+  if (!context?.routeAuthority) {
+    return context;
+  }
+
+  const targetMessageId = normalizeHostedLinqDeliveryContextText(input.targetMessageId);
+  return targetMessageId && targetMessageId === context.replyToMessageId
+    ? context
     : null;
 }
 

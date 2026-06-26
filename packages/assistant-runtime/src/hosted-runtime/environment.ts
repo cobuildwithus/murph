@@ -163,7 +163,6 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     "HOSTED_WEB_BASE_URL",
     "LD_LIBRARY_PATH",
     "LD_PRELOAD",
-    "MURPH_DATA_API_KEY",
     "NODE_OPTIONS",
     "NODE_PATH",
     "PATH",
@@ -484,6 +483,13 @@ function cloneHostedAssistantRuntimeParserToolConfig(
   input: HostedAssistantRuntimeParserToolConfig,
 ): HostedAssistantRuntimeParserToolConfig {
   return {
+    ...(input.authorizationHeader === undefined
+      ? {}
+      : {
+          authorizationHeader: normalizeHostedAssistantRuntimeParserToolAuthorizationHeader(
+            input.authorizationHeader,
+          ),
+        }),
     ...(input.command === undefined
       ? {}
       : {
@@ -508,6 +514,19 @@ function cloneHostedAssistantRuntimeParserToolConfig(
           ),
         }),
   };
+}
+
+function normalizeHostedAssistantRuntimeParserToolAuthorizationHeader(
+  value: string | null | undefined,
+): string {
+  const normalized = normalizeHostedRuntimeString(value);
+  if (!normalized) {
+    throw new TypeError(
+      "Hosted runtime parser toolchain authorizationHeader must be a non-empty string.",
+    );
+  }
+
+  return normalized;
 }
 
 function normalizeHostedAssistantRuntimeParserToolEndpoint(

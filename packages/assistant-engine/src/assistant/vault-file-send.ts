@@ -11,17 +11,20 @@ import {
   assistantOutboxIntentSchema,
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
-  type AssistantTurnTrigger,
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
+import { resolveAssistantBindingDelivery } from './bindings.js'
 import {
-  createAssistantVaultFileSendOutboxIntent,
-  saveAssistantOutboxIntentIfUnchanged,
-  type AssistantOutboxCreateIntentInput,
-} from './outbox.js'
+  buildAssistantOutboxPersistedTarget,
+  buildAssistantOutboxRawTargetIdentity,
+  hashAssistantOutboxTargetFingerprint,
+} from './outbox/intents.js'
+import {
+  normalizeNullableString,
+} from './shared.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
@@ -49,80 +52,42 @@ export interface AssistantActionApprovalPort {
 
 export type AssistantVaultFileSendRequestResult =
   & {
+    file: AssistantVaultFileResponseMedia
     filename: string
-    intentId: string
   }
   & HostedActionApprovalResult
 
 export async function requestAssistantVaultFileSend(input: {
   actionApprovalPort: AssistantActionApprovalPort
   actorId?: string | null
-  bindingDelivery?: AssistantOutboxCreateIntentInput['bindingDelivery']
+  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
-  deliveryIdempotencyKey: string
-  deliverySource?: AssistantOutboxCreateIntentInput['deliverySource']
+  deliverySource?: AssistantOutboxIntent['deliverySource']
   explicitTarget?: string | null
   identityId?: string | null
   ref: string
   replyToMessageId?: string | null
-  sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
-  turnId: string
-  turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
   const file = await resolveAssistantVaultFileResponseMedia({
     ref: input.ref,
     vaultRoot: input.vault,
   })
-  const deliveryIdempotencyKey = buildAssistantVaultFileDeliveryIdempotencyKey({
-    baseKey: input.deliveryIdempotencyKey,
-    file,
-  })
-  const intent = await createAssistantVaultFileSendOutboxIntent({
-    actorId: input.actorId ?? null,
-    bindingDelivery: input.bindingDelivery ?? null,
-    channel: input.channel ?? null,
-    dedupeToken: deliveryIdempotencyKey,
-    deliveryIdempotencyKey,
-    deliverySource: input.deliverySource ?? null,
-    deliveryTransportIdempotent: true,
-    explicitTarget: input.explicitTarget ?? null,
-    file,
-    identityId: input.identityId ?? null,
-    message: `Attached: ${file.filename}`,
-    replyToMessageId: input.replyToMessageId ?? null,
-    sessionId: input.sessionId,
-    subject: null,
-    threadId: input.threadId ?? null,
-    threadIsDirect: input.threadIsDirect ?? null,
-    turnId: input.turnId,
-    turnTrigger: input.turnTrigger ?? null,
-    vault: input.vault,
-  })
+  const targetFingerprint = buildAssistantVaultFileSendTargetFingerprint(input)
   const approval = await input.actionApprovalPort.request(
-    buildAssistantVaultFileSendApprovalRequest(intent),
+    buildAssistantVaultFileSendApprovalRequestForTarget({
+      channel: input.channel ?? null,
+      file,
+      targetFingerprint,
+    }),
   )
-  const nextIntent = applyAssistantVaultFileSendApprovalResult({
-    approval,
-    intent,
-    now: new Date(),
-  })
-  if (nextIntent !== intent) {
-    await saveAssistantOutboxIntentIfUnchanged({
-      expectedDedupeKey: intent.dedupeKey,
-      expectedStatus: intent.status,
-      expectedUpdatedAt: intent.updatedAt,
-      intent: nextIntent,
-      vault: input.vault,
-    })
-  }
 
   return {
     approvalId: approval.approvalId,
+    file,
     filename: file.filename,
-    intentId: intent.intentId,
     ...(approval.status === 'pending'
       ? {
           approvalUrl: approval.approvalUrl,
@@ -196,32 +161,85 @@ export function buildAssistantVaultFileSendApprovalRequest(
       'Vault-file approval requires one vault-file media descriptor.',
     )
   }
+  return buildAssistantVaultFileSendApprovalRequestForTarget({
+    channel: intent.channel,
+    file,
+    targetFingerprint: buildAssistantVaultFileSendTargetFingerprint(intent),
+  })
+}
+
+export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
+  channel?: string | null
+  file: AssistantVaultFileResponseMedia
+  targetFingerprint: string
+}): HostedActionApprovalRequest {
+  const targetFingerprint = normalizeNullableString(input.targetFingerprint)
+  if (!targetFingerprint) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+      'Secure vault-file approval requires a concrete destination.',
+    )
+  }
+  const channel = normalizeNullableString(input.channel)
+  const actionIdentity = sha256Hex(JSON.stringify([
+    'murph.vault-file-send-action.v2',
+    input.file.ref,
+    input.file.sha256,
+    input.file.filename,
+    input.file.contentType,
+    input.file.sizeBytes,
+    channel,
+    targetFingerprint,
+  ]))
   const actionFingerprint = sha256Hex(JSON.stringify([
-    'murph.vault-file-send-approval.v1',
-    intent.intentId,
-    intent.dedupeKey,
-    intent.deliveryIdempotencyKey,
-    file.ref,
-    file.sha256,
-    file.filename,
-    file.contentType,
-    file.sizeBytes,
-    intent.message,
-    intent.subject,
-    intent.channel,
-    intent.targetFingerprint,
+    'murph.vault-file-send-approval.v2',
+    actionIdentity,
+    input.file.ref,
+    input.file.sha256,
+    input.file.filename,
+    input.file.contentType,
+    input.file.sizeBytes,
+    channel,
+    targetFingerprint,
   ]))
 
   return {
     actionFingerprint,
-    actionId: intent.intentId,
+    actionId: `vault-file-send:${actionIdentity}`,
     actionKind: ASSISTANT_VAULT_FILE_SEND_ACTION_KIND,
     presentation: {
-      body: `Murph will send “${file.filename}” (${formatByteCount(file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
+      body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
-    returnContactKind: resolveAssistantVaultFileSendReturnContactKind(intent.channel),
+    returnContactKind: resolveAssistantVaultFileSendReturnContactKind(channel),
   }
+}
+
+function buildAssistantVaultFileSendTargetFingerprint(input: {
+  actorId?: string | null
+  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  channel?: string | null
+  deliverySource?: AssistantOutboxIntent['deliverySource']
+  explicitTarget?: string | null
+  identityId?: string | null
+  replyToMessageId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}): string {
+  const persistedTarget = buildAssistantOutboxPersistedTarget({
+    actorId: input.actorId ?? null,
+    bindingDelivery: input.bindingDelivery ?? undefined,
+    channel: input.channel ?? null,
+    deliverySource: null,
+    explicitTarget: input.explicitTarget ?? null,
+    identityId: input.identityId ?? null,
+    replyToMessageId: null,
+    threadId: input.threadId ?? null,
+    threadIsDirect: input.threadIsDirect ?? null,
+  })
+  return hashAssistantOutboxTargetFingerprint(
+    buildAssistantOutboxRawTargetIdentity(persistedTarget),
+  )
 }
 
 function resolveAssistantVaultFileSendReturnContactKind(
@@ -259,11 +277,8 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
       if (input.intent.status !== 'awaiting_approval') {
         return input.intent
       }
-      return assistantOutboxIntentSchema.parse({
-        ...input.intent,
-        lastError: null,
-        nextAttemptAt: updatedAt,
-        status: 'pending',
+      return approveAssistantVaultFileSendIntent({
+        intent: input.intent,
         updatedAt,
       })
     case 'pending':
@@ -312,6 +327,59 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
   }
 }
 
+function approveAssistantVaultFileSendIntent(input: {
+  intent: AssistantOutboxIntent
+  updatedAt: string
+}): AssistantOutboxIntent {
+  const repair = materializeApprovedAssistantVaultFileLegacyTarget(input.intent)
+  if (!repair) {
+    return assistantOutboxIntentSchema.parse({
+      ...input.intent,
+      lastError: {
+        code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+        message: 'Approved vault-file delivery did not have a concrete destination.',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+      updatedAt: input.updatedAt,
+    })
+  }
+
+  return assistantOutboxIntentSchema.parse({
+    ...repair,
+    lastError: null,
+    nextAttemptAt: input.updatedAt,
+    status: 'pending',
+    updatedAt: input.updatedAt,
+  })
+}
+
+function materializeApprovedAssistantVaultFileLegacyTarget(
+  intent: AssistantOutboxIntent,
+): AssistantOutboxIntent | null {
+  if (intent.bindingDelivery !== null || intent.explicitTarget !== null) {
+    return intent
+  }
+
+  const bindingDelivery = resolveAssistantBindingDelivery({
+    actorId: intent.actorId,
+    channel: intent.channel,
+    threadId: intent.threadId,
+    threadIsDirect: intent.threadIsDirect,
+  })
+  if (!bindingDelivery) {
+    return null
+  }
+
+  return assistantOutboxIntentSchema.parse({
+    ...intent,
+    bindingDelivery,
+    // Keep persisted outbox identity stable while repairing the concrete
+    // destination needed for delivery.
+    targetFingerprint: intent.targetFingerprint,
+  })
+}
+
 export function deferAssistantVaultFileApprovalCheck(input: {
   intent: AssistantOutboxIntent
   now: Date
@@ -341,25 +409,6 @@ export function deferAssistantVaultFileApprovalCheck(input: {
     status: 'awaiting_approval',
     updatedAt,
   })
-}
-
-function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
-  baseKey: string
-  file: AssistantVaultFileResponseMedia
-}): string {
-  const baseKey = input.baseKey.trim()
-  if (!baseKey) {
-    throw new VaultCliError(
-      'ASSISTANT_HOSTED_DELIVERY_IDEMPOTENCY_KEY_REQUIRED',
-      'Secure vault-file delivery requires a deterministic hosted delivery id.',
-    )
-  }
-  return `vault-file:${sha256Hex(JSON.stringify([
-    'murph.vault-file-delivery-id.v1',
-    baseKey,
-    input.file.ref,
-    input.file.sha256,
-  ]))}`
 }
 
 async function readAssistantVaultFileSnapshot(input: {

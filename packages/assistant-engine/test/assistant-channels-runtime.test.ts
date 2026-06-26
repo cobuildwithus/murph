@@ -149,6 +149,10 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toBe(
       'iMessage auto-reply only runs for direct chats',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply({
+      ...groupCapture,
+      externalThreadRouteAuthorityPresent: true,
+    })).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
     )
