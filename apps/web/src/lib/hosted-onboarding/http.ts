@@ -111,20 +111,52 @@ function mapHostedOnboardingBodyReadError(
   });
 }
 
-function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {
+export function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {
+  const domainDetails = isHostedOnboardingError(error)
+    ? {
+        ...describeHostedOnboardingDomainErrorDetailsForLog(error.details),
+        ...describeHostedOnboardingSafeDomainErrorForLog(error),
+      }
+    : null;
   const prismaDetails = describeHostedOnboardingPrismaErrorForLog(error);
   const developmentDetails = isHostedOnboardingDevelopmentLoggingEnabled()
     ? describeHostedOnboardingDevelopmentErrorForLog(error)
     : null;
 
-  if (prismaDetails || developmentDetails) {
+  if (domainDetails || prismaDetails || developmentDetails) {
     return {
+      ...(domainDetails ?? {}),
       ...(prismaDetails ?? {}),
       ...(developmentDetails ?? {}),
     };
   }
 
   return null;
+}
+
+function describeHostedOnboardingSafeDomainErrorForLog(
+  error: Error,
+): Record<string, unknown> | null {
+  const errorMessage = sanitizeHostedOnboardingLogString(error.message);
+  const cause = error.cause;
+  const errorCauseType = cause instanceof Error
+    ? sanitizeHostedOnboardingLogString(cause.name)
+    : cause === undefined
+      ? null
+      : sanitizeHostedOnboardingLogString(typeof cause);
+  const errorCauseMessage = cause instanceof Error
+    ? sanitizeHostedOnboardingLogString(cause.message)
+    : typeof cause === "string"
+      ? sanitizeHostedOnboardingLogString(cause)
+      : null;
+
+  return errorMessage || errorCauseType || errorCauseMessage
+    ? {
+        ...(errorCauseMessage ? { errorCauseMessage } : {}),
+        ...(errorCauseType ? { errorCauseType } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
+      }
+    : null;
 }
 
 function describeHostedOnboardingDomainErrorDetailsForLog(

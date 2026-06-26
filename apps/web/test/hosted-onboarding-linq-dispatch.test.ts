@@ -2459,16 +2459,7 @@ https://join.example.test/join/code_first_text`);
       },
       hostedMember: {
         create: vi.fn(),
-        findUnique: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValue({
-            billingStatus: HostedBillingStatus.active,
-            id: "member_concurrent",
-            invites: [],
-            linqChatId: "chat_123",
-            phoneLookupKey: "+15551234567",
-            suspendedAt: null,
-          }),
+        findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
     };
@@ -2509,7 +2500,7 @@ https://join.example.test/join/code_first_text`);
       signal: undefined,
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
@@ -2833,12 +2824,17 @@ https://join.example.test/join/code_first_text`);
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
       expect.objectContaining({
+        admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
         errorCauseMessage: "fetch failed",
         errorCauseType: "Error",
+        errorDetails: expect.objectContaining({
+          operationName: "hosted_linq_first_contact_admission",
+          type: "transport",
+        }),
         errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "_retry",
-        type: "transport",
+        retryable: true,
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -2854,6 +2850,10 @@ https://join.example.test/join/code_first_text`);
         onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
       }));
 
+    let resolveFailOpenCommitted: () => void = () => {};
+    const failOpenCommitted = new Promise<void>((resolve) => {
+      resolveFailOpenCommitted = resolve;
+    });
     mocks.classifyHostedLinqFirstContactAdmission
       .mockRejectedValueOnce(hostedOnboardingError({
         cause: new Error("fetch failed"),
@@ -2866,11 +2866,14 @@ https://join.example.test/join/code_first_text`);
         message: "Linq first-contact admission classifier is unavailable.",
         retryable: true,
       }))
-      .mockResolvedValueOnce({
-        category: "wrong_number_or_personal_logistics",
-        confidence: 0.94,
-        kind: "block",
-        source: "model",
+      .mockImplementationOnce(async () => {
+        await failOpenCommitted;
+        return {
+          category: "wrong_number_or_personal_logistics",
+          confidence: 0.94,
+          kind: "block",
+          source: "model",
+        };
       });
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -2897,7 +2900,10 @@ https://join.example.test/join/code_first_text`);
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(invite),
+        create: vi.fn(async () => {
+          resolveFailOpenCommitted();
+          return invite;
+        }),
         findFirst: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValue(invite),
@@ -2960,7 +2966,7 @@ https://join.example.test/join/code_first_text`);
       }),
     ]);
 
-    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
@@ -2968,12 +2974,17 @@ https://join.example.test/join/code_first_text`);
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
       expect.objectContaining({
+        admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
         errorCauseMessage: "fetch failed",
         errorCauseType: "Error",
+        errorDetails: expect.objectContaining({
+          operationName: "hosted_linq_first_contact_admission",
+          type: "transport",
+        }),
         errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "s_race",
-        type: "transport",
+        retryable: true,
       }),
     );
   });
@@ -3010,6 +3021,7 @@ https://join.example.test/join/code_first_text`);
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
         findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
           .mockResolvedValueOnce(null)
           .mockResolvedValue({
             category: "wrong_number_or_personal_logistics",

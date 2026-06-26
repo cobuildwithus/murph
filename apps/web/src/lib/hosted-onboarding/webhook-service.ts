@@ -40,7 +40,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
-  sanitizeHostedOnboardingLogString,
+  describeHostedOnboardingErrorForLog,
 } from "./http";
 import {
   classifyHostedLinqFirstContactAdmission,
@@ -64,6 +64,13 @@ export type {
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 type HostedOnboardingLinqWebhookPlan = Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+type HostedOnboardingLinqFirstContactAdmissionRequest =
+  NonNullable<HostedOnboardingLinqWebhookPlan["firstContactAdmissionRequest"]>;
+type HostedOnboardingLinqAdmissionPlanResult = {
+  firstContactAdmissionClassified: boolean;
+  firstContactAdmissionUnavailable: boolean;
+  plan: HostedOnboardingLinqWebhookPlan;
+};
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -313,11 +320,59 @@ async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
   event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
   prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<{
-  firstContactAdmissionClassified: boolean;
-  firstContactAdmissionUnavailable: boolean;
-  plan: HostedOnboardingLinqWebhookPlan;
-}> {
+}): Promise<HostedOnboardingLinqAdmissionPlanResult> {
+  const initialPlan = await planHostedOnboardingLinqWebhookForCurrentAdmissionState({
+    event: input.event,
+    prisma: input.prisma,
+  });
+  if (!("request" in initialPlan)) {
+    return initialPlan;
+  }
+
+  let classification:
+    | {
+        decision: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
+        kind: "classified";
+      }
+    | {
+        error: unknown;
+        kind: "unavailable";
+      };
+  try {
+    classification = {
+      decision: await classifyHostedLinqFirstContactAdmission({
+        request: initialPlan.request,
+        signal: input.signal,
+      }),
+      kind: "classified",
+    };
+  } catch (error) {
+    if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
+      throw error;
+    }
+
+    classification = {
+      error,
+      kind: "unavailable",
+    };
+  }
+
+  return await resolveHostedOnboardingLinqWebhookClassifiedAdmission({
+    classification,
+    event: input.event,
+    prisma: input.prisma,
+  });
+}
+
+async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
+  event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<
+  | HostedOnboardingLinqAdmissionPlanResult
+  | {
+      request: HostedOnboardingLinqFirstContactAdmissionRequest;
+    }
+> {
   return await runHostedOnboardingWebhookTransaction(
     input.prisma,
     async (transaction) => {
@@ -325,40 +380,56 @@ async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
         eventId: input.event.event_id,
         transaction,
       });
-
-      const recordedAdmission = await readRecordedHostedLinqFirstContactAdmissionDecision({
-        eventId: input.event.event_id,
-        prisma: transaction,
-      });
-      if (recordedAdmission?.kind === "block") {
-        return {
-          firstContactAdmissionClassified: false,
-          firstContactAdmissionUnavailable: false,
-          plan: buildBlockedHostedLinqFirstContactAdmissionPlan(),
-        };
-      }
-
-      let plan = await planHostedOnboardingLinqWebhook({
+      const plan = await planHostedOnboardingLinqWebhookForRecordedAdmission({
         event: input.event,
-        firstContactAdmitted: recordedAdmission?.kind === "allow",
-        requireFirstContactAdmission: true,
-        prisma: transaction,
+        transaction,
+      });
+      return plan.firstContactAdmissionRequest
+        ? { request: plan.firstContactAdmissionRequest }
+        : {
+            firstContactAdmissionClassified: false,
+            firstContactAdmissionUnavailable: false,
+            plan,
+          };
+    },
+  );
+}
+
+async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
+  classification:
+    | {
+        decision: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
+        kind: "classified";
+      }
+    | {
+        error: unknown;
+        kind: "unavailable";
+      };
+  event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<HostedOnboardingLinqAdmissionPlanResult> {
+  return await runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    async (transaction) => {
+      await acquireHostedLinqFirstContactAdmissionEventLockTx({
+        eventId: input.event.event_id,
+        transaction,
+      });
+      let plan = await planHostedOnboardingLinqWebhookForRecordedAdmission({
+        event: input.event,
+        transaction,
       });
       if (!plan.firstContactAdmissionRequest) {
         return {
-          firstContactAdmissionClassified: false,
+          firstContactAdmissionClassified: input.classification.kind === "classified",
           firstContactAdmissionUnavailable: false,
           plan,
         };
       }
 
-      try {
-        const classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
-          request: plan.firstContactAdmissionRequest,
-          signal: input.signal,
-        });
+      if (input.classification.kind === "classified") {
         const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-          decision: classifiedAdmission,
+          decision: input.classification.decision,
           eventId: input.event.event_id,
           prisma: transaction,
         });
@@ -382,30 +453,46 @@ async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
           firstContactAdmissionUnavailable: false,
           plan,
         };
-      } catch (error) {
-        if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
-          throw error;
-        }
-
-        plan = await planHostedOnboardingLinqWebhook({
-          event: input.event,
-          firstContactAdmitted: true,
-          requireFirstContactAdmission: true,
-          prisma: transaction,
-        });
-        assertHostedLinqFirstContactAdmissionResolved(plan);
-        logHostedLinqFirstContactAdmissionFailOpen({
-          error,
-          eventId: input.event.event_id,
-        });
-        return {
-          firstContactAdmissionClassified: false,
-          firstContactAdmissionUnavailable: true,
-          plan,
-        };
       }
+
+      plan = await planHostedOnboardingLinqWebhook({
+        event: input.event,
+        firstContactAdmitted: true,
+        requireFirstContactAdmission: true,
+        prisma: transaction,
+      });
+      assertHostedLinqFirstContactAdmissionResolved(plan);
+      logHostedLinqFirstContactAdmissionFailOpen({
+        error: input.classification.error,
+        eventId: input.event.event_id,
+      });
+      return {
+        firstContactAdmissionClassified: false,
+        firstContactAdmissionUnavailable: true,
+        plan,
+      };
     },
   );
+}
+
+async function planHostedOnboardingLinqWebhookForRecordedAdmission(input: {
+  event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
+  transaction: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqWebhookPlan> {
+  const recordedAdmission = await readRecordedHostedLinqFirstContactAdmissionDecision({
+    eventId: input.event.event_id,
+    prisma: input.transaction,
+  });
+  if (recordedAdmission?.kind === "block") {
+    return buildBlockedHostedLinqFirstContactAdmissionPlan();
+  }
+
+  return await planHostedOnboardingLinqWebhook({
+    event: input.event,
+    firstContactAdmitted: recordedAdmission?.kind === "allow",
+    requireFirstContactAdmission: true,
+    prisma: input.transaction,
+  });
 }
 
 function assertHostedLinqFirstContactAdmissionResolved(
@@ -414,32 +501,6 @@ function assertHostedLinqFirstContactAdmissionResolved(
   if (plan.firstContactAdmissionRequest) {
     throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
   }
-}
-
-function readHostedOnboardingErrorCauseLogDetails(error: Error): {
-  errorCauseMessage?: string;
-  errorCauseType?: string;
-} {
-  const cause = error.cause;
-  if (cause === undefined) {
-    return {};
-  }
-
-  if (cause instanceof Error) {
-    return {
-      errorCauseMessage: sanitizeHostedOnboardingLogString(cause.message, 80) ?? undefined,
-      errorCauseType: sanitizeHostedOnboardingLogString(cause.name, 80) ?? undefined,
-    };
-  }
-
-  return {
-    errorCauseMessage: sanitizeHostedOnboardingLogString(String(cause), 80) ?? undefined,
-    errorCauseType: sanitizeHostedOnboardingLogString(typeof cause, 80) ?? undefined,
-  };
-}
-
-function readHostedOnboardingErrorMessage(error: Error): string | undefined {
-  return sanitizeHostedOnboardingLogString(error.message, 80) ?? undefined;
 }
 
 async function acquireHostedLinqFirstContactAdmissionEventLockTx(input: {
@@ -468,34 +529,17 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
   error: unknown;
   eventId: string;
 }): void {
-  const error = isHostedOnboardingError(input.error) ? input.error : null;
-  const details = error?.details;
   console.warn(
     "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
-    sanitizeHostedOnboardingStructuredLogDetails({
-      ...(error
-        ? {
-            errorMessage: readHostedOnboardingErrorMessage(error),
-            ...readHostedOnboardingErrorCauseLogDetails(error),
-          }
-        : {}),
-      errorCode: error?.code,
+    {
+      ...(describeHostedOnboardingErrorForLog(input.error) ?? {}),
+      ...sanitizeHostedOnboardingStructuredLogDetails({
+        admissionDisposition: "fail_open",
+        errorCode: isHostedOnboardingError(input.error) ? input.error.code : null,
+        retryable: isHostedOnboardingError(input.error) ? input.error.retryable : null,
+      }),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      providerErrorCode:
-        typeof details?.providerErrorCode === "string" ? details.providerErrorCode : null,
-      providerErrorType:
-        typeof details?.providerErrorType === "string" ? details.providerErrorType : null,
-      providerRequestIdPresent:
-        typeof details?.providerRequestIdPresent === "boolean"
-          ? details.providerRequestIdPresent
-          : null,
-      retryable: error?.retryable,
-      statusCode:
-        typeof details?.statusCode === "number" && Number.isFinite(details.statusCode)
-          ? details.statusCode
-          : null,
-      type: typeof details?.type === "string" ? details.type : null,
-    }),
+    },
   );
 }
 
