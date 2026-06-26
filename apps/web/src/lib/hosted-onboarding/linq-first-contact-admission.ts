@@ -7,7 +7,7 @@ import {
 import { getHostedOnboardingEnvironment } from "./runtime";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 2_500;
+const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE = 0.6;
 
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES = [
