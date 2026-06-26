@@ -405,6 +405,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const computerHandoffReturnContactKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062600_computer_handoff_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
@@ -473,6 +480,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026062501_hosted_linq_egress_engagement",
       "2026062502_hosted_linq_conversation_state",
       "20260626000000_linq_first_contact_admission_decision",
+      "2026062600_computer_handoff_return_contact_kind",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -570,6 +578,8 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLinqConversationStateMigrationSql).toContain('"last_receipt_at" TIMESTAMP(3)');
     expect(hostedLinqConversationStateMigrationSql).toContain('"last_receipt_event_id" TEXT');
+    expect(hostedLinqConversationStateMigrationSql).toContain('"last_inbound_event_id" TEXT');
+    expect(hostedLinqConversationStateMigrationSql).toContain('"last_outbound_event_id" TEXT');
     expect(hostedLinqConversationStateMigrationSql).toContain(
       'REFERENCES "hosted_linq_line"("phone_number_lookup_key") ON DELETE SET NULL',
     );
@@ -577,6 +587,12 @@ describe("hosted Prisma baseline migration", () => {
       'r."linq_recipient_phone_lookup_key"',
     );
     expect(hostedLinqConversationStateMigrationSql).not.toContain("raw_payload");
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
+    );
     expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
     );
