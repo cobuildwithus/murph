@@ -228,21 +228,26 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       continue;
     }
 
+    let sent = false;
     try {
       await sendHostedLinqSideEffect(effect, {
         prisma: input.prisma,
         signal: input.signal,
       });
-      await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
+      sent = true;
+      if (effect.payload.template === "invite_signup") {
+        await markHostedInviteSent(effect.payload.inviteId, input.prisma);
+        await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
+      } else if (isHostedInviteLinqMessagePayload(effect.payload)) {
+        await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
+      }
 
     } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma, noticeClaim);
-      await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
+      if (!sent) {
+        await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma, noticeClaim);
+        await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
+      }
       throw error;
-    }
-
-    if (isHostedInviteLinqMessagePayload(effect.payload)) {
-      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
   }
 }
@@ -546,14 +551,7 @@ async function markHostedInviteSentBestEffort(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {
   try {
-    await prisma.hostedInvite.update({
-      where: {
-        id: inviteId,
-      },
-      data: {
-        sentAt: new Date(),
-      },
-    });
+    await markHostedInviteSent(inviteId, prisma);
   } catch (error) {
     console.error(
       "Hosted invite sentAt update failed.",
@@ -562,6 +560,20 @@ async function markHostedInviteSentBestEffort(
       ) ?? "Unknown error.",
     );
   }
+}
+
+async function markHostedInviteSent(
+  inviteId: string,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  await prisma.hostedInvite.update({
+    where: {
+      id: inviteId,
+    },
+    data: {
+      sentAt: new Date(),
+    },
+  });
 }
 
 function buildHostedWebhookLinqMessagePayload(

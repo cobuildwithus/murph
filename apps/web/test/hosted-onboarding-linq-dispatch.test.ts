@@ -2071,7 +2071,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("retries signup delivery when a daily onboarding claim exists without delivered invite evidence", async () => {
+  it("does not retry signup delivery from a stale daily claim without delivered invite evidence", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
     }));
@@ -2125,18 +2125,11 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
-      inviteCode: "code_stale_claim",
-      ok: true,
-      reason: "sent-signup-link",
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      retryable: true,
     });
 
-    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
-      memberId: "member_stale_claim",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-      sentAt: new Date("2026-03-26T12:00:01.000Z"),
-    });
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
       orderBy: {
         sentAt: "desc",
@@ -2153,16 +2146,10 @@ https://join.example.test/join/code_first_text`);
         },
       },
     });
-    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_stale_claim",
-      },
-      data: {
-        sentAt: expect.any(Date),
-      },
-    });
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalled();
   });
 
   it("does not clear an in-flight daily onboarding claim before invite delivery proof exists", async () => {
