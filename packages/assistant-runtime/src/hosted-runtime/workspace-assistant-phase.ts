@@ -16,7 +16,6 @@ import {
 import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
-  MurphManagedAutomationStableKeyUnavailableError,
   readAssistantOutboxIntent,
   readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
@@ -732,7 +731,13 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       vaultRoot: input.input.restored.vaultRoot,
     });
     const changed = result.created + result.updated;
-    if (changed === 0) {
+    const shouldRetryStableKey =
+      result.stableKeyRetryNeeded === true &&
+      (input.retryStableKeyFailure || changed > 0);
+    if (
+      changed === 0 &&
+      !shouldRetryStableKey
+    ) {
       return null;
     }
 
@@ -750,6 +755,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
         redactedJson: {
           murphManagedAutomationCreated: result.created,
           murphManagedAutomationSkipped: result.skipped,
+          ...(result.stableKeyRetryNeeded === true
+            ? { murphManagedAutomationFailed: true }
+            : {}),
           murphManagedAutomationUpdated: result.updated,
         },
       },
@@ -758,9 +766,20 @@ async function applyHostedManagedAutomationsBestEffort(input: {
 
     return {
       checkpointReason: "assistant_runtime_commit",
+      ...(shouldRetryStableKey
+        ? {
+            nextWakeAt: new Date(
+              resolveHostedAssistantPhaseNowMs(input.input)
+                + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+            ).toISOString(),
+          }
+        : {}),
       progressed: true,
       redactedStatus: {
         murphManagedAutomationCreated: result.created,
+        ...(result.stableKeyRetryNeeded === true
+          ? { murphManagedAutomationFailed: true }
+          : {}),
         murphManagedAutomationSkipped: result.skipped,
         murphManagedAutomationUpdated: result.updated,
       },
@@ -789,24 +808,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
       platform: input.input.runtime.platform,
     });
-    if (
-      !input.retryStableKeyFailure ||
-      !(error instanceof MurphManagedAutomationStableKeyUnavailableError)
-    ) {
-      return null;
-    }
-
-    return {
-      checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: new Date(
-        resolveHostedAssistantPhaseNowMs(input.input)
-          + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
-      ).toISOString(),
-      progressed: true,
-      redactedStatus: {
-        murphManagedAutomationFailed: true,
-      },
-    };
+    return null;
   }
 }
 

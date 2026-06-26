@@ -59,17 +59,8 @@ export interface ApplyMurphManagedAutomationsInput {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   skipped: number
+  stableKeyRetryNeeded?: true
   updated: number
-}
-
-export class MurphManagedAutomationStableKeyUnavailableError extends Error {
-  readonly cause: unknown
-
-  constructor(cause: unknown) {
-    super('Managed automation schedule spread stable key is unavailable.')
-    this.name = 'MurphManagedAutomationStableKeyUnavailableError'
-    this.cause = cause
-  }
 }
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
@@ -361,10 +352,17 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
-  const scheduleStableKey = await resolveMurphManagedScheduleStableKey({
-    seeds: rawSeeds,
-    vaultRoot: input.vaultRoot,
-  })
+  let scheduleStableKey: string | null | undefined
+  let scheduleStableKeyUnavailable = false
+  const resolveScheduleStableKey = async (): Promise<string | null> => {
+    if (scheduleStableKey !== undefined) {
+      return scheduleStableKey
+    }
+    scheduleStableKey = await resolveMurphManagedScheduleStableKey({
+      vaultRoot: input.vaultRoot,
+    })
+    return scheduleStableKey
+  }
   let createRoute: AutomationRoute | null | undefined
   const resolveCreateRoute = async (): Promise<AutomationRoute | null> => {
     if (createRoute !== undefined) {
@@ -386,9 +384,26 @@ export async function applyMurphManagedAutomations(
     })
 
     if (!existing) {
+      let stableKey: string | null = null
+      if (shouldSpreadMurphManagedAutomationSchedule(rawSeed)) {
+        if (scheduleStableKeyUnavailable) {
+          result.skipped += 1
+          result.stableKeyRetryNeeded = true
+          continue
+        }
+        try {
+          stableKey = await resolveScheduleStableKey()
+        } catch {
+          scheduleStableKeyUnavailable = true
+          result.skipped += 1
+          result.stableKeyRetryNeeded = true
+          continue
+        }
+      }
+
       const seed = resolveMurphManagedAutomationCreateSeed({
         seed: rawSeed,
-        stableKey: scheduleStableKey,
+        stableKey,
       })
       if (!seed) {
         result.skipped += 1
@@ -524,19 +539,9 @@ export async function applyMurphManagedAutomations(
 }
 
 async function resolveMurphManagedScheduleStableKey(input: {
-  seeds: readonly MurphManagedAutomationSeed[]
   vaultRoot: string
 }): Promise<string | null> {
-  if (!input.seeds.some((seed) => shouldSpreadMurphManagedAutomationSchedule(seed))) {
-    return null
-  }
-
-  let vault: Awaited<ReturnType<typeof loadVault>>
-  try {
-    vault = await loadVault({ vaultRoot: input.vaultRoot })
-  } catch (error) {
-    throw new MurphManagedAutomationStableKeyUnavailableError(error)
-  }
+  const vault = await loadVault({ vaultRoot: input.vaultRoot })
   const vaultId = typeof vault.metadata.vaultId === 'string'
     ? vault.metadata.vaultId.trim()
     : ''

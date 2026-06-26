@@ -103,7 +103,6 @@ import {
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-  MurphManagedAutomationStableKeyUnavailableError,
   applyMurphManagedAutomations,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
@@ -661,14 +660,19 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
   })
 
-  it('propagates vault metadata read failures before managed creation writes', async () => {
+  it('defers spread-managed creation when vault metadata cannot be read', async () => {
     managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
-    })).rejects.toBeInstanceOf(MurphManagedAutomationStableKeyUnavailableError)
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 4,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
     expect(managedAutomationMocks.records.size).toBe(0)
 
@@ -693,6 +697,66 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
+  })
+
+  it('continues non-spread seeds and existing updates when stable-key metadata is unavailable', async () => {
+    const existingDigestSchedule = { kind: 'cron', expression: '0 9 * * 2' } as const
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'Old digest prompt.',
+      route: defaultRoute,
+      schedule: existingDigestSchedule,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: 'Old digest summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health digest',
+    })
+    managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
+
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    )
+    const productUpdatesSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID
+    )
+    if (!digestSeed || !productUpdatesSeed) {
+      throw new Error('Expected managed seeds to exist.')
+    }
+    const experimentSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_01KSTABLEKEYTEST000000000000',
+      instructions: 'Create the due experiment final-results message.',
+      schedule: { kind: 'at', at: '2026-06-09T12:30:00.000Z' },
+      slug: 'experiment-final-results-stable-key-test',
+      tags: ['experiment', 'final-results'],
+      title: 'Final results · Stable key test',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      seeds: [digestSeed, productUpdatesSeed, experimentSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 1,
+      stableKeyRetryNeeded: true,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: expect.stringContaining('On this scheduled weekly run'),
+        schedule: existingDigestSchedule,
+      }))
+    expect(managedAutomationMocks.records.get(experimentSeed.automationId))
+      .toEqual(expect.objectContaining({
+        instructions: experimentSeed.instructions,
+        schedule: experimentSeed.schedule,
+      }))
+    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
+      .toBe(false)
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {

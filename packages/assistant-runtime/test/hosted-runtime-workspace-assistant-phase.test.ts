@@ -153,7 +153,6 @@ import {
 } from "@murphai/core";
 import {
   markAssistantContextSnapshotDirty,
-  MurphManagedAutomationStableKeyUnavailableError,
   readAssistantContextSnapshotState,
 } from "@murphai/assistant-engine";
 import {
@@ -1561,12 +1560,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("keeps a retry wake when hosted managed automation work partially succeeds", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 1,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationFailed: true,
+        murphManagedAutomationSkipped: 1,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "assistant.pass_finished",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+        }),
+      }),
+    );
+  });
+
   it("logs hosted managed automation setup failures without forcing a background retry", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.applyMurphManagedAutomations.mockRejectedValueOnce(
-      new MurphManagedAutomationStableKeyUnavailableError(
-        new Error("metadata unavailable"),
-      ),
+      new Error("metadata unavailable"),
     );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -1708,11 +1745,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         threadId: defaultRoute.deliveryTarget,
       },
     });
-    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(
-      new MurphManagedAutomationStableKeyUnavailableError(
-        new Error("metadata unavailable"),
-      ),
-    );
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
