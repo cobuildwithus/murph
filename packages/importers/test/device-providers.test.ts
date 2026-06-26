@@ -6,6 +6,8 @@ import { test } from "vitest";
 
 import * as coreRuntime from "@murphai/core";
 import {
+  eventRevisionFromLifecycle,
+  isDeletedEventLifecycle,
   workoutSessionSchema,
   type WorkoutSessionMetrics,
 } from "@murphai/contracts";
@@ -109,6 +111,40 @@ function workoutMetricsFromCoreEvent(
 
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+function latestLiveRecords(records: readonly StoredJsonlRecord[]): StoredJsonlRecord[] {
+  const latestById = new Map<string, StoredJsonlRecord>();
+
+  for (const record of records) {
+    if (typeof record.id !== "string") {
+      continue;
+    }
+
+    const existing = latestById.get(record.id);
+    if (!existing || eventRevisionFromLifecycle(record.lifecycle) > eventRevisionFromLifecycle(existing.lifecycle)) {
+      latestById.set(record.id, record);
+    }
+  }
+
+  return [...latestById.values()].filter((record) => !isDeletedEventLifecycle(record.lifecycle));
+}
+
+function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
+}
+
+function assertWhoopScopedBodyDateResourceId(resourceId: string | undefined, dayKey: string): void {
+  assert.match(resourceId ?? "", new RegExp(`^account:[0-9a-f]{16}/date:${dayKey}$`, "u"));
+}
+
+function whoopBodyDateResourceSuffix(resourceId: string | undefined): string | undefined {
+  return resourceId?.replace(/^account:[0-9a-f]{16}\//u, "");
 }
 
 async function readRequiredIntegrationIngest(vaultRoot: string, ingestId: string) {
@@ -460,7 +496,222 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.deepEqual(workoutObservationMetrics, []);
   assert.equal(hrvEvent?.fields?.value, 42.5);
   assert.equal(hrvEvent?.externalRef?.facet, "hrv");
-  assert.equal(bmiEvent?.dayKey, "2026-03-16");
+  assert.equal(bmiEvent?.dayKey, undefined);
+});
+
+test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-midnight imports", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-local-day");
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const result = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-local-day-user",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          bodyMeasurements: {
+            measured_at: "2026-06-25T03:30:00.000Z",
+            weight_kilogram: 78.2,
+          },
+          sleeps: [
+            {
+              id: "sleep-local-24",
+              cycle_id: "cycle-local-24",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              timezone_offset: "-04:00",
+              score: {
+                respiratory_rate: 14.2,
+              },
+            },
+            {
+              id: "sleep-recovery-local-24",
+              cycle_id: "cycle-recovery-no-offset",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              timezone_offset: "-04:00",
+              score: {},
+            },
+            {
+              id: "sleep-no-offset-local-24",
+              cycle_id: "cycle-no-offset-local-24",
+              start: "2026-06-25T02:30:00.000Z",
+              end: "2026-06-25T03:45:00.000Z",
+              updated_at: "2026-06-25T04:00:00.000Z",
+              score: {
+                respiratory_rate: 13.9,
+              },
+            },
+            {
+              id: "sleep-no-offset-overnight-24",
+              cycle_id: "cycle-no-offset-local-24",
+              start: "2026-06-24T02:30:00.000Z",
+              end: "2026-06-24T11:00:00.000Z",
+              updated_at: "2026-06-24T11:30:00.000Z",
+              score: {
+                respiratory_rate: 13.7,
+              },
+            },
+          ],
+          cycles: [
+            {
+              id: "cycle-local-24",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              timezone_offset: "-04:00",
+              score: {
+                strain: 12.4,
+              },
+            },
+            {
+              id: "cycle-recovery-no-offset",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {},
+            },
+            {
+              id: "cycle-no-offset-local-24",
+              start: "2026-06-24T12:00:00.000Z",
+              end: "2026-06-25T03:59:00.000Z",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                strain: 10.1,
+              },
+            },
+          ],
+          recoveries: [
+            {
+              sleep_id: "sleep-recovery-local-24",
+              cycle_id: "cycle-recovery-no-offset",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                recovery_score: 72,
+              },
+            },
+            {
+              sleep_id: "sleep-no-offset-local-24",
+              cycle_id: "cycle-no-offset-local-24",
+              updated_at: "2026-06-25T04:10:00.000Z",
+              score: {
+                recovery_score: 63,
+              },
+            },
+          ],
+          workouts: [
+            {
+              id: "workout-local-24",
+              start: "2026-06-25T03:45:00.000Z",
+              end: "2026-06-25T04:15:00.000Z",
+              updated_at: "2026-06-25T04:20:00.000Z",
+              timezone_offset: "-04:00",
+              sport_name: "Run",
+              score: {
+                strain: 6.8,
+              },
+            },
+            {
+              id: "workout-no-offset-local-24",
+              start: "2026-06-25T03:45:00.000Z",
+              end: "2026-06-25T04:15:00.000Z",
+              updated_at: "2026-06-25T04:20:00.000Z",
+              sport_name: "Run",
+              score: {
+                strain: 5.9,
+              },
+            },
+          ],
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+
+    const workoutEvent = result.events.find(
+      (event) => event.kind === "activity_session" && event.externalRef?.resourceId === "workout-local-24",
+    );
+    const noOffsetWorkoutEvent = result.events.find(
+      (event) => event.kind === "activity_session" && event.externalRef?.resourceId === "workout-no-offset-local-24",
+    );
+    const dayStrainEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "day-strain"
+        && event.externalRef?.resourceId === "cycle-local-24",
+    );
+    const respiratoryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-local-24",
+    );
+    const noOffsetDayStrainEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "day-strain"
+        && event.externalRef?.resourceId === "cycle-no-offset-local-24",
+    );
+    const noOffsetRespiratoryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-no-offset-local-24",
+    );
+    const overnightNoOffsetSleepEvent = result.events.find(
+      (event) =>
+        event.kind === "sleep_session"
+        && event.externalRef?.resourceId === "sleep-no-offset-overnight-24",
+    );
+    const overnightNoOffsetRespiratoryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "respiratory-rate"
+        && event.externalRef?.resourceId === "sleep-no-offset-overnight-24",
+    );
+    const recoveryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "recovery-score"
+        && event.externalRef?.resourceId === "sleep-recovery-local-24",
+    );
+    const noOffsetRecoveryEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "recovery-score"
+        && event.externalRef?.resourceId === "sleep-no-offset-local-24",
+    );
+    const noOffsetBodyWeightEvent = result.events.find(
+      (event) =>
+        event.kind === "observation"
+        && event.metric === "weight"
+        && event.externalRef?.resourceType === "body-measurement",
+    );
+
+    assert.equal(workoutEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetWorkoutEvent?.dayKey, "2026-06-24");
+    assert.equal(dayStrainEvent?.dayKey, "2026-06-24");
+    assert.equal(respiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetDayStrainEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetRespiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(overnightNoOffsetSleepEvent?.dayKey, "2026-06-24");
+    assert.equal(overnightNoOffsetRespiratoryEvent?.dayKey, "2026-06-24");
+    assert.equal(recoveryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetRecoveryEvent?.dayKey, "2026-06-24");
+    assert.equal(noOffsetBodyWeightEvent?.dayKey, "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonical device payloads", async () => {
@@ -738,10 +989,10 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   assert.equal(ouraNonWearEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
   assert.equal(whoopRemEvent?.fields?.unit, "minutes");
-  assert.equal(whoopRemEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopRemEvent?.dayKey, undefined);
   assert.equal(whoopRemEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopTemperatureEvent?.fields?.unit, "celsius");
-  assert.equal(whoopTemperatureEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopTemperatureEvent?.dayKey, undefined);
   assert.equal(whoopTemperatureEvent?.fields?.observationGrain, "summary");
 });
 
@@ -1284,6 +1535,137 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
   assert.doesNotMatch(compactBloodOxygenPart.content, /dense_provider_timeseries_pruned|70|72\.4/u);
 });
 
+test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-legacy-conflict");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-06-25T00:00:00.000Z",
+    vaultRoot,
+  });
+
+  const snapshot = {
+    accountId: "junction-user-legacy-days",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              {
+                calendar_date: "2026-06-25",
+                timestamp: "2026-06-25T00:30:00.000Z",
+                timestamp_semantics: "offset",
+                timezone_offset: -14_400,
+                value: 44,
+              },
+              {
+                calendar_date: "2026-06-25",
+                timestamp: "2026-06-25T10:00:00.000Z",
+                timestamp_semantics: "offset",
+                timezone_offset: -14_400,
+                value: 44,
+              },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  };
+  const prepared = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    snapshot,
+  });
+  const correctedStressEvent = prepared.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+  );
+  const currentExternalRef = correctedStressEvent?.externalRef;
+  const legacyExternalRef = correctedStressEvent?.legacyExternalRefs?.[0];
+  assert.equal(correctedStressEvent?.dayKey, "2026-06-25");
+  assert.ok(currentExternalRef);
+  assert.ok(legacyExternalRef);
+
+  const sourceOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    timestampSemantics: "offset" as const,
+    normalizerVersion: "junction-normalizer.v1",
+  };
+  const legacyImport = await coreRuntime.importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-legacy-days",
+    importedAt: "2026-06-25T11:00:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-06-25T10:00:00.000Z",
+        recordedAt: "2026-06-25T10:00:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction stress level average",
+        externalRef: legacyExternalRef,
+        dataOrigin: {
+          ...sourceOrigin,
+          observedAtRaw: "2026-06-24:stress_level:daily",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-06-25T10:00:00.000Z",
+        recordedAt: "2026-06-25T10:00:00.000Z",
+        dayKey: "2026-06-25",
+        title: "Junction stress level average",
+        externalRef: currentExternalRef,
+        dataOrigin: {
+          ...sourceOrigin,
+          observedAtRaw: "2026-06-25:stress_level:daily",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(
+    importDeviceProviderSnapshot(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    ),
+    (error) =>
+      error instanceof coreRuntime.VaultError &&
+      error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+
+  const records = (
+    await Promise.all(
+      legacyImport.eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )
+  ).flat();
+  const liveStressRecords = latestLiveRecords(records).filter(
+    (record) => record.kind === "observation" && record.metric === "stress-level",
+  );
+  assert.equal(liveStressRecords.length, 2);
+});
+
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
 
@@ -1732,7 +2114,7 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
     ),
   );
   assert.equal(payload.provenance?.whoopUserId, undefined);
-  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
+  assert.equal(payload.provenance?.bodyMeasurementDay, undefined);
 });
 
 test("prepareDeviceProviderSnapshotImport prefers WHOOP measurement timestamps over generic update timestamps", async () => {
@@ -1754,8 +2136,526 @@ test("prepareDeviceProviderSnapshotImport prefers WHOOP measurement timestamps o
 
   assert.equal(weightEvent?.occurredAt, "2026-03-16T07:00:00.000Z");
   assert.equal(weightEvent?.recordedAt, "2026-03-16T07:00:00.000Z");
-  assert.equal(weightEvent?.dayKey, "2026-03-16");
-  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
+  assert.equal(weightEvent?.dayKey, undefined);
+  assertWhoopScopedBodyDateResourceId(weightEvent?.externalRef?.resourceId, "2026-03-16");
+  assert.equal(payload.provenance?.bodyMeasurementDay, undefined);
+});
+
+test("prepareDeviceProviderSnapshotImport preserves WHOOP body measurement offset day keys", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      bodyMeasurements: {
+        height_meter: 1.82,
+        weight_kilogram: 78.2,
+        measured_at: "2026-06-25T03:30:00.000Z",
+        timezone_offset: "-04:00",
+      },
+    },
+  });
+
+  const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(weightEvent?.occurredAt, "2026-06-25T03:30:00.000Z");
+  assert.equal(weightEvent?.dayKey, "2026-06-24");
+  assertWhoopScopedBodyDateResourceId(weightEvent?.externalRef?.resourceId, "2026-06-24");
+  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-06-24");
+});
+
+test("prepareDeviceProviderSnapshotImport keeps date-only WHOOP body measurement identity stable", async () => {
+  const firstPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      bodyMeasurements: {
+        date: "2026-06-24",
+        updated_at: "2026-06-25T12:00:00.000Z",
+        weight_kilogram: 78.2,
+      },
+    },
+  });
+  const secondPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-26T12:00:00.000Z",
+      bodyMeasurements: {
+        date: "2026-06-24",
+        updated_at: "2026-06-26T12:00:00.000Z",
+        weight_kilogram: 78.2,
+      },
+    },
+  });
+  const firstWeightEvent = firstPayload.events?.find((event) => event.fields?.metric === "weight");
+  const secondWeightEvent = secondPayload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(firstWeightEvent?.occurredAt, "2026-06-24T00:00:00.000Z");
+  assert.equal(secondWeightEvent?.occurredAt, firstWeightEvent?.occurredAt);
+  assert.equal(firstWeightEvent?.recordedAt, "2026-06-25T12:00:00.000Z");
+  assert.equal(secondWeightEvent?.recordedAt, "2026-06-26T12:00:00.000Z");
+  assert.equal(firstWeightEvent?.dayKey, "2026-06-24");
+  assert.equal(secondWeightEvent?.dayKey, "2026-06-24");
+  assertWhoopScopedBodyDateResourceId(firstWeightEvent?.externalRef?.resourceId, "2026-06-24");
+  assert.equal(secondWeightEvent?.externalRef?.resourceId, firstWeightEvent?.externalRef?.resourceId);
+});
+
+test("importDeviceProviderSnapshot replays date-only WHOOP body measurements idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            updated_at: "2026-06-25T12:00:00.000Z",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-02T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            updated_at: "2026-06-26T12:00:00.000Z",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const firstWeight = firstImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const replayWeight = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const [eventShardPath] = firstImport.eventShardPaths;
+    assert.ok(eventShardPath);
+    const records = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: eventShardPath,
+    });
+    const weightRecords = records.filter(
+      (record) => record.kind === "observation" && record.metric === "weight",
+    );
+
+    assert.equal(firstWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(firstWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
+    assert.equal(replayWeight?.id, firstWeight?.id);
+    assert.equal(replayWeight?.occurredAt, firstWeight?.occurredAt);
+    assert.equal(replayWeight?.recordedAt, firstWeight?.recordedAt);
+    assert.equal(weightRecords.length, 1);
+    assert.equal(weightRecords[0]?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(weightRecords[0]?.recordedAt, "2026-06-25T12:00:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot keys current WHOOP body snapshots by vault local day", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-current-local-day");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const importAt = (importedAt: string, weightKilogram: number) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId: "whoop-user-1",
+            importedAt,
+            bodyMeasurements: {
+              weight_kilogram: weightKilogram,
+            },
+          },
+        },
+        {
+          corePort: coreRuntime,
+        },
+      );
+
+    const firstImport = await importAt("2026-06-24T23:30:00.000Z", 78.2);
+    const replaySameLocalDay = await importAt("2026-06-25T03:30:00.000Z", 78.2);
+    const nextLocalDay = await importAt("2026-06-25T04:30:00.000Z", 78.6);
+    const records = (
+      await Promise.all(
+        [...new Set([
+          ...firstImport.eventShardPaths,
+          ...replaySameLocalDay.eventShardPaths,
+          ...nextLocalDay.eventShardPaths,
+        ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const liveWeightRecords = latestLiveRecords(records)
+      .filter((record) => record.kind === "observation" && record.metric === "weight")
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    const firstWeight = firstImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const replayWeight = replaySameLocalDay.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const nextWeight = nextLocalDay.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+
+    assert.equal(replayWeight?.id, firstWeight?.id);
+    assert.notEqual(nextWeight?.id, firstWeight?.id);
+    assert.deepEqual(liveWeightRecords.map((record) => record.dayKey), ["2026-06-24", "2026-06-25"]);
+    assert.deepEqual(
+      liveWeightRecords.map((record) => whoopBodyDateResourceSuffix(storedExternalRefResourceId(record))),
+      ["date:2026-06-24", "date:2026-06-25"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot scopes WHOOP body measurement identities by account", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-account-scope");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const importAccount = (accountId: string, weightKilogram: number) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "whoop",
+          vaultRoot,
+          snapshot: {
+            accountId,
+            importedAt: "2026-06-25T12:00:00.000Z",
+            bodyMeasurements: {
+              date: "2026-06-24",
+              updated_at: "2026-06-25T12:00:00.000Z",
+              weight_kilogram: weightKilogram,
+            },
+          },
+        },
+        {
+          corePort: coreRuntime,
+        },
+      );
+
+    const firstAccount = await importAccount("whoop-account-a", 78.2);
+    const secondAccount = await importAccount("whoop-account-b", 82.4);
+    const firstReplay = await importAccount("whoop-account-a", 78.2);
+    const records = (
+      await Promise.all(
+        [...new Set([
+          ...firstAccount.eventShardPaths,
+          ...secondAccount.eventShardPaths,
+          ...firstReplay.eventShardPaths,
+        ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const liveWeightRecords = latestLiveRecords(records)
+      .filter((record) => record.kind === "observation" && record.metric === "weight")
+      .sort((left, right) => Number(left.value) - Number(right.value));
+    const firstWeight = firstAccount.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const secondWeight = secondAccount.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const replayWeight = firstReplay.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+
+    assert.equal(replayWeight?.id, firstWeight?.id);
+    assert.notEqual(secondWeight?.id, firstWeight?.id);
+    assert.equal(liveWeightRecords.length, 2);
+    assert.deepEqual(liveWeightRecords.map((record) => record.value), [78.2, 82.4]);
+    assert.equal(
+      new Set(liveWeightRecords.map((record) => storedExternalRefResourceId(record))).size,
+      2,
+    );
+    assertWhoopScopedBodyDateResourceId(storedExternalRefResourceId(liveWeightRecords[0]), "2026-06-24");
+    assertWhoopScopedBodyDateResourceId(storedExternalRefResourceId(liveWeightRecords[1]), "2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot supersedes date-only direct WHOOP body measurements keyed by UTC day", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-legacy-ref");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-user-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-25T12:00:00.000Z",
+        recordedAt: "2026-06-25T12:00:00.000Z",
+        dayKey: "2026-06-25",
+        title: "WHOOP weight",
+        externalRef: {
+          system: "whoop",
+          resourceType: "body-measurement",
+          resourceId: "2026-06-25",
+          facet: "weight",
+        },
+        fields: {
+          metric: "weight",
+          observationGrain: "summary",
+          value: 78.2,
+          unit: "kg",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            updated_at: "2026-06-25T12:00:00.000Z",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const legacyWeight = legacyImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const replayWeight = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveWeightRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "weight",
+    );
+
+    assert.equal(replayWeight?.id, legacyWeight?.id);
+    assert.equal(replayWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
+    assert.equal(replayWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
+    assert.equal(replayWeight?.dayKey, "2026-06-24");
+    assertWhoopScopedBodyDateResourceId(replayWeight?.externalRef?.resourceId, "2026-06-24");
+    assert.equal(liveWeightRecords.length, 1);
+    assert.equal(liveWeightRecords[0]?.id, legacyWeight?.id);
+    assert.equal(whoopBodyDateResourceSuffix(storedExternalRefResourceId(liveWeightRecords[0])), "date:2026-06-24");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot does not alias WHOOP body measurements to import day when updated_at exists", async () => {
+  const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-import-day-alias");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const julyImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-07-01",
+            updated_at: "2026-07-01T12:00:00.000Z",
+            weight_kilogram: 79.4,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const olderImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "whoop",
+        vaultRoot,
+        snapshot: {
+          accountId: "whoop-user-1",
+          importedAt: "2026-07-01T12:00:00.000Z",
+          bodyMeasurements: {
+            date: "2026-06-24",
+            updated_at: "2026-06-25T12:00:00.000Z",
+            weight_kilogram: 78.2,
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const julyWeight = julyImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const olderWeight = olderImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "weight",
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([
+          ...julyImport.eventShardPaths,
+          ...olderImport.eventShardPaths,
+        ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const liveWeightRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "weight",
+    );
+
+    assert.notEqual(olderWeight?.id, julyWeight?.id);
+    assertWhoopScopedBodyDateResourceId(olderWeight?.externalRef?.resourceId, "2026-06-24");
+    assertWhoopScopedBodyDateResourceId(julyWeight?.externalRef?.resourceId, "2026-07-01");
+    assert.equal(liveWeightRecords.length, 2);
+    assert.deepEqual(
+      liveWeightRecords.map((record) => whoopBodyDateResourceSuffix(storedExternalRefResourceId(record))).sort(),
+      ["date:2026-06-24", "date:2026-07-01"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importDeviceProviderSnapshot keeps adjacent legacy WHOOP body dates distinct during replay", async () => {
+  async function exercise(order: "corrected-first" | "adjacent-first") {
+    const vaultRoot = await makeTempDirectory(`murph-whoop-body-adjacent-${order}`);
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-06-25T00:00:00.000Z",
+        timezone: "America/New_York",
+      });
+
+      const legacyImport = await coreRuntime.importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        accountId: "whoop-user-1",
+        importedAt: "2026-06-25T12:00:00.000Z",
+        events: [{
+          kind: "observation",
+          occurredAt: "2026-06-25T12:00:00.000Z",
+          recordedAt: "2026-06-25T12:00:00.000Z",
+          dayKey: "2026-06-24",
+          title: "WHOOP weight",
+          externalRef: {
+            system: "whoop",
+            resourceType: "body-measurement",
+            resourceId: "2026-06-25",
+            facet: "weight",
+          },
+          fields: {
+            metric: "weight",
+            observationGrain: "summary",
+            value: 78.2,
+            unit: "kg",
+          },
+        }],
+      });
+      const importSnapshot = (date: string, updatedAt: string, weightKilogram: number) =>
+        importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+          {
+            provider: "whoop",
+            vaultRoot,
+            snapshot: {
+              accountId: "whoop-user-1",
+              importedAt: updatedAt,
+              bodyMeasurements: {
+                date,
+                updated_at: updatedAt,
+                weight_kilogram: weightKilogram,
+              },
+            },
+          },
+          {
+            corePort: coreRuntime,
+          },
+        );
+
+      const correctedJune24 = () => importSnapshot("2026-06-24", "2026-06-25T12:00:00.000Z", 78.2);
+      const adjacentJune25 = () => importSnapshot("2026-06-25", "2026-06-25T13:00:00.000Z", 78.2);
+      const firstReplay = order === "corrected-first" ? await correctedJune24() : await adjacentJune25();
+      const secondReplay = order === "corrected-first" ? await adjacentJune25() : await correctedJune24();
+      const records = (
+        await Promise.all(
+          [...new Set([
+            ...legacyImport.eventShardPaths,
+            ...firstReplay.eventShardPaths,
+            ...secondReplay.eventShardPaths,
+          ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+        )
+      ).flat();
+      const liveWeightRecords = latestLiveRecords(records)
+        .filter((record) => record.kind === "observation" && record.metric === "weight")
+        .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+
+      assert.equal(liveWeightRecords.length, 2);
+      assert.deepEqual(liveWeightRecords.map((record) => record.dayKey), ["2026-06-24", "2026-06-25"]);
+      assert.deepEqual(
+        liveWeightRecords.map((record) => whoopBodyDateResourceSuffix(storedExternalRefResourceId(record))),
+        ["date:2026-06-24", "date:2026-06-25"],
+      );
+      assert.equal(
+        liveWeightRecords.find((record) => record.dayKey === "2026-06-24")?.id,
+        legacyImport.events.find((event) => event.kind === "observation" && event.metric === "weight")?.id,
+      );
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+
+  await exercise("corrected-first");
+  await exercise("adjacent-first");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {
