@@ -117,7 +117,7 @@ export default async function ComputerHandoffPage({
                       "w-full sm:w-auto",
                     )}
                   >
-                    Reply in {option.label}
+                    Reply in {option.webmail?.label ?? option.label}
                   </MurphContactLink>
                 ))}
               </div>
