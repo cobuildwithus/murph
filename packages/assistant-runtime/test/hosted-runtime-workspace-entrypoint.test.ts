@@ -408,6 +408,14 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(phaseLogs.map((entry) => entry.details.runtimePhaseOrdinal)).toEqual(
         Array.from({ length: phaseLogs.length }, (_value, index) => index + 1),
       );
+      const codexPrepareDoneLog = phaseLogs.find((entry) =>
+        entry.details.runtimePhase === "codex.prepare"
+        && entry.details.runtimePhaseStatus === "done"
+      );
+      assert.equal(
+        codexPrepareDoneLog?.details.codexEffectiveModelProviderId,
+        "hosted-openai",
+      );
       expect(phaseLogs.every((entry) =>
         typeof entry.details.runtimeElapsedMs === "number"
       )).toBe(true);
@@ -3357,6 +3365,16 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 50;
     const wakeTimers: ReturnType<typeof setTimeout>[] = [];
+    let wakeTimersStarted = false;
+    const startNoProgressWakes = () => {
+      if (wakeTimersStarted) {
+        return;
+      }
+      wakeTimersStarted = true;
+      for (const delayMs of [2, 8, 14, 20]) {
+        wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
+      }
+    };
     const clearWakeTimers = () => {
       while (wakeTimers.length > 0) {
         clearTimeout(wakeTimers.pop());
@@ -3366,9 +3384,6 @@ describe("hosted workspace runtime entrypoint", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const startedAt = performance.now();
-      for (const delayMs of [2, 8, 14, 20]) {
-        wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
-      }
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -3393,6 +3408,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            startNoProgressWakes();
             return { status: "imported" };
           },
           platform: createPlatform({

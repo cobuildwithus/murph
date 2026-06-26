@@ -57,7 +57,7 @@ const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
-const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 84_000;
+const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
@@ -558,7 +558,7 @@ test("hosted Codex runtime config removes stale subscription auth from a persist
   await assert.rejects(() => readFile(codexAuthPath, "utf8"));
 });
 
-test("hosted Codex runtime config removes managed ChatGPT auth from a persistent home", async () => {
+test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
   const codexAuthPath = path.join(codexHome, "auth.json");
@@ -576,22 +576,21 @@ test("hosted Codex runtime config removes managed ChatGPT auth from a persistent
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_API_KEY: "secret-openai-key",
+      NODE_ENV: "test",
     },
   });
 
-  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
-  assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");
+  assert.equal(await readFile(codexAuthPath, "utf8"), managedAuthJson);
+  assert.equal(result.runtimeEnv.OPENAI_API_KEY, undefined);
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "hosted-openai",
+    "openai",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.doesNotMatch(config, /^cli_auth_credentials_store = "file"$/mu);
-  assert.match(config, /^model_provider = "hosted-openai"$/mu);
-  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
-  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
+  assert.match(config, /^model_provider = "openai"$/mu);
+  assert.doesNotMatch(config, /\[model_providers\./u);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
@@ -1269,7 +1268,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,

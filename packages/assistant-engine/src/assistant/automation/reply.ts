@@ -160,6 +160,7 @@ interface AssistantAutoReplyPrimaryInput {
   receivedAt: string | null
   replyTarget: AssistantAutoReplyPromptInput['replyTarget']
   source: string
+  sourceMetadata: AssistantAutoReplyPromptInput['sourceMetadata']
   text: string | null
 }
 
@@ -649,7 +650,10 @@ function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
     outcome.artifact.kind === 'result' || outcome.artifact.kind === 'deferred'
       ? outcome.artifact.result
       : null
-  return result?.deliveryIntentId ? [result.deliveryIntentId] : []
+  if (!result?.deliveryIntentId) {
+    return []
+  }
+  return [result.deliveryIntentId]
 }
 
 async function writeAssistantAutoReplyOutcomeArtifacts(input: {
@@ -1062,6 +1066,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   const channelAdapter = getAssistantChannelAdapter(primaryReplyInput.source)
   const autoReplySkipReason = channelAdapter?.canAutoReply({
+    externalThreadRouteAuthorityPresent:
+      primaryReplyInput.sourceMetadata?.kind === 'linq' &&
+      primaryReplyInput.sourceMetadata.externalThreadRouteAuthorityPresent === true,
     source: primaryReplyInput.source,
     threadIsDirect: primaryReplyInput.conversation.threadIsDirect,
   }) ?? null
@@ -1226,6 +1233,7 @@ function createAssistantAutoReplyPrimaryInput(
     receivedAt: input.receivedAt,
     replyTarget: input.replyTarget,
     source: input.source,
+    sourceMetadata: input.sourceMetadata,
     text: input.text,
   }
 }

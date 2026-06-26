@@ -62,11 +62,13 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+const HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
   ...HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS,
   HOSTED_RUNNER_OPENAI_API_KEY_ENV,
+  HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV,
 ]);
 
 export const HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER =
@@ -100,6 +102,9 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   // This is a platform-owned HMAC key for non-identifying log correlation.
   "HOSTED_LOG_FINGERPRINT_SECRET",
+  // This Worker-owned HMAC key signs hosted provider egress credentials. It
+  // must never be forwarded to hosted runtime/user env.
+  "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
   // Platform-owned data API auth is injected by the Worker on matching hosted
   // web egress. The hosted container and member runner secrets must not carry it.
   "MURPH_DATA_API_KEY",

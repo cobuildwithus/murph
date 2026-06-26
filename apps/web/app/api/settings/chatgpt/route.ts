@@ -28,13 +28,18 @@ export const GET = withJsonError(async (request: Request) => {
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   await assertEmptyHostedCodexAuthRequest(request);
-  await requireActiveHostedAppSessionFromRequest(request);
-  throw hostedOnboardingError({
-    code: "HOSTED_CODEX_AUTH_UNAVAILABLE",
-    httpStatus: 503,
-    message: "ChatGPT connection is unavailable until hosted credential isolation is in place.",
-    retryable: false,
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const attempt = await beginHostedCodexAuthAttempt({
+    action: "connect",
+    memberId: auth.member.id,
   });
+  await signalHostedCodexAuthAttempt({
+    action: "connect",
+    attemptId: attempt.attemptId,
+    mailboxItemId: attempt.mailboxItemId,
+    memberId: auth.member.id,
+  });
+  return jsonOk(attempt.view);
 });
 
 export const DELETE = withJsonError(async (request: Request) => {

@@ -351,6 +351,7 @@ const assistantInputTelegramSourceMetadataSchema = z
 
 const assistantInputLinqSourceMetadataSchema = z
   .object({
+    externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
     reactionEligible: z.boolean().optional().default(false),

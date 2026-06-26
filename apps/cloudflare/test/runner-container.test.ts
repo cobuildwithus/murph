@@ -86,12 +86,17 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
         HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "fixture-provider-egress-signing-secret",
       },
     });
 
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+    expect(container.envVars).not.toHaveProperty(
+      "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+    );
   });
 
   it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {
@@ -171,6 +176,58 @@ describe("RunnerContainer", () => {
     ]);
     expect(firstBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
     expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
+  });
+
+  it("recycles a warm v1 shell before posting v2 provider-credential jobs", async () => {
+    const healthChecks: string[] = [];
+    const { container, containerFetch, destroy, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            healthChecks.push(url);
+            const version = healthChecks.length === 1
+              ? "hosted-direct-v1"
+              : HOSTED_RUNTIME_ARCHITECTURE_VERSION;
+            return new Response(JSON.stringify({
+              hostedRuntimeArchitectureVersion: version,
+              ok: true,
+            }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+        initialStatus: "running",
+      });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recycle_v1_runtime"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toHaveLength(2);
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+    const body = JSON.parse(executeCalls[0]?.[1]?.body as string);
+    expect(body.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
   it("does not recycle a healthy warm shell by successful invocation count", async () => {

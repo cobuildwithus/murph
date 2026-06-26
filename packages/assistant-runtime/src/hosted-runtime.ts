@@ -1061,6 +1061,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     emitPhaseLog({
       details: {
+        codexEffectiveModelProviderId:
+          hostedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
         runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
         voiceMemoElevenLabsApiKeyConfigured:
           hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
@@ -3037,6 +3039,14 @@ function createAbortGuardedHostedRuntimePlatform(
         ? {
             readAssistantDeliveryRecord: (readInput) =>
               guard(() => platform.effectsPort.readAssistantDeliveryRecord!(readInput)),
+          }
+        : {}),
+      ...(platform.effectsPort.assertLinqThreadRouteAuthority
+        ? {
+            assertLinqThreadRouteAuthority: (authority, context) =>
+              guard(() =>
+                platform.effectsPort.assertLinqThreadRouteAuthority!(authority, context)
+              ),
           }
         : {}),
       readRawEmailMessage: (rawMessageKey) =>

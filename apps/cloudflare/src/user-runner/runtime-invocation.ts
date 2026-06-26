@@ -34,6 +34,12 @@ import {
   readHostedRunnerContainerIdentity,
 } from "../hosted-runner-container-identity.js";
 import {
+  createHostedProviderEgressCredential,
+} from "../hosted-provider-egress-credential.js";
+import {
+  readHostedProviderCredentialDiagnosticKind,
+} from "../hosted-provider-credential-diagnostics.js";
+import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../runner-job-transport.js";
@@ -63,6 +69,16 @@ import { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
+const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
+  EXA_API_KEY: "exa",
+  MAPBOX_ACCESS_TOKEN: "mapbox",
+  MURPH_DATA_API_KEY: "murph_data_api",
+  OPENAI_API_KEY: "openai",
+} as const;
+const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
+
+type HostedRunnerNativeProviderCredentialEnvName =
+  keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
 
 type RuntimeAttemptLivenessProbeOutcome =
   | "active"
@@ -624,13 +640,6 @@ export class RuntimeInvocationService {
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         }),
       ]);
-    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
-      configSource,
-      forwardedEnv,
-      rewritePlatformUrlsForContainer: true,
-      runnerSecrets,
-    });
-    const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerIdentity = readHostedRunnerContainerIdentity({
       containerName: input.token.runnerContainerName,
       source: this.input.runnerRuntimeEnvSource,
@@ -639,6 +648,47 @@ export class RuntimeInvocationService {
       throw new Error("Hosted runner container identity did not match the runtime invocation user.");
     }
     const runnerContainerName = runnerContainerIdentity.runnerContainerName;
+    const openAiCredentialBeforeMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    let openAiProviderCredentialMinted = false;
+    const createProviderCredential = async (providerKind: string) =>
+      await createHostedProviderEgressCredential({
+        providerKind,
+        runnerContainerName,
+        source: this.input.runnerRuntimeEnvSource,
+        userId: input.userId,
+      });
+    for (const [envKey, providerKind] of Object.entries(
+      HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV,
+    ) as Array<[HostedRunnerNativeProviderCredentialEnvName, string]>) {
+      if (
+        envKey === "OPENAI_API_KEY" &&
+        !isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
+      ) {
+        continue;
+      }
+      if (typeof forwardedEnv[envKey] === "string" && forwardedEnv[envKey].length > 0) {
+        forwardedEnv[envKey] = await createProviderCredential(providerKind);
+        if (envKey === "OPENAI_API_KEY") {
+          openAiProviderCredentialMinted = true;
+        }
+      }
+    }
+    const openAiCredentialAfterMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    const workersAiTranscribeProviderEgressCredential = await createProviderCredential(
+      HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND,
+    );
+    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv,
+      providerEgressCredentials: {
+        workersAiTranscribe: workersAiTranscribeProviderEgressCredential,
+      },
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    });
+    const userEnv = runtimeConfig.userEnv ?? {};
     const job: HostedExecutionWorkspaceInvocationJobInput = {
       ...(workspaceSnapshotPathHashSecret
         ? {
@@ -678,6 +728,9 @@ export class RuntimeInvocationService {
             forwardedEnv,
             userEnv,
           }),
+        openAiCredentialAfterMintKind,
+        openAiCredentialBeforeMintKind,
+        openAiProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,

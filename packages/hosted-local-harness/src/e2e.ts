@@ -16,6 +16,8 @@ const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 const SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
+const HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV =
+  "MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS";
 const FINAL_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
 
 interface HostedLocalE2eRunnerCleanupOptions {
@@ -41,11 +43,16 @@ export type HostedLocalE2eScenarioName =
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
+  | "openai-egress-authority"
+  | "provider-egress-token-bridge"
+  | "warm-reuse-egress"
   | "linq-delivery"
   | "linq-lost-active-operation"
   | "linq-onboarding-followup"
+  | "linq-first-contact-test-controls"
   | "linq-scheduled-reminder"
   | "linq-webhook"
+  | "linq-webhook-audio"
   | "runner-warm-reuse"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
@@ -63,6 +70,13 @@ export interface HostedLocalE2eScenario {
   name: Exclude<HostedLocalE2eScenarioName, "all">;
   processIsolation?: boolean;
   requiresParserToolchain?: boolean;
+  /**
+   * Normal hosted E2E scenarios run the production Worker/Runner/UserRunner
+   * graph. Set this only for deliberate fault-injection scenarios that need
+   * hosted-local test RPCs such as active-operation drop, activity expiry, or
+   * stuck-invocation setup.
+   */
+  testControls?: boolean;
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
@@ -70,6 +84,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
     manualOnly: true,
     name: "active-turn-latency",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
@@ -79,11 +94,13 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
     manualOnly: true,
     name: "container-continuity",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
     manualOnly: true,
     name: "codex-container-continuity",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
@@ -121,6 +138,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     name: "idle-checkpoint-deferred-progress",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-junction-wearable-fixture-e2e.test.ts",
@@ -145,13 +163,34 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "linq-first-contact",
   },
   {
+    file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
+    name: "linq-first-contact-test-controls",
+    testControls: true,
+  },
+  {
     file: "apps/cloudflare/test/hosted-local-linq-lost-active-operation-e2e.test.ts",
     manualOnly: true,
     name: "linq-lost-active-operation",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
     name: "linq-onboarding-followup",
+    processIsolation: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-openai-egress-authority-e2e.test.ts",
+    name: "openai-egress-authority",
+    processIsolation: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-provider-egress-token-bridge-e2e.test.ts",
+    name: "provider-egress-token-bridge",
+    processIsolation: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-warm-reuse-egress-e2e.test.ts",
+    name: "warm-reuse-egress",
     processIsolation: true,
   },
   {
@@ -165,6 +204,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     processIsolation: true,
   },
   {
+    file: "apps/cloudflare/test/hosted-local-linq-webhook-audio-e2e.test.ts",
+    name: "linq-webhook-audio",
+    requiresParserToolchain: true,
+    testControls: true,
+  },
+  {
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     name: "linq-webhook",
     requiresParserToolchain: true,
@@ -173,21 +218,25 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",
     manualOnly: true,
     name: "runner-warm-reuse",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-snapshot-stress-e2e.test.ts",
     manualOnly: true,
     name: "snapshot-stress",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
     manualOnly: true,
     name: "stuck-invocation-recovery",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
     manualOnly: true,
     name: "vault-persistence",
+    testControls: true,
   },
   {
     aliases: ["telegram"],
@@ -449,7 +498,7 @@ function buildHostedLocalVitestBatches(
   let currentBatch: HostedLocalE2eScenario[] = [];
 
   for (const scenario of scenarios) {
-    if (scenario.processIsolation) {
+    if (scenario.processIsolation || scenario.testControls === true) {
       if (currentBatch.length > 0) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -495,7 +544,9 @@ function buildHostedLocalVitestBatchEnv(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): NodeJS.ProcessEnv {
-  if (!input.scenarios.some((scenario) => scenario.processIsolation)) {
+  if (!input.scenarios.some((scenario) =>
+    scenario.processIsolation || scenario.testControls === true
+  )) {
     return input.env;
   }
 
@@ -523,7 +574,10 @@ async function runHostedLocalVitestForScenarios(input: {
     ],
     command: "pnpm",
     cwd: hostedLocalHarnessRepoRoot,
-    env: input.env,
+    env: buildHostedLocalVitestScenarioEnv({
+      env: input.env,
+      scenarios: input.scenarios,
+    }),
     forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: input.label,
   });
@@ -580,6 +634,25 @@ function buildHostedLocalE2eIsolationDefaults(input: {
       input.env.NEXT_DIST_DIR_SUFFIX?.trim()
       || `e2e-${suffix}`,
   };
+}
+
+function buildHostedLocalVitestScenarioEnv(input: {
+  env: NodeJS.ProcessEnv;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): NodeJS.ProcessEnv {
+  const testControlsRequired = input.scenarios.some((scenario) =>
+    scenario.testControls === true
+  );
+  if (!testControlsRequired && input.env[HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV] !== "1") {
+    return input.env;
+  }
+  const env = { ...input.env };
+  if (testControlsRequired) {
+    env[HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV] = "1";
+  } else {
+    delete env[HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV];
+  }
+  return env;
 }
 
 function buildHostedLocalE2ePortOffset(value: string): number {

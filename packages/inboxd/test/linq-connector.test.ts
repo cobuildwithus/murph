@@ -407,6 +407,49 @@ test("normalizeHostedLinqConversationMessage preserves hosted account ids and re
   assert.equal(capture.text, "Stored hosted wake snapshot");
 });
 
+test("normalizeHostedLinqConversationMessage preserves hosted group thread identity across senders", async () => {
+  const first = await normalizeHostedLinqConversationMessage({
+    accountId: "hbidx:phone:v1:route-account",
+    linqMessage: {
+      chatId: "chat_group_stored",
+      from: "+15551110000",
+      isFromMe: false,
+      messageId: "msg_group_a",
+      parts: [
+        {
+          type: "text",
+          value: "first",
+        },
+      ],
+      threadIsDirect: false,
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+  const second = await normalizeHostedLinqConversationMessage({
+    accountId: "hbidx:phone:v1:route-account",
+    linqMessage: {
+      chatId: "chat_group_stored",
+      from: "+15552220000",
+      isFromMe: false,
+      messageId: "msg_group_b",
+      parts: [
+        {
+          type: "text",
+          value: "second",
+        },
+      ],
+      threadIsDirect: false,
+    },
+    occurredAt: "2026-04-02T04:01:01.000Z",
+  });
+
+  assert.equal(first.accountId, second.accountId);
+  assert.equal(first.thread.id, second.thread.id);
+  assert.equal(first.thread.isDirect, false);
+  assert.equal(second.thread.isDirect, false);
+  assert.notEqual(first.actor.id, second.actor.id);
+});
+
 test("normalizeHostedLinqConversationMessage preserves reply metadata and metadata-only attachments when downloads fail", async () => {
   const capture = await normalizeHostedLinqConversationMessage({
     accountId: "hbid:linq.recipient:v1:test",

@@ -6,7 +6,7 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
-  readHostedLinqConversationMessageContact,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
   resolveHostedEmailSelfAddresses,
@@ -194,6 +194,7 @@ async function drainHostedConversationParsers(input: {
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
+            nextWakeAtPresent: false,
             safeErrorMessage: "One or more hosted conversation parser jobs failed.",
             parserFailed: parserFailures.length,
             parserObservedFailedJobs: observedFailedJobs.length,
@@ -205,6 +206,7 @@ async function drainHostedConversationParsers(input: {
       });
     }
     return createHostedConversationParserMetrics({
+      nextWakeAt: null,
       parserProcessed: results.length,
     });
   } catch (error) {
@@ -319,9 +321,8 @@ async function normalizeHostedConversationMessageWake(input: {
   signal?: AbortSignal | null;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
-    const contact = readHostedLinqConversationMessageContact(input.wake.message);
     return normalizeHostedLinqConversationCapture({
-      accountId: contact.lookupKey,
+      accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
       downloadDriver: createHostedLinqAttachmentDownloadDriver({
         env: buildHostedLinqAttachmentDownloadEnv(input.runtime),
