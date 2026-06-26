@@ -409,6 +409,9 @@ export async function sendAssistantMessageLocal(
       let activeTurnInputController: ReturnType<
         typeof createAssistantActiveTurnInputController
       > | null = null
+      const progressDeliveredSessionRef: { value: AssistantSession | null } = {
+        value: null,
+      }
 
       try {
         const turnInputController = createAssistantActiveTurnInputController({
@@ -453,9 +456,6 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
-        const progressDeliveredSessionRef: { value: AssistantSession | null } = {
-          value: null,
-        }
         const currentAudienceReplyDeliveryAvailable =
           isHostedCurrentAudienceReplyDeliveryAvailable({
             executionContext,
@@ -1031,6 +1031,10 @@ export async function sendAssistantMessageLocal(
               (reaction) =>
                 reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
             )
+            const failedNoReplySession = applyAssistantProgressDeliveredSession({
+              progressDeliveredSession: progressDeliveredSessionRef.value,
+              session: providerOutcome.session,
+            })
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
               assistantContractFingerprint: '',
@@ -1048,7 +1052,7 @@ export async function sendAssistantMessageLocal(
               response: '',
               responseMedia: [],
               route: providerOutcome.route,
-              session: providerOutcome.session,
+              session: failedNoReplySession,
               stderr: '',
               stdout: '',
               usage: providerOutcome.usage,
@@ -1063,7 +1067,7 @@ export async function sendAssistantMessageLocal(
               providerResult: failedNoReplyProviderResult,
               providerResumeStateAction: failedProviderResumeStateAction,
               persistUserPromptToTranscript: !userPromptPersistedToTranscript,
-              session: providerOutcome.session,
+              session: failedNoReplySession,
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
             })
@@ -1159,16 +1163,10 @@ export async function sendAssistantMessageLocal(
           acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
         }
-        const progressDeliveredSession = progressDeliveredSessionRef.value
-        currentSession =
-          progressDeliveredSession !== null &&
-          progressDeliveredSession.sessionId === providerResult.session.sessionId
-            ? {
-                ...providerResult.session,
-                binding: progressDeliveredSession.binding,
-                updatedAt: progressDeliveredSession.updatedAt,
-              }
-            : providerResult.session
+        currentSession = applyAssistantProgressDeliveredSession({
+          progressDeliveredSession: progressDeliveredSessionRef.value,
+          session: providerResult.session,
+        })
         responseText = providerResult.response
         await recordAssistantUsageEvent({
           executionContext,
@@ -1423,7 +1421,16 @@ export async function sendAssistantMessageLocal(
         activeTurnInputController?.fail(error)
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
-        const failedSession = resolved.session
+        const failedSession = applyAssistantProgressDeliveredSession({
+          progressDeliveredSession: progressDeliveredSessionRef.value,
+          session: resolved.session,
+        })
+
+        if (failedSession !== resolved.session) {
+          await runAssistantTurnBestEffort(() =>
+            saveAssistantSession(input.vault, failedSession),
+          )
+        }
 
         await runAssistantTurnBestEffort(() =>
           persistFailedAssistantPromptAttempt({
@@ -1533,6 +1540,23 @@ export async function updateAssistantSessionOptionsLocal(input: {
     target: nextTarget,
     updatedAt: new Date().toISOString(),
   })
+}
+
+function applyAssistantProgressDeliveredSession(input: {
+  progressDeliveredSession: AssistantSession | null
+  session: AssistantSession
+}): AssistantSession {
+  if (
+    input.progressDeliveredSession === null ||
+    input.progressDeliveredSession.sessionId !== input.session.sessionId
+  ) {
+    return input.session
+  }
+  return {
+    ...input.session,
+    binding: input.progressDeliveredSession.binding,
+    updatedAt: input.progressDeliveredSession.updatedAt,
+  }
 }
 
 async function runAssistantTurnBestEffort(

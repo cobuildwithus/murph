@@ -54,7 +54,7 @@ export type AssistantProgressDeliveryResult =
   | { kind: 'sent'; source: AssistantProgressDeliverySource }
   | {
       kind: 'skipped'
-      reason: 'duplicate' | 'empty' | 'limit' | 'too-soon'
+      reason: 'duplicate' | 'empty' | 'limit' | 'too-soon' | 'unavailable'
       source: AssistantProgressDeliverySource
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
@@ -156,6 +156,17 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
+      const deliveryContext = input.getDeliveryContext?.() ?? {
+        messageInput: input.messageInput,
+        session: input.session,
+      }
+      if (!shouldCreateAssistantProgressDelivery(deliveryContext.messageInput)) {
+        return {
+          kind: 'skipped',
+          reason: 'unavailable',
+          source,
+        }
+      }
       if (!required && sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
         return {
           kind: 'skipped',
@@ -185,10 +196,6 @@ export function createAssistantProgressDelivery(input: {
       }
 
       try {
-        const deliveryContext = input.getDeliveryContext?.() ?? {
-          messageInput: input.messageInput,
-          session: input.session,
-        }
         const progressInput: AssistantProgressDeliverInput = {
           input: deliveryContext.messageInput,
           ordinal,

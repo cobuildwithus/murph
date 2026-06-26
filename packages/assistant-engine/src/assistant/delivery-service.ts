@@ -413,6 +413,9 @@ export async function deliverAssistantProgressUpdate(input: {
   if (!input.input.deliverResponse) {
     return input.session
   }
+  if (input.input.deliveryDispatchMode === 'queue-only') {
+    return input.session
+  }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,

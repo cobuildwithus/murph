@@ -1510,6 +1510,9 @@ async function executeProgressUpdateTool(input: {
     if (result.reason === 'duplicate') {
       return toolTextResult(false, 'progress update skipped: duplicate progress update')
     }
+    if (result.reason === 'unavailable') {
+      return toolTextResult(false, 'progress update skipped: progress updates are not available for this turn')
+    }
     return toolTextResult(false, 'progress update skipped: empty progress update')
   } catch {
     return toolTextResult(false, 'progress update failed during best-effort delivery')

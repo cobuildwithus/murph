@@ -256,6 +256,49 @@ describe('assistant turn progress', () => {
     expect(delivered[0]?.input.deliveryReplyToMessageId).toBe('current-message')
   })
 
+  it('skips progress when the current delivery context becomes queue-only', async () => {
+    const delivered: DeliverProgressInput[] = []
+    let currentInput = createMessageInput({
+      deliveryDispatchMode: 'queue-only',
+    })
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
+      delivered.push(input)
+      return input.session
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      getDeliveryContext: () => ({
+        messageInput: currentInput,
+        session: createSession(),
+      }),
+      messageInput: createMessageInput({
+        deliveryDispatchMode: 'immediate',
+      }),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'unavailable',
+      source: 'model',
+    })
+    expect(deliver).not.toHaveBeenCalled()
+
+    currentInput = createMessageInput({
+      deliveryDispatchMode: 'immediate',
+    })
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+
+    expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
+      [0, 'Checking the latest message now.'],
+    ])
+  })
+
   it('builds progress idempotency keys distinct from final reply keys', () => {
     expect(
       buildAssistantProgressDeliveryIdempotencyKey({
