@@ -442,15 +442,11 @@ describe("hosted Family plan", () => {
 
   it("rejects explicit Telegram tokens from a different bound username", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique
-      .mockResolvedValueOnce({
-        expiresAt: new Date("2026-07-01T12:00:00.000Z"),
-        status: "pending",
-      })
-      .mockResolvedValueOnce(createPendingInvite({
-        inviteCode: "invite_telegram",
-        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Alice_User"),
-      }));
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      status: "pending",
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Alice_User"),
+    });
 
     await expect(acceptHostedFamilyInviteFromTelegramTx({
       now: new Date("2026-06-18T12:00:00.000Z"),
@@ -463,6 +459,9 @@ describe("hosted Family plan", () => {
       code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
     });
 
+    expect(tx.hostedMember.create).not.toHaveBeenCalled();
+    expect(cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly).not.toHaveBeenCalled();
+    expect(tx.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });

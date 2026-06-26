@@ -2049,16 +2049,28 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   const startInviteCode = parseHostedFamilyInviteStartToken(input.text);
   let inviteCode = startInviteCode;
   if (inviteCode) {
-    const active = await isHostedFamilyInviteCodePendingActiveTx({
+    const activeInvite = await readHostedFamilyInviteCodePendingActiveTx({
       inviteCode,
       now,
       tx: input.tx,
     });
-    if (!active) {
+    if (!activeInvite) {
       inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
         now,
         telegramUsername: input.telegramUsername ?? null,
         tx: input.tx,
+      });
+    } else if (
+      activeInvite.targetTelegramUsernameLookupKey &&
+      !hostedTelegramUsernameLookupKeyMatchesValue(
+        input.telegramUsername,
+        activeInvite.targetTelegramUsernameLookupKey,
+      )
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+        httpStatus: 403,
+        message: "This family invite was sent to a different Telegram username.",
       });
     }
   } else {
@@ -2114,22 +2126,29 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   });
 }
 
-async function isHostedFamilyInviteCodePendingActiveTx(input: {
+async function readHostedFamilyInviteCodePendingActiveTx(input: {
   inviteCode: string;
   now: Date;
   tx: Prisma.TransactionClient;
-}): Promise<boolean> {
+}): Promise<{
+  targetTelegramUsernameLookupKey: string | null;
+} | null> {
   const invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: {
       expiresAt: true,
       status: true,
+      targetTelegramUsernameLookupKey: true,
     },
     where: {
       inviteCode: input.inviteCode,
     },
   });
 
-  return invite?.status === "pending" && invite.expiresAt > input.now;
+  return invite?.status === "pending" && invite.expiresAt > input.now
+    ? {
+        targetTelegramUsernameLookupKey: invite.targetTelegramUsernameLookupKey,
+      }
+    : null;
 }
 
 async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
