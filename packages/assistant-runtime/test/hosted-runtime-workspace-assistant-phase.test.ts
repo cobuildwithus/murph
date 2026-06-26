@@ -989,6 +989,71 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("refreshes assistant cron state after system-mailbox device sync queues due activity work", async () => {
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      })
+      .mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 1,
+        nextRunAt: "2026-04-27T00:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 1,
+      });
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_due_activity_handoff",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "webhook" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_due_activity_handoff",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: "2026-04-27T00:05:00.000Z",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+    }));
+  });
+
   it("logs and reschedules idle device-sync failures without throwing", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedDeviceSyncWakeLane.mockRejectedValueOnce(
@@ -1560,6 +1625,137 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("keeps a retry wake when hosted managed automation work partially succeeds", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const stableKeyFailure = new Error("metadata unavailable");
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 1,
+      stableKeyFailure,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationFailed: true,
+        murphManagedAutomationSkipped: 1,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "assistant.pass_finished",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+        }),
+      }),
+    );
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        }),
+      }),
+    );
+  });
+
+  it("logs stable-key metadata failures even when background setup stays idle", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 0,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        }),
+      }),
+    );
+  });
+
+  it("logs hosted managed automation setup failures without forcing a background retry", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(
+      new Error("metadata unavailable"),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationFailed: true,
+        }),
+      }),
+    );
+  });
+
   it("skips hosted managed automation work when background maintenance yields", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
 
@@ -1645,6 +1841,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationCreated: 1,
         murphManagedAutomationSkipped: 0,
         murphManagedAutomationUpdated: 0,
+      }),
+    }));
+  });
+
+  it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
       }),
     }));
   });
@@ -3201,6 +3452,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           providerMessageId: "provider_synthetic",
         })],
         env: {},
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+  });
+
+  it("passes the runtime action-approval port into hosted delivery drain", async () => {
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      request: vi.fn(),
+    };
+    const deliveryEffect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deliveryEffect.fingerprint,
+        effectId: deliveryEffect.effectId,
+        journalMethod: "POST",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeActionApprovalPort: actionApprovalPort,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionApprovalPort,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionApprovalPort,
+        assistantDeliveryEffects: [deliveryEffect],
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
         vaultRoot: "/tmp/murph-vault",
       }),
     );
@@ -6528,6 +6833,9 @@ function createPhaseInput(input: {
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
+  runtimeActionApprovalPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
+  >;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -6637,6 +6945,9 @@ function createPhaseInput(input: {
             }
           : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
+        ...(input.runtimeActionApprovalPort
+          ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
       },
       platformEnv: {},

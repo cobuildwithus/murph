@@ -344,7 +344,9 @@ async function buildHostedLinqSideEffectMessage(
     case "ai_usage_quota":
       return effect.payload.message;
     case "daily_quota":
-      return buildHostedDailyQuotaReply();
+      return buildHostedDailyQuotaReply({
+        seed: effect.effectId,
+      });
     case "conversation_home_redirect": {
       const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect.payload, prisma);
 
@@ -359,6 +361,7 @@ async function buildHostedLinqSideEffectMessage(
 
       return buildHostedLinqConversationHomeRedirectReply({
         homeRecipientPhone,
+        seed: effect.effectId,
       });
     }
     case "invite_signup":
@@ -425,6 +428,7 @@ async function buildHostedInviteSideEffectMessage(input: {
 
   return buildHostedInviteReply({
     joinUrl: buildHostedInviteUrl(invite.inviteCode),
+    seed: input.effectId,
   });
 }
 

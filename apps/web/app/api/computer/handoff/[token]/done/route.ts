@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
+import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
+const AUTO_RETURN_CONTACT_KINDS = new Set<MurphContactKind>(["text", "telegram"]);
 
 export async function POST(
   request: Request,
@@ -20,17 +22,47 @@ export async function POST(
     token,
   });
 
-  const fallbackPath = `/computer/handoff/${encodeURIComponent(token)}`;
-  if (completed.returnContactKind === "email") {
-    return NextResponse.json({ redirectTo: fallbackPath });
+  const sourceContactKind = completed.returnContactKind;
+  const fallbackHref = buildCompletedHandoffHref({ token });
+  if (
+    completed.status !== "completed" ||
+    !sourceContactKind ||
+    !AUTO_RETURN_CONTACT_KINDS.has(sourceContactKind)
+  ) {
+    return NextResponse.json({ redirectTo: fallbackHref });
   }
 
-  const contactOption = await resolveHostedMurphContactOption({
-    message: { body: HANDOFF_DONE_REPLY_BODY },
-    preferredKind: completed.returnContactKind,
+  let contactOptions: MurphContactOption[];
+  try {
+    contactOptions = await resolveHostedMurphContactOptions({
+      message: { body: HANDOFF_DONE_REPLY_BODY },
+      preferredKind: sourceContactKind,
+    });
+  } catch {
+    return NextResponse.json({ redirectTo: fallbackHref });
+  }
+  const redirectTo = resolveHandoffDoneRedirect({
+    contactOptions,
+    fallbackHref,
+    sourceContactKind,
   });
-  const redirectTo = contactOption?.href
-    ?? fallbackPath;
 
   return NextResponse.json({ redirectTo });
+}
+
+function resolveHandoffDoneRedirect(input: {
+  contactOptions: MurphContactOption[];
+  fallbackHref: string;
+  sourceContactKind: MurphContactKind | null;
+}): string {
+  if (!input.sourceContactKind || !AUTO_RETURN_CONTACT_KINDS.has(input.sourceContactKind)) {
+    return input.fallbackHref;
+  }
+
+  return input.contactOptions.find((option) => option.kind === input.sourceContactKind)?.href
+    ?? input.fallbackHref;
+}
+
+function buildCompletedHandoffHref(input: { token: string }): string {
+  return `/computer/handoff/${encodeURIComponent(input.token)}`;
 }

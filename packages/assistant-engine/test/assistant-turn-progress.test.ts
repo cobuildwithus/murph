@@ -8,7 +8,7 @@ import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildAssistantProgressDeliveryIdempotencyKey,
@@ -22,6 +22,7 @@ import type {
 } from '../src/assistant/service-contracts.js'
 import {
   MAX_PROGRESS_UPDATES_PER_TURN,
+  MIN_PROGRESS_UPDATE_SPACING_MS,
 } from '../src/assistant/progress-constants.js'
 import {
   createAssistantProgressDelivery,
@@ -32,6 +33,10 @@ import {
 type DeliverProgressInput = Parameters<typeof deliverAssistantProgressUpdate>[0]
 
 describe('assistant turn progress', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('normalizes user-facing progress text before delivery', () => {
     expect(
       normalizeAssistantProgressText(
@@ -45,8 +50,10 @@ describe('assistant turn progress', () => {
 
   it('dedupes and limits progress updates inside one turn', async () => {
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    let nowMs = 0
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -55,6 +62,7 @@ describe('assistant turn progress', () => {
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
     })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
 
     await expect(
       progress.send('Extracting the PDF and checking relevant results.'),
@@ -72,13 +80,23 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Checking the saved context now.'),
     ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'too-soon',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(
+      progress.send('Checking the saved context now.'),
+    ).resolves.toEqual({
       kind: 'sent',
       source: 'model',
     })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
     await expect(
       progress.send('Reviewing the tool output now.'),
     ).resolves.toEqual({
-      kind: 'sent',
+      kind: 'skipped',
+      reason: 'limit',
       source: 'model',
     })
     await expect(
@@ -93,14 +111,15 @@ describe('assistant turn progress', () => {
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Extracting the PDF and checking relevant results.'],
       [1, 'Checking the saved context now.'],
-      [2, 'Reviewing the tool output now.'],
     ])
   })
 
   it('tracks one shared progress budget across system and model updates', async () => {
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    let nowMs = 0
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -109,6 +128,7 @@ describe('assistant turn progress', () => {
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
     })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
 
     await expect(
       progress.send('Hang on, refreshing my memory real quick.', {
@@ -121,13 +141,23 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Checking the saved context now.', { source: 'model' }),
     ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'too-soon',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(
+      progress.send('Checking the saved context now.', { source: 'model' }),
+    ).resolves.toEqual({
       kind: 'sent',
       source: 'model',
     })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
     await expect(
       progress.send('Preparing a concise final reply.', { source: 'model' }),
     ).resolves.toEqual({
-      kind: 'sent',
+      kind: 'skipped',
+      reason: 'limit',
       source: 'model',
     })
     await expect(
@@ -141,7 +171,48 @@ describe('assistant turn progress', () => {
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Hang on, refreshing my memory real quick.'],
       [1, 'Checking the saved context now.'],
-      [2, 'Preparing a concise final reply.'],
+    ])
+  })
+
+  it('lets required system progress bypass optional spacing and budget', async () => {
+    const delivered: DeliverProgressInput[] = []
+    let nowMs = 0
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
+      delivered.push(input)
+      return input.session
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
+
+    await expect(progress.send('Checking the saved context now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(progress.send('Preparing the next step now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Hang on, refreshing my memory real quick.', {
+        required: true,
+        source: 'system',
+      }),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'system',
+    })
+
+    expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
+      [0, 'Checking the saved context now.'],
+      [1, 'Preparing the next step now.'],
+      [2, 'Hang on, refreshing my memory real quick.'],
     ])
   })
 
@@ -166,8 +237,9 @@ describe('assistant turn progress', () => {
 
   it('can be closed so later progress sends fail without delivery', async () => {
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -203,8 +275,9 @@ describe('assistant turn progress', () => {
     })
     const session = createSession()
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
       delivered.push(input)
+      return input.session
     })
     const progress = createAssistantProgressDelivery({
       deliver,
@@ -223,6 +296,49 @@ describe('assistant turn progress', () => {
     expect(deliver).toHaveBeenCalledTimes(1)
     expect(delivered[0]?.input.deliveryIdempotencyKey).toBe('current-reply-key')
     expect(delivered[0]?.input.deliveryReplyToMessageId).toBe('current-message')
+  })
+
+  it('skips progress when the current delivery context becomes queue-only', async () => {
+    const delivered: DeliverProgressInput[] = []
+    let currentInput = createMessageInput({
+      deliveryDispatchMode: 'queue-only',
+    })
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
+      delivered.push(input)
+      return input.session
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      getDeliveryContext: () => ({
+        messageInput: currentInput,
+        session: createSession(),
+      }),
+      messageInput: createMessageInput({
+        deliveryDispatchMode: 'immediate',
+      }),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'unavailable',
+      source: 'model',
+    })
+    expect(deliver).not.toHaveBeenCalled()
+
+    currentInput = createMessageInput({
+      deliveryDispatchMode: 'immediate',
+    })
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+
+    expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
+      [0, 'Checking the latest message now.'],
+    ])
   })
 
   it('builds progress idempotency keys distinct from final reply keys', () => {
@@ -251,6 +367,18 @@ describe('assistant turn progress', () => {
       ),
     ).toBe(true)
     expect(shouldCreateAssistantProgressDelivery(createMessageInput())).toBe(true)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          deliveryDispatchMode: 'queue-only',
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({ channel: 'email' }),
+      ),
+    ).toBe(false)
   })
 })
 

@@ -815,8 +815,6 @@ describe('assistant outbox runtime', () => {
 
   it('prunes terminal outbox intents by age and count without touching active retries', async () => {
     const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-retention-')
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-20T12:00:00.000Z'))
 
     const oldTerminal = await createIntent(vaultRoot, {
       createdAt: '2026-03-01T00:00:00.000Z',

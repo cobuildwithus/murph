@@ -17,6 +17,7 @@ import type { DeviceProviderRegistry } from "./registry.ts";
 
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
+  defaultTimeZone?: string;
   providerRegistry?: DeviceProviderRegistry;
 }
 
@@ -76,7 +77,12 @@ function resolveRegistry(registry?: DeviceProviderRegistry): DeviceProviderRegis
 
 export async function prepareDeviceProviderSnapshotImport(
   input: unknown,
-  { providerRegistry }: Pick<DeviceProviderImporterExecutionOptions, "providerRegistry"> = {},
+  {
+    defaultTimeZone,
+    providerRegistry,
+  }: Pick<DeviceProviderImporterExecutionOptions, "providerRegistry"> & {
+    defaultTimeZone?: string;
+  } = {},
 ): Promise<DeviceBatchImportPayload> {
   const request = parseInputObject(
     input,
@@ -93,7 +99,7 @@ export async function prepareDeviceProviderSnapshotImport(
   const snapshot = adapter.parseSnapshot
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
-  const normalized = await adapter.normalizeSnapshot(snapshot);
+  const normalized = await adapter.normalizeSnapshot(snapshot, { defaultTimeZone });
   const sanitizedSnapshot = adapter.sanitizeRawSnapshot
     ? adapter.sanitizeRawSnapshot(snapshot)
     : request.snapshot;
@@ -148,6 +154,31 @@ export async function prepareDeviceProviderSnapshotImport(
       normalizerVersion: request.normalizerVersion,
     }),
   });
+}
+
+interface VaultMetadataReadPort {
+  loadVault(input: { vaultRoot?: string }): Promise<{ metadata: { timezone?: string } }>;
+}
+
+function isVaultMetadataReadPort(value: unknown): value is VaultMetadataReadPort {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { loadVault?: unknown }).loadVault === "function",
+  );
+}
+
+async function resolveSnapshotImportDefaultTimeZone(
+  input: unknown,
+  corePort: unknown,
+): Promise<string | undefined> {
+  const request = deviceProviderSnapshotImportSchema.safeParse(input);
+  if (!request.success || !request.data.vaultRoot || !isVaultMetadataReadPort(corePort)) {
+    return undefined;
+  }
+
+  const vault = await corePort.loadVault({ vaultRoot: request.data.vaultRoot });
+  return vault.metadata.timezone;
 }
 
 function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
@@ -256,9 +287,14 @@ function firstValidTimestamp(...candidates: Array<string | undefined>): string |
 
 export async function importDeviceProviderSnapshot<TResult = unknown>(
   input: unknown,
-  { corePort, providerRegistry }: DeviceProviderImporterExecutionOptions = {},
+  { corePort, defaultTimeZone, providerRegistry }: DeviceProviderImporterExecutionOptions = {},
 ): Promise<TResult> {
   const writer = assertCanonicalWritePort(corePort, ["importDeviceBatch"]);
-  const payload = await prepareDeviceProviderSnapshotImport(input, { providerRegistry });
+  const resolvedDefaultTimeZone =
+    defaultTimeZone ?? await resolveSnapshotImportDefaultTimeZone(input, corePort);
+  const payload = await prepareDeviceProviderSnapshotImport(input, {
+    defaultTimeZone: resolvedDefaultTimeZone,
+    providerRegistry,
+  });
   return (await writer.importDeviceBatch(payload)) as TResult;
 }

@@ -139,6 +139,7 @@ export function expectAdvertisedMurphDynamicTools(
     computerToolsAvailable?: boolean;
     messageReactionsAvailable?: boolean;
     phoneCallsAvailable?: boolean;
+    progressUpdatesAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
   } = {},
 ): void {
@@ -164,6 +165,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.messageReactionsAvailable !== true
         && name === "murph.react_to_message"
+      ) {
+        return false;
+      }
+
+      if (
+        options.progressUpdatesAvailable === false
+        && name === "murph.send_progress_update"
       ) {
         return false;
       }

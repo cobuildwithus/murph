@@ -89,7 +89,7 @@
 
 ## User-Facing Message Sends
 
-- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, and billing cancellation feedback email. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, Linq daily text quota, Linq home-thread redirect, and billing cancellation feedback email. The Linq quota and home-thread redirects are narrowly scoped policy responses that preserve admission/routing invariants before assistant generation runs. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
 
 ## Hosted Foreground Priority
 

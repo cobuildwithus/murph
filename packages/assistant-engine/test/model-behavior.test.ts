@@ -183,16 +183,40 @@ describe('assistant execution prompt contract', () => {
       'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
-      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+      'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
+      'never send a third',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text to one to three short conversational sentences, specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+    )
+    expect(prompt).toContain(
+      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
+    )
+    expect(prompt).toContain(
+      '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
+    )
+    expect(
+      prompt.match(
+        /If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third\./g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq\/iMessage/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).not.toContain(
+      '3. Use `send_progress_update` first only for genuinely long',
     )
     expect(prompt).toContain(
       'Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself.',
@@ -555,7 +579,10 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, call `send_progress_update` first',
+      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
+    )
+    expect(prompt).toContain(
+      'at most one for ordinary long work, one more only after a multi-minute delay, and none when the final reply should be available shortly',
     )
     expect(prompt).toContain(
       'Do not use it for straightforward one-shot logging or capture writes',
@@ -1176,7 +1203,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '3bd4e168aadc1b871827878964baa668c063a25d82017fb0a7a4d8f4fa3ca9ee',
+      'f19b8aa894d30b48c4b3ad5ee6aecc5dc0cf421ed035ad3bf672f5112bf73ab6',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1402,6 +1429,19 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Do not auto-reorder.')
     expect(prompt).toContain(
       'Treat this check-in as the one adjacent next step; do not also offer tracking, reminders, or other follow-ups unless the user asks.',
+    )
+    expect(prompt).toContain('Supplement order logging:')
+    expect(prompt).toContain(
+      'When Murph helps the user order a supplement and the action result gives a reliable delivery date',
+    )
+    expect(prompt).toContain(
+      'proactively save or update the supplement in the user\'s vault with `vault-cli supplement save` and `--started-on <delivery-date>`',
+    )
+    expect(prompt).toContain(
+      'Treat this as part of completing the supplement-ordering task, not as an extra follow-up offer.',
+    )
+    expect(prompt).toContain(
+      'If the delivery date is not reliable, do not invent a start date',
     )
     expect(prompt).toContain('Make at most one proactive offer per completed action.')
     expect(prompt).toContain('Do not re-offer after the user declines.')

@@ -11,22 +11,26 @@ import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
 const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
+
+type HandoffSearchParams = {
+  managed?: string | string[];
+};
 
 export default async function ComputerHandoffPage({
   params,
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams?: Promise<{ managed?: string | string[] }>;
+  searchParams?: Promise<HandoffSearchParams>;
 }) {
   const { token } = await params;
-  const managedState = readManagedHandoffState(
-    await (searchParams ?? Promise.resolve({})),
-  );
+  const resolvedSearchParams = await (searchParams ?? Promise.resolve({}));
+  const managedState = readManagedHandoffState(resolvedSearchParams);
   const session = await readHandoffSessionOrAuthState();
   if (!session) {
     return <ComputerHandoffAuthRequiredState />;
@@ -96,10 +100,7 @@ export default async function ComputerHandoffPage({
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
         : "Return to Murph and ask for a new link.";
     const contactOptions = canSendDoneReply && !isEmailReturn
-      ? await resolveHostedMurphContactOptions({
-          preferredKind: state.returnContactKind,
-          message: { body: HANDOFF_DONE_REPLY_BODY },
-        })
+      ? await resolveCompletedHandoffContactOptions(state.returnContactKind)
       : [];
 
     return (
@@ -130,14 +131,14 @@ export default async function ComputerHandoffPage({
                       "w-full sm:w-auto",
                     )}
                   >
-                    Reply in {option.label}
+                    Reply in {option.webmail?.label ?? option.label}
                   </MurphContactLink>
                 ))}
               </div>
             ) : canSendDoneReply ? (
               <div className="mt-6 border-t border-border pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Return to your Murph thread and reply with:
+                  Reply with:
                 </p>
                 <p className="mt-3 break-words font-mono text-sm text-foreground">
                   {HANDOFF_DONE_REPLY_BODY}
@@ -185,7 +186,7 @@ export default async function ComputerHandoffPage({
 }
 
 function readManagedHandoffState(
-  searchParams: { managed?: string | string[] },
+  searchParams: HandoffSearchParams,
 ): "retry" | "waiting" | null {
   const value = Array.isArray(searchParams.managed)
     ? searchParams.managed[0]
@@ -210,4 +211,21 @@ async function readHandoffSessionOrAuthState() {
 
     throw error;
   }
+}
+
+async function resolveCompletedHandoffContactOptions(
+  returnContactKind: MurphContactKind | null,
+): Promise<MurphContactOption[]> {
+  let options: MurphContactOption[];
+  try {
+    options = await resolveHostedMurphContactOptions({
+      message: { body: HANDOFF_DONE_REPLY_BODY },
+      preferredKind: returnContactKind,
+    });
+  } catch {
+    return [];
+  }
+  return returnContactKind
+    ? options.filter((option) => option.kind === returnContactKind)
+    : options;
 }

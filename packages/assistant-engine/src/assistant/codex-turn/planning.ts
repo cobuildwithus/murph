@@ -316,7 +316,14 @@ export function resolveAssistantCodexThreadScope(input: {
 export async function buildCodexTurnExecutionPlan(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
+  allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
@@ -336,8 +343,12 @@ export async function buildCodexTurnExecutionPlan(input: {
   return {
     acceptedInputItems: input.acceptedInputItems ?? [],
     activeTurnSteering: input.activeTurnSteering ?? null,
+    allowFinishWithoutReply:
+      input.allowFinishWithoutReply ?? profile.toolProfile === 'provider-turn',
     executionContext,
     input: input.input,
+    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
+    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     profile,
     promptTimeContext,
     route: input.route,
@@ -359,6 +370,7 @@ export async function buildCodexTurnAttemptPlan(input: {
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       acceptedInputItems: input.executionPlan.acceptedInputItems,
+      allowFinishWithoutReply: input.executionPlan.allowFinishWithoutReply,
       executionContext: input.executionPlan.executionContext,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
@@ -375,6 +387,7 @@ export async function buildCodexTurnAttemptPlan(input: {
 
 export async function resolveAssistantRouteTurnPlan(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
+  allowFinishWithoutReply?: boolean | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   input: AssistantMessageInput
   profile: AssistantCodexTurnResolvedExecutionProfile
@@ -547,8 +560,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
+  const allowFinishWithoutReply =
+    input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   const dynamicTools = resolveMurphDynamicTools({
-    allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
+    allowFinishWithoutReply,
     allowMessageReactions: messageReactionsAvailable,
     computerToolsAvailable:
       input.hostedToolContext?.computerToolsAvailable === true,

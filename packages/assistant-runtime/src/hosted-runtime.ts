@@ -1685,14 +1685,28 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeAt: accumulatedProjection.nextWakeAt,
             nextWakeReason: accumulatedProjection.nextWakeReason,
           });
+          const projectedWakeIsUnserviced =
+            projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey;
+          const projectedWakeBlockedByCheckpoint =
+            projectedWakeIsUnserviced
+            && accumulatedProjection.nextWakeAt !== null
+            && (
+              pendingDurableCheckpointEffects.length > 0
+              || accumulatedProjection.projectedWakeRequiresCheckpoint
+            );
           const projectedRuntimeWakeAt =
-            pendingDurableCheckpointEffects.length === 0
-              && !accumulatedProjection.projectedWakeRequiresCheckpoint
-              && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
+            !projectedWakeBlockedByCheckpoint
+              && projectedWakeIsUnserviced
               ? accumulatedProjection.nextWakeAt
               : null;
+          const dirtyCheckpointStartByMs = projectedWakeBlockedByCheckpoint
+            ? clampHostedRuntimeDirtyCheckpointStartByProjectedWake({
+                idleCheckpointStartByMs,
+                projectedWakeAt: accumulatedProjection.nextWakeAt,
+              })
+            : idleCheckpointStartByMs;
           const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-            idleCheckpointStartByMs,
+            idleCheckpointStartByMs: dirtyCheckpointStartByMs,
             projectedRuntimeWakeAt,
             runtimeAbortSignal: runtimeAbortController.signal,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -2708,6 +2722,22 @@ function buildHostedRuntimeWakeKey(input: {
   }
 
   return JSON.stringify([input.nextWakeAt, input.nextWakeReason]);
+}
+
+function clampHostedRuntimeDirtyCheckpointStartByProjectedWake(input: {
+  idleCheckpointStartByMs: number;
+  projectedWakeAt: string | null;
+}): number {
+  if (input.projectedWakeAt === null) {
+    return input.idleCheckpointStartByMs;
+  }
+
+  const projectedWakeMs = Date.parse(input.projectedWakeAt);
+  if (!Number.isFinite(projectedWakeMs)) {
+    return input.idleCheckpointStartByMs;
+  }
+
+  return Math.min(input.idleCheckpointStartByMs, projectedWakeMs);
 }
 
 async function waitForHostedRuntimeDirtyWindow(input: {

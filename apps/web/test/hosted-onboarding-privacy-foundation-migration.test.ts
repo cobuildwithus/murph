@@ -17,6 +17,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'presentationBody String? @map("presentation_body")',
     'approvalStatus HostedSensitiveActionApprovalStatus? @map("approval_status")',
     'decidedAt DateTime? @map("decided_at")',
+    'consumedAt DateTime? @map("consumed_at")',
+    'consumedBy String? @map("consumed_by")',
     'returnContactKind String? @map("return_contact_kind")',
   ],
   HostedConnectedAppConnectIntent: [
@@ -389,6 +391,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const actionApprovalConsumedAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260625150000_hosted_action_approval_consumed_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const computerHandoffReturnContactKindMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026062600_computer_handoff_return_contact_kind/migration.sql",
@@ -461,6 +470,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260625000100_hosted_phone_calls",
+      "20260625150000_hosted_action_approval_consumed_at",
       "20260626000000_linq_first_contact_admission_decision",
       "2026062600_computer_handoff_return_contact_kind",
       "migration_lock.toml",
@@ -544,6 +554,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(sensitiveActionApprovalMigrationSql).not.toContain("wallet_address");
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(actionApprovalConsumedAtMigrationSql).toContain(
+      'ADD COLUMN "consumed_at" TIMESTAMP(3)',
+    );
+    expect(actionApprovalConsumedAtMigrationSql).toContain(
+      '"approval_status" = \'approved\'',
     );
     expect(computerHandoffReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',

@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-25
+Last verified: 2026-06-26
 
 ## Purpose
 
@@ -67,13 +67,14 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/hosted-temporal-orchestration.md` | Durable hard-cut Temporal orchestration ADR defining final ownership split, pointer-only Temporal state, signal-aware retry/wait behavior including failed-runtime completion backoff, web signal-client and worker Temporal Cloud auth/TLS parity, callback-signed execution-adapter and device-sync scheduled wake sweep contract, web-owned reconciliation facts without Activity-local signed usage decisions, mailbox-lag priority, global device-sync scheduled-wake Schedule ownership with bounded mailbox handoff, Cloudflare scheduler deletion targets, Vercel Workflow nudge deletion targets, architecture guard coverage, and acceptance criteria; `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed execution snapshot. | Hosted Temporal orchestration target | High | 2026-06-08 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
+| `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, default worktree/PR isolation, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-09 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, Cloudflare required Worker secret surface, DBHub timestamp-read guardrails, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-25 |
-| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-18 |
+| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-26 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, reminders, notifications, line health, pacing, links, and cold-contact behavior. | Phone-number messaging policy | High | 2026-06-25 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for running `pnpm dev` from secondary worktrees without colliding with the main checkout's ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel setup. | Local hosted runtime workflow | Medium | 2026-06-22 |
-| `agent-docs/operations/pr-deep-review-loop.md` | Required post-completion GPT-5.5 Pro external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh thread in parallel with PR CI, verify each finding before landing it, stop at zero accepted findings or 10 rounds. | PR deep-review loop | Medium | 2026-06-19 |
+| `agent-docs/operations/pr-deep-review-loop.md` | Required post-completion GPT-5.5 Pro external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh Eragon thread with guarded ZIP plus repomix attachments for the pushed PR head, verify each finding before landing it, stop at zero accepted findings or 10 rounds. | PR deep-review loop | Medium | 2026-06-26 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | The five device-sync push/pull ingestion invariants (pull floor, push-early/pull-eventually, degrade-to-fetch-never-silence, idempotent merge, louder-never-quieter) that any webhook/resource-job/reconcile change must preserve. | Device-sync ingestion contract | High | 2026-06-10 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |

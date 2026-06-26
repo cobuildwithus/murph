@@ -849,6 +849,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const runtimeTransitionTimeoutMs = 15_000;
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -858,80 +859,86 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     let assistantPass = 0;
 
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
+      vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_durable_effect_external_wake",
-            idleCheckpointDelayMs: 1,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_durable_effect_external_wake",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
           }),
-          runtimeWakeSignal,
-          async runAssistantPhase() {
-            assistantPass += 1;
-            events.push(`assistant:${assistantPass}`);
-
-            if (assistantPass === 1) {
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                afterCheckpoint: async () => {
-                  runtimeWakeSignal.notify();
-                  return {
-                    afterDurableCheckpoint: durableEffect,
-                    checkpointReason: "system_mailbox_receipt",
-                    nextWakeAt: TEST_NOW,
-                    nextWakeReason: "assistant",
-                  };
-                },
-                checkpointReason: "system_mailbox_receipt",
-                nextWakeAt: TEST_NOW,
-                nextWakeReason: "assistant",
-                progressed: true,
+                snapshotRef: createBundleRef({
+                  hash: "f".repeat(64),
+                  key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
+                  size: 512,
+                }),
               };
-            }
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase() {
+              assistantPass += 1;
+              events.push(`assistant:${assistantPass}`);
 
-            if (assistantPass === 2) {
-              return {
-                checkpointReason: "canonical_runtime_commit",
-                nextWakeAt: TEST_NOW,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
+              if (assistantPass === 1) {
+                return {
+                  afterCheckpoint: async () => {
+                    runtimeWakeSignal.notify();
+                    return {
+                      afterDurableCheckpoint: durableEffect,
+                      checkpointReason: "system_mailbox_receipt",
+                      nextWakeAt: TEST_NOW,
+                      nextWakeReason: "assistant",
+                    };
+                  },
+                  checkpointReason: "system_mailbox_receipt",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
 
-            throw new Error("Self-projected wake ran before durable effect checkpoint.");
+              if (assistantPass === 2) {
+                return {
+                  checkpointReason: "canonical_runtime_commit",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Self-projected wake ran before durable effect checkpoint.");
+            },
+            vaultRoot,
           },
-          vaultRoot,
-        },
+        ),
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
       );
 
       assert.equal(assistantPass, 2);
@@ -944,6 +951,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, TEST_NOW);
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

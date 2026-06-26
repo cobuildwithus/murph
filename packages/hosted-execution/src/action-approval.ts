@@ -53,9 +53,20 @@ export type HostedActionApprovalResult =
       status: "pending";
     }
   | {
+      approvalGeneration: string;
       approvalId: string;
-      status: "approved" | "denied" | "expired";
+      status: "approved";
+    }
+  | {
+      approvalId: string;
+      status: "denied" | "expired";
     };
+
+export interface HostedActionApprovalConsumeRequest {
+  approvalGeneration: string;
+  consumerId: string;
+  request: HostedActionApprovalRequest;
+}
 
 export function isHostedActionApprovalId(value: unknown): value is string {
   return typeof value === "string" && APPROVAL_ID_PATTERN.test(value);
@@ -186,6 +197,21 @@ export function parseHostedActionApprovalResult(
       return { approvalId, approvalUrl, expiresAt, status };
     }
     case "approved":
+      {
+        const exact = requireExactObject(
+          value,
+          "Hosted approved action approval result",
+          ["approvalGeneration", "approvalId", "status"],
+        );
+        return {
+          approvalGeneration: requireSha256Hex(
+            exact.approvalGeneration,
+            "Hosted action approval result approvalGeneration",
+          ),
+          approvalId,
+          status,
+        };
+      }
     case "denied":
     case "expired":
       requireExactObject(
@@ -201,11 +227,42 @@ export function parseHostedActionApprovalResult(
   }
 }
 
+export function parseHostedActionApprovalConsumeRequest(
+  value: unknown,
+): HostedActionApprovalConsumeRequest {
+  const request = requireExactObject(
+    value,
+    "Hosted action approval consume request",
+    ["approvalGeneration", "consumerId", "request"],
+  );
+
+  return {
+    approvalGeneration: requireSha256Hex(
+      request.approvalGeneration,
+      "Hosted action approval consume request approvalGeneration",
+    ),
+    consumerId: requireBoundedString(
+      request.consumerId,
+      "Hosted action approval consume request consumerId",
+      ACTION_ID_MAX_LENGTH,
+    ),
+    request: parseHostedActionApprovalRequest(request.request),
+  };
+}
+
 function requireApprovalId(value: unknown): string {
   if (!isHostedActionApprovalId(value)) {
     throw new TypeError("Hosted action approval result approvalId is invalid.");
   }
   return value;
+}
+
+function requireSha256Hex(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  if (!SHA256_HEX_PATTERN.test(text)) {
+    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+  }
+  return text;
 }
 
 function requireBoundedString(

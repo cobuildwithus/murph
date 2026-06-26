@@ -137,6 +137,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       phoneCallsAvailable: false,
+      progressUpdatesAvailable: false,
       vaultFileSendAvailable: true,
     });
   }, 300_000);

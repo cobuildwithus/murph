@@ -1,6 +1,9 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedActionApprovalResult } from "@murphai/hosted-execution/action-approval";
-import { HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import {
   fetchHostedWebControlPlaneJson,
@@ -14,6 +17,24 @@ export function createHostedWebActionApprovalPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async consume(
+      request: Parameters<
+        NonNullable<HostedRuntimePlatform["actionApprovalPort"]>["consume"]
+      >[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted action approval consume",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedActionApprovalResult(payload);
+    },
+
     async request(
       request: Parameters<
         NonNullable<HostedRuntimePlatform["actionApprovalPort"]>["request"]

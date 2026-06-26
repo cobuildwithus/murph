@@ -230,6 +230,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       connectedAppsAvailable: true,
       messageReactionsAvailable: true,
       phoneCallsAvailable: false,
+      progressUpdatesAvailable: false,
     });
 
     const reactionRequests = await requireTelegramStub().waitForRequestCount({

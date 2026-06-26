@@ -1138,6 +1138,142 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("resumes a legacy unscoped checkpoint with a scoped same-channel delivery context", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      checkpointContext: {
+        conversationId: "conversation-a",
+        recipientKey: "recipient-a",
+      },
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeDeliveryContext: {
+        conversationId: JSON.stringify(["telegram", "conversation-a"]),
+        recipientKey: JSON.stringify(["telegram", "recipient-a"]),
+        returnContactKind: "telegram",
+      },
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      checkpointContext: null,
+      status: "running",
+    });
+  });
+
+  it("resumes a scoped checkpoint with a legacy unscoped same-channel delivery context", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      checkpointContext: {
+        conversationId: JSON.stringify(["telegram", "conversation-a"]),
+        recipientKey: JSON.stringify(["telegram", "recipient-a"]),
+      },
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeDeliveryContext: {
+        conversationId: "conversation-a",
+        recipientKey: "recipient-a",
+        returnContactKind: "telegram",
+      },
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      checkpointContext: null,
+      status: "running",
+    });
+  });
+
+  it("rejects a legacy unscoped checkpoint when the scoped delivery channel differs", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      checkpointContext: {
+        conversationId: "conversation-a",
+        recipientKey: "recipient-a",
+      },
+      pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "awaiting_user",
+      suggestedReply: "done",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+        }),
+      ],
+      run,
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeDeliveryContext: {
+        conversationId: JSON.stringify(["email", "conversation-a"]),
+        recipientKey: JSON.stringify(["email", "recipient-a"]),
+        returnContactKind: "telegram",
+      },
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RESUME_CONTEXT_MISMATCH",
+    });
+    expect(store.run).toMatchObject({
+      status: "awaiting_user",
+    });
+  });
+
   it("returns an awaiting run when hidden user reply proof is missing", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
@@ -3788,6 +3924,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -3840,6 +3977,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -3886,6 +4024,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
 
@@ -3975,6 +4114,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "checkpointing",
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -4184,6 +4324,7 @@ describe("ComputerUseService", () => {
       token: "handoff-token",
     })).resolves.toEqual({
       returnContactKind: null,
+      status: "completed",
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({

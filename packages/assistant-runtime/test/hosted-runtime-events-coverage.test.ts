@@ -11,6 +11,10 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/runtime-control";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
 
@@ -207,7 +211,7 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 
-  it("returns an assistant wake when a device activity automation schedules notification work", async () => {
+  it("returns an assistant wake when device activity automation schedules notification work", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity",
@@ -363,6 +367,75 @@ describe("hosted runtime event coverage", () => {
         workingDirectory: "/tmp/assistant-runtime-events-coverage",
       }),
     );
+  });
+
+  it("persists Codex auth connect failure diagnostics", async () => {
+    const update = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.executeCodexManagedAccountOperation.mockRejectedValueOnce(
+      new VaultCliError(
+        "ASSISTANT_CODEX_AUTH_FAILED",
+        "ChatGPT account authentication did not complete successfully.",
+        {
+          codexLoginError: "device auth failed with status 500",
+          retryable: false,
+        },
+      ),
+    );
+    const runtime = createRuntime({
+      codexAuthPort: { update },
+      logPort: {
+        async write(request) {
+          logRequests.push(request);
+          return { loggedCount: request.entries.length };
+        },
+      },
+    });
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "connect",
+      attemptId: "hca_diagnosticfailure",
+      eventId: "runtime-control:codex-auth-diagnostic-failure",
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_123",
+    });
+
+    await expect(
+      executeHostedMailboxEvent({
+        executionContext,
+        operatorHomeRoot: "/tmp/assistant-runtime-events-operator",
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: "/tmp/assistant-runtime-events-coverage",
+        wake,
+      }),
+    ).resolves.toMatchObject({
+      mailboxLane: "runtime-control",
+      postCheckpointRecord: null,
+    });
+
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        attemptId: "hca_diagnosticfailure",
+        component: "assistant",
+        errorCode: "authorization_error",
+        eventCode: "assistant.codex_auth_failed",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          action: "connect",
+          errorCause: "device auth failed with status 500",
+          errorCode: "authorization_error",
+          safeErrorMessage: "Hosted execution authorization failed.",
+        }),
+      }),
+    );
+    expect(update).toHaveBeenCalledWith({
+      attemptId: "hca_diagnosticfailure",
+      phase: "failed",
+    });
   });
 
   it("runs Codex auth connect wakes and reports the device code", async () => {

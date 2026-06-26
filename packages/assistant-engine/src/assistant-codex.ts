@@ -159,7 +159,6 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
-const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -372,27 +371,12 @@ function resolveCodexAppServerHostedToolContext(
 
 async function waitForCodexProgressDrain(
   pending: readonly Promise<unknown>[],
-): Promise<boolean> {
+): Promise<void> {
   if (pending.length === 0) {
-    return true
+    return
   }
 
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      Promise.allSettled(pending).then(() => true),
-      new Promise<boolean>((resolve) => {
-        timeout = setTimeout(
-          () => resolve(false),
-          CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS,
-        )
-      }),
-    ])
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout)
-    }
-  }
+  await Promise.allSettled(pending)
 }
 
 function resolveCodexCurrentChannelProgressSource(
@@ -1463,6 +1447,11 @@ export type CodexManagedAccountOperationResult =
   | { kind: 'connected' }
   | { kind: 'disconnected' }
 
+interface CodexManagedAccountLoginCompletion {
+  error: string | null
+  success: boolean
+}
+
 /**
  * Runs one managed ChatGPT account operation through the same app-server
  * transport used by turns. The child is intentionally short lived: account
@@ -1503,9 +1492,9 @@ export async function executeCodexManagedAccountOperation(
     rejectAccountUpdate = reject
   })
   void accountUpdate.catch(() => undefined)
-  let settleCompletion!: (success: boolean) => void
+  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
   let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<boolean>((resolve, reject) => {
+  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
     settleCompletion = resolve
     rejectCompletion = reject
   })
@@ -1513,7 +1502,7 @@ export async function executeCodexManagedAccountOperation(
   let expectedLoginId: string | null = null
   let acceptChatGptAccountUpdate = false
   let bufferedChatGptAccountUpdate = false
-  const bufferedCompletions = new Map<string, boolean>()
+  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
 
   const binding: CodexAppServerActiveTurnBinding = {
     onClose(code, signal) {
@@ -1597,14 +1586,17 @@ export async function executeCodexManagedAccountOperation(
       }
       const params = asCodexRecord(message.params)
       const loginId = asCodexString(params?.loginId)
-      const success = params?.success === true
       if (!loginId) {
         return
       }
+      const completionResult: CodexManagedAccountLoginCompletion = {
+        error: asCodexString(params?.error),
+        success: params?.success === true,
+      }
       if (loginId === expectedLoginId) {
-        settleCompletion(success)
+        settleCompletion(completionResult)
       } else {
-        bufferedCompletions.set(loginId, success)
+        bufferedCompletions.set(loginId, completionResult)
       }
     },
     onStderrLine: () => {},
@@ -1683,16 +1675,19 @@ export async function executeCodexManagedAccountOperation(
     }
     await input.onDeviceCode?.({ userCode, verificationUrl })
 
-    const succeeded = await withCodexRpcTimeout(
+    const loginCompletion = await withCodexRpcTimeout(
       completion,
       normalizeCodexManagedAccountTimeout(input.timeoutMs),
       'account/login/completed',
     )
-    if (!succeeded) {
+    if (!loginCompletion.success) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_AUTH_FAILED',
         'ChatGPT account authentication did not complete successfully.',
-        { retryable: false },
+        {
+          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
+          retryable: false,
+        },
       )
     }
     await withCodexRpcTimeout(
@@ -2278,6 +2273,7 @@ async function runCodexAppServerTurnOnProcess(
   let turnTerminal = false
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
+  let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
@@ -2661,19 +2657,39 @@ async function runCodexAppServerTurnOnProcess(
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' && contextCompactionProgressNotified)
+      (source === 'system' &&
+        (contextCompactionProgressNotified || contextCompactionProgressPending))
     ) {
       return false
     }
 
-    if (source === 'system') {
-      contextCompactionProgressNotified = true
-    }
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      progressPromise = progressDelivery.send(text, { source })
+      if (source === 'system') {
+        contextCompactionProgressPending = true
+      }
+      progressPromise = progressDelivery.send(text, {
+        ...(source === 'system' ? { required: true } : {}),
+        source,
+      })
     } catch {
+      if (source === 'system') {
+        contextCompactionProgressPending = false
+      }
       return false
+    }
+    if (source === 'system') {
+      progressPromise = progressPromise.then((result) => {
+        if (result.kind === 'sent') {
+          contextCompactionProgressNotified = true
+        } else {
+          contextCompactionProgressPending = false
+        }
+        return result
+      }, (error: unknown) => {
+        contextCompactionProgressPending = false
+        throw error
+      })
     }
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
@@ -2693,19 +2709,11 @@ async function runCodexAppServerTurnOnProcess(
     pendingProgressDeliveries.add(tracked)
   }
 
-  const closeProgressDelivery = (): void => {
-    resolveCodexAppServerProgressDelivery(input)?.close?.()
-  }
-
   const drainPendingProgressDeliveries = async (): Promise<void> => {
     while (pendingProgressDeliveries.size > 0) {
-      const drained = await waitForCodexProgressDrain([
+      await waitForCodexProgressDrain([
         ...pendingProgressDeliveries,
       ])
-      if (!drained) {
-        closeProgressDelivery()
-        return
-      }
     }
   }
 
@@ -2731,10 +2739,27 @@ async function runCodexAppServerTurnOnProcess(
     } while (drained !== dynamicToolExecutionChain)
   }
 
-  const applyResponseMediaPatch = (patch: {
-    media: AssistantResponseMedia[]
-    op: 'append' | 'replace'
-  }): void => {
+  const hasAcceptedNoReplyPatchForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.deliveryContextOrdinal === deliveryContextOrdinal &&
+      entry.patch.kind === 'none'
+    )
+
+  const applyResponseMediaPatch = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
+        'Response media cannot be attached after finish_without_reply.',
+      )
+    }
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
@@ -2752,6 +2777,9 @@ async function runCodexAppServerTurnOnProcess(
       trailingSteerCandidateDeliveryContextOrdinal !== null &&
       trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
     ) {
+      return false
+    }
+    if (responseMedia.length > 0) {
       return false
     }
     if (
@@ -3063,11 +3091,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
-        ? Math.max(0, completedUserMessageOrdinal)
+        ? dynamicToolRequestDeliveryContextOrdinal
         : null
     const dynamicToolProgressDelivery =
       dynamicToolRequest.kind === 'send-progress-update'
@@ -3153,8 +3183,15 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.responseMediaPatch) {
         try {
-          applyResponseMediaPatch(result.responseMediaPatch)
-        } catch {
+          applyResponseMediaPatch(
+            result.responseMediaPatch,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch (error) {
+          const text = error instanceof VaultCliError &&
+            error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
+            ? 'response media unavailable after finish_without_reply'
+            : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -3162,7 +3199,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'response media limit reached',
+                  text,
                 },
               ],
             },
@@ -3843,6 +3880,7 @@ async function runCodexAppServerTurnOnProcess(
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
+    await drainPendingProgressDeliveries()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true
