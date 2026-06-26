@@ -359,6 +359,63 @@ describe("hosted Linq observability stores", () => {
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
   });
 
+  it("backfills an already-ingested terminal receipt when acceptance records the provider id", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqProviderEventFindFirst.mockResolvedValueOnce({
+      deliveryStatus: "failed",
+      eventId: "evt_failed_123",
+      failureCode: "30007",
+      failureReason: "[redacted]",
+      providerCreatedAt: new Date("2026-03-26T12:00:05.000Z"),
+      service: "sms",
+    });
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqProviderEventFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [
+          { providerCreatedAt: "desc" },
+          { eventId: "desc" },
+        ],
+        where: expect.objectContaining({
+          deliveryStatus: {
+            in: ["delivered", "failed"],
+          },
+          messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failedAt: new Date("2026-03-26T12:00:05.000Z"),
+          failureCode: "30007",
+          failureReason: "[redacted]",
+          lastProviderEventId: "evt_failed_123",
+          lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
+          status: "failed",
+        }),
+        where: expect.objectContaining({
+          idempotencyKey: "linq-message:event-123",
+          OR: expect.arrayContaining([
+            {
+              lastReceiptAt: {
+                lt: new Date("2026-03-26T12:00:05.000Z"),
+              },
+            },
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("redacts direct send-failure details before recording delivery state", async () => {
     const fixture = createObservabilityPrismaFixture();
 
@@ -397,6 +454,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqLineUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqLineUpsert = vi.fn().mockResolvedValue(undefined);
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const prisma = {
     hostedLinqAlert: {
       createMany: hostedLinqAlertCreateMany,
@@ -416,6 +474,7 @@ function createObservabilityPrismaFixture() {
     },
     hostedLinqProviderEvent: {
       createMany: hostedLinqProviderEventCreateMany,
+      findFirst: hostedLinqProviderEventFindFirst,
     },
   };
 
@@ -429,6 +488,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqLineUpdateMany,
     hostedLinqLineUpsert,
     hostedLinqProviderEventCreateMany,
+    hostedLinqProviderEventFindFirst,
     prisma,
   };
 }

@@ -600,6 +600,64 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
+  it("does not let message.received observability failures block the active-member planner", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const prisma = createPrismaStub();
+    prisma.hostedLinqProviderEvent.createMany.mockRejectedValueOnce(
+      new Error("provider event insert failed"),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody(),
+        scheduleAfterResponse: (task) => {
+          scheduledTasks.push(task);
+        },
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        expectedUserId: "member_123",
+        mailboxItemId: "mailbox_evt_123",
+      });
+      expect(prisma.hostedLinqProviderEvent.createMany).not.toHaveBeenCalled();
+
+      await Promise.all(scheduledTasks.map((task) => task()));
+
+      expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Hosted Linq provider event sidecar ingestion failed.",
+        expect.objectContaining({
+          errorName: "Error",
+          eventIdSuffix: "vt_123",
+          eventType: "message.received",
+        }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("uses the home Linq chat route when the sender contact no longer matches the member identity", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -772,6 +830,7 @@ function createPrismaStub() {
     },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({

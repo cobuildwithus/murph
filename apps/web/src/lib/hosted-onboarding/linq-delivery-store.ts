@@ -19,6 +19,14 @@ import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
+type HostedLinqDeliveryReceiptData = {
+  deliveryStatus: "delivered" | "failed";
+  eventId: string;
+  failureCode: string | null;
+  failureReason: string | null;
+  providerCreatedAt: Date;
+  service: string | null;
+};
 
 export async function recordHostedLinqDeliveryAttemptTx(input: {
   attemptedAt?: Date;
@@ -94,15 +102,21 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   messageId?: string | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   await input.prisma.hostedLinqDelivery.updateMany({
     where: { idempotencyKey: input.idempotencyKey },
     data: {
       acceptedAt: input.acceptedAt ?? new Date(),
       linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
       messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      messageLookupKey: createHostedLinqMessageLookupKey(input.messageId),
+      messageLookupKey,
       status: "accepted",
     },
+  });
+  await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
+    idempotencyKey: input.idempotencyKey,
+    messageLookupKey,
+    prisma: input.prisma,
   });
 }
 
@@ -220,18 +234,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       id: delivery.id,
-      OR: [
-        { lastReceiptAt: null },
-        { lastReceiptAt: { lt: input.event.providerCreatedAt } },
-        {
-          lastProviderEventId: null,
-          lastReceiptAt: input.event.providerCreatedAt,
-        },
-        {
-          lastProviderEventId: { lt: input.event.eventId },
-          lastReceiptAt: input.event.providerCreatedAt,
-        },
-      ],
+      OR: buildReceiptOrderingWhere(input.event),
     },
     data: buildReceiptUpdate(input.event),
   });
@@ -242,27 +245,117 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
 }
 
 function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.HostedLinqDeliveryUpdateInput {
-  const base = {
-    lastProviderEventId: event.eventId,
-    lastReceiptAt: event.providerCreatedAt,
+  if (!event.deliveryStatus) {
+    throw new TypeError("Hosted Linq delivery receipt update requires a terminal status.");
+  }
+
+  return buildReceiptUpdateFromData({
+    deliveryStatus: event.deliveryStatus,
+    eventId: event.eventId,
+    failureCode: event.failureCode,
+    failureReason: event.failureReason,
+    providerCreatedAt: event.providerCreatedAt,
     service: event.service,
+  });
+}
+
+function buildReceiptUpdateFromData(
+  receipt: HostedLinqDeliveryReceiptData,
+): Prisma.HostedLinqDeliveryUpdateInput {
+  const base = {
+    lastProviderEventId: receipt.eventId,
+    lastReceiptAt: receipt.providerCreatedAt,
+    service: receipt.service,
   } satisfies Prisma.HostedLinqDeliveryUpdateInput;
 
-  if (event.deliveryStatus === "delivered") {
+  if (receipt.deliveryStatus === "delivered") {
     return {
       ...base,
-      deliveredAt: event.providerCreatedAt,
+      deliveredAt: receipt.providerCreatedAt,
       status: "delivered",
     };
   }
 
   return {
     ...base,
-    failedAt: event.providerCreatedAt,
-    failureCode: event.failureCode,
-    failureReason: event.failureReason,
+    failedAt: receipt.providerCreatedAt,
+    failureCode: receipt.failureCode,
+    failureReason: receipt.failureReason,
     status: "failed",
   };
+}
+
+async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
+  idempotencyKey: string;
+  messageLookupKey: string | null;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<void> {
+  if (!input.messageLookupKey) {
+    return;
+  }
+
+  const receipt = await input.prisma.hostedLinqProviderEvent.findFirst({
+    where: {
+      deliveryStatus: {
+        in: ["delivered", "failed"],
+      },
+      messageLookupKey: input.messageLookupKey,
+    },
+    orderBy: [
+      { providerCreatedAt: "desc" },
+      { eventId: "desc" },
+    ],
+    select: {
+      deliveryStatus: true,
+      eventId: true,
+      failureCode: true,
+      failureReason: true,
+      providerCreatedAt: true,
+      service: true,
+    },
+  });
+
+  if (!isHostedLinqTerminalReceiptData(receipt)) {
+    return;
+  }
+
+  await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      idempotencyKey: input.idempotencyKey,
+      OR: buildReceiptOrderingWhere(receipt),
+    },
+    data: buildReceiptUpdateFromData(receipt),
+  });
+}
+
+function buildReceiptOrderingWhere(
+  receipt: Pick<HostedLinqDeliveryReceiptData, "eventId" | "providerCreatedAt">,
+): Prisma.HostedLinqDeliveryWhereInput[] {
+  return [
+    { lastReceiptAt: null },
+    { lastReceiptAt: { lt: receipt.providerCreatedAt } },
+    {
+      lastProviderEventId: null,
+      lastReceiptAt: receipt.providerCreatedAt,
+    },
+    {
+      lastProviderEventId: { lt: receipt.eventId },
+      lastReceiptAt: receipt.providerCreatedAt,
+    },
+  ];
+}
+
+function isHostedLinqTerminalReceiptData(
+  value: {
+    deliveryStatus: string | null;
+    eventId: string;
+    failureCode: string | null;
+    failureReason: string | null;
+    providerCreatedAt: Date;
+    service: string | null;
+  } | null,
+): value is HostedLinqDeliveryReceiptData {
+  return value?.deliveryStatus === "delivered" || value?.deliveryStatus === "failed";
 }
 
 function buildHostedLinqDeliveryId(idempotencyKey: string): string {

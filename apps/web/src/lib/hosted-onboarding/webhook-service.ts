@@ -164,23 +164,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       },
     );
     let plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
-    let providerAlertIds: string[] = [];
     try {
       plan = await runHostedOnboardingWebhookTransaction(
         prisma,
-        async (transaction) => {
-          if (providerEvent) {
-            const providerResult = await ingestHostedLinqProviderEventTx({
-              event: providerEvent,
-              prisma: transaction,
-            });
-            providerAlertIds = providerResult.alertIds;
-          }
-          return planHostedOnboardingLinqWebhook({
+        async (transaction) =>
+          planHostedOnboardingLinqWebhook({
             event,
             prisma: transaction,
-          });
-        },
+          }),
       );
     } catch (error) {
       finishHostedOnboardingTiming(planTiming, "failed", {
@@ -204,8 +195,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await scheduleHostedLinqProviderAlertEmails({
-      alertIds: providerAlertIds,
+    scheduleHostedLinqProviderEventIngestionBestEffort({
+      event: providerEvent,
       prisma,
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
@@ -346,6 +337,40 @@ async function ingestHostedLinqProviderEventDirect(input: {
       prisma: transaction,
     }),
   );
+}
+
+function scheduleHostedLinqProviderEventIngestionBestEffort(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"] | null;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  if (!input.event) {
+    return;
+  }
+
+  const event = input.event;
+  const ingestProviderEvent = async () => {
+    try {
+      const providerResult = await ingestHostedLinqProviderEventDirect({
+        event,
+        prisma: input.prisma,
+      });
+      await scheduleHostedLinqProviderAlertEmails({
+        alertIds: providerResult.alertIds,
+        prisma: input.prisma,
+      });
+    } catch (error) {
+      console.warn("Hosted Linq provider event sidecar ingestion failed.", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(event.eventId),
+        eventType: event.eventType,
+      });
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(ingestProviderEvent);
+  }
 }
 
 async function scheduleHostedLinqProviderAlertEmails(input: {
