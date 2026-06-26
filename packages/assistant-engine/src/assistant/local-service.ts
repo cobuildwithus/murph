@@ -474,6 +474,11 @@ export async function sendAssistantMessageLocal(
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
         const hostedExecutionContext = executionContext?.hosted ?? null
+        const refreshTypingIndicatorAfterProgress = () => {
+          void runAssistantTurnBestEffort(async () => {
+            await typingIndicator?.refreshNow?.()
+          })
+        }
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
@@ -496,15 +501,19 @@ export async function sendAssistantMessageLocal(
                       'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
-                  return await deliverAssistantProgressUpdate({
+                  const result = await deliverAssistantProgressUpdate({
                     ...progressInput,
                     dependencies,
                   })
+                  refreshTypingIndicatorAfterProgress()
+                  return result
                 }
 
-                return await deliverAssistantProgressUpdate({
+                const result = await deliverAssistantProgressUpdate({
                   ...progressInput,
                 })
+                refreshTypingIndicatorAfterProgress()
+                return result
               },
               getDeliveryContext: () => ({
                 messageInput: currentInput,
