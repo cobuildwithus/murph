@@ -595,8 +595,6 @@ function renderPreparedAttachmentMetadataLines(input: {
     input.includeParserEvidence && attachment.parseState
       ? `parseState: ${attachment.parseState}`
       : null,
-    `routingImageEligible: ${String(attachment.routingImage.eligible)}`,
-    `routingImageReason: ${attachment.routingImage.reason}`,
   ].filter((line): line is string => line !== null)
 }
 

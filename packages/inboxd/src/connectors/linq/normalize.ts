@@ -345,30 +345,15 @@ async function downloadLinqAttachmentInlineBestEffort(
       url,
     };
     const downloadOperation = (downloadSignal?: AbortSignal) => {
+      if (downloadDriver.downloadPart) {
+        return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+      }
+
       if (url) {
-        return downloadDriver
-          .downloadUrl(url, downloadSignal)
-          .catch(async (error) => {
-            if (!downloadDriver.downloadPart) {
-              throw error;
-            }
-
-            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
-          })
-          .then(async (data) => {
-            if (data !== null || !downloadDriver.downloadPart) {
-              return data;
-            }
-
-            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
-          });
+        return downloadDriver.downloadUrl(url, downloadSignal);
       }
 
-      if (!downloadDriver.downloadPart) {
-        return Promise.resolve<Uint8Array | null>(null);
-      }
-
-      return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+      return Promise.resolve<Uint8Array | null>(null);
     };
 
     if (normalizedTimeoutMs !== null) {

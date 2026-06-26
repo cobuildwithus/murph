@@ -338,13 +338,35 @@ async function downloadHostedLinqAttachmentPart(input: {
     return null;
   }
 
-  const metadataResult = await fetchHostedLinqAttachmentDownloadUrl({
-    apiBaseUrl: input.apiConfig.apiBaseUrl,
-    apiToken: input.apiConfig.apiToken,
-    attachmentId,
-    fetchImplementation: input.metadataFetch,
-    signal: input.signal,
-  });
+  let metadataResult: HostedLinqAttachmentMetadataLookupResult;
+  try {
+    metadataResult = await fetchHostedLinqAttachmentDownloadUrl({
+      apiBaseUrl: input.apiConfig.apiBaseUrl,
+      apiToken: input.apiConfig.apiToken,
+      attachmentId,
+      fetchImplementation: input.metadataFetch,
+      signal: input.signal,
+    });
+  } catch (error) {
+    const failure = classifyHostedLinqAttachmentDownloadError(error);
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        directFetchAttempted: Boolean(directUrl),
+        directFetchSucceeded: false,
+        directLocatorAllowed: Boolean(directUrl),
+        downloadStatus: directFailure?.status ?? null,
+        failureCode: failure.code,
+        metadataLocatorAllowed: false,
+        metadataLocatorPresent: false,
+        metadataLookupAttempted: true,
+        metadataStatus: failure.status,
+        result: "failed",
+      },
+      platform: input.platform,
+    });
+    throw error;
+  }
   const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator, input.env)
     ?? normalizeHostedLinqMetadataAttachmentUrl(metadataResult.downloadLocator, input.apiConfig.apiBaseUrl);
 
@@ -538,15 +560,19 @@ function shouldRetryHostedLinqAttachmentDownloadError(
     // Linq audio URLs can be visible in the message event before the backing
     // CDN/metadata object is readable. A tiny bounded retry avoids converting
     // that short provider lag into permanent descriptor-only audio.
-    return failure.status === 403
-      || failure.status === 404
-      || failure.status === 408
-      || failure.status === 425
-      || failure.status === 429
-      || failure.status >= 500;
+    return isRetryableHostedLinqAttachmentDownloadStatus(failure.status);
   }
 
   return isHostedLinqTransientTransportError(error);
+}
+
+function isRetryableHostedLinqAttachmentDownloadStatus(status: number): boolean {
+  return status === 403
+    || status === 404
+    || status === 408
+    || status === 425
+    || status === 429
+    || status >= 500;
 }
 
 function isHostedLinqTransientTransportError(error: unknown): boolean {
@@ -707,6 +733,14 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       },
     );
     if (!response.ok) {
+      if (isRetryableHostedLinqAttachmentDownloadStatus(response.status)) {
+        throw new HostedLinqAttachmentDownloadError(
+          "metadata_http_status",
+          `Hosted Linq attachment metadata lookup failed with ${response.status} ${response.statusText}.`,
+          response.status,
+        );
+      }
+
       return {
         downloadLocator: null,
         failureCode: "metadata_http_status",
@@ -724,6 +758,19 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       status: response.status,
     };
   } catch (error) {
+    if (error instanceof HostedLinqAttachmentDownloadError) {
+      throw error;
+    }
+    if (
+      !isAbortLikeHostedLinqAttachmentError(error)
+      && isHostedLinqTransientTransportError(error)
+    ) {
+      throw new HostedLinqAttachmentDownloadError(
+        "metadata_fetch_failed",
+        "Hosted Linq attachment metadata lookup failed.",
+      );
+    }
+
     return {
       downloadLocator: null,
       failureCode: classifyHostedLinqAttachmentMetadataError(error),
@@ -969,7 +1016,7 @@ async function writeHostedLinqAttachmentDownloadAttemptLog(input: {
         ? { errorCode: toHostedRuntimeLogCode(input.attempt.failureCode) }
         : {}),
       eventCode: "mailbox.linq_attachment_download_finished",
-      level: input.attempt.result === "succeeded" ? "info" : "warn",
+      level: "info",
       phase: "import",
       redactedJson: toHostedLinqAttachmentDownloadRedactedJson(input.attempt),
     },

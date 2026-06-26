@@ -587,13 +587,28 @@ test("normalizeHostedLinqConversationMessage hydrates metadata-only voice memos 
   ]);
 });
 
-test("normalizeHostedLinqConversationMessage prefers downloadUrl for url-backed attachments", async () => {
+test("normalizeHostedLinqConversationMessage prefers downloadPart for url-backed attachments", async () => {
   const downloadUrl = vi.fn(async (url: string) => {
     assert.equal(url, "https://cdn.example.test/voice-note.m4a");
-    return Uint8Array.from([1, 2, 3]);
+    throw new Error("downloadUrl should not run when downloadPart is available");
   });
-  const downloadPart = vi.fn(async () => {
-    throw new Error("downloadPart should not run when downloadUrl succeeds");
+  const downloadPart = vi.fn(async (part: {
+    attachmentId?: string | null;
+    fileName?: string | null;
+    mimeType?: string | null;
+    size?: number | null;
+    type: "media" | "voice_memo";
+    url?: string | null;
+  }) => {
+    assert.deepEqual(part, {
+      attachmentId: "voice_att_download_url_first",
+      fileName: "voice-note.m4a",
+      mimeType: "audio/m4a",
+      size: 4096,
+      type: "voice_memo",
+      url: "https://cdn.example.test/voice-note.m4a",
+    });
+    return Uint8Array.from([1, 2, 3]);
   });
 
   const capture = await normalizeHostedLinqConversationMessage({
@@ -623,8 +638,8 @@ test("normalizeHostedLinqConversationMessage prefers downloadUrl for url-backed 
     occurredAt: "2026-04-02T04:00:01.000Z",
   });
 
-  assert.equal(downloadUrl.mock.calls.length, 1);
-  assert.equal(downloadPart.mock.calls.length, 0);
+  assert.equal(downloadPart.mock.calls.length, 1);
+  assert.equal(downloadUrl.mock.calls.length, 0);
   assert.deepEqual(capture.attachments, [
     {
       byteSize: 4096,
@@ -637,26 +652,9 @@ test("normalizeHostedLinqConversationMessage prefers downloadUrl for url-backed 
   ]);
 });
 
-test("normalizeHostedLinqConversationMessage falls back to downloadPart after url download failure", async () => {
-  const downloadUrl = vi.fn(async () => {
-    throw new Error("direct url failed");
-  });
-  const downloadPart = vi.fn(async (part: {
-    attachmentId?: string | null;
-    fileName?: string | null;
-    mimeType?: string | null;
-    size?: number | null;
-    type: "media" | "voice_memo";
-    url?: string | null;
-  }) => {
-    assert.deepEqual(part, {
-      attachmentId: "voice_att_download_fallback",
-      fileName: "voice-note.m4a",
-      mimeType: "audio/m4a",
-      size: 4096,
-      type: "voice_memo",
-      url: "https://cdn.example.test/voice-note.m4a",
-    });
+test("normalizeHostedLinqConversationMessage uses downloadUrl when downloadPart is unavailable", async () => {
+  const downloadUrl = vi.fn(async (url: string) => {
+    assert.equal(url, "https://cdn.example.test/voice-note.m4a");
     return Uint8Array.from([4, 5, 6]);
   });
 
@@ -664,7 +662,6 @@ test("normalizeHostedLinqConversationMessage falls back to downloadPart after ur
     accountId: "hbid:linq.recipient:v1:test",
     attachmentDownloadTimeoutMs: 5_000,
     downloadDriver: {
-      downloadPart,
       downloadUrl,
     },
     linqMessage: {
@@ -688,7 +685,6 @@ test("normalizeHostedLinqConversationMessage falls back to downloadPart after ur
   });
 
   assert.equal(downloadUrl.mock.calls.length, 1);
-  assert.equal(downloadPart.mock.calls.length, 1);
   assert.deepEqual(capture.attachments, [
     {
       byteSize: 4096,

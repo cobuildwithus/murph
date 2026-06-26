@@ -1360,6 +1360,70 @@ describe('prepareAssistantAutoReplyInput', () => {
     )
   })
 
+  it('redacts internal routing labels for unavailable image attachments', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'image',
+        mime: 'image/jpeg',
+        fileName: 'missing-image.jpg',
+        byteSize: 1024,
+        storedPath: null,
+        parseState: null,
+        routingImage: {
+          eligible: false,
+          reason: 'stored-path-missing',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: null,
+            text: [
+              'routingImageEligible: false',
+              'routingImageReason: stored-path-missing',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          '[attachment-1-metadata]',
+          'routingImageEligible: false',
+          'routingImageReason: stored-path-missing',
+        ].join('\n'),
+      }),
+    ])
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/jpeg',
+              parseState: null,
+              storedPath: null,
+            }),
+          ],
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
+    expect(result.prompt).not.toContain('routingImageEligible')
+    expect(result.prompt).not.toContain('routingImageReason')
+    expect(result.prompt).not.toContain('stored-path-missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
+  })
+
   it('does not render stale raw lifecycle paths when prepared evidence is missing', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
