@@ -3843,6 +3843,7 @@ async function runCodexAppServerTurnOnProcess(
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
+    await drainPendingProgressDeliveries()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true
