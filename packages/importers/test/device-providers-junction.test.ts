@@ -586,7 +586,7 @@ test("Junction daily aggregates keep adjacent provider-local days distinct throu
             garmin: [{
               data: [
                 { timestamp: "2026-04-23T06:30:00.000Z", timezone_offset: -25_200, score: 44 },
-                { timestamp: "2026-04-23T08:00:00.000Z", timezone_offset: -25_200, value: 55 },
+                { timestamp: "2026-04-23T08:00:00.000Z", timezone_offset: -25_200, value: 44 },
               ],
               source: { provider: "garmin", type: "watch" },
             }],
@@ -784,6 +784,14 @@ test("Junction daily aggregates repair legacy calendar-date resource ids through
           resourceId: legacyResourceId,
           facet: "stress-level",
         },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          observedAtRaw: "2026-06-24:stress_level:daily",
+          timestampSemantics: "offset",
+        },
         fields: {
           metric: "stress-level",
           observationGrain: "summary",
@@ -850,6 +858,107 @@ test("Junction daily aggregates repair legacy calendar-date resource ids through
         sourceType: "watch",
       }),
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregates do not rewrite same-value adjacent days through legacy refs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-adjacent-legacy-ref");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const adjacentResourceId = junctionDailyTimeseriesResourceId({
+      dayKey: "2026-06-24",
+      resource: "stress_level",
+      resourceSlug: "stress-level",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    });
+    const adjacentImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-24T21:30:00.000Z",
+        recordedAt: "2026-06-24T21:30:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction stress level",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-stress-level",
+          resourceId: adjacentResourceId,
+          facet: "stress-level",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          observedAtRaw: "2026-06-24:stress_level:daily",
+          timestampSemantics: "offset",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:30:00.000Z",
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{
+                  data: [
+                    {
+                      timestamp: "2026-06-25T00:30:00+02:00",
+                      timezone_offset: -14_400,
+                      score: 44,
+                    },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...adjacentImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records)
+      .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    const replayStress = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+
+    assert.notEqual(replayStress?.id, adjacentImport.events[0]?.id);
+    assert.equal(liveStressRecords.length, 2);
+    assert.deepEqual(liveStressRecords.map((record) => record.dayKey), ["2026-06-24", "2026-06-25"]);
+    assert.equal(new Set(liveStressRecords.map((record) => record.id)).size, 2);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

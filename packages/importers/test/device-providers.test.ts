@@ -2201,7 +2201,7 @@ test("importDeviceProviderSnapshot keys current WHOOP body snapshots by vault lo
   }
 });
 
-test("importDeviceProviderSnapshot supersedes legacy WHOOP body measurement date-only refs", async () => {
+test("importDeviceProviderSnapshot does not auto-alias timestamp-less cross-day WHOOP legacy refs", async () => {
   const vaultRoot = await makeTempDirectory("murph-whoop-body-date-only-legacy-ref");
   try {
     await coreRuntime.initializeVault({
@@ -2270,13 +2270,15 @@ test("importDeviceProviderSnapshot supersedes legacy WHOOP body measurement date
       (record) => record.kind === "observation" && record.metric === "weight",
     );
 
-    assert.equal(replayWeight?.id, legacyWeight?.id);
+    assert.notEqual(replayWeight?.id, legacyWeight?.id);
     assert.equal(replayWeight?.occurredAt, "2026-06-24T00:00:00.000Z");
     assert.equal(replayWeight?.recordedAt, "2026-06-25T12:00:00.000Z");
     assert.equal(replayWeight?.externalRef?.resourceId, "date:2026-06-24");
-    assert.equal(liveWeightRecords.length, 1);
-    assert.equal(liveWeightRecords[0]?.id, legacyWeight?.id);
-    assert.equal(storedExternalRefResourceId(liveWeightRecords[0]), "date:2026-06-24");
+    assert.equal(liveWeightRecords.length, 2);
+    assert.deepEqual(
+      liveWeightRecords.map((record) => storedExternalRefResourceId(record)).sort(),
+      ["2026-06-25", "date:2026-06-24"],
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -2414,7 +2416,7 @@ test("importDeviceProviderSnapshot keeps adjacent legacy WHOOP body dates distin
         );
 
       const correctedJune24 = () => importSnapshot("2026-06-24", "2026-06-25T12:00:00.000Z", 78.2);
-      const adjacentJune25 = () => importSnapshot("2026-06-25", "2026-06-25T13:00:00.000Z", 79.1);
+      const adjacentJune25 = () => importSnapshot("2026-06-25", "2026-06-25T13:00:00.000Z", 78.2);
       const firstReplay = order === "corrected-first" ? await correctedJune24() : await adjacentJune25();
       const secondReplay = order === "corrected-first" ? await adjacentJune25() : await correctedJune24();
       const records = (

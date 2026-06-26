@@ -3609,6 +3609,92 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
+test("importDeviceBatch repairs proven legacy refs after a no-externalRef edit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-stress-level",
+    resourceId: "stress-level-legacy-local-day",
+    facet: "stress-level",
+  };
+  const currentExternalRef = {
+    ...legacyExternalRef,
+    resourceId: "stress-level-current-local-day",
+  };
+  const legacyOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    observedAtRaw: "2026-06-24:stress_level:daily",
+    timestampSemantics: "offset" as const,
+  };
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-24T22:30:00.000Z",
+      recordedAt: "2026-06-24T22:30:00.000Z",
+      dayKey: "2026-06-24",
+      title: "Junction stress level",
+      externalRef: legacyExternalRef,
+      dataOrigin: legacyOrigin,
+      fields: {
+        metric: "stress-level",
+        observationGrain: "summary",
+        value: 44,
+        unit: "score",
+      },
+    }],
+  });
+  const eventId = first.events[0]?.id as string;
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+  const { externalRef: _externalRef, dataOrigin: _dataOrigin, ...editedBase } = stored;
+  const edited = {
+    ...editedBase,
+    note: "user-added context",
+    lifecycle: { revision: 2 },
+  };
+  await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
+
+  const repaired = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-25T12:30:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-24T22:30:00.000Z",
+      recordedAt: "2026-06-25T12:30:00.000Z",
+      dayKey: "2026-06-25",
+      title: "Junction stress level",
+      externalRef: currentExternalRef,
+      legacyExternalRefs: [legacyExternalRef],
+      dataOrigin: {
+        ...legacyOrigin,
+        observedAtRaw: "2026-06-25:stress_level:daily",
+      },
+      fields: {
+        metric: "stress-level",
+        observationGrain: "summary",
+        value: 44,
+        unit: "score",
+      },
+    }],
+  });
+
+  assert.equal(repaired.events[0]?.id, eventId);
+  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
+  assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
+});
+
 test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-find-current-ref");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
