@@ -3247,8 +3247,11 @@ https://join.example.test/join/code_first_text`);
             if (!(receiptRecord.updatedAt instanceof Date)) {
               return { count: 0 };
             }
-            const cutoff = (where.updatedAt as { lt?: Date }).lt;
-            if (!(cutoff instanceof Date) || receiptRecord.updatedAt.getTime() >= cutoff.getTime()) {
+            const cutoff = where.updatedAt as { gte?: Date; lt?: Date };
+            if (cutoff.lt instanceof Date && receiptRecord.updatedAt.getTime() >= cutoff.lt.getTime()) {
+              return { count: 0 };
+            }
+            if (cutoff.gte instanceof Date && receiptRecord.updatedAt.getTime() < cutoff.gte.getTime()) {
               return { count: 0 };
             }
           }
@@ -3878,6 +3881,9 @@ https://join.example.test/join/code_first_text`);
         eventId: "evt_block_after_member_state_change",
         processingOwnerToken,
         status: "processing",
+        updatedAt: {
+          gte: expect.any(Date),
+        },
       },
     });
     expect(await firstContactReceipt.findUnique({
@@ -6463,6 +6469,24 @@ function createHostedLinqFirstContactEventReceiptFixture(): Required<HostedLinqF
         return {
           count: 0,
         };
+      }
+      if (where.updatedAt && typeof where.updatedAt === "object") {
+        if (!(existing.updatedAt instanceof Date)) {
+          return {
+            count: 0,
+          };
+        }
+        const cutoff = where.updatedAt as { gte?: Date; lt?: Date };
+        if (cutoff.lt instanceof Date && existing.updatedAt.getTime() >= cutoff.lt.getTime()) {
+          return {
+            count: 0,
+          };
+        }
+        if (cutoff.gte instanceof Date && existing.updatedAt.getTime() < cutoff.gte.getTime()) {
+          return {
+            count: 0,
+          };
+        }
       }
       const record = {
         ...existing,

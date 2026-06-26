@@ -13,6 +13,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
+  assertHostedLinqFirstContactEventProcessingOwner,
   classifyHostedLinqFirstContactAdmission,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
@@ -450,6 +451,42 @@ describe("Linq first-contact admission", () => {
         status: "processing",
         updatedAt: {
           lt: new Date("2026-03-26T12:00:00.000Z"),
+        },
+      },
+    });
+  });
+
+  it("rejects matching first-contact processing owners after the lease expires", async () => {
+    const prisma = {
+      hostedLinqFirstContactEventReceipt: {
+        create: vi.fn(),
+        deleteMany: vi.fn(),
+        findUnique: vi.fn(),
+        updateMany: vi.fn().mockResolvedValueOnce({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqFirstContactEventProcessingOwner({
+      eventId: BASE_REQUEST.eventId,
+      now: new Date("2026-03-26T12:05:00.000Z"),
+      prisma,
+      processingOwnerToken: "owner-token",
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      retryable: true,
+    });
+    expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).toHaveBeenCalledWith({
+      data: {
+        processingOwnerToken: "owner-token",
+        status: "processing",
+      },
+      where: {
+        eventId: BASE_REQUEST.eventId,
+        processingOwnerToken: "owner-token",
+        status: "processing",
+        updatedAt: {
+          gte: new Date("2026-03-26T12:00:00.000Z"),
         },
       },
     });

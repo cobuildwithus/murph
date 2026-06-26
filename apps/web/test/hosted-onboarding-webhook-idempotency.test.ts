@@ -667,16 +667,61 @@ function createPrismaStub() {
     },
     hostedLinqFirstContactEventReceipt: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        firstContactReceipts.set(String(data.eventId), data);
-        return data;
+        const record = {
+          ...data,
+          updatedAt: new Date(),
+        };
+        firstContactReceipts.set(String(data.eventId), record);
+        return record;
       }),
-      deleteMany: vi.fn(async ({ where }: { where: { eventId: string } }) => {
+      deleteMany: vi.fn(async ({ where }: { where: { eventId: string; processingOwnerToken?: string } }) => {
+        const existing = firstContactReceipts.get(where.eventId);
+        if (
+          typeof where.processingOwnerToken === "string"
+          && existing?.processingOwnerToken !== where.processingOwnerToken
+        ) {
+          return { count: 0 };
+        }
         const existed = firstContactReceipts.delete(where.eventId);
         return { count: existed ? 1 : 0 };
       }),
       findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
         firstContactReceipts.get(where.eventId) ?? null),
-      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      updateMany: vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
+        const eventId = typeof where.eventId === "string" ? where.eventId : "";
+        const existing = firstContactReceipts.get(eventId);
+        if (!existing) {
+          return { count: 0 };
+        }
+        if (typeof where.status === "string" && existing.status !== where.status) {
+          return { count: 0 };
+        }
+        if (
+          typeof where.processingOwnerToken === "string"
+          && existing.processingOwnerToken !== where.processingOwnerToken
+        ) {
+          return { count: 0 };
+        }
+        if (where.updatedAt && typeof where.updatedAt === "object") {
+          if (!(existing.updatedAt instanceof Date)) {
+            return { count: 0 };
+          }
+          const cutoff = where.updatedAt as { gte?: Date; lt?: Date };
+          if (cutoff.lt instanceof Date && existing.updatedAt.getTime() >= cutoff.lt.getTime()) {
+            return { count: 0 };
+          }
+          if (cutoff.gte instanceof Date && existing.updatedAt.getTime() < cutoff.gte.getTime()) {
+            return { count: 0 };
+          }
+        }
+        const record = {
+          ...existing,
+          ...data,
+          updatedAt: new Date(),
+        };
+        firstContactReceipts.set(eventId, record);
+        return { count: 1 };
+      }),
       upsert: vi.fn(async (
         { create, update, where }: {
           create: Record<string, unknown>;
@@ -688,6 +733,7 @@ function createPrismaStub() {
           ...create,
           ...(firstContactReceipts.get(where.eventId) ?? {}),
           ...update,
+          updatedAt: new Date(),
         };
         firstContactReceipts.set(where.eventId, data);
         return data;

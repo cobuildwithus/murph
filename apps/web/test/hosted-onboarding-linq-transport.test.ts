@@ -623,6 +623,9 @@ describe("hosted Linq webhook transport", () => {
         eventId: "event-1",
         processingOwnerToken: "owner-1",
         status: "processing",
+        updatedAt: {
+          gte: expect.any(Date),
+        },
       },
     });
   });
@@ -678,6 +681,7 @@ describe("hosted Linq webhook transport", () => {
       },
       hostedLinqFirstContactEventReceipt: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           eventId: "event-1",
           processingOwnerToken: "owner-1",
@@ -741,6 +745,7 @@ describe("hosted Linq webhook transport", () => {
         },
         hostedLinqFirstContactEventReceipt: {
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
           findUnique: vi.fn().mockResolvedValue({
             eventId: "event-1",
             processingOwnerToken: "owner-1",
