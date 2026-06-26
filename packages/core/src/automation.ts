@@ -8,7 +8,9 @@ import {
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
+  compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  resolveNextDeviceActivityCoverageCursor,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -116,6 +118,25 @@ export interface PatchAutomationInput {
   vaultRoot: string;
 }
 
+export interface AdvanceAutomationDeviceActivityCursorInput {
+  after: string;
+  afterEntityId: string;
+  afterOccurredAt: string;
+  expectedActivityKind?: AutomationDeviceActivityKind;
+  expectedContinuityPolicy: AutomationContinuityPolicy;
+  expectedInstructions: string;
+  expectedRoute: AutomationRoute;
+  expectedSource?: AutomationDeviceActivitySource;
+  lookup: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface AdvanceAutomationDeviceActivityCursorResult {
+  advanced: boolean;
+  record: AutomationRecord;
+}
+
 export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
@@ -185,6 +206,24 @@ function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDevice
   }
 
   return parsed.data;
+}
+
+function normalizeAutomationDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  return optionalString(value, "schedule.afterEntityId", 240) ?? undefined;
+}
+
+function assertAutomationDeviceActivityCursorShape(input: {
+  afterEntityId?: string;
+  afterOccurredAt?: string;
+}): void {
+  const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
+  const hasScalarEntityId = input.afterEntityId !== undefined;
+  if (hasScalarOccurredAt !== hasScalarEntityId) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "schedule.afterOccurredAt and schedule.afterEntityId must be provided together.",
+    );
+  }
 }
 
 function normalizeDeviceActivityKindToken(value: string): string {
@@ -264,10 +303,20 @@ function normalizeAutomationSchedule(
     case "deviceActivity": {
       const source = normalizeAutomationDeviceActivitySource(object.source);
       const activityKind = normalizeAutomationDeviceActivityKind(object.activityKind);
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : normalizeAutomationIsoTimestamp(object.afterOccurredAt, "schedule.afterOccurredAt");
+      const afterEntityId = normalizeAutomationDeviceActivityCursorEntityId(object.afterEntityId);
+      assertAutomationDeviceActivityCursorShape({
+        afterEntityId,
+        afterOccurredAt,
+      });
 
       return {
         kind,
         after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -392,6 +441,8 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         after: schedule.after,
+        ...(schedule.afterOccurredAt ? { afterOccurredAt: schedule.afterOccurredAt } : {}),
+        ...(schedule.afterEntityId ? { afterEntityId: schedule.afterEntityId } : {}),
         ...(schedule.source ? { source: schedule.source } : {}),
         ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
       };
@@ -649,6 +700,79 @@ export async function patchAutomation(
   });
 }
 
+export async function advanceAutomationDeviceActivityCursor(
+  input: AdvanceAutomationDeviceActivityCursorInput,
+): Promise<AdvanceAutomationDeviceActivityCursorResult> {
+  const after = normalizeAutomationIsoTimestamp(input.after, "after");
+  const afterOccurredAt = normalizeAutomationIsoTimestamp(input.afterOccurredAt, "afterOccurredAt");
+  const afterEntityId = requireString(input.afterEntityId, "afterEntityId");
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+    if (
+      existingRecord.status !== "active" ||
+      existingRecord.continuityPolicy !== input.expectedContinuityPolicy ||
+      existingRecord.instructions !== input.expectedInstructions ||
+      !automationRoutesEqual(existingRecord.route, input.expectedRoute) ||
+      existingRecord.schedule.kind !== "deviceActivity" ||
+      existingRecord.schedule.activityKind !== input.expectedActivityKind ||
+      existingRecord.schedule.source !== input.expectedSource
+    ) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const cursor = resolveAdvancedDeviceActivityCursor({
+      currentAfter: existingRecord.schedule.after,
+      currentAfterEntityId: existingRecord.schedule.afterEntityId,
+      currentAfterOccurredAt: existingRecord.schedule.afterOccurredAt,
+      nextAfter: after,
+      nextAfterEntityId: afterEntityId,
+      nextAfterOccurredAt: afterOccurredAt,
+    });
+    if (!cursor) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const updated = await upsertAutomationWithLatestRegistry({
+      automationId: existingRecord.automationId,
+      continuityPolicy: existingRecord.continuityPolicy,
+      instructions: existingRecord.instructions,
+      now: input.now,
+      route: existingRecord.route,
+      schedule: {
+        ...existingRecord.schedule,
+        after: cursor.after,
+        afterOccurredAt: cursor.afterOccurredAt,
+        afterEntityId: cursor.afterEntityId,
+      },
+      slug: existingRecord.slug,
+      status: existingRecord.status,
+      summary: existingRecord.summary,
+      tags: existingRecord.tags,
+      title: existingRecord.title,
+      vaultRoot: input.vaultRoot,
+    }, records);
+
+    return {
+      advanced: true,
+      record: updated.record,
+    };
+  });
+}
+
 function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
   const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
   if (Object.values(patch).some((value) => value !== undefined)) {
@@ -659,6 +783,44 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
     "VAULT_AUTOMATION_EMPTY_PATCH",
     "Automation edit requires at least one field to update.",
   );
+}
+
+function automationRoutesEqual(left: AutomationRoute, right: AutomationRoute): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function resolveAdvancedDeviceActivityCursor(input: {
+  currentAfter: string;
+  currentAfterEntityId?: string;
+  currentAfterOccurredAt?: string;
+  nextAfter: string;
+  nextAfterEntityId: string;
+  nextAfterOccurredAt: string;
+}): { after: string; afterOccurredAt: string; afterEntityId: string } | null {
+  const nextKey = {
+    entityId: input.nextAfterEntityId,
+    occurredAt: input.nextAfterOccurredAt,
+    triggeredAt: input.nextAfter,
+  };
+  const cursor = resolveNextDeviceActivityCoverageCursor({
+    cursor: {
+      after: input.currentAfter,
+      ...(input.currentAfterOccurredAt ? { afterOccurredAt: input.currentAfterOccurredAt } : {}),
+      ...(input.currentAfterEntityId ? { afterEntityId: input.currentAfterEntityId } : {}),
+    },
+    keys: [nextKey],
+  });
+  if (!cursor) {
+    return null;
+  }
+
+  return compareDeviceActivityCoverageKeys(nextKey, {
+    entityId: cursor.afterEntityId,
+    occurredAt: cursor.afterOccurredAt,
+    triggeredAt: cursor.after,
+  }) === 0
+    ? cursor
+    : null;
 }
 
 async function upsertAutomationWithLatestRegistry(
