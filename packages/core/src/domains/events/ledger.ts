@@ -346,8 +346,14 @@ export async function findEventByExternalRef(
     }
   }
 
+  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
+    externalRefMatches(entry.record, input)
+  );
+  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
+    !isDeletedEventSpineRecord(entry.record)
+  );
   const latest = selectLatestEventSpineEntry(
-    [...latestByCandidateId.values()].filter((entry) => externalRefMatches(entry.record, input)),
+    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
   );
   if (!latest || isDeletedEventSpineRecord(latest.record)) {
     return null;

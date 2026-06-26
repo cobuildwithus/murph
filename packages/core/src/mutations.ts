@@ -1733,16 +1733,25 @@ function deviceDataOriginSourceMatches(
   return compared;
 }
 
+function isDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/u.test(resourceId) ||
+    /^date:\d{4}-\d{2}-\d{2}$/u.test(resourceId);
+}
+
+function isScopedDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
+  return /(?:^|\/)date:\d{4}-\d{2}-\d{2}$/u.test(resourceId);
+}
+
 function isWhoopBodyMeasurementDateOnlyLegacyRef(
   legacyExternalRef: ExternalRef,
   incoming: EventRecord,
 ): boolean {
   return legacyExternalRef.system === "whoop" &&
     legacyExternalRef.resourceType === "body-measurement" &&
-    /^\d{4}-\d{2}-\d{2}$/u.test(legacyExternalRef.resourceId) &&
+    isDateLikeWhoopBodyMeasurementResourceId(legacyExternalRef.resourceId) &&
     incoming.externalRef?.system === "whoop" &&
     incoming.externalRef.resourceType === "body-measurement" &&
-    incoming.externalRef.resourceId.startsWith("date:");
+    isScopedDateLikeWhoopBodyMeasurementResourceId(incoming.externalRef.resourceId);
 }
 
 function hasStableLegacyOccurrenceProof(
@@ -1753,7 +1762,8 @@ function hasStableLegacyOccurrenceProof(
   if (existing.indexedRecord.occurredAt === incoming.occurredAt || existing.record.occurredAt === incoming.occurredAt) {
     const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
     if (existingDataOrigin || incoming.dataOrigin) {
-      return deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+      return deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin) &&
+        isSameObservationValue(existing.record, incoming);
     }
 
     return isSameObservationValue(existing.record, incoming);
@@ -1828,6 +1838,19 @@ interface LegacyExternalRefReservation {
   indexedMatch: IndexedEventExternalRefMatch;
 }
 
+function userAuthoredEventStateKey(record: EventRecord): string {
+  return stableStringify({
+    links: record.links ?? [],
+    note: record.note ?? null,
+    tags: record.tags ?? [],
+  });
+}
+
+function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternalRefMatch): boolean {
+  return eventSpineRevision(match.record) > eventSpineRevision(match.indexedRecord) &&
+    userAuthoredEventStateKey(match.record) !== userAuthoredEventStateKey(match.indexedRecord);
+}
+
 function buildLegacyExternalRefReservations(
   entries: readonly PreparedDeviceEventEntry[],
   index: EventExternalRefIndex,
@@ -1836,7 +1859,7 @@ function buildLegacyExternalRefReservations(
 
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
-    if (!externalRef || index.latestByRefKey.has(eventExternalRefKey(externalRef))) {
+    if (!externalRef) {
       continue;
     }
 
@@ -1906,37 +1929,35 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
       ? undefined
       : index.latestByRefKey.get(refKey);
-    const legacyMatchedEntries = primaryMatch
-      ? []
-      : entry.legacyExternalRefs
-        .map((legacyExternalRef) => ({
+    const legacyMatchedEntries = entry.legacyExternalRefs
+      .map((legacyExternalRef) => ({
+        legacyExternalRef,
+        refKey: eventExternalRefKey(legacyExternalRef),
+      }))
+      .filter((match) => match.refKey !== refKey)
+      .map(({ legacyExternalRef, refKey }) => {
+        const reservation = legacyReservations.get(refKey);
+        return {
           legacyExternalRef,
-          refKey: eventExternalRefKey(legacyExternalRef),
-        }))
-        .filter((match) => match.refKey !== refKey)
-        .map(({ legacyExternalRef, refKey }) => {
-          const reservation = legacyReservations.get(refKey);
-          return {
-            legacyExternalRef,
-            refKey,
-            indexedMatch: reservation?.entry === entry
-              ? reservation.indexedMatch
-              : index.latestByRefKey.get(refKey),
-          };
-        })
-        .filter((match): match is {
-          refKey: string;
-          indexedMatch: IndexedEventExternalRefMatch;
-          legacyExternalRef: ExternalRef;
-        } => {
-          if (!match.indexedMatch) {
-            return false;
-          }
+          refKey,
+          indexedMatch: reservation?.entry === entry
+            ? reservation.indexedMatch
+            : index.latestByRefKey.get(refKey),
+        };
+      })
+      .filter((match): match is {
+        refKey: string;
+        indexedMatch: IndexedEventExternalRefMatch;
+        legacyExternalRef: ExternalRef;
+      } => {
+        if (!match.indexedMatch) {
+          return false;
+        }
 
-          const reservation = legacyReservations.get(match.refKey);
-          return (!reservation || reservation.entry === entry) &&
-            isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
-        });
+        const reservation = legacyReservations.get(match.refKey);
+        return (!reservation || reservation.entry === entry) &&
+          isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
+      });
     const matchedEntries = [
       ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
       ...legacyMatchedEntries,
@@ -1998,6 +2019,18 @@ async function reconcileDeviceEventEntriesByExternalRef(
       appendEntries.push(entry);
       records.push(entry.record);
       continue;
+    }
+
+    const historicalUserEditMatch = matchedEntries.find((match) =>
+      hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+    );
+    if (historicalUserEditMatch) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched a historical provider identity ` +
+          "whose latest event revision contains user-authored changes; merge must be repaired explicitly.",
+      );
     }
 
     const revision = Math.max(

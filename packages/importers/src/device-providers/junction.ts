@@ -634,6 +634,7 @@ interface JunctionDailyTimeseriesAggregate {
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
+  legacyDayKeys: Set<string>;
   maxValue: number;
   minValue: number;
   evidencePartRole: string;
@@ -1101,6 +1102,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+    const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
     if (value === undefined || !sampleAt || !dayKey) {
       continue;
@@ -1115,6 +1117,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const existing = aggregates.get(key);
     const recordedAt = timestamp.recordedAt ?? sampleAt;
     const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const legacyDayKeys = new Set<string>();
+    if (legacyDayKey && legacyDayKey !== dayKey) {
+      legacyDayKeys.add(legacyDayKey);
+    }
 
     if (!existing) {
       aggregates.set(key, {
@@ -1123,6 +1129,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
+        legacyDayKeys,
         maxValue: value,
         minValue: value,
         evidencePartRole,
@@ -1137,6 +1144,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
+    if (legacyDayKey && legacyDayKey !== dayKey) {
+      existing.legacyDayKeys.add(legacyDayKey);
+    }
     if (sampleAt < existing.firstSampleAt) {
       existing.firstSampleAt = sampleAt;
     }
@@ -1227,6 +1237,9 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             firstSampleAt: aggregate.firstSampleAt,
             lastSampleAt: aggregate.lastSampleAt,
             lastRecordedAt: aggregate.lastRecordedAt,
+            legacyDayKeys: aggregate.legacyDayKeys.size > 0
+              ? [...aggregate.legacyDayKeys].sort()
+              : undefined,
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
             maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
@@ -1314,17 +1327,11 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
   aggregate: JunctionDailyTimeseriesAggregate,
   metric: string,
 ): DeviceExternalRefPayload[] {
-  const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(
-    aggregate.entry,
-    aggregate.timestamp,
-    aggregate.lastSampleAt,
-  );
-
-  if (!legacyDayKey || legacyDayKey === aggregate.dayKey) {
+  if (aggregate.legacyDayKeys.size === 0) {
     return [];
   }
 
-  return [
+  return [...aggregate.legacyDayKeys].sort().map((legacyDayKey) =>
     makeJunctionExternalRef(
       aggregate.resourceContext,
       aggregate.entry,
@@ -1335,8 +1342,8 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
         observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
       }),
       metric,
-    ),
-  ];
+    )
+  );
 }
 
 // Sparse paired blood-pressure readings land as-is: one canonical

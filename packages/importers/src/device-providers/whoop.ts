@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import {
@@ -80,6 +82,25 @@ function makeExternalRef(
   facet?: string,
 ): DeviceExternalRefPayload {
   return makeProviderExternalRef("whoop", resourceType, resourceId, version, facet);
+}
+
+function shortHash(parts: readonly unknown[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(parts))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function bodyMeasurementAccountScope(accountId: string | undefined): string | undefined {
+  return accountId ? shortHash(["whoop", "body-measurement", accountId]) : undefined;
+}
+
+function bodyMeasurementDayResourceId(dayKey: string, accountScope: string | undefined): string {
+  return accountScope ? `account:${accountScope}/date:${dayKey}` : `date:${dayKey}`;
+}
+
+function bodyMeasurementCurrentResourceId(accountScope: string | undefined): string {
+  return accountScope ? `account:${accountScope}/current` : "current";
 }
 
 function cycleOrFallbackTimestamp(...candidates: Array<string | undefined>): string | undefined {
@@ -551,11 +572,12 @@ export function normalizeWhoopSnapshot(
   const bodyMeasurementUpdatedAt = bodyMeasurement
     ? firstBodyMeasurementUpdatedAt(bodyMeasurement)
     : undefined;
+  const bodyMeasurementScope = bodyMeasurementAccountScope(accountId);
   const bodyMeasurementObservedAt = bodyMeasurementExplicitDayKey
     ? bodyMeasurementMeasuredAt
     : bodyMeasurementMeasuredAt ?? bodyMeasurementUpdatedAt;
   const bodyMeasurementRecordedAt = bodyMeasurement
-    ? bodyMeasurementObservedAt ?? importedAt
+    ? bodyMeasurementMeasuredAt ?? bodyMeasurementUpdatedAt ?? importedAt
     : undefined;
   const bodyMeasurementOccurredAt = bodyMeasurement
     ? bodyMeasurementObservedAt ??
@@ -567,18 +589,24 @@ export function normalizeWhoopSnapshot(
       firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt) ??
       firstVaultLocalDayKey(context.defaultTimeZone, bodyMeasurementRecordedAt)
     : undefined;
+  const bodyMeasurementFallbackDayKey = firstDayKey(bodyMeasurementObservedAt) ?? firstDayKey(bodyMeasurementRecordedAt);
   const bodyMeasurementResourceId = bodyMeasurementDayKey
-    ? `date:${bodyMeasurementDayKey}`
-    : firstDayKey(bodyMeasurementObservedAt) ?? firstDayKey(bodyMeasurementRecordedAt) ?? "current";
+    ? bodyMeasurementDayResourceId(bodyMeasurementDayKey, bodyMeasurementScope)
+    : bodyMeasurementFallbackDayKey
+      ? bodyMeasurementDayResourceId(bodyMeasurementFallbackDayKey, bodyMeasurementScope)
+      : bodyMeasurementCurrentResourceId(bodyMeasurementScope);
   const bodyMeasurementLegacyResourceId = firstDayKey(
     bodyMeasurementMeasuredAt,
     bodyMeasurementUpdatedAt,
     importedAt,
   );
-  const bodyMeasurementLegacyResourceIds =
-    bodyMeasurementLegacyResourceId && bodyMeasurementLegacyResourceId !== bodyMeasurementResourceId
-      ? [bodyMeasurementLegacyResourceId]
-      : [];
+  const bodyMeasurementLegacyResourceIds = [
+    bodyMeasurementDayKey ? bodyMeasurementDayResourceId(bodyMeasurementDayKey, undefined) : undefined,
+    bodyMeasurementFallbackDayKey,
+    bodyMeasurementFallbackDayKey ? bodyMeasurementDayResourceId(bodyMeasurementFallbackDayKey, undefined) : undefined,
+    bodyMeasurementLegacyResourceId,
+    bodyMeasurementLegacyResourceId ? bodyMeasurementDayResourceId(bodyMeasurementLegacyResourceId, undefined) : undefined,
+  ].filter((resourceId): resourceId is string => Boolean(resourceId) && resourceId !== bodyMeasurementResourceId);
   const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));

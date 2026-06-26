@@ -3495,6 +3495,14 @@ test("importDeviceBatch keeps deduping against a surviving live copy after a dup
   });
 
   assert.equal(replay.events[0]?.id, survivorId);
+  const found = await findEventByExternalRef({
+    vaultRoot,
+    system: "junction",
+    resourceType: "junction-whoop-v2-workouts",
+    resourceId: "workouts-393350f4b34bad8c",
+    facet: "session",
+  });
+  assert.equal(found?.id, survivorId);
 
   const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
   const deletedIds = new Set(
@@ -3579,7 +3587,6 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   const { externalRef: _externalRef, ...editedBase } = stored;
   const edited = {
     ...editedBase,
-    note: "user-added context",
     lifecycle: { revision: 2 },
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
@@ -3610,7 +3617,7 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
-test("importDeviceBatch repairs proven legacy refs after a no-externalRef edit", async () => {
+test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -3661,11 +3668,92 @@ test("importDeviceBatch repairs proven legacy refs after a no-externalRef edit",
   const edited = {
     ...editedBase,
     note: "user-added context",
+    tags: ["context"],
+    links: [{ type: "related_to", targetId: eventId }],
     lifecycle: { revision: 2 },
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  const repaired = await importDeviceBatch({
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "jxn_acct_stable",
+      importedAt: "2026-06-25T12:30:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-24T22:30:00.000Z",
+        recordedAt: "2026-06-25T12:30:00.000Z",
+        dayKey: "2026-06-25",
+        title: "Junction stress level",
+        externalRef: currentExternalRef,
+        legacyExternalRefs: [legacyExternalRef],
+        dataOrigin: {
+          ...legacyOrigin,
+          observedAtRaw: "2026-06-25:stress_level:daily",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      }],
+    }),
+    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
+  assert.equal(latestUserEdited?.note, "user-added context");
+  assert.deepEqual(latestUserEdited?.tags, ["context"]);
+  assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
+});
+
+test("importDeviceBatch does not claim cross-day legacy refs when observation values differ", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-value-mismatch");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-stress-level",
+    resourceId: "stress-level-legacy-day",
+    facet: "stress-level",
+  };
+  const currentExternalRef = {
+    ...legacyExternalRef,
+    resourceId: "stress-level-current-day",
+  };
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    observedAtRaw: "2026-06-24:stress_level:daily",
+    timestampSemantics: "offset" as const,
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-24T22:30:00.000Z",
+      recordedAt: "2026-06-24T22:30:00.000Z",
+      dayKey: "2026-06-24",
+      title: "Junction stress level",
+      externalRef: legacyExternalRef,
+      dataOrigin,
+      fields: {
+        metric: "stress-level",
+        observationGrain: "summary",
+        value: 44,
+        unit: "score",
+      },
+    }],
+  });
+  const replay = await importDeviceBatch({
     vaultRoot,
     provider: "junction",
     accountId: "jxn_acct_stable",
@@ -3679,21 +3767,32 @@ test("importDeviceBatch repairs proven legacy refs after a no-externalRef edit",
       externalRef: currentExternalRef,
       legacyExternalRefs: [legacyExternalRef],
       dataOrigin: {
-        ...legacyOrigin,
+        ...dataOrigin,
         observedAtRaw: "2026-06-25:stress_level:daily",
       },
       fields: {
         metric: "stress-level",
         observationGrain: "summary",
-        value: 44,
+        value: 45,
         unit: "score",
       },
     }],
   });
+  const records = (
+    await Promise.all(
+      [...new Set([...first.eventShardPaths, ...replay.eventShardPaths])].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )
+  ).flat() as EventRecord[];
+  const liveStressIds = new Set(
+    records
+      .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+      .map((record) => record.id),
+  );
 
-  assert.equal(repaired.events[0]?.id, eventId);
-  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
-  assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
+  assert.notEqual(replay.events[0]?.id, first.events[0]?.id);
+  assert.equal(liveStressIds.size, 2);
 });
 
 test("importDeviceBatch repairs proven legacy refs after no-externalRef edits move shards", async () => {
@@ -3750,7 +3849,6 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
       recordedAt: "2026-06-01T12:30:00.000Z",
       dayKey: "2026-05-31",
       title: "Junction stress level",
-      note: "user-added context",
       metric: "stress-level",
       observationGrain: "summary",
       value: 44,
