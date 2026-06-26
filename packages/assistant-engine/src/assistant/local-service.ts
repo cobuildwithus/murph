@@ -412,6 +412,7 @@ export async function sendAssistantMessageLocal(
       const progressDeliveredSessionRef: { value: AssistantSession | null } = {
         value: null,
       }
+      let currentSession = resolved.session
 
       try {
         const turnInputController = createAssistantActiveTurnInputController({
@@ -455,7 +456,6 @@ export async function sendAssistantMessageLocal(
           turnTrigger: input.turnTrigger ?? null,
         })
         let currentInput = input
-        let currentSession = resolved.session
         const currentAudienceReplyDeliveryAvailable =
           isHostedCurrentAudienceReplyDeliveryAvailable({
             executionContext,
@@ -843,7 +843,7 @@ export async function sendAssistantMessageLocal(
           input: currentInput,
           onCodexThreadHistoryUnsafe: async (event) => {
             if (!codexUnsafeResumeStateInvalidated) {
-              await clearAssistantSessionCodexResumeStateIfNeeded({
+              currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
                 action: resolveProviderResumeStateAction({
                   codexThreadHistoryUnsafe: true,
                   codexThreadId: null,
@@ -1023,10 +1023,17 @@ export async function sendAssistantMessageLocal(
             codexThreadId: providerOutcome.codexThreadId ?? null,
             threadScope,
           })
-          if (!codexUnsafeResumeStateInvalidated) {
-            await clearAssistantSessionCodexResumeStateIfNeeded({
-              action: failedProviderResumeStateAction,
+          if (
+            !codexUnsafeResumeStateInvalidated &&
+            failedProviderResumeStateAction === 'clear'
+          ) {
+            currentSession = applyAssistantProgressDeliveredSession({
+              progressDeliveredSession: progressDeliveredSessionRef.value,
               session: providerOutcome.session,
+            })
+            currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
+              action: failedProviderResumeStateAction,
+              session: currentSession,
               vault: input.vault,
             })
           }
@@ -1040,10 +1047,7 @@ export async function sendAssistantMessageLocal(
               (reaction) =>
                 reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
             )
-            const failedNoReplySession = applyAssistantProgressDeliveredSession({
-              progressDeliveredSession: progressDeliveredSessionRef.value,
-              session: providerOutcome.session,
-            })
+            const failedNoReplySession = currentSession
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
               assistantContractFingerprint: '',
@@ -1080,6 +1084,7 @@ export async function sendAssistantMessageLocal(
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
             })
+            currentSession = session
             const {
               deliverySession,
               reactionDeliveryOutcomes,
@@ -1250,7 +1255,7 @@ export async function sendAssistantMessageLocal(
           threadScope,
         })
         if (!codexUnsafeResumeStateInvalidated) {
-          await clearAssistantSessionCodexResumeStateIfNeeded({
+          currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
             action: providerResumeStateAction,
             session: currentSession,
             vault: input.vault,
@@ -1276,6 +1281,7 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
+        currentSession = session
         // Preceding-answer delivery is best-effort only when a final reply can
         // still compensate. If no final reply is selected, preceding delivery
         // work is the turn's only user-visible outbound work.
@@ -1432,10 +1438,10 @@ export async function sendAssistantMessageLocal(
         const failedAt = new Date().toISOString()
         const failedSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,
-          session: resolved.session,
+          session: currentSession,
         })
 
-        if (failedSession !== resolved.session) {
+        if (failedSession !== currentSession) {
           await runAssistantTurnBestEffort(() =>
             saveAssistantSession(input.vault, failedSession),
           )
@@ -1582,12 +1588,12 @@ async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
   action: ReturnType<typeof resolveProviderResumeStateAction>
   session: AssistantSession
   vault: string
-}): Promise<void> {
+}): Promise<AssistantSession> {
   if (input.action !== 'clear') {
-    return
+    return input.session
   }
 
-  await clearAssistantSessionCodexResumeState({
+  return await clearAssistantSessionCodexResumeState({
     session: input.session,
     vault: input.vault,
   })

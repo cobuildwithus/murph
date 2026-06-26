@@ -10381,7 +10381,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { source: 'system' },
+      { required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -14466,6 +14466,7 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   })
 
   expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    required: true,
     source: 'system',
   })
   expect(result.finalMessage).toBe('Final answer after system progress.')

@@ -5808,6 +5808,117 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
   })
 })
 
+test('sendAssistantMessageLocal does not restore cleared Codex resume state after progress-materialized failures', async () => {
+  const terminalError = new Error('provider failed after unsafe progress')
+  const staleResumeState = {
+    routeFingerprint: 'route-stale-progress-failed',
+    threadId: 'provider-thread-stale-progress-failed',
+  }
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress-failed-clear',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress-failed-clear',
+      },
+      identityId: 'identity-progress-failed-clear',
+      threadId: null,
+      threadIsDirect: null,
+    },
+    resumeState: staleResumeState,
+    sessionId: 'session-progress-failed-clear',
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-failed-clear',
+      },
+      threadId: 'thread-progress-failed-clear',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const clearedMaterializedSession: AssistantSession = {
+    ...materializedSession,
+    codexResume: null,
+    resumeState: null,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-failed-clear',
+      target: 'thread-progress-failed-clear',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.clearAssistantSessionCodexResumeState.mockResolvedValueOnce(
+    clearedMaterializedSession,
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await providerInput.onCodexThreadHistoryUnsafe?.({
+      deliveryContextOrdinal: 0,
+    })
+    throw terminalError
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      channel: 'linq',
+      deliverResponse: true,
+      deliveryDispatchMode: 'immediate',
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies,
+          userEnvKeys: [],
+        },
+      },
+      prompt: 'Hosted failed unsafe manual task',
+      turnTrigger: 'manual-ask',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toBe(terminalError)
+
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: materializedSession,
+    vault: '/vaults/test',
+  })
+  const savedFailedSession = mocks.saveAssistantSession.mock.calls.at(-1)?.[1]
+  expect(savedFailedSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-failed-clear',
+  })
+  expect(savedFailedSession?.binding.threadId).toBe('thread-progress-failed-clear')
+  expect(savedFailedSession?.codexResume).toBeNull()
+  expect(savedFailedSession?.resumeState).toBeNull()
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session
+      .resumeState,
+  ).toBeNull()
+})
+
 test('sendAssistantMessageLocal completes accepted no-reply terminal provider failures', async () => {
   const terminalError = new Error('provider failed after no-reply')
   const failedProviderSession = createAssistantSession({

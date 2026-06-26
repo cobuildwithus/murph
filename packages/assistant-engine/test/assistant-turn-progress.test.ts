@@ -174,6 +174,48 @@ describe('assistant turn progress', () => {
     ])
   })
 
+  it('lets required system progress bypass optional spacing and budget', async () => {
+    const delivered: DeliverProgressInput[] = []
+    let nowMs = 0
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantSession> => {
+      delivered.push(input)
+      return input.session
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
+
+    await expect(progress.send('Checking the saved context now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    nowMs += MIN_PROGRESS_UPDATE_SPACING_MS
+    await expect(progress.send('Preparing the next step now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Hang on, refreshing my memory real quick.', {
+        required: true,
+        source: 'system',
+      }),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'system',
+    })
+
+    expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
+      [0, 'Checking the saved context now.'],
+      [1, 'Preparing the next step now.'],
+      [2, 'Hang on, refreshing my memory real quick.'],
+    ])
+  })
+
   it('keeps progress delivery best-effort', async () => {
     const deliver = vi.fn(async () => {
       throw new Error('outbox unavailable')

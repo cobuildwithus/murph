@@ -2278,6 +2278,7 @@ async function runCodexAppServerTurnOnProcess(
   let turnTerminal = false
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
+  let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
@@ -2661,19 +2662,39 @@ async function runCodexAppServerTurnOnProcess(
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' && contextCompactionProgressNotified)
+      (source === 'system' &&
+        (contextCompactionProgressNotified || contextCompactionProgressPending))
     ) {
       return false
     }
 
-    if (source === 'system') {
-      contextCompactionProgressNotified = true
-    }
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      progressPromise = progressDelivery.send(text, { source })
+      if (source === 'system') {
+        contextCompactionProgressPending = true
+      }
+      progressPromise = progressDelivery.send(text, {
+        ...(source === 'system' ? { required: true } : {}),
+        source,
+      })
     } catch {
+      if (source === 'system') {
+        contextCompactionProgressPending = false
+      }
       return false
+    }
+    if (source === 'system') {
+      progressPromise = progressPromise.then((result) => {
+        if (result.kind === 'sent') {
+          contextCompactionProgressNotified = true
+        } else {
+          contextCompactionProgressPending = false
+        }
+        return result
+      }, (error: unknown) => {
+        contextCompactionProgressPending = false
+        throw error
+      })
     }
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
