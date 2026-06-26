@@ -636,6 +636,20 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
     return await buildAssistantInputAttachmentPromptBundles({
       attachments: input.entry.attachmentEvidence.attachments,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      onEvidenceReadFailure(failure) {
+        input.onEvent?.({
+          type: 'input.reply-progress',
+          inputId: input.entry.inputId,
+          details: 'nonblocking attachment evidence read failed',
+          errorCode: failure.errorCode,
+          failureContext: {
+            attachmentOrdinal: failure.attachmentOrdinal,
+          },
+          safeDetails: 'attachment_evidence_read_failed_nonblocking',
+          providerKind: 'status',
+          providerState: 'completed',
+        })
+      },
       vaultRoot: input.vaultRoot,
     })
   } catch {
