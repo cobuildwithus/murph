@@ -246,6 +246,7 @@ describe("hosted web production migration guard", () => {
 
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/retention/cron",
+      "/api/internal/hosted-onboarding/linq/contact-card/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
     ]);
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
