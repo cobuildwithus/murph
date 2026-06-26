@@ -3609,6 +3609,51 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
+test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-find-current-ref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+  assert.ok(stored.externalRef);
+
+  const moved = {
+    ...stored,
+    externalRef: {
+      ...stored.externalRef,
+      resourceId: "workouts-corrected",
+    },
+    lifecycle: { revision: 2 },
+  };
+  await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(moved)}\n`);
+
+  const historical = await findEventByExternalRef({
+    vaultRoot,
+    system: stored.externalRef.system,
+    resourceType: stored.externalRef.resourceType,
+    resourceId: stored.externalRef.resourceId,
+    facet: stored.externalRef.facet,
+  });
+  const current = await findEventByExternalRef({
+    vaultRoot,
+    system: stored.externalRef.system,
+    resourceType: stored.externalRef.resourceType,
+    resourceId: "workouts-corrected",
+    facet: stored.externalRef.facet,
+  });
+
+  assert.equal(historical, null);
+  assert.equal(current?.id, stored.id);
+  assert.equal(current?.lifecycle?.revision, 2);
+});
+
 test("importDeviceBatch supersedes an in-batch fresh record when a later entry changes it", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-inbatch-supersede");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

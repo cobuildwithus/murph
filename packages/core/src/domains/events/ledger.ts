@@ -18,6 +18,7 @@ import { walkVaultFiles } from "../../fs.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
+  collapseEventSpineEntries,
   eventSpineRevision,
   isDeletedEventSpineRecord,
   parseEventSpineAttachments,
@@ -303,7 +304,7 @@ export async function findEventByExternalRef(
   const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
-  const matches: MatchedEventRecord[] = [];
+  const entriesById = new Map<string, MatchedEventRecord[]>();
 
   for (const relativePath of relativePaths) {
     const records = await readJsonlRecords({
@@ -313,9 +314,17 @@ export async function findEventByExternalRef(
 
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-      if (externalRefMatches(record, input)) {
-        matches.push({ relativePath, record });
-      }
+      const group = entriesById.get(record.id) ?? [];
+      group.push({ relativePath, record });
+      entriesById.set(record.id, group);
+    }
+  }
+
+  const matches: MatchedEventRecord[] = [];
+  for (const entries of entriesById.values()) {
+    const latest = selectLatestEventSpineEntry(collapseEventSpineEntries(entries));
+    if (latest && externalRefMatches(latest.record, input)) {
+      matches.push(latest);
     }
   }
 

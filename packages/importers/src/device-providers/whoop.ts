@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { WorkoutSessionMetrics } from "@murphai/contracts";
+import {
+  toLocalDayKey,
+  type WorkoutSessionMetrics,
+} from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
@@ -31,7 +34,11 @@ import type {
   ObservationMetricDescriptor,
   PlainObject,
 } from "./shared-normalization.ts";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import type {
+  DeviceProviderAdapter,
+  DeviceProviderNormalizationContext,
+  NormalizedDeviceBatch,
+} from "./types.ts";
 import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface WhoopSnapshotInput {
@@ -168,6 +175,30 @@ function firstWhoopOffsetDayKey(
 
     if (dayKey) {
       return dayKey;
+    }
+  }
+
+  return undefined;
+}
+
+function firstVaultLocalDayKey(
+  defaultTimeZone: string | undefined,
+  ...candidates: Array<string | undefined>
+): string | undefined {
+  if (!defaultTimeZone) {
+    return undefined;
+  }
+
+  for (const candidate of candidates) {
+    const iso = toIso(candidate);
+    if (!iso) {
+      continue;
+    }
+
+    try {
+      return toLocalDayKey(iso, defaultTimeZone);
+    } catch {
+      continue;
     }
   }
 
@@ -474,7 +505,10 @@ function pushDeletionObservation(
   });
 }
 
-export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): NormalizedDeviceBatch {
+export function normalizeWhoopSnapshot(
+  snapshot: WhoopSnapshotInput,
+  context: DeviceProviderNormalizationContext = {},
+): NormalizedDeviceBatch {
   const request = asPlainObject(snapshot) ?? {};
   const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
   const profile = asPlainObject(request.profile);
@@ -529,18 +563,18 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       bodyMeasurementRecordedAt
     : undefined;
   const bodyMeasurementDayKey = bodyMeasurement
-    ? bodyMeasurementExplicitDayKey ?? firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt)
+    ? bodyMeasurementExplicitDayKey ??
+      firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt) ??
+      firstVaultLocalDayKey(context.defaultTimeZone, bodyMeasurementRecordedAt)
     : undefined;
-  const isDateOnlyBodyMeasurement = Boolean(bodyMeasurementExplicitDayKey && !bodyMeasurementMeasuredAt);
-  const bodyMeasurementResourceId = isDateOnlyBodyMeasurement
-    ? `date:${bodyMeasurementExplicitDayKey}`
-    : firstDayKey(bodyMeasurementObservedAt) ??
-      bodyMeasurementExplicitDayKey ??
-      firstDayKey(bodyMeasurementRecordedAt) ??
-      "current";
-  const bodyMeasurementLegacyResourceId = isDateOnlyBodyMeasurement
-    ? firstDayKey(bodyMeasurementUpdatedAt) ?? firstDayKey(importedAt)
-    : undefined;
+  const bodyMeasurementResourceId = bodyMeasurementDayKey
+    ? `date:${bodyMeasurementDayKey}`
+    : firstDayKey(bodyMeasurementObservedAt) ?? firstDayKey(bodyMeasurementRecordedAt) ?? "current";
+  const bodyMeasurementLegacyResourceId = firstDayKey(
+    bodyMeasurementMeasuredAt,
+    bodyMeasurementUpdatedAt,
+    importedAt,
+  );
   const bodyMeasurementLegacyResourceIds =
     bodyMeasurementLegacyResourceId && bodyMeasurementLegacyResourceId !== bodyMeasurementResourceId
       ? [bodyMeasurementLegacyResourceId]

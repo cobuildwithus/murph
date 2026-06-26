@@ -1596,40 +1596,64 @@ interface EventExternalRefIndex {
   maxRevisionById: Map<string, number>;
 }
 
+async function readValidEventSpineEntries(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<EventSpineEntry<EventRecord>[]> {
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+
+  if (!(await pathExists(resolved.absolutePath))) {
+    return [];
+  }
+
+  const entries: EventSpineEntry<EventRecord>[] = [];
+  for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
+    const parsed = safeParseContract(eventRecordSchema, raw);
+
+    if (parsed.success) {
+      entries.push({ relativePath, record: parsed.data });
+    }
+  }
+
+  return entries;
+}
+
 async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
 ): Promise<EventExternalRefIndex> {
   const latestByRefKey = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
+  const refBearingEventIds = new Set<string>();
   const entriesById = new Map<string, EventSpineEntry<EventRecord>[]>();
 
   for (const relativePath of relativePaths) {
-    const resolved = resolveVaultPath(vaultRoot, relativePath);
+    for (const entry of await readValidEventSpineEntries(vaultRoot, relativePath)) {
+      maxRevisionById.set(
+        entry.record.id,
+        Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
+      );
 
-    if (!(await pathExists(resolved.absolutePath))) {
-      continue;
-    }
-
-    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
-      const parsed = safeParseContract(eventRecordSchema, raw);
-
-      if (!parsed.success) {
+      if (!entry.record.externalRef) {
         continue;
       }
 
-      // Track the highest revision per event id across ALL rows, including
-      // revisions without an externalRef (e.g. a user edit through upsertEvent
-      // that did not echo the ref), so a supersede never reuses a taken
-      // revision number.
-      maxRevisionById.set(
-        parsed.data.id,
-        Math.max(maxRevisionById.get(parsed.data.id) ?? 0, eventSpineRevision(parsed.data)),
-      );
+      refBearingEventIds.add(entry.record.id);
+      const group = entriesById.get(entry.record.id) ?? [];
+      group.push(entry);
+      entriesById.set(entry.record.id, group);
+    }
+  }
 
-      const group = entriesById.get(parsed.data.id) ?? [];
-      group.push({ relativePath, record: parsed.data });
-      entriesById.set(parsed.data.id, group);
+  for (const relativePath of relativePaths) {
+    for (const entry of await readValidEventSpineEntries(vaultRoot, relativePath)) {
+      if (entry.record.externalRef || !refBearingEventIds.has(entry.record.id)) {
+        continue;
+      }
+
+      const group = entriesById.get(entry.record.id) ?? [];
+      group.push(entry);
+      entriesById.set(entry.record.id, group);
     }
   }
 
@@ -1671,8 +1695,35 @@ async function indexLatestEventsByExternalRef(
   return { latestByRefKey, maxRevisionById };
 }
 
-function isCompatibleLegacyExternalRefMatch(existing: EventRecord, incoming: EventRecord): boolean {
-  return existing.kind === incoming.kind && existing.dayKey === incoming.dayKey;
+function isSameObservationValue(existing: EventRecord, incoming: EventRecord): boolean {
+  return existing.kind === "observation" &&
+    incoming.kind === "observation" &&
+    existing.metric === incoming.metric &&
+    existing.value === incoming.value &&
+    existing.unit === incoming.unit &&
+    existing.observationGrain === incoming.observationGrain;
+}
+
+function isCompatibleLegacyExternalRefMatch(
+  existing: EventRecord,
+  incoming: EventRecord,
+  legacyExternalRef: ExternalRef,
+): boolean {
+  if (existing.kind !== incoming.kind) {
+    return false;
+  }
+
+  if (existing.dayKey === incoming.dayKey) {
+    return true;
+  }
+
+  return existing.externalRef?.system === legacyExternalRef.system &&
+    existing.externalRef.resourceType === legacyExternalRef.resourceType &&
+    existing.externalRef.facet === legacyExternalRef.facet &&
+    incoming.externalRef?.system === legacyExternalRef.system &&
+    incoming.externalRef.resourceType === legacyExternalRef.resourceType &&
+    incoming.externalRef.facet === legacyExternalRef.facet &&
+    isSameObservationValue(existing, incoming);
 }
 
 // Device-sync ingestion invariant 4: merge is idempotent on the record's own
@@ -1710,17 +1761,23 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const legacyRefKeys = entry.legacyExternalRefs
       .map((legacyExternalRef) => eventExternalRefKey(legacyExternalRef))
       .filter((legacyRefKey) => legacyRefKey !== refKey);
-    const legacyMatchedEntries = legacyRefKeys
-      .map((legacyRefKey) => ({
-        refKey: legacyRefKey,
-        record: index.latestByRefKey.get(legacyRefKey),
+    const legacyMatchedEntries = entry.legacyExternalRefs
+      .map((legacyExternalRef) => ({
+        legacyExternalRef,
+        refKey: eventExternalRefKey(legacyExternalRef),
       }))
-      .filter((match): match is { refKey: string; record: EventRecord } => {
+      .filter((match) => match.refKey !== refKey)
+      .map(({ legacyExternalRef, refKey }) => ({
+        legacyExternalRef,
+        refKey,
+        record: index.latestByRefKey.get(refKey),
+      }))
+      .filter((match): match is { refKey: string; record: EventRecord; legacyExternalRef: ExternalRef } => {
         if (!match.record) {
           return false;
         }
 
-        return isCompatibleLegacyExternalRefMatch(match.record, entry.record);
+        return isCompatibleLegacyExternalRefMatch(match.record, entry.record, match.legacyExternalRef);
       });
     const matchedEntries = [
       { refKey, record: index.latestByRefKey.get(refKey) },

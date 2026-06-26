@@ -1287,6 +1287,7 @@ function pushJunctionDailyTimeseriesObservation(
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
   });
+  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(aggregate, observation.metric);
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -1298,6 +1299,7 @@ function pushJunctionDailyTimeseriesObservation(
     title: observation.title,
     evidenceRoles: [aggregate.evidencePartRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
       metric: observation.metric,
@@ -1306,6 +1308,35 @@ function pushJunctionDailyTimeseriesObservation(
       unit: observation.unit,
     },
   }));
+}
+
+function legacyJunctionDailyTimeseriesAggregateExternalRefs(
+  aggregate: JunctionDailyTimeseriesAggregate,
+  metric: string,
+): DeviceExternalRefPayload[] {
+  const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(
+    aggregate.entry,
+    aggregate.timestamp,
+    aggregate.lastSampleAt,
+  );
+
+  if (!legacyDayKey || legacyDayKey === aggregate.dayKey) {
+    return [];
+  }
+
+  return [
+    makeJunctionExternalRef(
+      aggregate.resourceContext,
+      aggregate.entry,
+      withTimestampOverride(aggregate.timestamp, {
+        occurredAt: aggregate.lastSampleAt,
+        recordedAt: aggregate.lastRecordedAt,
+        dayKey: legacyDayKey,
+        observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
+      }),
+      metric,
+    ),
+  ];
 }
 
 // Sparse paired blood-pressure readings land as-is: one canonical
@@ -3649,6 +3680,29 @@ function resolveJunctionTimeseriesAggregateDayKey(
   }
 
   return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+function resolveLegacyJunctionTimeseriesAggregateDayKey(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string | undefined,
+): string | undefined {
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (
+    offsetSeconds !== null
+    && offsetSeconds !== undefined
+    && sampleAt
+    && timestamp.observedAtRaw
+    && timestamp.timestampSemantics !== "floating"
+    && !isDateOnlyJunctionTimestamp(timestamp.observedAtRaw)
+  ) {
+    const offsetDayKey = extractLocalDayKeyFromUtcOffset(sampleAt, offsetSeconds);
+    if (offsetDayKey) {
+      return offsetDayKey;
+    }
+  }
+
+  return extractIsoDatePrefix(timestamp.observedAtRaw) ?? extractIsoDatePrefix(sampleAt) ?? undefined;
 }
 
 function isDateOnlyJunctionTimestamp(value: string): boolean {

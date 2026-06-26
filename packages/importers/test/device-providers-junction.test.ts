@@ -109,6 +109,28 @@ function junctionFallbackSummaryResourceId(
     .slice(0, 16)}`;
 }
 
+function junctionDailyTimeseriesResourceId(
+  input: {
+    dayKey: string;
+    resource: string;
+    resourceSlug: string;
+    sourceProviderSlug: string;
+    sourceType?: string;
+    sourceInstanceId?: string;
+  },
+): string {
+  return `${input.resourceSlug}-${createHash("sha256")
+    .update(JSON.stringify([
+      input.resourceSlug,
+      input.sourceProviderSlug,
+      input.sourceType,
+      input.sourceInstanceId,
+      `${input.dayKey}:${input.resource}:daily`,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
 function assertCompactSummaryObservationFields(fields: Record<string, unknown> | undefined): void {
   assert.ok(fields);
   assert.equal(fields.observationGrain, "summary");
@@ -727,6 +749,110 @@ test("Junction timeseries aggregates trust embedded offset timestamps before sep
   assert.equal(stressEvent?.dayKey, "2026-06-25");
   assert.equal(stressEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
   assert.equal(stressEvent?.dataOrigin?.timestampSemantics, "offset");
+});
+
+test("Junction daily aggregates repair legacy calendar-date resource ids through core replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-calendar-date-replay");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-24T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const legacyResourceId = junctionDailyTimeseriesResourceId({
+      dayKey: "2026-06-24",
+      resource: "stress_level",
+      resourceSlug: "stress-level",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    });
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-25T03:30:00.000Z",
+        recordedAt: "2026-06-25T03:30:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction stress level",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-stress-level",
+          resourceId: legacyResourceId,
+          facet: "stress-level",
+        },
+        fields: {
+          metric: "stress-level",
+          observationGrain: "summary",
+          value: 44,
+          unit: "score",
+        },
+      }],
+    });
+    const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-06-25T12:00:00.000Z",
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{
+                  data: [
+                    {
+                      calendar_date: "2026-06-25",
+                      timestamp: "2026-06-24T23:30:00-04:00",
+                      score: 44,
+                    },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...replayImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveStressRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "stress-level",
+    );
+    const replayStress = replayImport.events.find(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+
+    assert.equal(replayStress?.id, legacyImport.events[0]?.id);
+    assert.equal(replayStress?.dayKey, "2026-06-25");
+    assert.equal(liveStressRecords.length, 1);
+    assert.equal(liveStressRecords[0]?.id, legacyImport.events[0]?.id);
+    assert.equal(liveStressRecords[0]?.dayKey, "2026-06-25");
+    assert.equal(
+      storedExternalRefResourceId(liveStressRecords[0]),
+      junctionDailyTimeseriesResourceId({
+        dayKey: "2026-06-25",
+        resource: "stress_level",
+        resourceSlug: "stress-level",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      }),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer keeps floating stress timestamps on their raw day despite offset metadata", () => {
