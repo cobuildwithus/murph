@@ -72,25 +72,21 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
   lineLookupKey?: string | null;
   prisma: HostedLinqLineClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const lineLookupKey = input.lineLookupKey ?? await ensureHostedLinqLineForProviderEventTx(input);
   if (!lineLookupKey) {
-    return;
+    return false;
   }
 
   switch (input.event.eventType) {
     case "message.received":
-      await projectMessageReceived(input.prisma, lineLookupKey, input.event);
-      return;
+      return projectMessageReceived(input.prisma, lineLookupKey, input.event);
     case "message.delivered":
-      await projectMessageDelivered(input.prisma, lineLookupKey, input.event);
-      return;
+      return projectMessageDelivered(input.prisma, lineLookupKey, input.event);
     case "message.failed":
-      await projectMessageFailed(input.prisma, lineLookupKey, input.event);
-      return;
+      return projectMessageFailed(input.prisma, lineLookupKey, input.event);
     case "phone_number.status_updated":
-      await projectPhoneNumberStatusUpdated(input.prisma, lineLookupKey, input.event);
-      return;
+      return projectPhoneNumberStatusUpdated(input.prisma, lineLookupKey, input.event);
   }
 }
 
@@ -128,7 +124,7 @@ async function projectMessageReceived(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
-): Promise<void> {
+): Promise<boolean> {
   if (event.direction === "outbound") {
     await prisma.hostedLinqLine.update({
       where: { phoneNumberLookupKey },
@@ -137,7 +133,7 @@ async function projectMessageReceived(
         totalOutboundCount: { increment: 1 },
       },
     });
-    return;
+    return true;
   }
 
   await prisma.hostedLinqLine.update({
@@ -147,15 +143,16 @@ async function projectMessageReceived(
       totalInboundCount: { increment: 1 },
     },
   });
+  return true;
 }
 
 async function projectMessageDelivered(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
-): Promise<void> {
-  await prisma.hostedLinqLine.update({
-    where: { phoneNumberLookupKey },
+): Promise<boolean> {
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event.providerCreatedAt),
     data: {
       consecutiveFailures: 0,
       healthStatus: "healthy",
@@ -163,15 +160,16 @@ async function projectMessageDelivered(
       totalDeliveredCount: { increment: 1 },
     },
   });
+  return updated.count === 1;
 }
 
 async function projectMessageFailed(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
-): Promise<void> {
-  await prisma.hostedLinqLine.update({
-    where: { phoneNumberLookupKey },
+): Promise<boolean> {
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event.providerCreatedAt),
     data: {
       consecutiveFailures: { increment: 1 },
       healthStatus: "warning",
@@ -181,16 +179,17 @@ async function projectMessageFailed(
       totalFailedCount: { increment: 1 },
     },
   });
+  return updated.count === 1;
 }
 
 async function projectPhoneNumberStatusUpdated(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
-): Promise<void> {
+): Promise<boolean> {
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
   const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
-  await prisma.hostedLinqLine.updateMany({
+  const updated = await prisma.hostedLinqLine.updateMany({
     where: {
       phoneNumberLookupKey,
       OR: [
@@ -223,6 +222,34 @@ async function projectPhoneNumberStatusUpdated(
       providerUpdatedAt: event.providerCreatedAt,
     },
   });
+  return updated.count === 1;
+}
+
+function buildMessageReceiptLineProjectionWhere(
+  phoneNumberLookupKey: string,
+  providerCreatedAt: Date,
+): Prisma.HostedLinqLineWhereInput {
+  return {
+    phoneNumberLookupKey,
+    OR: [
+      {
+        lastDeliveredAt: null,
+        lastFailedAt: null,
+      },
+      {
+        lastDeliveredAt: null,
+        lastFailedAt: { lt: providerCreatedAt },
+      },
+      {
+        lastDeliveredAt: { lt: providerCreatedAt },
+        lastFailedAt: null,
+      },
+      {
+        lastDeliveredAt: { lt: providerCreatedAt },
+        lastFailedAt: { lt: providerCreatedAt },
+      },
+    ],
+  };
 }
 
 function classifyHostedLinqProviderStatus(value: string | null): string {

@@ -190,9 +190,15 @@ export async function markHostedLinqDeliverySkippedTx(input: {
 export async function applyHostedLinqDeliveryReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqDeliveryClient;
-}): Promise<{ deliveryId: string | null }> {
+}): Promise<{
+  advanced: boolean;
+  deliveryId: string | null;
+}> {
   if (!input.event.messageLookupKey || !input.event.deliveryStatus) {
-    return { deliveryId: null };
+    return {
+      advanced: true,
+      deliveryId: null,
+    };
   }
 
   const delivery = await input.prisma.hostedLinqDelivery.findUnique({
@@ -205,14 +211,34 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   });
 
   if (!delivery) {
-    return { deliveryId: null };
+    return {
+      advanced: true,
+      deliveryId: null,
+    };
   }
 
-  await input.prisma.hostedLinqDelivery.update({
-    where: { id: delivery.id },
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      id: delivery.id,
+      OR: [
+        { lastReceiptAt: null },
+        { lastReceiptAt: { lt: input.event.providerCreatedAt } },
+        {
+          lastProviderEventId: null,
+          lastReceiptAt: input.event.providerCreatedAt,
+        },
+        {
+          lastProviderEventId: { lt: input.event.eventId },
+          lastReceiptAt: input.event.providerCreatedAt,
+        },
+      ],
+    },
     data: buildReceiptUpdate(input.event),
   });
-  return { deliveryId: delivery.id };
+  return {
+    advanced: updated.count === 1,
+    deliveryId: delivery.id,
+  };
 }
 
 function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.HostedLinqDeliveryUpdateInput {

@@ -62,15 +62,25 @@ export async function ingestHostedLinqProviderEventTx(input: {
     };
   }
 
-  await projectHostedLinqLineForProviderEventTx({
-    event: input.event,
-    lineLookupKey,
-    prisma: input.prisma,
-  });
   const deliveryReceipt = await applyHostedLinqDeliveryReceiptTx({
     event: input.event,
     prisma: input.prisma,
   });
+  const staleDeliveryReceipt = deliveryReceipt.deliveryId !== null && !deliveryReceipt.advanced;
+  const lineProjectionAdvanced = staleDeliveryReceipt
+    ? false
+    : await projectHostedLinqLineForProviderEventTx({
+      event: input.event,
+      lineLookupKey,
+      prisma: input.prisma,
+    });
+  if (staleDeliveryReceipt || isStaleStatusProjection(input.event, lineProjectionAdvanced)) {
+    return {
+      alertIds: [],
+      duplicate: false,
+    };
+  }
+
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
     deliveryId: deliveryReceipt.deliveryId,
     event: input.event,
@@ -81,6 +91,13 @@ export async function ingestHostedLinqProviderEventTx(input: {
     alertIds,
     duplicate: false,
   };
+}
+
+function isStaleStatusProjection(
+  event: ParsedHostedLinqProviderEvent,
+  lineProjectionAdvanced: boolean,
+): boolean {
+  return event.eventType === "phone_number.status_updated" && !lineProjectionAdvanced;
 }
 
 async function claimHostedLinqAlertsForProviderEventTx(input: {

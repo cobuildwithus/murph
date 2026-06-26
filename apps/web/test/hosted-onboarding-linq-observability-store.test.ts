@@ -53,7 +53,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.hostedLinqProviderEventCreateMany.mock.invocationCallOrder[0],
     );
-    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           healthStatus: "warning",
@@ -63,16 +63,16 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
-    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           failureCode: "30007",
           failureReason: "[redacted]",
           status: "failed",
         }),
-        where: {
+        where: expect.objectContaining({
           id: "hld_attempt_123",
-        },
+        }),
       }),
     );
     expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
@@ -86,6 +86,53 @@ describe("hosted Linq observability stores", () => {
         skipDuplicates: true,
       }),
     );
+  });
+
+  it("does not regress projections or alerts for stale delivery receipts", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValue({
+      id: "hld_attempt_123",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:00:00.000Z",
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered +15551234567 provider_msg_123 private text",
+        },
+        message_id: "msg_failed_123",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_older",
+      eventType: "message.failed",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_attempt_123",
+          OR: expect.arrayContaining([
+            {
+              lastReceiptAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+          ]),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
   it("counts outbound message.received echoes against line pacing", async () => {
