@@ -26,6 +26,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
+  inferBindingDeliveryForChannel,
   readDeliveredCleanupMessages,
   readDeliveredCleanupTargetAliases,
   readDeliveredProviderMessageId,
@@ -389,6 +390,18 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent({ media }) {
     return !hasVoiceMemoMedia(media)
   },
+  inferBindingDelivery(input) {
+    if (input.deliveryKind === 'participant') {
+      return null
+    }
+
+    return inferBindingDeliveryForChannel({
+      channel: 'linq',
+      conversation: input.conversation,
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+    })
+  },
   supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
@@ -399,6 +412,13 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+    if (candidate.kind === 'participant') {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
+        'iMessage delivery requires an existing Linq chat id or explicit chat target before assistant delivery.',
+      )
+    }
+
     if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,
@@ -455,15 +475,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 
     const deliveredTarget = readDeliveredTarget(delivered)
     const providerThreadId = readDeliveredProviderThreadId(delivered)
-    if (candidate.kind === 'participant' && !deliveredTarget && !providerThreadId) {
-      throw createAssistantDeliveryConfirmationPendingError(
-        new VaultCliError(
-          'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
-          'Materialized iMessage participant delivery did not return a chat id.',
-        ),
-      )
-    }
-
     return {
       target: deliveredTarget ?? providerThreadId ?? candidate.target,
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),

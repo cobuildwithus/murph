@@ -2247,8 +2247,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await createAssistantOutboxIntent({
         actorId: "+15550001",
         bindingDelivery: {
-          kind: "participant",
-          target: "+15550001",
+          kind: "thread",
+          target: "thread_synthetic_linq_crash_window",
         },
         channel: "linq",
         createdAt: TEST_NOW,
@@ -2260,7 +2260,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         identityId: "phone_lookup_synthetic_crash_window",
         message: "Synthetic Linq crash-window reply",
         sessionId: "session_synthetic_crash_window",
-        threadId: null,
+        threadId: "thread_synthetic_linq_crash_window",
         threadIsDirect: true,
         turnId: "turn_synthetic_crash_window",
         vault: checkpointVaultRoot,

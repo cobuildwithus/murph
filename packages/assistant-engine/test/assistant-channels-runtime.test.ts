@@ -1844,7 +1844,7 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
-  it('keeps materialized Linq participant delivery confirmation-pending when no chat id is returned', async () => {
+  it('rejects materialized Linq participant delivery before provider dispatch', async () => {
     const sendLinq = vi.fn().mockResolvedValue({
       providerMessageId: 'created-message',
     })
@@ -1872,11 +1872,9 @@ describe('assistant channels runtime seam', () => {
     )
 
     expect(materialized).toMatchObject({
-      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
-      message: expect.stringContaining(
-        'Materialized iMessage participant delivery did not return a chat id.',
-      ),
+      code: 'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
     })
+    expect(sendLinq).not.toHaveBeenCalled()
     expect(materialized).toMatchObject({
       message: expect.not.stringContaining('Materialized Linq'),
     })

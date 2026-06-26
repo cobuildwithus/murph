@@ -992,7 +992,7 @@ describe('channel helper seams', () => {
         },
       ),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
+      code: 'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
     })
   })
 
