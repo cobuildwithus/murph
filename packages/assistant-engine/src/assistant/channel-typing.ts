@@ -64,6 +64,10 @@ export function startAssistantChannelTypingIndicator(input: {
 
   return {
     async refreshNow() {
+      if (stopRequested) {
+        return
+      }
+
       if (activeIndicator?.refreshNow) {
         const indicator = activeIndicator
         await runAssistantTypingBestEffort(() => indicator.refreshNow!())
@@ -71,7 +75,7 @@ export function startAssistantChannelTypingIndicator(input: {
       }
 
       await indicatorReady.then((indicator) => {
-        if (indicator?.refreshNow) {
+        if (!stopRequested && indicator?.refreshNow) {
           return runAssistantTypingBestEffort(() => indicator.refreshNow!())
         }
 
@@ -83,11 +87,11 @@ export function startAssistantChannelTypingIndicator(input: {
       if (activeIndicator) {
         const indicator = activeIndicator
         activeIndicator = null
-        void runAssistantTypingBestEffort(() => indicator.stop())
+        await runAssistantTypingBestEffort(() => indicator.stop())
         return
       }
 
-      void indicatorReady.then((indicator) => {
+      await indicatorReady.then((indicator) => {
         if (indicator) {
           activeIndicator = null
           return runAssistantTypingBestEffort(() => indicator.stop())

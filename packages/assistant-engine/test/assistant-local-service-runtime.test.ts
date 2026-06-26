@@ -4830,6 +4830,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const releaseProviderTurn = createDeferred<void>()
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
@@ -4842,8 +4843,32 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
       persistUserPromptOnFailure: false,
     },
   })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    await releaseProviderTurn.promise
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-progress',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session: createAssistantSession(),
+      },
+    }
+  })
 
-  await sendAssistantMessageLocal({
+  const resultPromise = sendAssistantMessageLocal({
     channel: 'linq',
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
@@ -4857,6 +4882,9 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     prompt: 'Hosted queue-only manual reply',
     turnTrigger: 'manual-ask',
     vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
   })
 
   const progressDelivery =
@@ -4877,7 +4905,12 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
     'Checking the iMessage thread.',
   )
-  expect(refreshTyping).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => {
+    expect(refreshTyping).toHaveBeenCalledTimes(1)
+  })
+
+  releaseProviderTurn.resolve()
+  await resultPromise
 })
 
 test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {
@@ -5790,18 +5823,25 @@ test('sendAssistantMessageLocal stops a typing indicator that resolves after the
     },
   })
 
-  const result = await sendAssistantMessageLocal({
+  const resultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
     prompt: 'Summarize my inbox',
     vault: '/vaults/test',
   })
+  let resultResolved = false
+  resultPromise.then(() => {
+    resultResolved = true
+  })
+  await Promise.resolve()
+  assert.equal(resultResolved, false)
 
-  assert.equal(result.status, 'completed')
   typingIndicatorDeferred.resolve({
     stop: stopTyping,
   })
+  const result = await resultPromise
   await stopCompleted.promise
 
+  assert.equal(result.status, 'completed')
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
