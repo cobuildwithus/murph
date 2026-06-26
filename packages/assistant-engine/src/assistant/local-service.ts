@@ -471,6 +471,11 @@ export async function sendAssistantMessageLocal(
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
         const hostedExecutionContext = executionContext?.hosted ?? null
+        const refreshTypingIndicatorAfterProgress = () => {
+          void runAssistantTurnBestEffort(async () => {
+            await typingIndicator?.refreshNow?.()
+          })
+        }
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
@@ -497,12 +502,14 @@ export async function sendAssistantMessageLocal(
                     ...progressInput,
                     dependencies,
                   })
+                  refreshTypingIndicatorAfterProgress()
                   return
                 }
 
                 await deliverAssistantProgressUpdate({
                   ...progressInput,
                 })
+                refreshTypingIndicatorAfterProgress()
               },
               getDeliveryContext: () => ({
                 messageInput: currentInput,

@@ -394,6 +394,229 @@ test('typing indicators use the current audience route', async () => {
   await indicator?.stop()
 })
 
+test('typing indicator stop waits for underlying stop and blocks later refreshes', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    participantId: 'linq-participant',
+    prompt: 'Send the reminder.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const stopGate: { finish?: () => void } = {}
+  const stopStarted = vi.fn()
+  const refreshNow = vi.fn(async () => undefined)
+  const stop = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        stopStarted()
+        stopGate.finish = resolve
+      }),
+  )
+  const startLinqTyping = vi.fn(async () => ({
+    refreshNow,
+    stop,
+  }))
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  await vi.waitFor(() => {
+    expect(startLinqTyping).toHaveBeenCalled()
+  })
+
+  const stopPromise = indicator?.stop()
+  await vi.waitFor(() => {
+    expect(stopStarted).toHaveBeenCalledTimes(1)
+  })
+
+  let stopResolved = false
+  stopPromise?.then(() => {
+    stopResolved = true
+  })
+  await Promise.resolve()
+  expect(stopResolved).toBe(false)
+
+  await indicator?.refreshNow?.()
+  expect(refreshNow).not.toHaveBeenCalled()
+
+  stopGate.finish?.()
+  await stopPromise
+  expect(stop).toHaveBeenCalledTimes(1)
+  expect(stopResolved).toBe(true)
+})
+
+test('typing indicator stop does not wait for a pending start', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    participantId: 'linq-participant',
+    prompt: 'Send the reminder.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const stop = vi.fn(async () => undefined)
+  let resolveStart!: (indicator: { stop(): Promise<void> }) => void
+  const startPromise = new Promise<{ stop(): Promise<void> }>((resolve) => {
+    resolveStart = resolve
+  })
+  const startLinqTyping = vi.fn(() => startPromise)
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  const stopPromise = indicator?.stop()
+  let stopResolved = false
+  stopPromise?.then(() => {
+    stopResolved = true
+  })
+  await Promise.resolve()
+  expect(stopResolved).toBe(true)
+  expect(stop).not.toHaveBeenCalled()
+
+  resolveStart({ stop })
+  await vi.waitFor(() => {
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+})
+
+test('typing indicator stop is bounded when the underlying stop stalls', async () => {
+  vi.useFakeTimers()
+  try {
+    const session = createAssistantSession({
+      binding: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'linq-thread',
+        },
+        identityId: null,
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    })
+    const input: AssistantMessageInput = {
+      channel: 'linq',
+      deliverResponse: true,
+      participantId: 'linq-participant',
+      prompt: 'Send the reminder.',
+      threadId: 'linq-thread',
+      vault: '/vaults/test',
+    }
+    const stopStarted = vi.fn()
+    const refreshNow = vi.fn(async () => undefined)
+    const startLinqTyping = vi.fn(async () => ({
+      refreshNow,
+      stop: vi.fn(
+        () =>
+          new Promise<void>(() => {
+            stopStarted()
+          }),
+      ),
+    }))
+
+    const indicator = startAssistantChannelTypingIndicator({
+      channelDependencies: {
+        startLinqTyping,
+      },
+      input,
+      precedence: 'audience-first',
+      session,
+      sharedPlan: createSharedPlan({
+        audience: {
+          actorId: 'linq-participant',
+          channel: 'linq',
+          threadId: 'linq-thread',
+          threadIsDirect: false,
+        },
+      }),
+    })
+
+    if (!indicator) {
+      throw new Error('expected typing indicator')
+    }
+    await indicator.refreshNow?.()
+    expect(refreshNow).toHaveBeenCalledTimes(1)
+
+    const stopPromise = indicator.stop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(stopStarted).toHaveBeenCalledTimes(1)
+
+    let stopResolved = false
+    stopPromise.then(() => {
+      stopResolved = true
+    })
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(stopResolved).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await stopPromise
+    expect(stopResolved).toBe(true)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('Linq reactions fail closed when the current message is not reaction-capable', async () => {
   const session = createAssistantSession()
   const result = await deliverAssistantReaction({
