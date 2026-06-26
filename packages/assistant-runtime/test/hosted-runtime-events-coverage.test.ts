@@ -207,7 +207,7 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 
-  it("returns an assistant wake when a device activity automation schedules notification work", async () => {
+  it("returns an assistant wake when device activity automation schedules notification work", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity",

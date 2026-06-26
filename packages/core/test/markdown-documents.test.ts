@@ -10,6 +10,7 @@ import {
   writeCanonicalMarkdownDocument,
 } from "../src/markdown-documents.ts";
 import {
+  advanceAutomationDeviceActivityCursor,
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
@@ -266,6 +267,117 @@ describe("markdown document primitives", () => {
     expect(patched.record.route).toEqual(created.record.route);
     expect(patched.record.summary).toBe(created.record.summary);
     expect(patched.record.tags).toEqual(created.record.tags);
+  });
+
+  it("advances only the device activity cursor and refuses stale matcher expectations", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        continuityPolicy: "preserve",
+        instructions: "Ask about walks.",
+        schedule: {
+          kind: "deviceActivity",
+          after: "2026-06-07T11:00:00.000Z",
+          activityKind: "walk",
+          source: "whoop",
+        },
+        tags: ["device"],
+      }),
+    });
+
+    const advanced = await advanceAutomationDeviceActivityCursor({
+      vaultRoot,
+      lookup: created.record.automationId,
+      after: "2026-06-07T12:00:00.000Z",
+      afterOccurredAt: "2026-06-07T11:30:00.000Z",
+      afterEntityId: "evt_walk",
+      expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
+      expectedSource: "whoop",
+      now: new Date("2026-06-07T12:01:00.000Z"),
+    });
+
+    expect(advanced.advanced).toBe(true);
+    expect(advanced.record.schedule).toEqual({
+      kind: "deviceActivity",
+      after: "2026-06-07T12:00:00.000Z",
+      afterOccurredAt: "2026-06-07T11:30:00.000Z",
+      afterEntityId: "evt_walk",
+      activityKind: "walk",
+      source: "whoop",
+    });
+    expect(advanced.record.instructions).toBe(created.record.instructions);
+    expect(advanced.record.tags).toEqual(["device"]);
+
+    const stale = await advanceAutomationDeviceActivityCursor({
+      vaultRoot,
+      lookup: created.record.automationId,
+      after: "2026-06-07T11:30:00.000Z",
+      afterOccurredAt: "2026-06-07T11:15:00.000Z",
+      afterEntityId: "evt_older",
+      expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
+      expectedSource: "whoop",
+      now: new Date("2026-06-07T12:01:30.000Z"),
+    });
+
+    expect(stale.advanced).toBe(false);
+    expect(stale.record.schedule).toEqual(advanced.record.schedule);
+
+    const retargeted = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: {
+        kind: "deviceActivity",
+        after: "2026-06-07T12:00:00.000Z",
+        afterOccurredAt: "2026-06-07T11:30:00.000Z",
+        afterEntityId: "evt_walk",
+        activityKind: "run",
+        source: "whoop",
+      },
+      now: new Date("2026-06-07T12:02:00.000Z"),
+    });
+
+    const skipped = await advanceAutomationDeviceActivityCursor({
+      vaultRoot,
+      lookup: created.record.automationId,
+      after: "2026-06-07T13:00:00.000Z",
+      afterOccurredAt: "2026-06-07T12:30:00.000Z",
+      afterEntityId: "evt_run",
+      expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
+      expectedSource: "whoop",
+      now: new Date("2026-06-07T12:03:00.000Z"),
+    });
+
+    expect(skipped.advanced).toBe(false);
+    expect(skipped.record.schedule).toEqual(retargeted.record.schedule);
+  });
+
+  it("rejects partial device activity cursor shapes", async () => {
+    const vaultRoot = await makeVaultRoot();
+
+    await expect(
+      upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          schedule: {
+            kind: "deviceActivity",
+            after: "2026-06-07T11:00:00.000Z",
+            afterOccurredAt: "2026-06-07T10:30:00.000Z",
+          },
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_INPUT",
+    });
   });
 
   it("clears automation summary when null is provided explicitly", async () => {
