@@ -16,6 +16,7 @@ import {
   type CanonicalEntity,
   type VaultReadModel,
 } from '@murphai/query'
+import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   readAssistantDeviceActivityCronJobMetadata,
 } from '../src/assistant/device-activity-cron-tags.ts'
@@ -696,6 +697,76 @@ describe('device activity triggered automations', () => {
         vaultRoot,
       }),
     )
+  })
+
+  it('restores a replaced occurrence slot after a listener cursor patch failure', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_run_replace_rollback',
+        instructions: 'Report run progress.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_replace_rollback',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          title: 'Rollback slot run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:06:00.000Z',
+      scheduled: 1,
+    })
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const [queued] = await readQueuedCronJobs(vaultRoot)
+    if (!queued) {
+      throw new Error('Expected queued device activity occurrence.')
+    }
+    const staleJob = assistantCronJobSchema.parse({
+      ...queued,
+      enabled: false,
+      prompt: 'Stale preserved job.',
+      state: {
+        ...queued.state,
+        nextRunAt: null,
+        pendingDeliveryIntentId: null,
+        runningAt: null,
+        runningPid: null,
+      },
+      updatedAt: '2026-06-07T12:06:30.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [staleJob],
+    })
+
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockRejectedValueOnce(
+      new Error('cursor write failed after replace'),
+    )
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:07:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow('cursor write failed after replace')
+
+    await expect(readQueuedCronJobs(vaultRoot)).resolves.toEqual([staleJob])
   })
 
   it('rolls back a newly queued occurrence when the listener cursor refuses to advance', async () => {

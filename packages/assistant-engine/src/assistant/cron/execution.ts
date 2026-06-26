@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
-  listAutomations,
-  readAutomationByRelativePath,
   type AutomationQueryRecord,
 } from '@murphai/query'
 import {
@@ -44,9 +42,9 @@ import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
   buildAssistantDeviceActivityAuthorityKey,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
-  type AssistantDeviceActivityCronJobMetadata,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
+import { readAssistantDeviceActivityParentAutomation } from '../device-activity-parent-automation.js'
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
@@ -899,7 +897,7 @@ async function resolveDeviceActivityParentAuthorityError(input: {
     return null
   }
 
-  const parentAutomation = await readDeviceActivityParentAutomation({
+  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
     metadata,
     vault: input.vault,
   })
@@ -922,23 +920,6 @@ async function resolveDeviceActivityParentAuthorityError(input: {
   }) === metadata.authorityKey
     ? null
     : ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
-}
-
-async function readDeviceActivityParentAutomation(input: {
-  metadata: AssistantDeviceActivityCronJobMetadata
-  vault: string
-}): Promise<AutomationQueryRecord | null> {
-  if (input.metadata.parentAutomationRelativePath) {
-    const record = await readAutomationByRelativePath(
-      input.vault,
-      input.metadata.parentAutomationRelativePath,
-    )
-    return record?.automationId === input.metadata.parentAutomationId ? record : null
-  }
-
-  return (await listAutomations(input.vault, {
-    status: ['active', 'paused', 'archived'],
-  })).find((automation) => automation.automationId === input.metadata.parentAutomationId) ?? null
 }
 
 function assistantCronTargetMatchesAutomationRoute(

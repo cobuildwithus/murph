@@ -475,10 +475,16 @@ async function scheduleDeviceActivityAutomationNotification(input: {
       if (cursor) {
         return { status: 'queued', cursor }
       }
-      await removeAssistantCronJobFromStore(paths, jobId)
+      await rollbackAssistantCronJobQueueAttempt(paths, {
+        jobId,
+        previousJob: existing,
+      })
       return { status: 'notAdvanced' }
     } catch (error) {
-      await removeAssistantCronJobFromStore(paths, jobId)
+      await rollbackAssistantCronJobQueueAttempt(paths, {
+        jobId,
+        previousJob: existing,
+      })
       throw error
     }
   })
@@ -662,19 +668,34 @@ function withAdvancedDeviceActivityCursor(
   }
 }
 
-async function removeAssistantCronJobFromStore(
+async function rollbackAssistantCronJobQueueAttempt(
   paths: ReturnType<typeof resolveAssistantStatePaths>,
-  jobId: string,
+  input: {
+    jobId: string
+    previousJob: AssistantCronJob | null
+  },
 ): Promise<void> {
   const store = await readAssistantCronStore(paths)
-  const jobs = store.jobs.filter((job) => job.jobId !== jobId)
-  if (jobs.length === store.jobs.length) {
+  const existingIndex = store.jobs.findIndex((job) => job.jobId === input.jobId)
+  if (existingIndex === -1) {
+    if (!input.previousJob) {
+      return
+    }
+    await writeAssistantCronStore(paths, {
+      ...store,
+      jobs: sortAssistantCronJobs([...store.jobs, input.previousJob]),
+    })
     return
   }
 
+  if (input.previousJob) {
+    store.jobs[existingIndex] = input.previousJob
+  } else {
+    store.jobs.splice(existingIndex, 1)
+  }
   await writeAssistantCronStore(paths, {
     ...store,
-    jobs,
+    jobs: sortAssistantCronJobs(store.jobs),
   })
 }
 

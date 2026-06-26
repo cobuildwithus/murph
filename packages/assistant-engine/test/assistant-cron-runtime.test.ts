@@ -1158,9 +1158,6 @@ describe('assistant cron runtime orchestration', () => {
       vaultRoot,
       'bank/automations/device-activity-listener.md',
     )
-    expect(cronMocks.listCanonicalAutomations).not.toHaveBeenCalledWith(vaultRoot, {
-      status: ['active', 'paused', 'archived'],
-    })
     const runs = await listAssistantCronRuns({
       job: localJob.jobId,
       vault: vaultRoot,
@@ -1179,6 +1176,116 @@ describe('assistant cron runtime orchestration', () => {
         nextRunAt: null,
       }),
     })
+  })
+
+  it('uses automation id fallback when device activity parent listener path changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-renamed-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-renamed-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      relativePath: 'bank/automations/renamed-device-activity-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'renamed-device-activity-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Renamed device activity listener',
+      updatedAt: '2026-04-08T08:30:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener_renamed',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity listener',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345679',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-listener.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    cronMocks.listCanonicalAutomations.mockClear()
+    cronMocks.readAutomationByRelativePath.mockClear()
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-listener.md',
+    )
+    expect(cronMocks.listCanonicalAutomations).toHaveBeenCalledWith(vaultRoot, {
+      status: ['active', 'paused', 'archived'],
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: 'Ask about the imported run.',
+      }),
+    )
   })
 
   it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
@@ -1255,7 +1362,6 @@ describe('assistant cron runtime orchestration', () => {
       vaultRoot,
       'bank/automations/device-activity-listener.md',
     )
-    expect(cronMocks.listCanonicalAutomations).not.toHaveBeenCalled()
     expect(dispatched.intent.status).toBe('failed')
     expect(dispatched.deliveryError).toEqual(
       expect.objectContaining({

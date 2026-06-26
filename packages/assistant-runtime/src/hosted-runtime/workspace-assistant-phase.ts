@@ -2008,6 +2008,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
     return state;
   };
+  const invalidateAssistantCronWakeState = (): void => {
+    assistantCronWakeState = null;
+  };
   const hasPendingAssistantInputWakeOverride = Object.hasOwn(input, "pendingAssistantInputWakeAt");
   let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
     ? input.pendingAssistantInputWakeAt ?? null
@@ -2077,6 +2080,9 @@ async function runSystemMailboxMaintenancePhase(input: {
       wake: input.wake,
     })
     : null;
+  if (dirtyDeviceSyncMetrics && !dirtyDeviceSyncMetrics.deviceSyncSkipped) {
+    invalidateAssistantCronWakeState();
+  }
   if (!systemMailboxPreparation) {
     if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
       return {
@@ -2192,6 +2198,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const systemMailboxDeviceSyncRan =
     systemMailboxPreparationRanDeviceSync(systemMailboxPreparation);
+  if (systemMailboxDeviceSyncRan) {
+    invalidateAssistantCronWakeState();
+  }
   const deviceSyncMaintenanceRan =
     systemMailboxDeviceSyncRan
     || (dirtyDeviceSyncMetrics !== null && !dirtyDeviceSyncMetrics.deviceSyncSkipped);
