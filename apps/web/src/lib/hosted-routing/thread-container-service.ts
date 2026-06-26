@@ -21,6 +21,7 @@ import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
+  normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
   hasHostedMemberActiveAccess,
@@ -150,6 +151,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       "Hosted thread route requires a supported channel and non-empty thread id.",
     );
   }
+  await acquireHostedThreadContainerRouteWriteLockTx({
+    channel: input.channel,
+    prisma: input.prisma,
+    threadId: input.threadId,
+  });
 
   const requestedContainerMemberId =
     normalizeHostedThreadContainerMemberId(input.containerMemberId);
@@ -402,6 +408,24 @@ async function updateHostedThreadRouteAuthorityRowTx(input: {
 
     throw error;
   }
+}
+
+async function acquireHostedThreadContainerRouteWriteLockTx(input: {
+  channel: HostedThreadRouteChannel;
+  prisma: Prisma.TransactionClient;
+  threadId: string | number;
+}): Promise<void> {
+  const threadId = normalizeHostedOpaqueInput(input.threadId);
+  if (!threadId) {
+    throw new TypeError("Hosted thread route lock requires a non-empty thread id.");
+  }
+
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext(${"hosted-thread-container-route"}),
+      hashtext(${`${input.channel}:${threadId}`})
+    )
+  `;
 }
 
 function resolveHostedThreadContainerMemberChannels(

@@ -48,23 +48,21 @@ export async function executeHostedCodexAuthWake(input: {
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME);
   try {
     if (input.wake.action === "connect") {
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        details: {
-          eventCode: "assistant.codex_auth_connect_disabled",
-        },
-        level: "warn",
-        message: "Hosted Codex account connect is disabled until credentials have an isolated control-plane owner.",
-        phase: "wake.running",
+      await connectHostedCodexManagedAccount({
+        codexHome,
+        platform: input.platform,
+        runtimeEnv: input.runtimeEnv,
+        vaultRoot: input.vaultRoot,
         wake: input.wake,
-      });
-      await port.update({
-        attemptId: input.wake.attemptId,
-        phase: "failed",
       });
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+        postCheckpointRecord: {
+          attemptId: input.wake.attemptId,
+          kind: "codex-auth.updated",
+          phase: "connected",
+        },
       });
     }
 
@@ -89,6 +87,13 @@ export async function executeHostedCodexAuthWake(input: {
       throw error;
     }
 
+    if (input.wake.action === "connect") {
+      await removeHostedCodexAuthJsonBestEffort({
+        codexHome,
+        wake: input.wake,
+      });
+    }
+
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: {
@@ -108,6 +113,54 @@ export async function executeHostedCodexAuthWake(input: {
       conversationMetrics: null,
       mailboxLane: "runtime-control",
     });
+  }
+}
+
+async function removeHostedCodexAuthJsonBestEffort(input: {
+  codexHome: string;
+  wake: HostedExecutionCodexAuthRequestedWake;
+}): Promise<void> {
+  try {
+    await rm(path.join(input.codexHome, HOSTED_CODEX_AUTH_FILE_NAME), { force: true });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        eventCode: "assistant.codex_auth_connect_local_delete_failed",
+      },
+      error,
+      level: "warn",
+      message: "Hosted Codex account connect failed and local credential cleanup failed.",
+      phase: "wake.running",
+      wake: input.wake,
+    });
+  }
+}
+
+async function connectHostedCodexManagedAccount(input: {
+  codexHome: string;
+  platform: HostedRuntimePlatform;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+  wake: HostedExecutionCodexAuthRequestedWake;
+}): Promise<void> {
+  const result = await executeCodexManagedAccountOperation({
+    action: "connect",
+    codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+    codexHome: input.codexHome,
+    env: { ...input.runtimeEnv },
+    onDeviceCode: async ({ userCode, verificationUrl }) => {
+      await input.platform.codexAuthPort?.update({
+        attemptId: input.wake.attemptId,
+        phase: "device_code",
+        userCode,
+        verificationUrl,
+      });
+    },
+    workingDirectory: input.vaultRoot,
+  });
+  if (result.kind !== "connected") {
+    throw new Error("Hosted Codex account connect did not complete.");
   }
 }
 

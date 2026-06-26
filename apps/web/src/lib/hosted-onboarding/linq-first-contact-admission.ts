@@ -597,10 +597,10 @@ function buildHostedLinqFirstContactAdmissionUnavailableError(input: {
   return hostedOnboardingError({
     cause: input.cause,
     code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
-    details: {
-      operationName: "hosted_linq_first_contact_admission",
-      providerErrorCode: input.providerError?.code,
-      providerErrorType: input.providerError?.type,
+      details: {
+        operationName: "hosted_linq_first_contact_admission",
+        providerErrorCode: input.providerError?.code,
+        providerErrorType: input.providerError?.type,
       providerRequestIdPresent: input.providerError?.requestIdPresent,
       statusCode: input.httpStatus,
       type: input.failureCategory,

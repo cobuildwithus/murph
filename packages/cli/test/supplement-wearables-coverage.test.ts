@@ -34,6 +34,26 @@ function createCoverageCli() {
   return createCoverageCliAndServices().cli
 }
 
+function setHostedDataApiEnv(): () => void {
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  const previousDataApiKey = process.env.MURPH_DATA_API_KEY
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+  process.env.MURPH_DATA_API_KEY = 'signed-murph-data-api-credential'
+
+  return () => {
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
+    } else {
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
+    }
+    if (previousDataApiKey === undefined) {
+      delete process.env.MURPH_DATA_API_KEY
+    } else {
+      process.env.MURPH_DATA_API_KEY = previousDataApiKey
+    }
+  }
+}
+
 function createCoverageCliAndServices() {
   const cli = Cli.create('vault-cli', {
     description: 'supplement/wearables coverage cli',
@@ -285,9 +305,8 @@ test('supplement list handler exercises the default limit fallback directly', as
   assert.equal(listSpy.mock.calls[0]?.[0].limit, 50)
 })
 
-test('supplement search-labels calls the hosted data API without local credentials', async () => {
-  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
-  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+test('supplement search-labels calls the hosted data API with the hosted provider credential', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
     items: [
       {
@@ -333,19 +352,19 @@ test('supplement search-labels calls the hosted data API without local credentia
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/supplements?q=creatine&limit=1')
     const init = fetchMock.mock.calls[0]?.[1]
-    assert.equal(init?.headers && 'authorization' in init.headers, false)
+    assert.equal(
+      init?.headers instanceof Headers
+        ? init.headers.get('authorization')
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
+    )
   } finally {
-    if (previousHostedRuntimeProcess === undefined) {
-      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
-    } else {
-      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
-    }
+    restoreHostedDataApiEnv()
   }
 })
 
-test('supplement search-labels-batch calls the hosted data API without local credentials', async () => {
-  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
-  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+test('supplement search-labels-batch calls the hosted data API with the hosted provider credential', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
     results: [
       {
@@ -409,13 +428,14 @@ test('supplement search-labels-batch calls the hosted data API without local cre
       limit: 1,
       includeOffMarket: false,
     })
-    assert.equal(init?.headers && 'authorization' in init.headers, false)
+    assert.equal(
+      init?.headers instanceof Headers
+        ? init.headers.get('authorization')
+        : undefined,
+      'Bearer signed-murph-data-api-credential',
+    )
   } finally {
-    if (previousHostedRuntimeProcess === undefined) {
-      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
-    } else {
-      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
-    }
+    restoreHostedDataApiEnv()
   }
 })
 
