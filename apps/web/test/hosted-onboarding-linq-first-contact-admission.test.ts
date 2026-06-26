@@ -14,6 +14,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   classifyHostedLinqFirstContactAdmission,
+  claimHostedLinqFirstContactAdmissionBudget,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
   type HostedLinqFirstContactAdmissionRequest,
@@ -22,6 +23,7 @@ import {
 const BASE_REQUEST: HostedLinqFirstContactAdmissionRequest = {
   eventId: "evt_123",
   participantContactKind: "phone",
+  participantContactLookupKey: "blind:v1:test-contact",
   partTypes: ["text"],
   service: "imessage",
   text: "hi",
@@ -117,6 +119,10 @@ describe("Linq first-contact admission", () => {
         },
       },
     });
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).input[0].content;
+    expect(prompt).toContain("Goal: decide whether");
+    expect(prompt).toContain("If the text mentions Murph at all, return allow");
+    expect(prompt).toContain("Block only obvious marketing");
   });
 
   it("blocks low-confidence or non-allow categories from structured responses", async () => {
@@ -313,6 +319,55 @@ describe("Linq first-contact admission", () => {
       httpStatus: 503,
       retryable: true,
     });
+  });
+
+  it("admits first contacts when OpenAI reports exhausted credits", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "insufficient_quota",
+        message: "You exceeded your current quota, please check your plan and billing details.",
+        type: "insufficient_quota",
+      },
+    }), {
+      headers: {
+        "x-request-id": "req_credits",
+      },
+      status: 429,
+    })));
+
+    await expect(classifyHostedLinqFirstContactAdmission({
+      request: BASE_REQUEST,
+    })).resolves.toMatchObject({
+      category: "benign_greeting",
+      confidence: 1,
+      kind: "allow",
+      source: "deterministic",
+    });
+  });
+
+  it("does not spend another first-contact admission budget attempt for the same event replay", async () => {
+    const prisma = {
+      hostedLinqFirstContactAdmissionBudget: {
+        findUnique: vi.fn().mockResolvedValueOnce({
+          attemptCount: 3,
+          lastEventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_REQUEST.participantContactKind,
+          participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
+        }),
+        upsert: vi.fn(),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContactKind: BASE_REQUEST.participantContactKind,
+      participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
+      prisma,
+    })).resolves.toEqual({
+      attemptCount: 3,
+      kind: "claimed",
+    });
+    expect(prisma.hostedLinqFirstContactAdmissionBudget.upsert).not.toHaveBeenCalled();
   });
 
   it("returns the stored decision when a concurrent insert already won the event", async () => {

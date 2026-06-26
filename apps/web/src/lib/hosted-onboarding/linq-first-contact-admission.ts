@@ -9,6 +9,7 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE = 0.6;
+export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES = [
   "benign_greeting",
@@ -42,6 +43,7 @@ export type HostedLinqFirstContactAdmissionDecision = {
 export type HostedLinqFirstContactAdmissionRequest = {
   eventId: string;
   participantContactKind: "email" | "phone";
+  participantContactLookupKey: string;
   partTypes: readonly string[];
   service: "imessage" | "rcs" | "sms" | "unknown";
   text: string | null;
@@ -73,6 +75,51 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
     }): Promise<HostedLinqFirstContactAdmissionDecisionRecord | null>;
   };
 };
+
+type HostedLinqFirstContactAdmissionBudgetRecord = {
+  attemptCount: number;
+  lastEventId: string;
+  participantContactKind: string;
+  participantContactLookupKey: string;
+};
+
+type HostedLinqFirstContactAdmissionBudgetStore = {
+  hostedLinqFirstContactAdmissionBudget: {
+    findUnique(input: {
+      where: {
+        participantContactLookupKey: string;
+      };
+    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
+    upsert(input: {
+      create: {
+        attemptCount: number;
+        lastEventId: string;
+        participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
+        participantContactLookupKey: string;
+      };
+      update: {
+        attemptCount: {
+          increment: number;
+        };
+        lastEventId: string;
+        participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
+      };
+      where: {
+        participantContactLookupKey: string;
+      };
+    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord>;
+  };
+};
+
+export type HostedLinqFirstContactAdmissionBudgetClaim =
+  | {
+      attemptCount: number;
+      kind: "claimed";
+    }
+  | {
+      attemptCount: number;
+      kind: "exhausted";
+    };
 
 type HostedLinqFirstContactAdmissionModelResult = {
   category: HostedLinqFirstContactAdmissionCategory;
@@ -134,6 +181,22 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
 
   if (!response.ok) {
     const providerError = await readHostedLinqFirstContactAdmissionProviderError(response);
+    if (isHostedLinqFirstContactAdmissionQuotaExhausted({
+      providerError,
+      status: response.status,
+    })) {
+      const decision = buildHostedLinqFirstContactAdmissionAllow({
+        category: "benign_greeting",
+        confidence: 1,
+        source: "deterministic",
+      });
+      logHostedLinqFirstContactAdmissionDecision(input.request, {
+        ...decision,
+        model: environment.linqFirstContactAdmissionModel,
+      });
+      return decision;
+    }
+
     throw buildHostedLinqFirstContactAdmissionUnavailableError({
       cause: providerError.message
         ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -234,6 +297,62 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   }
 }
 
+export async function claimHostedLinqFirstContactAdmissionBudget(input: {
+  eventId: string;
+  participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
+  participantContactLookupKey: string;
+  prisma: HostedLinqFirstContactAdmissionBudgetStore;
+}): Promise<HostedLinqFirstContactAdmissionBudgetClaim> {
+  const existing = await input.prisma.hostedLinqFirstContactAdmissionBudget.findUnique({
+    where: {
+      participantContactLookupKey: input.participantContactLookupKey,
+    },
+  });
+
+  if (existing?.lastEventId === input.eventId) {
+    return {
+      attemptCount: existing.attemptCount,
+      kind: "claimed",
+    };
+  }
+
+  if (existing && existing.attemptCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
+    return {
+      attemptCount: existing.attemptCount,
+      kind: "exhausted",
+    };
+  }
+
+  const claimed = await input.prisma.hostedLinqFirstContactAdmissionBudget.upsert({
+    create: {
+      attemptCount: 1,
+      lastEventId: input.eventId,
+      participantContactKind: input.participantContactKind,
+      participantContactLookupKey: input.participantContactLookupKey,
+    },
+    update: {
+      attemptCount: {
+        increment: 1,
+      },
+      lastEventId: input.eventId,
+      participantContactKind: input.participantContactKind,
+    },
+    where: {
+      participantContactLookupKey: input.participantContactLookupKey,
+    },
+  });
+
+  return claimed.attemptCount > HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS
+    ? {
+        attemptCount: claimed.attemptCount,
+        kind: "exhausted",
+      }
+    : {
+        attemptCount: claimed.attemptCount,
+        kind: "claimed",
+      };
+}
+
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
   model: string;
   request: HostedLinqFirstContactAdmissionRequest;
@@ -242,10 +361,11 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
     input: [
       {
         content: [
-          "Classify the first inbound iMessage, SMS, or RCS message from an unknown sender to Murph, a personal health assistant.",
-          "Return allow only when the message plausibly comes from a human intentionally trying to contact Murph, start using Murph, ask about Murph, or send a benign short greeting like hi, hey, or hello.",
-          "Return block for messages addressed to another person, personal logistics, wrong-number bait, marketing, sales, recruiting, SEO, lead-generation outreach, promotional campaigns, referral or coupon blasts, opt-out boilerplate, media-only messages, unsupported content, or anything ambiguous.",
-          "When uncertain, block. Do not reward messages for being conversational if they are not plausibly for Murph.",
+          "Goal: decide whether this first inbound iMessage, SMS, or RCS message from an unknown sender should be admitted so Murph, a personal health assistant, can reply.",
+          "Allow real human messages that are plausibly for Murph: short greetings, start/use/join intent, questions about Murph, and health/wellness/life questions intended for Murph.",
+          "If the text mentions Murph at all, return allow unless it is clearly spam, promotional, media-only/unsupported, or addressed to someone else in a way that makes it unrelated.",
+          "Block only obvious marketing, sales, recruiting, SEO, lead-generation, promotional or coupon blasts, wrong-person personal logistics, media-only/unsupported content, or messages with no plausible relationship to Murph.",
+          "When the message does not mention Murph and the intended recipient or purpose is ambiguous, block.",
         ].join("\n"),
         role: "system",
       },
@@ -301,12 +421,11 @@ function normalizeHostedLinqFirstContactAdmissionModelDecision(
     && HOSTED_LINQ_FIRST_CONTACT_ADMISSION_ALLOW_CATEGORIES.has(result.category)
     && result.confidence >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE
   ) {
-    return {
+    return buildHostedLinqFirstContactAdmissionAllow({
       category: result.category,
       confidence: result.confidence,
-      kind: "allow",
       source: "model",
-    };
+    });
   }
 
   return buildHostedLinqFirstContactAdmissionBlock({
@@ -316,6 +435,19 @@ function normalizeHostedLinqFirstContactAdmissionModelDecision(
     confidence: result.confidence,
     source: "model",
   });
+}
+
+function buildHostedLinqFirstContactAdmissionAllow(input: {
+  category: HostedLinqFirstContactAdmissionCategory;
+  confidence: number;
+  source: HostedLinqFirstContactAdmissionDecision["source"];
+}): HostedLinqFirstContactAdmissionDecision {
+  return {
+    category: input.category,
+    confidence: clampHostedLinqFirstContactAdmissionConfidence(input.confidence),
+    kind: "allow",
+    source: input.source,
+  };
 }
 
 function buildHostedLinqFirstContactAdmissionBlock(input: {
@@ -582,6 +714,35 @@ async function readHostedLinqFirstContactAdmissionProviderError(
 function readBoundedProviderErrorString(value: unknown): string | undefined {
   const text = readString(value);
   return text ? text.slice(0, 240) : undefined;
+}
+
+function isHostedLinqFirstContactAdmissionQuotaExhausted(input: {
+  providerError: {
+    code?: string;
+    message?: string;
+    type?: string;
+  };
+  status: number;
+}): boolean {
+  if (input.status !== 429) {
+    return false;
+  }
+
+  const code = input.providerError.code?.toLowerCase();
+  const type = input.providerError.type?.toLowerCase();
+  const message = input.providerError.message?.toLowerCase() ?? "";
+  return code === "insufficient_quota"
+    || code === "billing_hard_limit_reached"
+    || type === "insufficient_quota"
+    || type === "billing_hard_limit_reached"
+    || (
+      message.includes("exceeded your current quota")
+      && message.includes("billing")
+    )
+    || message.includes("insufficient quota")
+    || message.includes("billing hard limit")
+    || message.includes("out of credits")
+    || message.includes("credit balance");
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {

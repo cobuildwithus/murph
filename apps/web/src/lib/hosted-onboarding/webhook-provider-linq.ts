@@ -517,6 +517,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         request: buildHostedLinqFirstContactAdmissionRequest({
           context,
           event: input.event,
+          participantContact,
         }),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -965,10 +966,12 @@ function buildFirstContactAdmissionRequiredPlan(input: {
 function buildHostedLinqFirstContactAdmissionRequest(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  participantContact: HostedLinqParticipantContact;
 }): HostedLinqFirstContactAdmissionRequest {
   return {
     eventId: input.event.event_id,
-    participantContactKind: input.context.participantContact?.kind ?? "phone",
+    participantContactKind: input.participantContact.kind,
+    participantContactLookupKey: input.participantContact.lookupKey,
     partTypes: buildHostedLinqFirstContactAdmissionPartTypes(input.context.messageEvent.data.message.parts),
     service: normalizeHostedLinqFirstContactAdmissionService(input.context.messageEvent.data.service),
     text: buildHostedLinqFirstContactAdmissionText(input.context.messageEvent.data.message.parts),
