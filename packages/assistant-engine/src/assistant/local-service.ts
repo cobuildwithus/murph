@@ -482,6 +482,11 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
           initialAcceptedInputJournal.inputs
+        const refreshTypingIndicatorAfterProgress = () => {
+          void runAssistantTurnBestEffort(async () => {
+            await typingIndicator?.refreshNow?.()
+          })
+        }
         const progressDelivery =
           shouldCreateAssistantProgressDelivery(input) &&
           hostedOptionalProgressDeliveryAvailable
@@ -508,12 +513,14 @@ export async function sendAssistantMessageLocal(
                     ...progressInput,
                     dependencies,
                   })
+                  refreshTypingIndicatorAfterProgress()
                   return
                 }
 
                 await deliverAssistantProgressUpdate({
                   ...progressInput,
                 })
+                refreshTypingIndicatorAfterProgress()
               },
               getDeliveryContext: () => ({
                 messageInput: currentInput,
