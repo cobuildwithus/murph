@@ -335,6 +335,127 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('suppresses stale safety context when health_context is pending dirty', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+
+    try {
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.regimenFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.regimen,
+          regimenId: generateContractId(ID_PREFIXES.regimen),
+          slug: 'pregabalin',
+          title: 'Pregabalin',
+          kind: 'medication',
+          status: 'active',
+          startedOn: '2026-06-01',
+          substance: 'pregabalin',
+          dose: 75,
+          unit: 'mg',
+          schedule: 'nightly',
+        },
+        relativePath: `${VAULT_LAYOUT.regimensDirectory}/pregabalin.md`,
+        vaultRoot,
+      })
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })
+
+      const initialPrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(initialPrompt).toContain('Active medication regimens:')
+      expect(initialPrompt).toContain('Pregabalin')
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+
+      await expect(readAssistantContextSnapshotPrompt({ vaultRoot }))
+        .resolves.toBeNull()
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('does not surface inactive conditions through active allergy or active regimen related-condition lookups', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+    const resolvedConditionId = generateContractId(ID_PREFIXES.condition)
+
+    try {
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.conditionFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.condition,
+          conditionId: resolvedConditionId,
+          slug: 'resolved-infection',
+          title: 'Resolved infection',
+          clinicalStatus: 'resolved',
+          verificationStatus: 'confirmed',
+          assertedOn: '2024-01-01',
+          resolvedOn: '2024-03-01',
+        },
+        relativePath: `${VAULT_LAYOUT.conditionsDirectory}/resolved-infection.md`,
+        vaultRoot,
+      })
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.allergyFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.allergy,
+          allergyId: generateContractId(ID_PREFIXES.allergy),
+          slug: 'amoxicillin-allergy',
+          title: 'Amoxicillin allergy',
+          substance: 'Amoxicillin',
+          status: 'active',
+          criticality: 'high',
+          relatedConditionIds: [resolvedConditionId],
+        },
+        relativePath: `${VAULT_LAYOUT.allergiesDirectory}/amoxicillin-allergy.md`,
+        vaultRoot,
+      })
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.regimenFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.regimen,
+          regimenId: generateContractId(ID_PREFIXES.regimen),
+          slug: 'vitamin-d',
+          title: 'Vitamin D',
+          kind: 'supplement',
+          status: 'active',
+          startedOn: '2026-06-01',
+          relatedConditionIds: [resolvedConditionId],
+        },
+        relativePath: `${VAULT_LAYOUT.regimensDirectory}/vitamin-d.md`,
+        vaultRoot,
+      })
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })
+
+      const promptText = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+
+      expect(promptText).toContain('Active allergies:')
+      expect(promptText).toContain('Amoxicillin allergy')
+      expect(promptText).toContain('Active supplement regimens:')
+      expect(promptText).toContain('Vitamin D')
+      expect(promptText).not.toContain('Resolved infection')
+      expect(promptText).not.toContain('Active conditions:')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
   it('self-heals corrupt snapshots while oversized prompt reads return null', async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
     const vaultRoot = path.join(parentRoot, 'vault')

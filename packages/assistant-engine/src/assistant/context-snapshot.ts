@@ -121,6 +121,9 @@ export async function readAssistantContextSnapshotPrompt(input: {
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
+  if (state?.pendingDirtyDomains.includes('health_context')) {
+    return null
+  }
   return normalizeNullableString(state?.lastCompleted?.promptBlock)
 }
 
@@ -442,12 +445,6 @@ async function buildAssistantSnapshotCoverage(input: {
     VAULT_LAYOUT.regimensDirectory,
     regimenFrontmatterSchema,
   )
-  const conditionsById = new Map<string, PromptLookupRecord>(
-    conditions.map((condition): [string, PromptLookupRecord] => [
-      condition.conditionId,
-      condition,
-    ]),
-  )
   const activeRegimens = regimens.filter(isActiveRegimen)
   const activeRegimensById = new Map<string, PromptLookupRecord>(
     activeRegimens.map((regimen): [string, PromptLookupRecord] => [
@@ -458,6 +455,12 @@ async function buildAssistantSnapshotCoverage(input: {
   const activeConditions = conditions
     .filter(isActiveCondition)
     .sort(compareActiveConditions)
+  const activeConditionsById = new Map<string, PromptLookupRecord>(
+    activeConditions.map((condition): [string, PromptLookupRecord] => [
+      condition.conditionId,
+      condition,
+    ]),
+  )
   const visibleActiveConditions = activeConditions.slice(
     0,
     MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS,
@@ -521,7 +524,7 @@ async function buildAssistantSnapshotCoverage(input: {
     activeAllergyCount: activeAllergies.length,
     activeAllergiesLine: renderActiveAllergiesLine({
       allergies: visibleActiveAllergies,
-      conditionsById,
+      conditionsById: activeConditionsById,
       totalCount: activeAllergies.length,
     }),
     activeConditionCount: activeConditions.length,
@@ -543,8 +546,8 @@ async function buildAssistantSnapshotCoverage(input: {
     ),
     activeMedicationRegimenCount: activeMedicationRegimens.length,
     activeMedicationRegimensLine: renderActiveSafetyRegimensLine({
-      conditions,
-      conditionsById,
+      conditions: activeConditions,
+      conditionsById: activeConditionsById,
       label: 'Active medication regimens',
       omittedNoun: 'medication regimen',
       regimens: visibleActiveMedicationRegimens,
@@ -559,8 +562,8 @@ async function buildAssistantSnapshotCoverage(input: {
       : null,
     activeSupplementRegimenCount: activeSupplementRegimens.length,
     activeSupplementRegimensLine: renderActiveSafetyRegimensLine({
-      conditions,
-      conditionsById,
+      conditions: activeConditions,
+      conditionsById: activeConditionsById,
       label: 'Active supplement regimens',
       omittedNoun: 'supplement regimen',
       regimens: visibleActiveSupplementRegimens,
