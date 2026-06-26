@@ -1759,6 +1759,11 @@ function hasStableLegacyOccurrenceProof(
   incoming: EventRecord,
   legacyExternalRef: ExternalRef,
 ): boolean {
+  if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
+    return existing.record.recordedAt === incoming.recordedAt &&
+      isSameObservationValue(existing.record, incoming);
+  }
+
   if (existing.indexedRecord.occurredAt === incoming.occurredAt || existing.record.occurredAt === incoming.occurredAt) {
     const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
     if (existingDataOrigin || incoming.dataOrigin) {
@@ -1766,13 +1771,6 @@ function hasStableLegacyOccurrenceProof(
         isSameObservationValue(existing.record, incoming);
     }
 
-    return isSameObservationValue(existing.record, incoming);
-  }
-
-  if (
-    isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming) &&
-    existing.record.recordedAt === incoming.recordedAt
-  ) {
     return isSameObservationValue(existing.record, incoming);
   }
 
@@ -1797,12 +1795,14 @@ function isCompatibleLegacyExternalRefMatch(
     return false;
   }
 
-  if (existing.record.dayKey === incoming.dayKey) {
-    return true;
+  if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
+    return isSameObservationFacet(existing.record, incoming) &&
+      hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
   }
 
-  return isSameObservationFacet(existing.record, incoming) &&
-    hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
+  return existing.record.dayKey === incoming.dayKey ||
+    (isSameObservationFacet(existing.record, incoming) &&
+      hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef));
 }
 
 function selectLatestIndexedEventExternalRefMatch(

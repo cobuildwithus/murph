@@ -4,6 +4,7 @@ import {
   extractIsoDatePrefix,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
+  toLocalDayKey,
   type MealMicronutrientKey,
   type MealMicronutrients,
   type MealNutrition,
@@ -87,7 +88,11 @@ import type {
   DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import type {
+  DeviceProviderAdapter,
+  DeviceProviderNormalizationContext,
+  NormalizedDeviceBatch,
+} from "./types.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export {
@@ -132,6 +137,7 @@ interface ResourceContext {
 }
 
 interface NormalizationContext {
+  defaultTimeZone?: string;
   importedAt?: string;
   windowStart?: string;
   windowEnd?: string;
@@ -649,7 +655,10 @@ function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
 }
 
-export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): NormalizedDeviceBatch {
+export function normalizeJunctionSnapshot(
+  snapshot: JunctionSnapshotInput,
+  providerContext: DeviceProviderNormalizationContext = {},
+): NormalizedDeviceBatch {
   const importedAt = normalizeTimestamp(snapshot.importedAt);
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
@@ -661,6 +670,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     return normalized ? [normalized] : [];
   });
   const context: NormalizationContext = {
+    defaultTimeZone: providerContext.defaultTimeZone,
     importedAt,
     windowStart,
     windowEnd,
@@ -1100,8 +1110,8 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
-    const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+    const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
     const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
     if (value === undefined || !sampleAt || !dayKey) {
@@ -1380,7 +1390,7 @@ function pushJunctionBloodPressureReadings(
     const diastolic = normalizeDiastolicMmHg(firstNumberFromPaths(entry, JUNCTION_BLOOD_PRESSURE_DIASTOLIC_PATHS));
     const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
     const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt);
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt, context.defaultTimeZone);
 
     if (systolic === undefined || diastolic === undefined || systolic <= diastolic || !occurredAt || !dayKey) {
       continue;
@@ -3666,6 +3676,7 @@ function resolveJunctionTimeseriesAggregateDayKey(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   sampleAt: string | undefined,
+  defaultTimeZone: string | undefined,
 ): string | undefined {
   if (timestamp.timestampSemantics === "offset") {
     return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
@@ -3686,7 +3697,32 @@ function resolveJunctionTimeseriesAggregateDayKey(
     }
   }
 
-  return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+  const vaultDayKey = sampleAt
+    ? resolveVaultLocalDayKey(sampleAt, defaultTimeZone)
+    : undefined;
+  return timestamp.dayKey ?? vaultDayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+function resolveJunctionDailyAggregateSampleAt(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  return timestamp.occurredAt ?? timestamp.recordedAt ?? (
+    timestamp.timestampSemantics === "floating" && timestamp.dayKey
+      ? `${timestamp.dayKey}T00:00:00.000Z`
+      : undefined
+  );
+}
+
+function resolveVaultLocalDayKey(timestamp: string, defaultTimeZone: string | undefined): string | undefined {
+  if (!defaultTimeZone) {
+    return undefined;
+  }
+
+  try {
+    return toLocalDayKey(timestamp, defaultTimeZone);
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveLegacyJunctionTimeseriesAggregateDayKey(

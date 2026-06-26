@@ -3795,6 +3795,77 @@ test("importDeviceBatch does not claim cross-day legacy refs when observation va
   assert.equal(liveStressIds.size, 2);
 });
 
+test("importDeviceBatch does not claim unscoped WHOOP body legacy refs across accounts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-whoop-body-account-legacy-collision");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "whoop",
+    resourceType: "body-measurement",
+    resourceId: "date:2026-06-24",
+    facet: "weight",
+  };
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-account-a",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-24T00:00:00.000Z",
+      recordedAt: "2026-06-25T12:00:00.000Z",
+      dayKey: "2026-06-24",
+      title: "WHOOP weight",
+      externalRef: legacyExternalRef,
+      fields: {
+        metric: "weight",
+        observationGrain: "summary",
+        value: 80,
+        unit: "kg",
+      },
+    }],
+  });
+  const second = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-account-b",
+    importedAt: "2026-06-25T12:30:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-06-24T00:00:00.000Z",
+      recordedAt: "2026-06-25T12:30:00.000Z",
+      dayKey: "2026-06-24",
+      title: "WHOOP weight",
+      externalRef: {
+        ...legacyExternalRef,
+        resourceId: "account:bbbbbbbbbbbbbbbb/date:2026-06-24",
+      },
+      legacyExternalRefs: [legacyExternalRef],
+      fields: {
+        metric: "weight",
+        observationGrain: "summary",
+        value: 70,
+        unit: "kg",
+      },
+    }],
+  });
+  const records = (
+    await Promise.all(
+      [...new Set([...first.eventShardPaths, ...second.eventShardPaths])].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )
+  ).flat() as EventRecord[];
+  const liveWeightIds = new Set(
+    records
+      .filter((record) => record.kind === "observation" && record.metric === "weight")
+      .map((record) => record.id),
+  );
+
+  assert.notEqual(second.events[0]?.id, first.events[0]?.id);
+  assert.equal(liveWeightIds.size, 2);
+});
+
 test("importDeviceBatch repairs proven legacy refs after no-externalRef edits move shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-cross-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

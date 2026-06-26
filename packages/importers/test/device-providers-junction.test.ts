@@ -2659,6 +2659,39 @@ test("Junction normalizer compacts HRV timeseries into daily average facts", () 
   assert.equal(dayTwo?.fields?.value, 61);
 });
 
+test("Junction normalizer uses vault timezone for UTC-only daily aggregate days", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-06-25T12:00:00.000Z",
+      timeseries: {
+        hrv: {
+          groups: {
+            whoop: [{
+              data: [
+                { timestamp: "2026-06-25T02:30:00.000Z", value: 70 },
+              ],
+              source: { provider: "whoop", type: "wearable" },
+            }],
+          },
+        },
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+
+  const hrvEvent = payload.events?.find((event) => event.fields?.metric === "hrv");
+  const artifact = findJunctionCompactTimeseriesArtifacts(payload, "hrv")[0]?.content as
+    | Record<string, unknown>
+    | undefined;
+
+  assert.equal(hrvEvent?.occurredAt, "2026-06-25T02:30:00.000Z");
+  assert.equal(hrvEvent?.dayKey, "2026-06-24");
+  assert.equal(hrvEvent?.dataOrigin?.observedAtRaw, "2026-06-24:hrv:daily");
+  assert.equal(hrvEvent?.legacyExternalRefs?.length, 1);
+  assert.notEqual(hrvEvent?.legacyExternalRefs?.[0]?.resourceId, hrvEvent?.externalRef?.resourceId);
+  assert.deepEqual(artifact?.legacyDayKeys, ["2026-06-25"]);
+});
+
 test("Junction normalizer compacts VO2 max interval timeseries into daily facts", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -3380,7 +3413,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
-test("Junction importer drops floating-timestamp glucose records without retaining raw samples", async () => {
+test("Junction importer compacts floating-timestamp glucose records without retaining raw samples", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     sourceKind: "poll",
@@ -3393,14 +3426,14 @@ test("Junction importer drops floating-timestamp glucose records without retaini
       timeseries: {
         glucose: [
           {
-            sourceProviderSlug: "freestyle_libre",
+            sourceProviderSlug: "abbott_libreview",
             timestamp: "2023-09-27T07:48:00+00:00",
-            value: 101,
+            value: 5.5,
           },
           {
             sourceProviderSlug: "abbott_libreview",
-            timestamp: "2023-09-27T07:48:00+00:00",
-            value: 102,
+            timestamp: "2023-09-27T08:03:00+00:00",
+            value: 6.5,
           },
         ],
       },
@@ -3408,20 +3441,25 @@ test("Junction importer drops floating-timestamp glucose records without retaini
   });
 
   const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
-  const glucoseArtifact = payload.evidenceParts?.find((artifact) =>
-    artifact.role === "junction-timeseries-glucose"
-  );
+  const glucoseEvents = payload.events?.filter((event) =>
+    event.kind === "observation" &&
+    ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields?.metric))
+  ) ?? [];
+  const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
-  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(glucoseEvents.length, 3);
+  assert.equal(mean?.occurredAt, "2023-09-27T00:00:00.000Z");
+  assert.equal(mean?.dayKey, "2023-09-27");
+  assert.equal(mean?.fields?.value, 108.1092);
+  assert.equal(mean?.dataOrigin?.timestampSemantics, "floating");
   assert.equal(glucoseSamples.length, 0);
-  assert.equal(glucoseArtifact, undefined);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assert.equal(
     payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-daily-glucose:no-valid-samples"),
-    true,
+    false,
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"value":101|"value":102/u);
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
