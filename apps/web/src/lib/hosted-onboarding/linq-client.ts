@@ -9,6 +9,25 @@ import { hostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
+export type HostedLinqReputationStatus = "AT_RISK" | "CRITICAL" | "HEALTHY";
+
+export type HostedLinqPhoneNumber = {
+  healthStatusDocUrl: string | null;
+  healthStatusStatus: HostedLinqReputationStatus | null;
+  id: string | null;
+  phoneNumber: string;
+  reputationDocUrl: string | null;
+  reputationStatus: HostedLinqReputationStatus;
+};
+
+export type HostedLinqContactCard = {
+  firstName: string;
+  imageUrl: string | null;
+  isActive: boolean;
+  lastName: string | null;
+  phoneNumber: string;
+};
+
 export type HostedLinqWebhookSubscription = {
   createdAt: string | null;
   id: string | null;
@@ -24,6 +43,155 @@ export type HostedLinqSendResult = {
   chatId: string | null;
   messageId: string | null;
 };
+
+type LinqPhoneNumbersResponse = {
+  phone_numbers?: Array<{
+    health_status?: {
+      doc_url?: string | null;
+      status?: string | null;
+    } | null;
+    id?: string | null;
+    phone_number?: string | null;
+    reputation?: {
+      doc_url?: string | null;
+      status?: string | null;
+    } | null;
+  }> | null;
+};
+
+type LinqContactCardResponse = {
+  first_name?: string | null;
+  image_url?: string | null;
+  is_active?: boolean | null;
+  last_name?: string | null;
+  phone_number?: string | null;
+};
+
+type LinqContactCardsResponse = {
+  contact_cards?: LinqContactCardResponse[] | null;
+};
+
+export async function listHostedLinqPhoneNumbers(input: {
+  signal?: AbortSignal;
+} = {}): Promise<HostedLinqPhoneNumber[]> {
+  const response = await fetchHostedLinqApiOrThrow({
+    method: "GET",
+    operation: "phone number list",
+    path: "phone_numbers",
+    signal: input.signal,
+    timeoutMessage: "Linq phone number list timed out.",
+  });
+
+  assertHostedLinqResponseOk(response, "phone number list");
+
+  const payload = await readHostedLinqOptionalJsonResponse<LinqPhoneNumbersResponse>(response);
+  return (payload?.phone_numbers ?? [])
+    .map(normalizeHostedLinqPhoneNumber)
+    .filter((value): value is HostedLinqPhoneNumber => value !== null);
+}
+
+export async function listHostedLinqContactCards(input: {
+  signal?: AbortSignal;
+} = {}): Promise<HostedLinqContactCard[]> {
+  const response = await fetchHostedLinqApiOrThrow({
+    method: "GET",
+    operation: "contact card list",
+    path: "contact_card",
+    signal: input.signal,
+    timeoutMessage: "Linq contact card list timed out.",
+  });
+
+  assertHostedLinqResponseOk(response, "contact card list");
+
+  const payload = await readHostedLinqOptionalJsonResponse<LinqContactCardsResponse>(response);
+  return (payload?.contact_cards ?? [])
+    .map(normalizeHostedLinqContactCard)
+    .filter((value): value is HostedLinqContactCard => value !== null);
+}
+
+export async function setupHostedLinqContactCard(input: {
+  firstName: string;
+  imageUrl?: string | null;
+  lastName?: string | null;
+  phoneNumber: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqContactCard> {
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(buildHostedLinqContactCardBody(input)),
+    method: "POST",
+    operation: "contact card setup",
+    path: "contact_card",
+    signal: input.signal,
+    timeoutMessage: "Linq contact card setup timed out.",
+  });
+
+  assertHostedLinqResponseOk(response, "contact card setup");
+
+  const payload = await readHostedLinqOptionalJsonResponse<LinqContactCardResponse>(response);
+  const card = normalizeHostedLinqContactCard(payload);
+  if (!card) {
+    throw hostedOnboardingError({
+      code: "LINQ_CONTACT_CARD_RESPONSE_INVALID",
+      message: "Linq contact card setup returned an invalid response.",
+      httpStatus: 502,
+      retryable: true,
+    });
+  }
+
+  return card;
+}
+
+export async function updateHostedLinqContactCard(input: {
+  firstName?: string | null;
+  imageUrl?: string | null;
+  lastName?: string | null;
+  phoneNumber: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqContactCard> {
+  const phoneNumber = normalizeRequiredString(input.phoneNumber, "phone number");
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(buildHostedLinqContactCardBody({
+      firstName: input.firstName,
+      imageUrl: input.imageUrl,
+      lastName: input.lastName,
+    })),
+    method: "PATCH",
+    operation: "contact card update",
+    path: `contact_card?phone_number=${encodeURIComponent(phoneNumber)}`,
+    signal: input.signal,
+    timeoutMessage: "Linq contact card update timed out.",
+  });
+
+  assertHostedLinqResponseOk(response, "contact card update");
+
+  const payload = await readHostedLinqOptionalJsonResponse<LinqContactCardResponse>(response);
+  const card = normalizeHostedLinqContactCard(payload);
+  if (!card) {
+    throw hostedOnboardingError({
+      code: "LINQ_CONTACT_CARD_RESPONSE_INVALID",
+      message: "Linq contact card update returned an invalid response.",
+      httpStatus: 502,
+      retryable: true,
+    });
+  }
+
+  return card;
+}
+
+export async function shareHostedLinqContactCard(input: {
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const response = await fetchHostedLinqApiOrThrow({
+    method: "POST",
+    operation: "contact card share",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/share_contact_card`,
+    signal: input.signal,
+    timeoutMessage: "Linq contact card share timed out.",
+  });
+
+  assertHostedLinqResponseOk(response, "contact card share");
+}
 
 export async function sendHostedLinqChatMessage(input: {
   chatId: string;
@@ -47,13 +215,7 @@ export async function sendHostedLinqChatMessage(input: {
     timeoutMessage: "Linq outbound reply timed out.",
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "outbound reply",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
+  assertHostedLinqResponseOk(response, "outbound reply");
 
   const payload = await readHostedLinqOptionalJsonResponse<LinqSendMessageResponse>(response);
   return {
@@ -135,13 +297,7 @@ export async function createHostedLinqChat(input: {
     timeoutMessage: "Linq outbound chat creation timed out.",
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "outbound chat creation",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
+  assertHostedLinqResponseOk(response, "outbound chat creation");
 
   const payload = (await response.json()) as LinqCreateChatResponse;
   return {
@@ -173,13 +329,7 @@ export async function createHostedLinqWebhookSubscription(input: {
     timeoutMessage: "Linq webhook subscription creation timed out.",
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "webhook subscription creation",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
+  assertHostedLinqResponseOk(response, "webhook subscription creation");
 
   const payload = (await response.json()) as LinqCreateWebhookSubscriptionResponse;
   return {
@@ -195,7 +345,7 @@ export async function createHostedLinqWebhookSubscription(input: {
 }
 
 async function fetchHostedLinqApiOrThrow(input: {
-  body: string;
+  body?: string;
   method: string;
   operation: string;
   path: string;
@@ -208,7 +358,7 @@ async function fetchHostedLinqApiOrThrow(input: {
     return await fetchLinqApi({
       apiBaseUrl,
       apiToken,
-      body: input.body,
+      ...(input.body === undefined ? {} : { body: input.body }),
       method: input.method,
       path: input.path,
       signal: input.signal,
@@ -225,6 +375,18 @@ async function fetchHostedLinqApiOrThrow(input: {
 
     throw error;
   }
+}
+
+function assertHostedLinqResponseOk(response: Response, operation: string): void {
+  if (response.ok) {
+    return;
+  }
+
+  throw buildHostedLinqRequestFailedError({
+    operation,
+    retryable: isRetryableHostedLinqStatus(response.status),
+    status: response.status,
+  });
 }
 
 function buildHostedLinqRequestFailedError(input: {
@@ -265,6 +427,95 @@ function normalizeRequiredString(value: unknown, label: string): string {
 
 function isRetryableHostedLinqStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+function buildHostedLinqContactCardBody(input: {
+  firstName?: string | null;
+  imageUrl?: string | null;
+  lastName?: string | null;
+  phoneNumber?: string | null;
+}): Record<string, string> {
+  const firstName = normalizeNullableString(input.firstName);
+  const lastName = normalizeNullableString(input.lastName);
+  const imageUrl = normalizeNullableString(input.imageUrl);
+  const phoneNumber = normalizeNullableString(input.phoneNumber);
+
+  return {
+    ...(firstName ? { first_name: firstName } : {}),
+    ...(imageUrl ? { image_url: imageUrl } : {}),
+    ...(lastName ? { last_name: lastName } : {}),
+    ...(phoneNumber ? { phone_number: phoneNumber } : {}),
+  };
+}
+
+function normalizeHostedLinqPhoneNumber(value: unknown): HostedLinqPhoneNumber | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const phoneNumber = normalizeNullableString(record.phone_number);
+  if (!phoneNumber) {
+    return null;
+  }
+
+  const reputation = readHostedLinqStatusObject(record.reputation);
+  const healthStatus = readHostedLinqStatusObject(record.health_status);
+  return {
+    healthStatusDocUrl: healthStatus.docUrl,
+    healthStatusStatus: healthStatus.status,
+    id: normalizeNullableString(record.id),
+    phoneNumber,
+    reputationDocUrl: reputation.docUrl,
+    reputationStatus: reputation.status ?? healthStatus.status ?? "HEALTHY",
+  };
+}
+
+function normalizeHostedLinqContactCard(value: unknown): HostedLinqContactCard | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const phoneNumber = normalizeNullableString(record.phone_number);
+  const firstName = normalizeNullableString(record.first_name);
+  if (!phoneNumber || !firstName) {
+    return null;
+  }
+
+  return {
+    firstName,
+    imageUrl: normalizeNullableString(record.image_url),
+    isActive: record.is_active === true,
+    lastName: normalizeNullableString(record.last_name),
+    phoneNumber,
+  };
+}
+
+function readHostedLinqStatusObject(value: unknown): {
+  docUrl: string | null;
+  status: HostedLinqReputationStatus | null;
+} {
+  if (!value || typeof value !== "object") {
+    return { docUrl: null, status: null };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    docUrl: normalizeNullableString(record.doc_url),
+    status: normalizeHostedLinqReputationStatus(record.status),
+  };
+}
+
+function normalizeHostedLinqReputationStatus(value: unknown): HostedLinqReputationStatus | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return normalized === "AT_RISK" || normalized === "CRITICAL" || normalized === "HEALTHY"
+    ? normalized
+    : null;
 }
 
 function buildHostedLinqTextMessageBody(input: {
