@@ -51,445 +51,441 @@ export interface RenderedUserFacingMessage {
 
 const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
-    `Hey, I'm Murph - your personal health assistant.
+    `Hey, I'm Murph. Glad you're in.
 
-Text me anything health-related: meals, supplements, workouts, symptoms, questions, or experiments.
+Text me anything health-related you notice or wonder about. Over time I'll help you understand what's actually working for your body, and what isn't.
 
-What do you want to start with?`,
-    `Welcome to Murph. I help you make sense of meals, workouts, symptoms, supplements, and health experiments over time.
+I'm especially good at small experiments. Sauna, a new supplement, a routine change, a sleep tweak. Whatever you want to test, I'll help you tell signal from noise.
 
-What's the first thing you want to track?`,
-    `Hey, I'm Murph. Send me anything health-related and I'll help you notice what is actually working for your body.
+Ready to get started?`,
+    `Hi, I'm Murph. Glad you're here.
 
-Want to start with food, training, sleep, or something else?`,
-    `I'm Murph - a health assistant you can text.
+Text me whatever comes up about your health. The more I see, the better I'll help you spot what's actually working for you.
 
-Meals, workouts, symptoms, supplements, questions, experiments: send any of it here.
+Where I shine: small experiments. A new supplement, a sleep tweak, a routine change, a workout shift. I'll help you tell whether it's actually helping.
 
-What would be useful to look at first?`,
-    `Welcome in - I'm Murph.
+Ready?`,
+    `Murph here. Glad you signed up.
 
-You can text me health questions, meals, workouts, supplements, symptoms, or experiments, and I'll help you connect the dots.
+Send me anything health-related you're noticing or wondering about. Over time I'll help you figure out what's actually working for your body.
 
-What are you trying to improve right now?`,
-    `Hey, Murph here. I can help you track health inputs and spot patterns across food, training, sleep, symptoms, and experiments.
+Small experiments are my thing. Cold plunge, sauna, a new routine, a supplement to test. I'll help you see if it's actually moving things.
 
-What should we start with?`,
-    `Glad you're here - I'm Murph, your personal health assistant.
+Ready to dive in?`,
+    `Hey, I'm Murph. You made it.
 
-Text me what you're eating, trying, feeling, or wondering about, and I'll help you learn from it.
+Text me anything health-related as it comes up. Over time I'll help you understand what's actually moving the needle for your body, and what isn't.
 
-What are you curious about first?`,
-    `Hey, I'm Murph. Think of this as a simple place to text health notes, questions, and experiments.
+I'm at my best with small experiments. A sleep change, a new supplement, a routine tweak, a workout shift. I'll help you figure out if it's actually working.
 
-Want to start with meals, workouts, symptoms, supplements, or sleep?`,
-    `Welcome to Murph.
+Ready to go?`,
+    `Hi, Murph here. Welcome in.
 
-I can help you run small health experiments and understand what changes are actually helping.
+Send anything you notice or wonder about your health. Over time I'll help you see what's actually working for your body.
 
-What experiment or habit do you want to start with?`,
-    `Hey, I'm Murph - text me anything health-related and I'll help you make sense of it over time.
+What I do best: small experiments. Sauna, a new supplement, a routine change, a sleep tweak. I'll help you sort what's working from what isn't.
 
-What's one thing about your health you want clearer answers on?`,
-    `Murph here. I can help with meals, workouts, symptoms, supplements, questions, and small experiments.
+Want to dive in?`,
+    `Hey, I'm Murph. Glad to have you.
 
-What do you want to log or ask about first?`,
-    `Welcome - I'm Murph.
+Text me whatever health-related you're paying attention to. Over time I'll help you understand what's actually working for your body, and what isn't.
 
-Use this chat for health notes, questions, and experiments. Over time, I'll help you see what's moving the needle.
+I'm especially good at small experiments. Cold plunge, a new supplement, a routine change, a workout shift. I'll help you tell if it's making a difference.
 
-Where should we begin?`,
-    `Hey, I'm Murph. I help you turn health logs and questions into useful patterns.
+Ready to get started?`,
+    `Murph here. Glad you're in.
 
-Want to start by tracking something or asking a question?`,
-    `You're set up with Murph.
+Send me anything that comes up about your health. The more I see, the better I'll help you spot what's actually working.
 
-Text me meals, symptoms, workouts, supplements, or questions, and I'll help you understand what is working.
+Small experiments are where I shine. A new supplement, a sleep change, a routine tweak, a sauna habit. I'll help you see whether it's working for you.
 
-What's the first thing on your mind?`,
-    `Hey - Murph here.
+Sound good?`,
+    `Hi, I'm Murph. Welcome.
 
-I'm built for health questions, daily logs, and experiments like sauna, cold plunge, supplements, training, or sleep changes.
+Text me anything you're noticing about your health, whenever it comes up. Over time I'll help you understand what's actually working for your body.
 
-What would you like help with first?`,
-    `Welcome to Murph. You can text me like a health notebook that talks back.
+I'm especially good with small experiments. A new supplement, a routine change, a workout shift, a sleep tweak. I'll help you figure out if it's actually helping.
 
-Meals, symptoms, workouts, supplements, and questions are all fair game.
+Ready to start?`,
+    `Hey, Murph here. Glad you signed up.
 
-What should I help you with today?`,
-    `I'm Murph, your health assistant.
+Text me whatever health-related comes up. Over time I'll help you tell what's actually working for your body from what isn't.
 
-Send me what you tried, ate, felt, or wondered about, and I'll help you find patterns over time.
+What I do best: small experiments. Sauna, cold plunge, a new supplement, a routine change. I'll help you see if it's worth keeping.
 
-What are you working on right now?`,
-    `Hey, Murph here. I can help you track health inputs and learn from experiments instead of guessing.
+Want to dive in?`,
+    `Hi, I'm Murph. Glad you're here.
 
-What do you want to test or understand first?`,
-    `Welcome. I'm Murph - a health assistant built around your real notes, questions, and experiments.
+Send anything health-related as it comes up. The more I see, the better I'll help you understand what's actually working for your body.
 
-What would make this useful for you today?`,
-    `Hey, I'm Murph.
+Where I shine: small experiments. A workout change, a new supplement, a sleep tweak, a sauna habit. I'll help you tell whether it's making a difference.
 
-Text me health-related questions, meals, workouts, symptoms, supplements, or experiment notes. I'll help you connect them over time.
+Want to start?`,
+    `Murph here. Welcome aboard.
 
-What do you want to start with?`,
+Text me anything you're noticing or wondering about your health. Over time I'll help you spot what's actually working for your body.
+
+I'm especially good at small experiments. A new supplement, a routine change, a sleep change, a cold plunge. I'll help you sort signal from noise.
+
+Ready to dive in?`,
+    `Hey, I'm Murph. Glad you're in.
+
+Text me whatever you're paying attention to about your health. Over time I'll help you understand what's actually moving the needle, and what isn't.
+
+I'm at my best running small experiments. Sauna, a new supplement, a routine tweak, a workout shift. I'll help you tell if it's actually helping.
+
+Ready to get started?`,
+    `Hi, I'm Murph. You're in.
+
+Send anything health-related you notice or wonder about. The more I see, the better I'll help you understand what's actually working for your body.
+
+Where I shine: small experiments. A new supplement, a sleep change, a routine tweak, a sauna session. I'll help you see if it's moving the needle.
+
+Ready to start?`,
+    `Murph here. Glad you're here.
+
+Text me anything health-related on your mind. Over time I'll help you spot what's actually working for you, and what isn't.
+
+Small experiments are my favorite thing. A workout change, a new supplement, a sleep tweak, a cold plunge. I'll help you tell whether it's actually moving things.
+
+Sound good?`,
+    `Hello, I'm Murph. Glad you signed up.
+
+Send me whatever comes up about your health. Over time I'll help you understand what's actually working for your body.
+
+I'm especially good at small experiments. A new supplement, a routine change, a sauna habit, a sleep tweak. I'll help you figure out if it's worth continuing.
+
+Want to start?`,
+    `Hey, I'm Murph. Welcome in.
+
+Text me anything you're noticing about your health, as it comes up. Over time I'll help you see what's actually working for your body, and what isn't.
+
+What I do best: small experiments. Sauna, a new supplement, a workout change, a sleep tweak. I'll help you figure out if it's making a difference.
+
+Ready?`,
+    `Hi, Murph here. Glad you're in.
+
+Send me anything you notice or wonder about your health. The more I see, the better I'll help you understand what's actually working for your body.
+
+I'm at my best with small experiments. A new supplement, a routine tweak, a sleep change, a cold plunge. I'll help you tell whether it's actually helping.
+
+Ready to get started?`,
+    `Murph here. You made it.
+
+Text me anything that comes up about your health. Over time I'll help you spot what's actually working for your body, and what isn't.
+
+Where I shine: small experiments. Sauna sessions, a new supplement, a routine change, a workout shift. I'll help you tell signal from noise.
+
+Want to dive in?`,
+    `Hey, I'm Murph. Welcome.
+
+Send me anything health-related when it comes up. Over time I'll help you figure out what's actually working for your body.
+
+Small experiments are my thing. A new supplement, a sleep tweak, a routine change, a cold plunge. I'll help you tell if it's actually helping.
+
+Ready to start?`,
+    `Hi, I'm Murph. Glad to have you.
+
+Text me anything health-related you're paying attention to. Over time I'll help you understand what's actually moving the needle for your body.
+
+I'm especially good with small experiments. A new supplement, a workout change, a sleep change, a sauna habit. I'll help you see whether it's actually moving things.
+
+Ready to dive in?`,
   ],
   "linq.invite_signup": [
-    `Welcome to Murph - I can help you track health questions, habits, and experiments.
-
-Verify your phone to finish signup:
+    `Hey, I'm Murph. Quick verify so I can reply from this number:
 {joinUrl}
 
-What do you want help tracking first?`,
-    `Hey, Murph here. To finish setting up this chat, verify your phone here:
+Is this still you?`,
+    `Welcome to Murph. Tap to confirm this is your phone:
 {joinUrl}
 
-After that, what health goal should we start with?`,
-    `You're almost set up with Murph.
-
-Verify your phone here:
+Good number for you?`,
+    `Hi, Murph here. Verify this number to start:
 {joinUrl}
 
-Want to start with meals, workouts, sleep, symptoms, or supplements?`,
-    `Welcome in - one quick step before I can help from this number.
-
-Verify your phone:
+Your number?`,
+    `Tap to verify and we can get going:
 {joinUrl}
 
-What are you hoping Murph helps you understand?`,
-    `Hey, I'm Murph. Finish signup by verifying your phone here:
+Sound good?`,
+    `Murph here. One tap to confirm your number:
 {joinUrl}
 
-Once you're in, what should we look at first?`,
-    `Murph here. Verify your phone to connect this chat:
+Was this you signing up?`,
+    `Welcome in. Verify your phone here:
 {joinUrl}
 
-What health question do you want help answering first?`,
-    `Almost done - verify your phone so Murph can reply here:
+All good?`,
+    `Hi, I'm Murph. Tap to verify:
 {joinUrl}
 
-What would you like to track or ask about first?`,
-    `Welcome to Murph.
-
-Please verify your phone to finish signup:
+All you?`,
+    `Confirm this is your number to start:
 {joinUrl}
 
-Want to start with food, training, sleep, or something else?`,
-    `Hey - to finish getting Murph set up, verify this phone:
+Ready?`,
+    `Quick verify before we get started:
 {joinUrl}
 
-What are you trying to improve right now?`,
-    `One more step to use Murph from this chat.
-
-Verify your phone here:
+This the right number?`,
+    `Murph here, glad you're texting. Tap to verify your phone:
 {joinUrl}
 
-What should we start with after that?`,
-    `Glad you're here. Verify your phone to finish Murph signup:
+Save this number?`,
+    `Welcome. Tap to confirm this number is yours:
 {joinUrl}
 
-What health habit or question should we tackle first?`,
-    `Murph is ready once your phone is verified.
-
-Finish signup:
+OK to text from here?`,
+    `This is Murph. Verify your number to get going:
 {joinUrl}
 
-Do you want to begin with tracking or a question?`,
-    `Hey, Murph here. Connect this number by verifying your phone:
+Want me to use this number?`,
+    `Hi from Murph. Quick verify here:
 {joinUrl}
 
-What's the first thing you want help making sense of?`,
-    `Welcome - please verify your phone so I can keep helping from this chat:
+Make sense?`,
+    `Murph here. Tap the link to verify and I'll reply from this number: {joinUrl}
+
+Good?`,
+    `All set once you verify:
 {joinUrl}
 
-What's your first health focus?`,
-    `You're one step away from texting Murph.
-
-Verify your phone:
+That you?`,
+    `Quick one. Tap to verify this is your number:
 {joinUrl}
 
-What do you want to log or learn about first?`,
-    `Let's get Murph connected to this number.
+Is this you?`,
+    `Tap to confirm and we're set: {joinUrl}
 
-Verify your phone here:
+Cool?`,
+    `Hello, I'm Murph. Verify this number to start:
 {joinUrl}
 
-What should we pay attention to first?`,
-    `Hey, this is Murph. Finish signup by verifying your phone:
+Sound right?`,
+    `Murph here. One tap and we're in: {joinUrl}
+
+Good number?`,
+    `One tap and I can text back from this number:
 {joinUrl}
 
-What health experiment or habit should we start with?`,
-    `To finish setting up Murph, verify your phone here:
-{joinUrl}
-
-What would make this chat useful for you today?`,
-    `Welcome to Murph. Please verify your phone so this chat is connected:
-{joinUrl}
-
-What do you want help with first?`,
-    `Murph here - verify your phone to finish setup:
-{joinUrl}
-
-After that, what should we start tracking?`,
+Want me to keep texting from here?`,
   ],
   "linq.daily_quota": [
-    `You've hit Murph's daily text limit of {dailyTextLimit} messages. Try me again tomorrow.`,
-    `That's Murph's {dailyTextLimit}-message daily text limit for today. We can pick this back up tomorrow.`,
-    `You've reached today's Murph text limit: {dailyTextLimit} messages. Send the next note tomorrow.`,
-    `Murph is at the daily text cap of {dailyTextLimit} messages. Try again tomorrow.`,
-    `You used today's {dailyTextLimit} Murph text messages. I'll be ready again tomorrow.`,
-    `Daily Murph text limit reached - {dailyTextLimit} messages for today. We can continue tomorrow.`,
-    `You've reached the {dailyTextLimit}-message daily limit for Murph texts. Try again tomorrow.`,
-    `That's today's Murph text allowance: {dailyTextLimit} messages. Message me tomorrow to continue.`,
-    `Murph has hit today's text limit of {dailyTextLimit}. Let's continue tomorrow.`,
-    `You're at Murph's daily text limit of {dailyTextLimit} messages. Try the next message tomorrow.`,
-    `Today's Murph text limit is used up: {dailyTextLimit} messages. I'll be back tomorrow.`,
-    `You've sent today's {dailyTextLimit} Murph texts. We can keep going tomorrow.`,
-    `Murph's daily text cap is {dailyTextLimit} messages, and you've reached it. Try again tomorrow.`,
-    `That's the daily Murph text cap for now: {dailyTextLimit} messages. Continue tomorrow.`,
-    `You've reached Murph's daily message limit of {dailyTextLimit}. Check back tomorrow.`,
-    `Murph can take {dailyTextLimit} texts per day, and today's limit is reached. Try again tomorrow.`,
-    `Daily limit reached: {dailyTextLimit} Murph texts. Send the next update tomorrow.`,
-    `You're at today's Murph text max of {dailyTextLimit}. I'll be ready for more tomorrow.`,
-    `Murph's daily text allowance is used up for today: {dailyTextLimit} messages. Try tomorrow.`,
-    `That's all {dailyTextLimit} Murph texts for today. We can continue tomorrow.`,
+    `That's the {dailyTextLimit}/day cap on this thread. Email or Telegram still work today, otherwise back tomorrow.`,
+    `I cap texts at {dailyTextLimit} a day to keep things readable. Email or Telegram me if you want to keep going today.`,
+    `Done with texts for today. {dailyTextLimit}/day limit. You can email or Telegram me anytime.`,
+    `We hit today's {dailyTextLimit} text cap. Email me or Telegram me if there's more, otherwise tomorrow.`,
+    `Quick pause on texts. That's {dailyTextLimit} for the day. Email or Telegram still open.`,
+    `Texts hit {dailyTextLimit}/day. Email or Telegram works. Otherwise tomorrow.`,
+    `Hold that thought. I'm at today's {dailyTextLimit} text max here. Email or Telegram me if you want to keep going.`,
+    `{dailyTextLimit}/day is where I stop on texts. Email or Telegram if you need more today.`,
+    `Wrapped texts for today: {dailyTextLimit} messages. Email me, hit Telegram, or come back in the morning.`,
+    `Offline on this thread at {dailyTextLimit} texts. Email or Telegram still work today, otherwise pick this up tomorrow.`,
+    `Pausing texts here. Daily cap is {dailyTextLimit}. Email or Telegram if you want to keep talking, or see you tomorrow.`,
+    `Reached today's {dailyTextLimit} texts. Email or Telegram to continue today, otherwise tomorrow.`,
+    `Texts are done at {dailyTextLimit} today. Email or Telegram me if there's more, or talk in the morning.`,
+    `Heads up. You're at today's {dailyTextLimit} text ceiling. Email or Telegram works if you want more today.`,
+    `Save texts for tomorrow, or hit me on email or Telegram. I cap texts at {dailyTextLimit}/day.`,
+    `{dailyTextLimit} texts for the day. Email or Telegram me anytime, otherwise back tomorrow.`,
+    `Out on texts for today. {dailyTextLimit} is the daily limit. Email or Telegram still works.`,
+    `Caught up to today's {dailyTextLimit} text cap. Email or Telegram still open, or continue tomorrow.`,
+    `Daily text limit at {dailyTextLimit} reached. Email or Telegram if you want to keep going today.`,
+    `Texts are off until tomorrow. I cap at {dailyTextLimit}/day so this thread doesn't become a notification machine. Email or Telegram still work today.`,
   ],
   "linq.home_redirect": [
-    `You're already set up with Murph.
+    `Your main Murph thread is on a different number. Text me here so things stay in one place:
+{homeRecipientPhone}`,
+    `You're already set up with Murph. Save this and message me there instead:
+{homeRecipientPhone}`,
+    `Heads up, you've got another Murph line that I reply on. Use:
+{homeRecipientPhone}`,
+    `Quick redirect. I reply from your main Murph number:
+{homeRecipientPhone}`,
+    `{homeRecipientPhone} is your active Murph line. Easier if we keep things there.`,
+    `Looks like you're texting the wrong thread. Your active line is:
+{homeRecipientPhone}`,
+    `I'm on another number for you. Move the conversation over to:
+{homeRecipientPhone}`,
+    `You're connected, just not on the right line. Continue here:
+{homeRecipientPhone}`,
+    `Save {homeRecipientPhone} and we'll continue there.`,
+    `Two threads going. The one I actually reply on is:
+{homeRecipientPhone}`,
+    `I'm running from a different number for you. Switch to:
+{homeRecipientPhone}`,
+    `Hey, this isn't your home Murph thread. Text me at:
+{homeRecipientPhone}`,
+    `Your Murph number is {homeRecipientPhone}. Move over there and I'll meet you.`,
+    `Already running on another line for you. Save:
+{homeRecipientPhone}`,
+    `Wrong thread, easy fix. Your Murph line is:
+{homeRecipientPhone}`,
+    `Continue our Murph chat at:
+{homeRecipientPhone}
 
-Save this number and text me here instead:
+That's the line I reply on for you.`,
+    `Tap to save and we can pick this up at:
 {homeRecipientPhone}`,
-    `You're set up with Murph on another number.
-
-Please save and use this one:
+    `I keep replies on one Murph line per person. Yours is {homeRecipientPhone}.`,
+    `Got you, just on a different number than this one. Your line:
 {homeRecipientPhone}`,
-    `Murph is already connected for you.
-
-Text the saved home number instead:
-{homeRecipientPhone}`,
-    `This looks like the wrong Murph thread.
-
-Use your Murph home number here:
-{homeRecipientPhone}`,
-    `You're already connected to Murph.
-
-Send your next message to this number:
-{homeRecipientPhone}`,
-    `Murph is ready for you on your home line.
-
-Please text me here:
-{homeRecipientPhone}`,
-    `You're set up - just use your Murph home number.
-
-Save this and message me there:
-{homeRecipientPhone}`,
-    `This thread is not your main Murph line.
-
-Text your Murph number instead:
-{homeRecipientPhone}`,
-    `You're already active with Murph.
-
-Use this number for replies:
-{homeRecipientPhone}`,
-    `Please switch to your Murph home line so replies stay in one place:
-{homeRecipientPhone}`,
-    `You're connected to Murph already.
-
-Your main text number is:
-{homeRecipientPhone}`,
-    `Let's keep your Murph chat on the right number.
-
-Text me here:
-{homeRecipientPhone}`,
-    `This is not the best Murph number for your account.
-
-Use:
-{homeRecipientPhone}`,
-    `You're already set up, but this is not your home thread.
-
-Save and text:
-{homeRecipientPhone}`,
-    `Murph replies should go through your home number.
-
-Please use:
-{homeRecipientPhone}`,
-    `You're set up with Murph. To keep the thread clean, text this number instead:
-{homeRecipientPhone}`,
-    `Use your Murph home line for the next message:
-{homeRecipientPhone}`,
-    `This is not your main Murph thread. Your active number is:
-{homeRecipientPhone}`,
-    `You're already connected. Please continue with Murph here:
-{homeRecipientPhone}`,
-    `Let's move this to your Murph home number:
-{homeRecipientPhone}`,
+    `Let's move this over. My number for you is {homeRecipientPhone}.`,
   ],
   "linq.ai_usage.trial_conversion_pending": [
-    `Your trial has ended. Start Pulse to keep Murph replying:
+    `Trial's done. Head to the site to keep this going:
 {homeUrl}`,
-    `Murph needs Pulse active to keep replying now that your trial is over:
+    `Your trial ended. There's more setup here to continue:
 {homeUrl}`,
-    `Your Murph trial is done. Start Pulse here to continue:
+    `Want to keep going? Tap to finish account setup:
 {homeUrl}`,
-    `Trial ended - activate Pulse if you want Murph to keep responding:
+    `After the trial, more to do on the site:
 {homeUrl}`,
-    `Your trial has wrapped up. Start Pulse to continue using Murph:
+    `Trial ended. Head to the site whenever you're ready:
 {homeUrl}`,
-    `Murph replies are paused because your trial ended. You can start Pulse here:
+    `Heads up, your trial finished. Setup to take care of to keep me on:
 {homeUrl}`,
-    `Your trial period is over. Start Pulse to turn Murph replies back on:
+    `Trial done. {homeUrl} is where you finish setup.`,
+    `Setup to finish after the trial to keep things going:
 {homeUrl}`,
-    `To keep Murph replying after the trial, start Pulse here:
+    `If the trial was useful, there's setup to finish here:
 {homeUrl}`,
-    `Murph is paused after your trial. Start Pulse when you're ready:
+    `Out of trial. Want to continue? Take care of it over here:
 {homeUrl}`,
-    `Your trial ended, so Murph can't keep replying until Pulse is active:
+    `Things pick back up after finishing setup on the site:
 {homeUrl}`,
-    `Start Pulse to continue your Murph chat after the trial:
+    `Your trial's over. Tap to take care of the rest when you're ready:
 {homeUrl}`,
-    `Murph's trial access has ended. You can continue with Pulse here:
+    `Pick back up after finishing setup: {homeUrl}`,
+    `End of trial. Setup to finish to keep going:
 {homeUrl}`,
-    `Trial complete - start Pulse to keep this Murph thread going:
+    `Continue on the site when you're ready: {homeUrl}`,
+    `Looks like the trial's done. Setup to take care of on the site:
 {homeUrl}`,
-    `Murph is waiting on Pulse activation before more replies:
+    `Now that the trial's done, the rest is on the site:
 {homeUrl}`,
-    `Your trial is over. If you want to keep going with Murph, start Pulse:
+    `Your trial closed out. Setup is waiting on the site:
 {homeUrl}`,
-    `Pulse is needed for Murph to keep replying after the trial:
-{homeUrl}`,
-    `Murph replies are off after the trial. Start Pulse here:
-{homeUrl}`,
-    `Your trial finished. Start Pulse to keep using Murph by text:
-{homeUrl}`,
-    `To continue with Murph, activate Pulse now that the trial is done:
-{homeUrl}`,
-    `Murph can keep helping once Pulse is active:
+    `That was the trial. The rest is here: {homeUrl}`,
+    `Trial's done. If you want me to keep replying, setup is on the site:
 {homeUrl}`,
   ],
   "linq.ai_usage.trial_limit_reached": [
-    `You've reached the hosted AI usage included in your trial. Please finish checkout:
+    `Used up the AI included in your trial. There's setup to finish on the site to keep going:
 {homeUrl}`,
-    `Your trial's included AI usage is used up. Finish checkout to keep Murph replying:
+    `AI from the trial is spent. Take care of setup to pick it back up:
 {homeUrl}`,
-    `Murph hit the AI usage included with your trial. You can finish checkout here:
+    `You hit the AI cap that came with the trial. Finish setup on the site:
 {homeUrl}`,
-    `Trial usage limit reached. Complete checkout to continue with Murph:
+    `The trial allowance is done. Take care of setup here:
 {homeUrl}`,
-    `You've used the AI allowance included in your trial. Finish checkout here:
+    `Capped on the trial AI. There's setup to take care of on the site:
 {homeUrl}`,
-    `Murph is paused because the trial AI usage is used up. Finish checkout:
+    `Out of trial AI. Tap to finish setup when you're ready:
 {homeUrl}`,
-    `Your trial AI allowance is complete. Checkout will let Murph keep replying:
+    `Hit the included trial usage. Setup to take care of to keep this going:
 {homeUrl}`,
-    `You've reached the trial usage limit. Finish checkout when you're ready:
+    `Your trial allowance is used. Head to the site to keep replies on:
 {homeUrl}`,
-    `Murph used the AI included in your trial. Continue by finishing checkout:
+    `Cap on the trial AI is reached. Continue once setup is done:
 {homeUrl}`,
-    `The trial AI limit is reached. Finish checkout to keep this chat active:
+    `Finished the trial AI. Head to the site to keep things going:
 {homeUrl}`,
-    `Your included trial usage is done for now. Complete checkout here:
+    `Trial AI is done. The site has the rest:
 {homeUrl}`,
-    `Murph can't keep replying because the trial usage limit was reached:
+    `That's the trial usage cap. Setup to finish to continue:
 {homeUrl}`,
-    `Trial usage is maxed out. Finish checkout to restart Murph replies:
+    `Heads up, trial AI is used. Take care of setup here: {homeUrl}`,
+    `Ran out of trial AI. The site has more setup waiting:
 {homeUrl}`,
-    `You've used your trial's included Murph AI. Continue here:
+    `You're out of trial AI. Tap to finish setup and keep this thread going:
 {homeUrl}`,
-    `Your trial allowance has been used. Finish checkout if you want to keep going:
+    `Maxed the trial usage. Setup to take care of if you want to continue:
 {homeUrl}`,
-    `Murph reached the trial's hosted AI limit. Checkout is here:
+    `Allowance from the trial is up. Setup left to do on the site:
 {homeUrl}`,
-    `The included trial AI usage has run out. Finish setup here:
+    `Reached the AI cap on the trial. Finish setup here: {homeUrl}`,
+    `Spent the trial usage. Pick this up after finishing setup:
 {homeUrl}`,
-    `Your trial usage cap is reached. Finish checkout to continue:
-{homeUrl}`,
-    `Murph replies are paused at the trial usage limit. Continue here:
-{homeUrl}`,
-    `You've reached the AI included in your trial. Checkout can turn replies back on:
+    `Through the trial AI. Setup left to finish to keep replying:
 {homeUrl}`,
   ],
   "linq.ai_usage.edge_limit_reached": [
-    `Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets:
+    `Hit this month's allowance. I'll resume when it resets:
 {homeUrl}`,
-    `Your monthly Murph usage limit is reached. Replies resume when the included allowance resets:
+    `Out for the month. Replies pick up when the allowance resets:
 {homeUrl}`,
-    `Murph is at this month's usage limit. It will pick back up when your allowance resets:
+    `Monthly cap reached. I'll be back at next reset:
 {homeUrl}`,
-    `You've used this month's included Murph allowance. Replies resume after reset:
+    `That's the monthly Edge allowance done. Back when it resets:
 {homeUrl}`,
-    `Monthly usage limit reached. Murph will resume when the allowance resets:
+    `The allowance is used for the month. Resumes at reset:
 {homeUrl}`,
-    `Murph replies are paused at your monthly limit and will resume after reset:
+    `Reached this month's cap. See you after the next reset:
 {homeUrl}`,
-    `You're at the included usage limit for this month. Murph will continue after reset:
+    `Allowance is spent for the month. I come back at reset:
 {homeUrl}`,
-    `This month's Murph allowance is used up. Replies resume when it resets:
+    `You're out of usage for this month. Resets bring me back:
 {homeUrl}`,
-    `Murph hit the monthly included usage limit. Check your account here:
+    `Used up your Edge allowance for the month. Back at the next reset:
 {homeUrl}`,
-    `Your included monthly usage is used for now. Murph will resume at reset:
+    `Heads up, this month's cap is hit. I'll resume after reset:
 {homeUrl}`,
-    `Murph is paused because the monthly usage limit was reached:
+    `Done for the month. Reset is when I'm back:
 {homeUrl}`,
-    `You've reached this month's included Murph usage. Replies will come back after reset:
+    `Maxed the monthly cap. I pick back up after reset:
 {homeUrl}`,
-    `Monthly allowance reached. Murph will be ready again after the reset:
+    `Wrapped this month's allowance. Back at reset:
 {homeUrl}`,
-    `Murph can't continue this month until the included allowance resets:
+    `Cap reached for the month. Replies return at reset:
 {homeUrl}`,
-    `This month's usage cap is reached. Murph resumes when the cap resets:
+    `Through this month's allowance. I'll be ready at reset:
 {homeUrl}`,
-    `Your monthly included allowance is complete. Murph will resume at the next reset:
+    `This month's usage is done. Account details: {homeUrl}`,
+    `Topped out on Edge this month. Reset turns replies back on: {homeUrl}`,
+    `Limit hit for the month. Account info if you need it: {homeUrl}`,
+    `Spent this month's allowance. I'm back at reset:
 {homeUrl}`,
-    `Murph has reached your monthly usage allowance. More details:
-{homeUrl}`,
-    `You've hit the monthly Murph usage cap. Replies resume after reset:
-{homeUrl}`,
-    `Murph's included monthly usage is used up for now:
-{homeUrl}`,
-    `The monthly Murph limit is reached. It will reset before replies continue:
+    `End of this month for me. Reset is when I return:
 {homeUrl}`,
   ],
   "linq.ai_usage.pulse_upgrade_edge": [
-    `Hey, you've reached your usage limit for the month. Upgrade to Edge:
+    `Hit this month's cap. Upgrade for more room if you want it: {homeUrl}`,
+    `Monthly allowance is used. The upgrade (Edge) unlocks more, or wait for reset:
 {homeUrl}`,
-    `You've hit this month's Murph usage limit. Upgrade to Edge to keep going:
+    `Out for the month on Pulse. Edge (the upgrade) is one option, otherwise back at reset:
 {homeUrl}`,
-    `Murph reached your monthly usage limit. Edge gives you more room:
+    `Cap reached. Move up a tier (Edge) for more headroom this month:
 {homeUrl}`,
-    `You're at the monthly limit for Murph. Upgrade to Edge here:
+    `That's this month's allowance. The next tier is here if you want more now:
 {homeUrl}`,
-    `Monthly usage limit reached. You can move to Edge to continue:
+    `Done with the month. Upgrading to Edge picks up where this left off:
 {homeUrl}`,
-    `Murph is paused at your usage limit. Upgrade to Edge if you want more:
+    `Used up usage for the month. Edge has more if you need it:
 {homeUrl}`,
-    `You've used this month's Murph allowance. Edge can unlock more usage:
+    `Reached the monthly cap. Upgrade to Edge for more, or wait for reset:
 {homeUrl}`,
-    `Your Murph usage limit is reached for the month. Upgrade path:
+    `Heads up, you're at the monthly cap. Edge (more usage) is the upgrade path: {homeUrl}`,
+    `Maxed this month. The next tier keeps things going through reset:
 {homeUrl}`,
-    `Murph hit the monthly cap. Edge is available here:
+    `You're at the monthly cap. The Edge tier gives you more this period:
 {homeUrl}`,
-    `You're out of included Murph usage for the month. Upgrade to Edge:
+    `Allowance is spent this month. Upgrade if you want more now:
 {homeUrl}`,
-    `Monthly Murph limit reached. Want more usage? Edge is here:
+    `Wrapped this month's usage. The next tier has more capacity if you need it:
 {homeUrl}`,
-    `Murph can't keep replying at the current monthly limit. Upgrade to Edge:
+    `More usage on the next tier (Edge). Cap hit this month:
 {homeUrl}`,
-    `You've reached the monthly cap. Edge can keep Murph running:
+    `Topped out for the month. Edge (the upgrade) if you want to keep going:
 {homeUrl}`,
-    `Murph replies are paused at the monthly limit. Upgrade here:
+    `This month's allowance is done. Edge for more, otherwise reset brings replies back:
 {homeUrl}`,
-    `The monthly usage allowance is used up. Edge lets you continue:
+    `Spent your monthly allowance. The upgrade (Edge) if more is useful right now: {homeUrl}`,
+    `End of the month for me. The next tier gives you more headroom:
 {homeUrl}`,
-    `Your current Murph plan hit its usage limit. Upgrade to Edge:
+    `Through this month's usage. Upgrading if you want to keep going:
 {homeUrl}`,
-    `Murph reached the usage cap for this month. Edge is the next step:
-{homeUrl}`,
-    `You've hit your Murph usage limit. To keep going this month, upgrade to Edge:
-{homeUrl}`,
-    `Murph is at your monthly usage cap. You can upgrade to Edge here:
-{homeUrl}`,
-    `Usage limit reached. Upgrade to Edge if you want Murph to keep replying:
+    `Wait for reset or upgrade. Monthly cap is hit:
 {homeUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
