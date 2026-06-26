@@ -3617,6 +3617,58 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
+test("importDeviceBatch rejects primary provider refs after user-authored same-externalRef edits", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-primary-ref-user-edit");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const eventId = first.events[0]?.id as string;
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+  const edited = {
+    ...stored,
+    source: "manual",
+    note: "user-added context",
+    tags: ["context"],
+    links: [{ type: "related_to", targetId: eventId }],
+    lifecycle: { revision: 2 },
+  } satisfies EventRecord;
+  await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "jxn_acct_stable",
+      importedAt: "2026-06-04T21:00:00.000Z",
+      events: [
+        buildJunctionStyleWorkoutEvent({
+          recordedAt: "2026-06-04T07:00:00.000Z",
+          durationMinutes: 36,
+        }),
+      ],
+    }),
+    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
+  assert.equal(latestUserEdited?.note, "user-added context");
+  assert.deepEqual(latestUserEdited?.tags, ["context"]);
+  assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
+  assert.equal(
+    records.filter((record) => record.id === eventId).length,
+    2,
+    "provider re-import must not append a superseding revision over user edits",
+  );
+});
+
 test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

@@ -1606,6 +1606,7 @@ interface IndexedEventExternalRefMatch {
 }
 
 interface EventExternalRefIndexState {
+  latestDeviceExternalRefEntryByRefKey: Map<string, EventSpineEntry<EventRecord>>;
   latestExternalRefEntry: EventSpineEntry<EventRecord> | null;
   latestEntry: EventSpineEntry<EventRecord>;
 }
@@ -1639,12 +1640,24 @@ async function indexLatestEventsByExternalRef(
       );
 
       const state = entriesById.get(entry.record.id);
+      const latestDeviceExternalRefEntryByRefKey =
+        state?.latestDeviceExternalRefEntryByRefKey ?? new Map<string, EventSpineEntry<EventRecord>>();
+
+      if (entry.record.source === "device" && entry.record.externalRef) {
+        const refKey = eventExternalRefKey(entry.record.externalRef);
+        const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
+        if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
+          latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
+        }
+      }
+
       const latestExternalRefEntry = entry.record.externalRef &&
           (!state?.latestExternalRefEntry || compareEventSpineEntries(state.latestExternalRefEntry, entry) < 0)
         ? entry
         : state?.latestExternalRefEntry ?? null;
 
       entriesById.set(entry.record.id, {
+        latestDeviceExternalRefEntryByRefKey,
         latestEntry: !state || compareEventSpineEntries(state.latestEntry, entry) < 0
           ? entry
           : state.latestEntry,
@@ -1669,10 +1682,12 @@ async function indexLatestEventsByExternalRef(
     }
 
     const refKey = eventExternalRefKey(externalRefEntry.record.externalRef);
+    const indexedExternalRefEntry =
+      state.latestDeviceExternalRefEntryByRefKey.get(refKey) ?? externalRefEntry;
     const refGroup = groupedByRefKey.get(refKey) ?? [];
     refGroup.push({
-      indexedExternalRef: externalRefEntry.record.externalRef,
-      indexedRecord: externalRefEntry.record,
+      indexedExternalRef: indexedExternalRefEntry.record.externalRef ?? externalRefEntry.record.externalRef,
+      indexedRecord: indexedExternalRefEntry.record,
       relativePath: latestForId.relativePath,
       record: latestForId.record,
     });
