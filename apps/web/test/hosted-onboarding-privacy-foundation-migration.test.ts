@@ -388,6 +388,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -445,6 +452,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
+      "20260626000000_linq_first_contact_admission_decision",
       "2026062600_computer_handoff_return_contact_kind",
       "migration_lock.toml",
     ]);
@@ -526,6 +534,18 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(computerHandoffReturnContactKindMigrationSql).toContain(
       'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'PRIMARY KEY ("event_id")',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
