@@ -98,6 +98,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     ["packages/hosted-execution/src/routes.ts"],
   );
   assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"],
+    ["packages/hosted-execution/src/phone-calls.ts"],
+  );
+  assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
     ["packages/device-syncd/src/providers/junction-client.ts"],
   );

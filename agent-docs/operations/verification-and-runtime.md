@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-06-22
+Last verified: 2026-06-25
 
 ## Verification Matrix
 
@@ -154,7 +154,7 @@ When that fast path applies:
   triggers the secret deploy hook for the exact current `main` commit only after
   `Murph Host Support` and `Repo Hygiene` push CI are green.
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `hosted-execution` and `runtime-state` packages, and build the CLI package through the same TypeScript workspace toolchain used for local development.
-- Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.
+- Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam plus phone-call start contracts between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.
 - Query-owned strict reads and lexical search now share `.runtime/projections/query.sqlite`; inbox-owned local runtime is split between `.runtime/projections/inboxd.sqlite` and `.runtime/operations/inbox/*.json`.
 - Device sync state lives only at `.runtime/operations/device-sync/state.sqlite`; Murph's CLI-managed daemon launcher state, logs, and a separate `0600` local control-token file live under `.runtime/operations/device-sync/`, with the bearer kept out of ordinary `launcher.json`; provider OAuth sessions and encrypted tokens remain outside the canonical vault.
 - `vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state under `vault/.runtime/operations/assistant/**`, including explicit conversation bindings, timestamps/turn counts, provider session references, local transcript files, inbox-routing and channel auto-reply cursors, enabled auto-reply channels, coarse turn receipts, replay-safe outbound intents, diagnostics events plus snapshots, and persisted assistant status snapshots. Hosted provider usage is not assistant runtime state; hosted runs record it directly into the web-owned usage ledger through the injected runtime platform. Durable user-facing memory now lives canonically in `bank/memory.md`, and durable scheduled assistant prompts live canonically in `bank/automations/*.md` through the top-level `memory` and `automation` command surfaces. If a datum is user-facing, queryable, or something future product features will build on, it must not start in assistant runtime first; it needs a canonical vault home or an explicit derived materialization from the start. Assistant runtime receipt/outbox/diagnostics/status mutations stay serialized under one shared assistant-runtime write lock, and provider-native transcript history plus channel-native send history may still stay external when adapters support them. Current outbound channel support covers Telegram, Linq, and AgentMail-backed email. Email setup can still reuse a discovered or explicit existing inbox when the API key cannot create new inboxes.

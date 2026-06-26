@@ -2,6 +2,9 @@ import {
   HOSTED_CONNECTED_APPS_PATH,
 } from "@murphai/hosted-execution/connected-apps";
 import {
+  HOSTED_PHONE_CALLS_PATH,
+} from "@murphai/hosted-execution/phone-calls";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -59,6 +62,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
+  | "phone_call_start"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "thread_route_egress_authority"
@@ -94,6 +98,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
   [HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH, "thread_route_egress_authority"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
+  [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);
 

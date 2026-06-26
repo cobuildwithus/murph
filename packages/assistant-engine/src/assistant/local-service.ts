@@ -107,6 +107,9 @@ import {
 import {
   createAssistantHostedToolContext,
 } from './hosted-tool-context.js'
+import {
+  resolveAssistantPhoneCallAcceptedInputIds,
+} from '../assistant-codex/dynamic-tools/phone-calls.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
@@ -142,6 +145,7 @@ import { withAssistantTurnLock } from './turn-lock.js'
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
+const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 
 function resolveAssistantProgressDeliveryChannel(input: {
   session: AssistantSession
@@ -442,7 +446,10 @@ export async function sendAssistantMessageLocal(
           userTurn: currentUserTurn,
         })
         const initialUserPromptInputId =
-          resolveInitialUserPromptAcceptedTurnInputId(input)
+          resolveInitialUserPromptAcceptedTurnInputId({
+            input,
+            userTurn: currentUserTurn,
+          })
         const initialAcceptedInputJournal =
           await runtimeState.turns.acceptedInputs.append({
             inputs: initialAcceptedTurnInputItems,
@@ -475,6 +482,10 @@ export async function sendAssistantMessageLocal(
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
         const hostedExecutionContext = executionContext?.hosted ?? null
+        let acceptedInputIdsForProviderRequest: readonly string[] =
+          initialAcceptedInputJournal.inputIds
+        let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
+          initialAcceptedInputJournal.inputs
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
             await typingIndicator?.refreshNow?.()
@@ -554,10 +565,16 @@ export async function sendAssistantMessageLocal(
           ? createAssistantHostedToolContext({
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
+              phoneCalls: hostedExecutionContext.phoneCalls ?? null,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getPhoneCallAcceptedInputIds: () =>
+                resolveAssistantPhoneCallAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }),
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -625,10 +642,6 @@ export async function sendAssistantMessageLocal(
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
         const providerRequestOrdinal = 0
-        let acceptedInputIdsForProviderRequest: readonly string[] =
-          initialAcceptedInputJournal.inputIds
-        let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
-          initialAcceptedInputJournal.inputs
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string
@@ -1642,7 +1655,10 @@ function resolveInitialAcceptedTurnInputItems(input: {
 
   return [
     {
-      id: DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID,
+      id: resolveDefaultInitialAcceptedTurnInputId({
+        input: input.input,
+        userTurn: input.userTurn,
+      }),
       promptFallbackReason:
         isManualAssistantTurnTrigger(input.input.turnTrigger)
           ? 'manual-input'
@@ -1663,13 +1679,30 @@ function resolveInitialAcceptedTurnInputItems(input: {
   ]
 }
 
-function resolveInitialUserPromptAcceptedTurnInputId(
-  input: AssistantMessageInput,
-): string | null {
-  const initialInputs = input.acceptedTurnInput?.initialInputs ?? null
+function resolveInitialUserPromptAcceptedTurnInputId(input: {
+  input: AssistantMessageInput
+  userTurn: PersistedUserTurn
+}): string | null {
+  const initialInputs = input.input.acceptedTurnInput?.initialInputs ?? null
   return initialInputs && initialInputs.length > 0
     ? null
+    : resolveDefaultInitialAcceptedTurnInputId(input)
+}
+
+function resolveDefaultInitialAcceptedTurnInputId(input: {
+  input: AssistantMessageInput
+  userTurn: PersistedUserTurn
+}): string {
+  return shouldUsePhoneCallManualAcceptedTurnInputId(input.input)
+    ? `${PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX}${input.userTurn.turnId}`
     : DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID
+}
+
+function shouldUsePhoneCallManualAcceptedTurnInputId(
+  input: AssistantMessageInput,
+): boolean {
+  return isManualAssistantTurnTrigger(input.turnTrigger) &&
+    input.executionContext?.hosted?.phoneCalls != null
 }
 
 async function appendAcceptedActiveTurnInputTranscriptEntries(input: {

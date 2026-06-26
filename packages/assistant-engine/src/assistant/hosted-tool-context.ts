@@ -12,6 +12,9 @@ import type {
 import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
+import type {
+  AssistantPhoneCallPort,
+} from './execution-context.js'
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
@@ -20,6 +23,13 @@ export interface AssistantHostedDeliveryContext {
   conversationId: string | null
   recipientKey: string | null
   returnContactKind: HostedReturnContactKind | null
+}
+
+export interface AssistantHostedToolRequestKeyScope {
+  acceptedInputIds: readonly string[]
+  conversationId: string | null
+  inboundMailboxItemIds: readonly string[]
+  recipientKey: string | null
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -40,8 +50,10 @@ export type AssistantHostedVaultFileSendResult =
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
+  readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -56,7 +68,9 @@ export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
+  phoneCalls?: AssistantPhoneCallPort | null
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -64,9 +78,22 @@ export function createAssistantHostedToolContext(input: {
     messageInput: input.messageInput,
     session: input.session,
   }
+  const buildRequestKeyScope = (
+    acceptedInputIds: readonly string[],
+  ): AssistantHostedToolRequestKeyScope => {
+    const deliveryContext = readDeliveryContext()
+    const context = deliveryContext.messageInput.hostedDeliveryIdempotency
+    return {
+      acceptedInputIds: [...acceptedInputIds],
+      conversationId: context?.conversationId ?? null,
+      inboundMailboxItemIds: context?.inboundMailboxItemIds ?? [],
+      recipientKey: context?.recipientKey ?? null,
+    }
+  }
 
   return {
     connectedApps: input.connectedApps ?? null,
+    phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
@@ -94,6 +121,12 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
+    },
+    currentPhoneCallToolRequestKeyScope: () => {
+      const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
+      return acceptedInputIds.length > 0
+        ? buildRequestKeyScope(acceptedInputIds)
+        : null
     },
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

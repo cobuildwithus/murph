@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   HostedActionApprovalRequest,
@@ -403,6 +403,66 @@ describe("hosted action approvals", () => {
       request: consumeRequest(secondApproved, "delivery_current"),
     })).resolves.toEqual(secondApproved);
   });
+
+  it("consumes approved legacy null-channel requests that used the old action hash", async () => {
+    const { deps, memberId } = await setup();
+    const legacyRequest = {
+      actionFingerprint: REQUEST.actionFingerprint,
+      actionId: REQUEST.actionId,
+      actionKind: REQUEST.actionKind,
+      presentation: REQUEST.presentation,
+    };
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: legacyRequest,
+    });
+    const legacyActionHash = hashLegacyNullReturnContactKindRequest({
+      memberId,
+      request: legacyRequest,
+    });
+
+    await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        actionHash: legacyActionHash,
+        approvalStatus: "approved",
+        bindingHash: legacyActionHash,
+        consumedAt: null,
+        consumedBy: null,
+        decidedAt: new Date("2026-06-25T16:01:00.000Z"),
+        expiresAt: new Date("2026-06-25T16:16:00.000Z"),
+        returnContactKind: null,
+        tokenHash: `approval-token-${randomUUID()}`,
+      },
+      where: { approvalKey: requested.approvalId },
+    });
+
+    const approved = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: deps.prisma,
+      request: legacyRequest,
+    });
+    if (approved.status !== "approved") {
+      throw new Error("Expected legacy hosted action approval to be approved.");
+    }
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:03:00.000Z"),
+      prisma: deps.prisma,
+      request: {
+        approvalGeneration: approved.approvalGeneration,
+        consumerId: "legacy_delivery",
+        request: legacyRequest,
+      },
+    })).resolves.toEqual(approved);
+
+    const consumed = await requireApprovalRow(deps, requested.approvalId);
+    expect(consumed.consumedAt?.toISOString()).toBe("2026-06-25T16:03:00.000Z");
+    expect(consumed.consumedBy).toBe("legacy_delivery");
+  });
 });
 
 async function approveExistingAction(input: {
@@ -445,6 +505,34 @@ function consumeRequest(
     consumerId,
     request: REQUEST,
   };
+}
+
+function hashLegacyNullReturnContactKindRequest(input: {
+  memberId: string;
+  request: {
+    actionFingerprint: string;
+    actionId: string;
+    actionKind: string;
+    presentation: {
+      body: string;
+      title: string;
+    };
+  };
+}): string {
+  return createHash("sha256")
+    .update([
+      "murph-action-approval-request-hash-v1",
+      input.memberId,
+      JSON.stringify([
+        "murph.hosted-action-approval-request.v1",
+        input.request.actionId,
+        input.request.actionKind,
+        input.request.actionFingerprint,
+        input.request.presentation.title,
+        input.request.presentation.body,
+      ]),
+    ].join("\n"))
+    .digest("hex");
 }
 
 async function requireApprovalRow(
