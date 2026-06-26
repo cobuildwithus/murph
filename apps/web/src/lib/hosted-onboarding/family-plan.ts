@@ -2210,11 +2210,24 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
       inviteCode,
     },
   });
-  if (!invite || invite.status !== "pending" || invite.expiresAt <= now) {
+  if (!invite) {
     return null;
   }
   if (!invite.targetPhoneLookupKey) {
     return null;
+  }
+  if (
+    invite.status !== "accepted" &&
+    (invite.status !== "pending" || invite.expiresAt <= now)
+  ) {
+    return null;
+  }
+  if (!hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different phone number.",
+    });
   }
 
   const member = await ensureHostedMemberForPhoneTx({

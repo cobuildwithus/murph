@@ -10,6 +10,9 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  isHostedOnboardingError,
+} from "./errors";
+import {
   acceptHostedFamilyInviteFromPhoneTx,
   buildHostedFamilyInviteAcceptedReplyText,
   hasHostedMemberEffectiveActiveAccessForMember,
@@ -243,14 +246,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
-  const familyAcceptance = participantContact.kind === "phone"
-    ? await acceptHostedFamilyInviteFromPhoneTx({
+  let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
+  if (participantContact.kind === "phone") {
+    try {
+      familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
         now: new Date(occurredAt),
         phoneNumber: participantContact.value,
         text: summary.text,
         tx: input.prisma,
-      })
-    : null;
+      });
+    } catch (error) {
+      if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
+        throw error;
+      }
+    }
+  }
 
   if (familyAcceptance) {
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
@@ -676,6 +686,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
       routeStage: "first-contact-signup-link",
     }),
   );
+}
+
+const HOSTED_LINQ_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
+  "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+  "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+  "HOSTED_FAMILY_INVITE_NOT_FOUND",
+  "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+  "HOSTED_FAMILY_INVITE_PHONE_REQUIRED",
+  "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+  "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
+  "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+]);
+
+function isExpectedHostedLinqFamilyInviteAcceptanceMiss(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && !error.retryable
+    && HOSTED_LINQ_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);
 }
 
 function resolveHostedLinqExistingMemberMatch(input: {

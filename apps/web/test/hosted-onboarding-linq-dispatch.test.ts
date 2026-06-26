@@ -6,6 +6,7 @@ import {
   type HostedAiUsageGateDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
@@ -1980,6 +1981,145 @@ https://join.example.test/join/code_first_text`);
       now: new Date("2026-03-26T12:00:00.000Z"),
       phoneNumber: "+15551234567",
       text: "family_expired_or_wrong_line",
+      tx: prisma,
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries the Family welcome reply when the first Linq send fails after acceptance", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue({
+      groupId: "group_family",
+      memberId: "member_family",
+      role: "member",
+      status: "active",
+    });
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      data: {
+        parts: [
+          {
+            type: "text",
+            value: "family_retry_token",
+          },
+        ],
+      },
+      eventId: "evt_family_linq_retry",
+      service: "iMessage",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("linq send failed");
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "family-invite-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith({
+      chatId: "chat_123",
+      idempotencyKey: "linq-message:evt_family_linq_retry",
+      message: "Welcome to Murph Family.",
+      replyToMessageId: "msg_123",
+      signal: undefined,
+    });
+  });
+
+  it("ignores wrong-phone Family invite tokens without failing Linq", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different phone number.",
+    }));
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_wrong_phone",
+            },
+          ],
+        },
+        eventId: "evt_family_linq_wrong_phone",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-not-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
+      now: new Date("2026-03-26T12:00:00.000Z"),
+      phoneNumber: "+15551234567",
+      text: "family_wrong_phone",
       tx: prisma,
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
