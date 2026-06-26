@@ -30,33 +30,35 @@ export const POST = withJsonError(async (
       message: "That family invite is no longer valid.",
     });
   }
-  if (view.status !== "pending") {
+  if (view.status !== "pending" && view.status !== "accepted") {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
       httpStatus: 410,
       message: "That family invite has expired or was already used.",
     });
   }
-  if (!view.groupActive) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_GROUP_INACTIVE",
-      httpStatus: 409,
-      message: "This family plan isn't active right now. Ask the plan owner to finish setting it up.",
-    });
-  }
-  if (!view.isPhoneBound && !view.isEmailBound) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
-      httpStatus: 409,
-      message: "Open this invite from Telegram or WhatsApp to join.",
-    });
-  }
-  if (!view.seatAvailable) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
-      httpStatus: 409,
-      message: "This family plan already has four active or invited people.",
-    });
+  if (view.status === "pending") {
+    if (!view.groupActive) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_GROUP_INACTIVE",
+        httpStatus: 409,
+        message: "This family plan isn't active right now. Ask the plan owner to finish setting it up.",
+      });
+    }
+    if (!view.isPhoneBound && !view.isEmailBound) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
+        httpStatus: 409,
+        message: "Open this invite from Telegram or WhatsApp to join.",
+      });
+    }
+    if (!view.seatAvailable) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+        httpStatus: 409,
+        message: "This family plan already has four active or invited people.",
+      });
+    }
   }
 
   const [identity, account] = await Promise.all([

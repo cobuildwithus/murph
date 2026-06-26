@@ -160,3 +160,24 @@ test("rejects an expired or already-used invite", async () => {
   expect(response.status).toBe(410);
   expect(mocks.acceptHostedFamilyInvite).not.toHaveBeenCalled();
 });
+
+test("allows already accepted invites to reach domain idempotency", async () => {
+  mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValueOnce({
+    ...ACTIVE_PHONE_BOUND,
+    seatAvailable: false,
+    status: "accepted",
+    webAcceptable: false,
+  });
+
+  const response = await acceptRoute.POST(postRequest(), params);
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ accepted: true });
+  expect(mocks.acceptHostedFamilyInvite).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedMemberId: "member_mom",
+      inviteCode: "CODEDAD",
+      requireWebBinding: true,
+    }),
+  );
+});
