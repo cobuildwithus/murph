@@ -42,6 +42,7 @@ import {
 import {
   buildHostedLinqFirstContactEventProcessingError,
   classifyHostedLinqFirstContactAdmission,
+  isHostedLinqFirstContactEventProcessingFresh,
   readHostedLinqFirstContactAdmissionMode,
   readHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
@@ -419,7 +420,10 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         eventId: input.event.event_id,
         prisma: transaction,
       });
-      if (existingReceipt?.status === "processing") {
+      if (
+        existingReceipt?.status === "processing"
+        && isHostedLinqFirstContactEventProcessingFresh(existingReceipt)
+      ) {
         throw buildHostedLinqFirstContactEventProcessingError({
           eventId: input.event.event_id,
         });

@@ -2070,6 +2070,83 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("retries signup delivery when a daily onboarding claim exists without delivered invite evidence", async () => {
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
+    }));
+    const invite = {
+      channel: "linq",
+      id: "invite_stale_claim",
+      inviteCode: "code_stale_claim",
+      memberId: "member_stale_claim",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_stale_claim",
+          sentAt: new Date("2026-03-26T12:00:02.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_stale_claim",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_stale_daily_claim_retry",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: "code_stale_claim",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_stale_claim",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_stale_claim",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
+  });
+
   it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {
     const invite = {
       channel: "linq",
@@ -3253,7 +3330,14 @@ https://join.example.test/join/code_first_text`);
       .mockResolvedValue(makeHostedLinqDailyState({
         onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
       }));
-    const invite = {
+    const invite: {
+      channel: string;
+      id: string;
+      inviteCode: string;
+      memberId: string;
+      sentAt: Date | null;
+      status: string;
+    } = {
       channel: "linq",
       id: "invite_already_sent_replay",
       inviteCode: "code_already_sent_replay",
@@ -3279,11 +3363,14 @@ https://join.example.test/join/code_first_text`);
       },
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
-        findFirst: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn(async () => invite.sentAt ? invite : null),
         findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn().mockResolvedValue({
-          id: invite.id,
-          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        update: vi.fn().mockImplementation(async () => {
+          invite.sentAt = new Date("2026-03-26T12:00:01.000Z");
+          return {
+            id: invite.id,
+            sentAt: invite.sentAt,
+          };
         }),
         updateMany: vi.fn(),
       },
@@ -5343,7 +5430,10 @@ https://join.example.test/join/code_first_text`);
       },
       hostedInvite: {
         create: vi.fn(),
-        findFirst: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "invite_repeat_signup",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
@@ -5990,6 +6080,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
           ...create,
           ...update,
@@ -6000,6 +6091,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     hostedLinqFirstContactEventReceipt.create ??= vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     hostedLinqFirstContactEventReceipt.deleteMany ??= vi.fn().mockResolvedValue({ count: 0 });
     hostedLinqFirstContactEventReceipt.findUnique ??= vi.fn().mockResolvedValue(null);
+    hostedLinqFirstContactEventReceipt.updateMany ??= vi.fn().mockResolvedValue({ count: 0 });
     hostedLinqFirstContactEventReceipt.upsert ??= vi.fn(async (
       { create, update }: { create: Record<string, unknown>; update: Record<string, unknown> },
     ) => {

@@ -675,6 +675,7 @@ function createPrismaStub() {
       }),
       findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
         firstContactReceipts.get(where.eventId) ?? null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       upsert: vi.fn(async (
         { create, update, where }: {
           create: Record<string, unknown>;

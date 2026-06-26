@@ -16,6 +16,7 @@ import {
   classifyHostedLinqFirstContactAdmission,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
+  recordHostedLinqFirstContactEventProcessing,
   type HostedLinqFirstContactAdmissionRequest,
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
 import * as hostedOnboardingHttp from "@/src/lib/hosted-onboarding/http";
@@ -380,6 +381,76 @@ describe("Linq first-contact admission", () => {
       confidence: 0.99,
       kind: "block",
       source: "model",
+    });
+  });
+
+  it("keeps fresh first-contact processing receipts retryable without takeover", async () => {
+    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    const prisma = {
+      hostedLinqFirstContactEventReceipt: {
+        create: vi.fn().mockRejectedValueOnce(uniqueConflict),
+        deleteMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          status: "processing",
+          updatedAt: new Date("2026-03-26T12:04:30.000Z"),
+        }),
+        updateMany: vi.fn(),
+        upsert: vi.fn(),
+      },
+    };
+
+    await expect(recordHostedLinqFirstContactEventProcessing({
+      eventId: BASE_REQUEST.eventId,
+      now: new Date("2026-03-26T12:05:00.000Z"),
+      prisma,
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reclaims expired first-contact processing receipts for provider retry recovery", async () => {
+    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    const prisma = {
+      hostedLinqFirstContactEventReceipt: {
+        create: vi.fn().mockRejectedValueOnce(uniqueConflict),
+        deleteMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          status: "processing",
+          updatedAt: new Date("2026-03-26T11:59:59.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
+        upsert: vi.fn(),
+      },
+    };
+
+    await expect(recordHostedLinqFirstContactEventProcessing({
+      eventId: BASE_REQUEST.eventId,
+      now: new Date("2026-03-26T12:05:00.000Z"),
+      prisma,
+    })).resolves.toMatchObject({
+      eventId: BASE_REQUEST.eventId,
+      status: "processing",
+    });
+    expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).toHaveBeenCalledWith({
+      data: {
+        status: "processing",
+      },
+      where: {
+        eventId: BASE_REQUEST.eventId,
+        status: "processing",
+        updatedAt: {
+          lt: new Date("2026-03-26T12:00:00.000Z"),
+        },
+      },
     });
   });
 });

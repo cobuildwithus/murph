@@ -9,6 +9,7 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 2_500;
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE = 0.6;
+const HOSTED_LINQ_FIRST_CONTACT_EVENT_PROCESSING_LEASE_MS = 5 * 60_000;
 
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES = [
   "benign_greeting",
@@ -58,6 +59,7 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
 export type HostedLinqFirstContactEventReceipt = {
   eventId: string;
   status: HostedLinqFirstContactEventReceiptStatus;
+  updatedAt: Date;
 };
 
 export type HostedLinqFirstContactEventReceiptStatus = "consumed" | "processing";
@@ -84,6 +86,7 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
 type HostedLinqFirstContactEventReceiptRecord = {
   eventId: string;
   status: string;
+  updatedAt?: Date | string | null;
 };
 
 type HostedLinqFirstContactEventReceiptStore = {
@@ -104,6 +107,19 @@ type HostedLinqFirstContactEventReceiptStore = {
         eventId: string;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord | null>;
+    updateMany(input: {
+      data: {
+        status: HostedLinqFirstContactEventReceiptStatus;
+      };
+      where: {
+        eventId: string;
+        status?: HostedLinqFirstContactEventReceiptStatus;
+        updatedAt?: {
+          lt?: Date;
+          lte?: Date;
+        };
+      };
+    }): Promise<{ count: number }>;
     upsert(input: {
       create: {
         eventId: string;
@@ -308,13 +324,16 @@ export async function recordHostedLinqFirstContactEventConsumed(input: {
   return parseHostedLinqFirstContactEventReceiptRecord(receipt) ?? {
     eventId: input.eventId,
     status: "consumed",
+    updatedAt: new Date(),
   };
 }
 
 export async function recordHostedLinqFirstContactEventProcessing(input: {
   eventId: string;
+  now?: Date;
   prisma: HostedLinqFirstContactEventReceiptStore;
 }): Promise<HostedLinqFirstContactEventReceipt> {
+  const now = input.now ?? new Date();
   try {
     const created = await input.prisma.hostedLinqFirstContactEventReceipt.create({
       data: {
@@ -325,6 +344,7 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
     return parseHostedLinqFirstContactEventReceiptRecord(created) ?? {
       eventId: input.eventId,
       status: "processing",
+      updatedAt: now,
     };
   } catch (error) {
     if (!isPrismaUniqueConstraintError(error)) {
@@ -336,6 +356,34 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
       prisma: input.prisma,
     });
     if (existing?.status === "processing") {
+      if (!isHostedLinqFirstContactEventProcessingFresh(existing, now)) {
+        const reclaimed = await input.prisma.hostedLinqFirstContactEventReceipt.updateMany({
+          data: {
+            status: "processing",
+          },
+          where: {
+            eventId: input.eventId,
+            status: "processing",
+            updatedAt: {
+              lt: buildHostedLinqFirstContactEventProcessingLeaseCutoff(now),
+            },
+          },
+        });
+        if (reclaimed.count === 1) {
+          return {
+            eventId: input.eventId,
+            status: "processing",
+            updatedAt: now,
+          };
+        }
+        const current = await readHostedLinqFirstContactEventReceipt({
+          eventId: input.eventId,
+          prisma: input.prisma,
+        });
+        if (current?.status === "consumed") {
+          return current;
+        }
+      }
       throw buildHostedLinqFirstContactEventProcessingError({
         eventId: input.eventId,
       });
@@ -345,6 +393,18 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
     }
     throw error;
   }
+}
+
+export function isHostedLinqFirstContactEventProcessingFresh(
+  receipt: HostedLinqFirstContactEventReceipt,
+  now = new Date(),
+): boolean {
+  return receipt.status === "processing"
+    && receipt.updatedAt.getTime() >= buildHostedLinqFirstContactEventProcessingLeaseCutoff(now).getTime();
+}
+
+function buildHostedLinqFirstContactEventProcessingLeaseCutoff(now: Date): Date {
+  return new Date(now.getTime() - HOSTED_LINQ_FIRST_CONTACT_EVENT_PROCESSING_LEASE_MS);
 }
 
 export function buildHostedLinqFirstContactEventProcessingError(input: {
@@ -554,7 +614,21 @@ function parseHostedLinqFirstContactEventReceiptRecord(
   return {
     eventId: record.eventId,
     status: record.status === "processing" ? "processing" : "consumed",
+    updatedAt: readHostedLinqFirstContactReceiptUpdatedAt(record.updatedAt),
   };
+}
+
+function readHostedLinqFirstContactReceiptUpdatedAt(value: Date | string | null | undefined): Date {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (Number.isFinite(parsed.getTime())) {
+      return parsed;
+    }
+  }
+  return new Date();
 }
 
 function readHostedLinqFirstContactAdmissionTerminalBlock(

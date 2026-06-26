@@ -221,8 +221,8 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
 
     } catch (error) {
-      await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+      await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
       throw error;
     }
 
@@ -669,5 +669,8 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       "Hosted Linq side-effect notice claim release failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
+    if (effect.payload.template === "invite_signup") {
+      throw error;
+    }
   }
 }

@@ -34,6 +34,7 @@ import {
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
+  releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
 import {
   type HostedLinqMessageReceivedEvent,
@@ -73,6 +74,7 @@ import type {
 } from "./linq-first-contact-admission";
 import {
   buildHostedLinqFirstContactEventProcessingError,
+  isHostedLinqFirstContactEventProcessingFresh,
   recordHostedLinqFirstContactEventConsumed,
   recordHostedLinqFirstContactEventProcessing,
   readHostedLinqFirstContactEventReceipt,
@@ -147,9 +149,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     prisma: input.prisma,
   });
   if (existingFirstContactReceipt?.status === "processing") {
-    throw buildHostedLinqFirstContactEventProcessingError({
-      eventId: input.event.event_id,
-    });
+    if (isHostedLinqFirstContactEventProcessingFresh(existingFirstContactReceipt)) {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.event.event_id,
+      });
+    }
   }
   if (existingFirstContactReceipt?.status === "consumed") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -582,19 +586,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (existingDailyState?.onboardingLinkSentAt) {
-    await recordHostedLinqFirstContactEventConsumed({
-      eventId: input.event.event_id,
+    const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+      memberId: member.id,
       prisma: input.prisma,
     });
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
-        existingMemberMatch,
-        reason: "signup-link-already-sent",
-        routeStage: "first-contact-signup-already-sent",
-      }),
-    );
+    if (alreadySentPlan) {
+      return alreadySentPlan;
+    }
   }
 
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
@@ -607,20 +609,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (dailyState.onboardingLinkSentAt) {
-    await recordHostedLinqFirstContactEventConsumed({
-      eventId: input.event.event_id,
+    const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
+      context,
+      dailyInboundCount: dailyState.inboundCount,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+      memberId: member.id,
       prisma: input.prisma,
     });
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
-        existingMemberMatch,
-        reason: "signup-link-already-sent",
-        routeStage: "first-contact-signup-already-sent",
-      }),
-    );
+    if (alreadySentPlan) {
+      return alreadySentPlan;
+    }
   }
 
   const firstContactEventReceipt = await recordHostedLinqFirstContactEventProcessing({
@@ -662,6 +662,55 @@ export async function planHostedOnboardingLinqWebhook(input: {
       existingMemberMatch,
       reason: "sent-signup-link",
       routeStage: "first-contact-signup-link",
+    }),
+  );
+}
+
+async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  dailyInboundCount?: number;
+  event: HostedLinqWebhookEvent;
+  existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const deliveredInvite = await input.prisma.hostedInvite.findFirst({
+    orderBy: {
+      sentAt: "desc",
+    },
+    where: {
+      memberId: input.memberId,
+      sentAt: {
+        not: null,
+      },
+    },
+  });
+  if (!deliveredInvite?.sentAt) {
+    await releaseHostedLinqOnboardingLinkNoticeClaim({
+      memberId: input.memberId,
+      occurredAt: input.context.occurredAt,
+      prisma: input.prisma,
+    });
+    return null;
+  }
+
+  await recordHostedLinqFirstContactEventConsumed({
+    eventId: input.event.event_id,
+    prisma: input.prisma,
+  });
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      ...(input.dailyInboundCount === undefined
+        ? {}
+        : {
+            dailyInboundCount: input.dailyInboundCount,
+          }),
+      existingMemberActive: input.existingMember ? hasHostedMemberActiveAccess(input.existingMember) : false,
+      existingMemberMatch: input.existingMemberMatch,
+      reason: "signup-link-already-sent",
+      routeStage: "first-contact-signup-already-sent",
     }),
   );
 }
