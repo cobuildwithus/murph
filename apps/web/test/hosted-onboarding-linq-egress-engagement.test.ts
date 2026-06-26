@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
@@ -136,5 +137,42 @@ describe("hosted Linq egress engagement", () => {
         }),
       }),
     );
+  });
+
+  it("allows pre-chat runtime sends when the sending line has recent inbound engagement", async () => {
+    const lineLookupKey = createHostedPhoneLookupKey("+15550100001");
+    if (!lineLookupKey) {
+      throw new Error("Expected test Linq line lookup key.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: null,
+          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+          linqRecipientPhoneLookupKey: lineLookupKey,
+          pendingLinqChatLookupKey: null,
+          pendingLinqLastInboundAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directRecipientPhoneNumber: "+15550199999",
+      fromPhoneNumber: "+15550100001",
+      idempotencyKey: "delivery-key-2",
+      intentId: "intent-2",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      target: "+15550199999",
+      targetKind: "participant",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });

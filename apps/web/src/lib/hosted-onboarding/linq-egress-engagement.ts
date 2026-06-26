@@ -219,7 +219,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         chatId: input.target,
         memberId: input.memberId,
         prisma: input.prisma,
-        recipientPhone: input.directRecipientPhoneNumber,
+        recipientPhone: input.fromPhoneNumber ?? input.directRecipientPhoneNumber,
       }),
       now,
     });

@@ -87,6 +87,7 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
   privyUserId?: string | null;
+  recentInboundAt?: Date | string | null;
   walletAddress?: string | null;
 }
 
@@ -414,6 +415,9 @@ export async function startHostedLocalFullStackScenario(input: {
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
           privyUserId: seedInput.privyUserId,
+          recentInboundAt: seedInput.recentInboundAt === undefined
+            ? new Date().toISOString()
+            : seedInput.recentInboundAt,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
           walletAddress: seedInput.walletAddress,
