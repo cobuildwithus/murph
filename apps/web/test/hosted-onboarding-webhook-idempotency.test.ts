@@ -319,12 +319,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "recorded-linq-provider-event:phone_number.status_updated",
     });
 
-    expect(prisma.hostedLinqLine.update).toHaveBeenCalledWith(
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           egressPolicy: "disabled",
           healthStatus: "unhealthy",
-          providerReason: "carrier review",
+          providerReason: "[redacted]",
           providerStatus: "flagged",
         }),
       }),
@@ -767,6 +767,7 @@ function createPrismaStub() {
     hostedLinqLine: {
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue(undefined),
     },
     hostedLinqProviderEvent: {

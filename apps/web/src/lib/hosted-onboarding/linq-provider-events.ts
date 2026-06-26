@@ -11,6 +11,10 @@ import {
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqRecipientPhoneNumber,
 } from "./linq";
+import {
+  sanitizeHostedOnboardingLogString,
+  sanitizeHostedOnboardingPersistedErrorMessage,
+} from "./http";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
@@ -280,8 +284,8 @@ function buildParsedProviderEvent(input: {
       ...input.extraction,
       extractionVersion: 1,
     }),
-    failureCode: normalizeSafeProviderText(input.failureCode),
-    failureReason: normalizeSafeProviderText(input.failureReason),
+    failureCode: normalizeSafeProviderToken(input.failureCode),
+    failureReason: normalizeProviderFreeText(input.failureReason),
     linqChatLookupKey,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
@@ -301,9 +305,9 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
-    providerReason: normalizeSafeProviderText(input.providerReason),
-    providerStatus: normalizeSafeProviderText(input.providerStatus),
-    service: normalizeSafeProviderText(input.service),
+    providerReason: normalizeProviderFreeText(input.providerReason),
+    providerStatus: normalizeSafeProviderToken(input.providerStatus),
+    service: normalizeSafeProviderToken(input.service),
     traceIdSuffix: toHostedOnboardingLogIdSuffix(input.event.trace_id),
     webhookVersion: normalizeNullableString(input.event.webhook_version ?? null),
   };
@@ -377,13 +381,17 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function normalizeSafeProviderText(value: string | null): string | null {
+function normalizeSafeProviderToken(value: string | null): string | null {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
     return null;
   }
 
-  return normalized.slice(0, 160);
+  return sanitizeHostedOnboardingLogString(normalized, 160);
+}
+
+function normalizeProviderFreeText(value: string | null): string | null {
+  return sanitizeHostedOnboardingPersistedErrorMessage(normalizeNullableString(value));
 }
 
 function buildPayloadHash(rawBody: string | null | undefined, event: HostedLinqWebhookEvent): string | null {

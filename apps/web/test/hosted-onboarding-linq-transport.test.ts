@@ -104,6 +104,66 @@ describe("hosted Linq webhook transport", () => {
     );
   });
 
+  it("does not block current inbound replies on delivery-attempt recording", async () => {
+    let releaseAttempt!: () => void;
+    const attemptPromise = new Promise<{ id: string }>((resolve) => {
+      releaseAttempt = () => resolve({ id: "hld_123" });
+    });
+    const prisma = {
+      hostedLinqDelivery: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn(() => attemptPromise),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "daily_quota",
+    });
+
+    let drainResolved = false;
+    const drainPromise = drainHostedLinqSideEffectsDirect({
+      currentInboundReply,
+      prisma: prisma as never,
+      sideEffects: [effect],
+    }).then(() => {
+      drainResolved = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(prisma.hostedLinqDelivery.upsert).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idempotencyKey: effect.effectId,
+          message: "daily-quota",
+        }),
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(drainResolved).toBe(true);
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+
+    releaseAttempt();
+    await drainPromise;
+    await vi.waitFor(() => {
+      expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: "accepted",
+          }),
+          where: {
+            idempotencyKey: effect.effectId,
+          },
+        }),
+      );
+    });
+  });
+
   it("prefers the latest routing phone over the stored redirect fallback", async () => {
     vi.mocked(readHostedMemberRoutingState).mockResolvedValue({
       linqChatId: "home-chat-1",

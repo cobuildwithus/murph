@@ -254,7 +254,7 @@ async function sendHostedLinqSideEffect(
   },
 ): Promise<{ status: "sent" | "skipped" }> {
   const startedAtMs = Date.now();
-  await recordHostedLinqDeliveryAttemptBestEffort({
+  const deliveryAttemptTask = recordHostedLinqDeliveryAttemptBestEffort({
     effect,
     prisma: options.prisma,
     startedAtMs,
@@ -267,6 +267,7 @@ async function sendHostedLinqSideEffect(
         prisma: options.prisma,
       });
       if (!engagementDecision.allowed) {
+        await deliveryAttemptTask;
         await markHostedLinqDeliverySkippedBestEffort({
           effect,
           lastInboundAt: engagementDecision.lastInboundAt,
@@ -289,18 +290,20 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    await markHostedLinqDeliveryAcceptedBestEffort({
-      chatId: result.chatId ?? effect.payload.chatId,
-      effect,
-      messageId: result.messageId,
-      prisma: options.prisma,
-    });
+    scheduleHostedLinqDeliveryMilestoneAfterAttempt(deliveryAttemptTask, () =>
+      markHostedLinqDeliveryAcceptedBestEffort({
+        chatId: result.chatId ?? effect.payload.chatId,
+        effect,
+        messageId: result.messageId,
+        prisma: options.prisma,
+      }));
   } catch (error) {
-    await markHostedLinqDeliveryFailedBestEffort({
-      effect,
-      error,
-      prisma: options.prisma,
-    });
+    scheduleHostedLinqDeliveryMilestoneAfterAttempt(deliveryAttemptTask, () =>
+      markHostedLinqDeliveryFailedBestEffort({
+        effect,
+        error,
+        prisma: options.prisma,
+      }));
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
@@ -309,6 +312,19 @@ async function sendHostedLinqSideEffect(
   }
 
   return { status: "sent" };
+}
+
+function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
+  attemptTask: Promise<void>,
+  milestoneTask: () => Promise<void>,
+): void {
+  void attemptTask
+    .then(milestoneTask)
+    .catch((error) => {
+      console.warn("Hosted Linq delivery milestone recording failed.", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    });
 }
 
 async function recordHostedLinqDeliveryAttemptBestEffort(input: {

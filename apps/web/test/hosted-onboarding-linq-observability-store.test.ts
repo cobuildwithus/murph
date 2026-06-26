@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
@@ -18,7 +19,7 @@ describe("hosted Linq observability stores", () => {
       data: {
         error: {
           code: "30007",
-          message: "carrier filtered",
+          message: "carrier filtered +15551234567 provider_msg_123 private text",
         },
         message_id: "msg_failed_123",
         phone_number: "+15550000000",
@@ -44,7 +45,7 @@ describe("hosted Linq observability stores", () => {
           eventId: "evt_failed_123",
           eventType: "message.failed",
           failureCode: "30007",
-          failureReason: "carrier filtered",
+          failureReason: "[redacted]",
         }),
         skipDuplicates: true,
       }),
@@ -57,7 +58,7 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           healthStatus: "warning",
           lastFailureCode: "30007",
-          lastFailureReason: "carrier filtered",
+          lastFailureReason: "[redacted]",
           totalFailedCount: { increment: 1 },
         }),
       }),
@@ -66,7 +67,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           failureCode: "30007",
-          failureReason: "carrier filtered",
+          failureReason: "[redacted]",
           status: "failed",
         }),
         where: {
@@ -309,6 +310,31 @@ describe("hosted Linq observability stores", () => {
       | Record<string, unknown>
       | undefined;
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
+  });
+
+  it("redacts direct send-failure details before recording delivery state", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: "LINQ_SEND_FAILED",
+      failureReason: "Failed provider_msg_123 to +15551234567: private member text",
+      idempotencyKey: "linq-message:event-123",
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failureCode: "LINQ_SEND_FAILED",
+          failureReason: "[redacted]",
+          status: "failed",
+        }),
+      }),
+    );
+    const update = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0];
+    expect(JSON.stringify(update)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(update)).not.toContain("+15551234567");
+    expect(JSON.stringify(update)).not.toContain("private member text");
   });
 });
 

@@ -123,7 +123,7 @@ function createAlertEmailPrismaFixture(input?: {
         eventIdSuffix: "led_123",
         eventType: "message.failed",
         failureCode: "30007",
-        failureReason: "carrier filtered",
+        failureReason: "[redacted]",
         providerCreatedAt: "2026-03-26T12:00:00.000Z",
       },
       eventId: "evt_failed_123",

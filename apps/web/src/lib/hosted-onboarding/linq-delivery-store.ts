@@ -9,6 +9,10 @@ import {
 import {
   upsertHostedLinqLineForPhoneTx,
 } from "./linq-line-store";
+import {
+  sanitizeHostedOnboardingPersistedErrorCode,
+  sanitizeHostedOnboardingPersistedErrorMessage,
+} from "./http";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
@@ -113,8 +117,12 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
     where: { idempotencyKey: input.idempotencyKey },
     data: {
       failedAt: input.failedAt ?? new Date(),
-      failureCode: normalizeNullable(input.failureCode),
-      failureReason: normalizeNullable(input.failureReason)?.slice(0, 160) ?? null,
+      failureCode: sanitizeHostedOnboardingPersistedErrorCode(
+        normalizeNullable(input.failureCode),
+      ),
+      failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+        normalizeNullable(input.failureReason),
+      ),
       status: "failed",
     },
   });

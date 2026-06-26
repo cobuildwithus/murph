@@ -48,7 +48,7 @@ describe("parseHostedLinqProviderEvent", () => {
         data: {
           error: {
             code: "30007",
-            message: "carrier filtered",
+            message: "carrier filtered +15551234567 provider_msg_123 private text",
           },
           message: "raw chat text must not be treated as failure reason",
           message_id: "msg_failed_123",
@@ -68,11 +68,35 @@ describe("parseHostedLinqProviderEvent", () => {
       deliveryStatus: "failed",
       eventType: "message.failed",
       failureCode: "30007",
-      failureReason: "carrier filtered",
+      failureReason: "[redacted]",
       phoneNumberRole: "line",
     });
+    expect(JSON.stringify(failed)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(failed)).not.toContain("+15551234567");
+    expect(JSON.stringify(failed)).not.toContain("private text");
     expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("raw chat text");
     expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("raw chat text");
+  });
+
+  it("redacts free-form provider status reasons before persistence", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          phone_number: "+15550000000",
+          reason: "carrier review for +15551234567 provider_msg_123",
+          status: "flagged",
+        },
+        eventType: "phone_number.status_updated",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      eventType: "phone_number.status_updated",
+      providerReason: "[redacted]",
+      providerStatus: "flagged",
+    });
+    expect(JSON.stringify(parsed)).not.toContain("+15551234567");
+    expect(JSON.stringify(parsed)).not.toContain("provider_msg_123");
   });
 
   it("parses phone number status updates conservatively", () => {
