@@ -2134,6 +2134,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_stale_claim",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: new Date("2026-03-26T12:00:01.000Z"),
     });
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
       orderBy: {
@@ -2161,6 +2162,74 @@ https://join.example.test/join/code_first_text`);
         sentAt: expect.any(Date),
       },
     });
+  });
+
+  it("does not clear an in-flight daily onboarding claim before invite delivery proof exists", async () => {
+    const claimSentAt = new Date();
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      onboardingLinkSentAt: claimSentAt,
+    }));
+    const hostedInviteCreate = vi.fn();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: hostedInviteCreate,
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_in_flight_claim",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_in_flight_daily_claim",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      retryable: true,
+    });
+
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        sentAt: "desc",
+      },
+      where: {
+        channel: "linq",
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+        memberId: "member_in_flight_claim",
+        sentAt: {
+          gte: claimSentAt,
+          not: null,
+        },
+      },
+    });
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
+    expect(hostedInviteCreate).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {

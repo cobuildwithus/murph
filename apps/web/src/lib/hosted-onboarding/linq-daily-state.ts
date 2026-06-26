@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 type HostedLinqDailyStateClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 150;
+const HOSTED_LINQ_ONBOARDING_LINK_NOTICE_CLAIM_LEASE_MS = 5 * 60_000;
 
 export function resolveHostedLinqDayUtc(value: Date | string): Date {
   const occurredAt = value instanceof Date ? value : new Date(value);
@@ -118,12 +119,13 @@ export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {
   memberId: string;
   occurredAt: Date | string;
   prisma: HostedLinqDailyStateClient;
-}): Promise<void> {
-  await input.prisma.hostedLinqDailyState.updateMany({
+  sentAt?: Date;
+}): Promise<boolean> {
+  const released = await input.prisma.hostedLinqDailyState.updateMany({
     where: {
       dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
       memberId: input.memberId,
-      onboardingLinkSentAt: {
+      onboardingLinkSentAt: input.sentAt ?? {
         not: null,
       },
     },
@@ -131,6 +133,15 @@ export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {
       onboardingLinkSentAt: null,
     },
   });
+
+  return released.count === 1;
+}
+
+export function isHostedLinqOnboardingLinkNoticeClaimFresh(
+  sentAt: Date,
+  now = new Date(),
+): boolean {
+  return sentAt.getTime() >= now.getTime() - HOSTED_LINQ_ONBOARDING_LINK_NOTICE_CLAIM_LEASE_MS;
 }
 
 export async function claimHostedLinqQuotaReplyNotice(input: {
