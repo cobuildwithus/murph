@@ -12,6 +12,7 @@ import {
   HOSTED_ELEVENLABS_ENV_NAMES,
   HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
   HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
+  HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 import {
@@ -67,6 +68,7 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
     ...HOSTED_RUNTIME_CHECKPOINT_DEBUG_ENV_KEYS,
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
     ...HOSTED_ELEVENLABS_ENV_NAMES,
+    ...HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES,
     HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
     HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
     HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -169,6 +171,14 @@ function readHostedRuntimeLaunchParserToolchain(
     }
 
     tools[toolName as keyof HostedAssistantRuntimeParserToolchainConfig["tools"]] = {
+      ...(config.authorizationHeader === undefined
+        ? {}
+        : {
+            authorizationHeader: normalizeHostedRuntimeLaunchParserToolString(
+              config.authorizationHeader,
+              `parserToolchain.tools.${toolName}.authorizationHeader`,
+            ),
+          }),
       ...(config.command === undefined
         ? {}
         : {
@@ -197,6 +207,17 @@ function readHostedRuntimeLaunchParserToolchain(
   }
 
   return { tools };
+}
+
+function normalizeHostedRuntimeLaunchParserToolString(
+  value: string | null | undefined,
+  label: string,
+): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value.trim();
 }
 
 function normalizeHostedRuntimeLaunchParserToolEndpoint(
