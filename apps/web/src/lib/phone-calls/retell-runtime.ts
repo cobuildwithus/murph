@@ -1,6 +1,9 @@
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
+import type {
+  CallCreatePhoneCallParams,
+} from "retell-sdk/resources/call";
 
 import type {
   HostedPhoneCallRuntimeRecord,
@@ -115,7 +118,7 @@ function buildRetellStorageModeMismatchError(input: {
   });
 }
 
-function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): Record<string, unknown> {
+function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): CallCreatePhoneCallParams {
   assertRetellAgentDataStorageSetting();
 
   return {
@@ -123,12 +126,10 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
     override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
-    agent_override: {
-      metadata: {
-        murph_phone_call_id: call.id,
-      },
-      retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
+    metadata: {
+      murph_phone_call_id: call.id,
     },
+    retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
   };
 }
 
