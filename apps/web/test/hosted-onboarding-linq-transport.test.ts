@@ -114,6 +114,9 @@ describe("hosted Linq webhook transport", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn(() => attemptPromise),
       },
+      hostedLinqProviderEvent: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -156,9 +159,12 @@ describe("hosted Linq webhook transport", () => {
           data: expect.objectContaining({
             status: "accepted",
           }),
-          where: {
+          where: expect.objectContaining({
+            deliveredAt: null,
+            failedAt: null,
             idempotencyKey: effect.effectId,
-          },
+            skippedAt: null,
+          }),
         }),
       );
     });

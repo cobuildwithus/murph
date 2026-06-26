@@ -28,7 +28,6 @@ import {
   listHostedLinqPhoneNumbers,
   reconcileHostedLinqContactCards,
   setupHostedLinqContactCard,
-  shareHostedLinqContactCard,
   syncHostedLinqProviderPhoneNumberTx,
   updateHostedLinqContactCard,
 } from "@/src/lib/hosted-onboarding/linq-contact-card";
@@ -217,23 +216,6 @@ describe("hosted Linq contact card client", () => {
     expect(readJsonRequestBody(init)).toEqual({
       first_name: "Murph",
     });
-  });
-
-  it("shares the contact card into an existing chat without a body", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await shareHostedLinqContactCard({
-      chatId: "chat_123",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("chats/chat_123/share_contact_card", "https://linq.example.test/api/partner/v3/"),
-      expect.objectContaining({
-        body: undefined,
-        method: "POST",
-      }),
-    );
   });
 
   it("syncs provider reputation without auto-enabling disabled lines", async () => {

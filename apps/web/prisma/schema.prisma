@@ -926,6 +926,8 @@ model HostedLinqLine {
   lastOutboundAt             DateTime? @map("last_outbound_at")
   lastDeliveredAt            DateTime? @map("last_delivered_at")
   lastFailedAt               DateTime? @map("last_failed_at")
+  lastReceiptAt              DateTime? @map("last_receipt_at")
+  lastReceiptEventId         String?   @map("last_receipt_event_id")
   lastFailureCode            String?   @map("last_failure_code")
   lastFailureReason          String?   @map("last_failure_reason")
   lastInboundAt              DateTime? @map("last_inbound_at")

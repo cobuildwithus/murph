@@ -84,6 +84,9 @@ import {
   type HostedSystemMailboxPendingItem,
 } from "./system-mailbox.ts";
 import type {
+  HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
+import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
@@ -408,6 +411,7 @@ export async function runHostedWorkspaceAssistantPhase(
         currentTurnDeliveryIntentIds,
         deferredProviderCleanupWakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt,
         input,
+        linqDeliveryContext: input.initialMailboxImport.importResult.latestLinqDeliveryContext ?? null,
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWake,
         systemMailboxWakeAt,
@@ -2732,6 +2736,7 @@ async function runForegroundAssistantReplyPhase(input: {
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt: string | null;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
@@ -2763,6 +2768,7 @@ async function runForegroundAssistantReplyPhase(input: {
       baseNextWake: fastDispatchBaseNextWake,
       checkpointReason: "outbox_receipt",
       input: input.input,
+      linqDeliveryContext: input.linqDeliveryContext,
       providerCleanup: {
         mode: "defer",
       },
@@ -2907,6 +2913,7 @@ async function runForegroundAssistantReplyPhase(input: {
               baseNextWake,
               checkpointReason: "outbox_receipt",
               input: input.input,
+              linqDeliveryContext: input.linqDeliveryContext,
               providerCleanup: {
                 mode: "defer",
               },
@@ -2944,6 +2951,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   baseNextWake: HostedRuntimeWakeCandidate;
   checkpointReason: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["checkpointReason"];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   providerCleanup:
     | { checkpoint: HostedProviderCleanupCheckpoint | null; mode: "drain" }
     | { mode: "defer" };
@@ -2993,6 +3001,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         },
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
+        linqDeliveryContext: input.linqDeliveryContext ?? null,
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,

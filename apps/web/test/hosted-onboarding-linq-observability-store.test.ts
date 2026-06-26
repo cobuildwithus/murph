@@ -60,8 +60,15 @@ describe("hosted Linq observability stores", () => {
           healthStatus: "warning",
           lastFailureCode: "30007",
           lastFailureReason: "[redacted]",
-          totalFailedCount: { increment: 1 },
+          lastReceiptEventId: "evt_failed_123",
         }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalFailedCount: { increment: 1 },
+        },
       }),
     );
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -355,9 +362,12 @@ describe("hosted Linq observability stores", () => {
           messageIdSuffix: "ge_123",
           status: "accepted",
         }),
-        where: {
+        where: expect.objectContaining({
           idempotencyKey: "linq-message:event-123",
-        },
+          deliveredAt: null,
+          failedAt: null,
+          skippedAt: null,
+        }),
       }),
     );
     const updateData = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.data as

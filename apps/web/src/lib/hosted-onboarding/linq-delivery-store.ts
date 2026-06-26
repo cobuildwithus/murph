@@ -100,20 +100,35 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
-  await input.prisma.hostedLinqDelivery.updateMany({
-    where: { idempotencyKey: input.idempotencyKey },
-    data: {
-      acceptedAt: input.acceptedAt ?? new Date(),
-      linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
-      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+  await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+    const updated = await prisma.hostedLinqDelivery.updateMany({
+      where: {
+        deliveredAt: null,
+        failedAt: null,
+        idempotencyKey: input.idempotencyKey,
+        skippedAt: null,
+        OR: [
+          { messageLookupKey: null },
+          ...(messageLookupKey ? [{ messageLookupKey }] : []),
+        ],
+      },
+      data: {
+        acceptedAt: input.acceptedAt ?? new Date(),
+        linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+        messageLookupKey,
+        status: "accepted",
+      },
+    });
+    if (updated.count !== 1) {
+      return;
+    }
+
+    await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
+      idempotencyKey: input.idempotencyKey,
       messageLookupKey,
-      status: "accepted",
-    },
-  });
-  await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
-    idempotencyKey: input.idempotencyKey,
-    messageLookupKey,
-    prisma: input.prisma,
+      prisma,
+    });
   });
 }
 
@@ -407,6 +422,23 @@ function isHostedLinqDeliveryLifecycleFinal(input: {
 
 function buildHostedLinqDeliveryId(idempotencyKey: string): string {
   return `hld_${sha256Hex(idempotencyKey).slice(0, 32)}`;
+}
+
+async function runHostedLinqDeliveryStoreTransaction<T>(
+  prisma: HostedLinqDeliveryClient,
+  operation: (transaction: HostedLinqDeliveryClient) => Promise<T>,
+): Promise<T> {
+  const candidate = prisma as HostedLinqDeliveryClient & {
+    $transaction?: <TResult>(
+      operation: (transaction: Prisma.TransactionClient) => Promise<TResult>,
+    ) => Promise<TResult>;
+  };
+
+  if (candidate.$transaction) {
+    return candidate.$transaction(operation);
+  }
+
+  return operation(prisma);
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

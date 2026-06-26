@@ -1097,6 +1097,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1121,6 +1122,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
+  const linqDeliveryContext = input.linqDeliveryContext
+    ?? buildHostedAssistantLinqDeliveryContextFromWake(input.wake);
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   const blockedForegroundDeliveryKeys = new Set<string>();
   const preparedDispatchByIntentId = new Map(
@@ -1175,6 +1178,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
         signal: input.signal ?? null,
         linqEnv,
+        linqDeliveryContext,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         telegramVoiceMemoEnv,
@@ -1301,6 +1305,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -1434,9 +1439,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
-          linqDeliveryContext: input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null,
+          linqDeliveryContext: input.linqDeliveryContext,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1449,9 +1452,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
-          linqDeliveryContext: input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null,
+          linqDeliveryContext: input.linqDeliveryContext,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1461,18 +1462,30 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          const routeScopedContext = input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null;
+          const routeScopedContext = input.linqDeliveryContext;
+          const deliveryContext = resolveHostedAssistantLinqReactionDeliveryContextForRequest({
+            context: routeScopedContext,
+            target: request.target,
+            targetMessageId: request.targetMessageId,
+          });
           await assertHostedAssistantLinqRouteAuthorityForDelivery({
-            deliveryContext: resolveHostedAssistantLinqReactionDeliveryContextForRequest({
-              context: routeScopedContext,
-              target: request.target,
-              targetMessageId: request.targetMessageId,
-            }),
+            deliveryContext,
             effectsPort: input.effectsPort,
             routeScopedContext,
             signal: input.signal,
+          });
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            allowCurrentInboundBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
+            deliveryContext,
+            directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
+            effectsPort: input.effectsPort,
+            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
+            intentId: input.assistantDeliveryEffect.effectId,
+            replyToMessageId: request.targetMessageId,
+            signal: input.signal,
+            target: request.target,
+            targetKind: "thread",
           });
           let reactionProviderDispatchEntered = false;
           const result = await setHostedProviderLinqMessageReaction({

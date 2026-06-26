@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { sendPendingHostedLinqAlertsBestEffort } from "@/src/lib/hosted-onboarding/linq-alert-email";
+import {
+  sendPendingHostedLinqAlertsBestEffort,
+  sendRecoverableHostedLinqAlertsBestEffort,
+} from "@/src/lib/hosted-onboarding/linq-alert-email";
 
 describe("sendPendingHostedLinqAlertsBestEffort", () => {
   it("sends pending alerts through the Linq alert Resend config and stores the provider id", async () => {
@@ -107,6 +110,44 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     });
 
     expect(fixture.hostedLinqAlertFindMany).not.toHaveBeenCalled();
+  });
+
+  it("recovers failed and lease-expired sending alerts", async () => {
+    const fixture = createAlertEmailPrismaFixture();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      id: "email_provider_123",
+    }), {
+      status: 200,
+    }));
+
+    await sendRecoverableHostedLinqAlertsBestEffort({
+      env: buildAlertEmailEnv(),
+      fetchImpl,
+      now: new Date("2026-03-26T12:20:00.000Z"),
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqAlertFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 50,
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              status: {
+                in: ["pending", "failed"],
+              },
+            },
+            {
+              lastAttemptedAt: {
+                lt: new Date("2026-03-26T12:05:00.000Z"),
+              },
+              status: "sending",
+            },
+          ]),
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -43,6 +43,7 @@ import {
 } from "./logging";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
+type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
 
 export type HostedLinqCurrentInboundReplyProof = {
   chatId: string | null;
@@ -212,6 +213,7 @@ function buildHostedWebhookLinqMessageEffectId(
 export async function drainHostedLinqSideEffectsDirect(input: {
   currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   prisma: HostedLinqTransportPersistenceClient;
+  scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
 }): Promise<void> {
@@ -225,6 +227,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       const result = await sendHostedLinqSideEffect(effect, {
         currentInboundReply: input.currentInboundReply ?? null,
         prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
       });
 
@@ -250,6 +253,7 @@ async function sendHostedLinqSideEffect(
   options: {
     currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
     prisma: HostedLinqTransportPersistenceClient;
+    scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
 ): Promise<{ status: "sent" | "skipped" }> {
@@ -290,20 +294,26 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt(deliveryAttemptTask, () =>
-      markHostedLinqDeliveryAcceptedBestEffort({
+    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+      attemptTask: deliveryAttemptTask,
+      milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
         chatId: result.chatId ?? effect.payload.chatId,
         effect,
         messageId: result.messageId,
         prisma: options.prisma,
-      }));
+      }),
+      scheduleAfterResponse: options.scheduleAfterResponse,
+    });
   } catch (error) {
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt(deliveryAttemptTask, () =>
-      markHostedLinqDeliveryFailedBestEffort({
+    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+      attemptTask: deliveryAttemptTask,
+      milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
         effect,
         error,
         prisma: options.prisma,
-      }));
+      }),
+      scheduleAfterResponse: options.scheduleAfterResponse,
+    });
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
@@ -315,16 +325,27 @@ async function sendHostedLinqSideEffect(
 }
 
 function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
-  attemptTask: Promise<void>,
-  milestoneTask: () => Promise<void>,
+  input: {
+    attemptTask: Promise<void>;
+    milestoneTask: () => Promise<void>;
+    scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
+  },
 ): void {
-  void attemptTask
-    .then(milestoneTask)
-    .catch((error) => {
-      console.warn("Hosted Linq delivery milestone recording failed.", {
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      });
+  const task = async () => {
+    await input.attemptTask;
+    await input.milestoneTask();
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(task);
+    return;
+  }
+
+  void task().catch((error) => {
+    console.warn("Hosted Linq delivery milestone recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
     });
+  });
 }
 
 async function recordHostedLinqDeliveryAttemptBestEffort(input: {

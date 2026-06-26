@@ -11,6 +11,7 @@ import {
 type HostedLinqAlertEmailEnv = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_LINQ_ALERT_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
+const HOSTED_LINQ_ALERT_EMAIL_SENDING_LEASE_MS = 15 * 60 * 1000;
 const HOSTED_LINQ_ALERT_EMAIL_MIN_TIMEOUT_MS = 1_000;
 const HOSTED_LINQ_ALERT_EMAIL_MAX_TIMEOUT_MS = 30_000;
 
@@ -33,10 +34,31 @@ export async function sendPendingHostedLinqAlertsBestEffort(input: {
   }
 }
 
+export async function sendRecoverableHostedLinqAlertsBestEffort(input: {
+  env?: HostedLinqAlertEmailEnv;
+  fetchImpl?: typeof fetch;
+  now?: Date;
+  prisma?: PrismaClient;
+} = {}): Promise<void> {
+  try {
+    await sendPendingHostedLinqAlerts({
+      alertIds: [],
+      includeRecoverableSending: true,
+      ...input,
+    });
+  } catch (error) {
+    console.warn("Hosted Linq alert email recovery failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
+
 async function sendPendingHostedLinqAlerts(input: {
   alertIds: readonly string[];
   env?: HostedLinqAlertEmailEnv;
   fetchImpl?: typeof fetch;
+  includeRecoverableSending?: boolean;
+  now?: Date;
   prisma?: PrismaClient;
 }): Promise<void> {
   const config = readHostedLinqAlertEmailConfig(input.env ?? process.env);
@@ -45,14 +67,17 @@ async function sendPendingHostedLinqAlerts(input: {
   }
 
   const prisma = input.prisma ?? getPrisma();
+  const claimableWhere = buildHostedLinqAlertClaimableWhere({
+    alertIds: input.alertIds,
+    includeRecoverableSending: input.includeRecoverableSending === true,
+    now: input.now ?? new Date(),
+  });
   const alerts = await prisma.hostedLinqAlert.findMany({
-    where: {
-      id: { in: [...input.alertIds] },
-      status: { in: ["pending", "failed"] },
-    },
+    where: claimableWhere,
     orderBy: {
       claimedAt: "asc",
     },
+    take: input.includeRecoverableSending === true ? 50 : undefined,
   });
 
   for (const alert of alerts) {
@@ -74,7 +99,7 @@ async function sendHostedLinqAlertEmail(input: {
   const claim = await input.prisma.hostedLinqAlert.updateMany({
     where: {
       id: input.alert.id,
-      status: { in: ["pending", "failed"] },
+      OR: buildHostedLinqAlertClaimableStatusWhere(new Date()),
     },
     data: {
       attemptCount: { increment: 1 },
@@ -119,6 +144,39 @@ async function sendHostedLinqAlertEmail(input: {
       },
     });
   }
+}
+
+function buildHostedLinqAlertClaimableWhere(input: {
+  alertIds: readonly string[];
+  includeRecoverableSending: boolean;
+  now: Date;
+}) {
+  return {
+    ...(input.alertIds.length > 0 ? { id: { in: [...input.alertIds] } } : {}),
+    OR: buildHostedLinqAlertClaimableStatusWhere(
+      input.includeRecoverableSending ? input.now : null,
+    ),
+  };
+}
+
+function buildHostedLinqAlertClaimableStatusWhere(now: Date | null) {
+  return [
+    { status: { in: ["pending", "failed"] } },
+    ...(now
+      ? [
+          {
+            lastAttemptedAt: {
+              lt: new Date(now.getTime() - HOSTED_LINQ_ALERT_EMAIL_SENDING_LEASE_MS),
+            },
+            status: "sending",
+          },
+          {
+            lastAttemptedAt: null,
+            status: "sending",
+          },
+        ]
+      : []),
+  ];
 }
 
 type HostedLinqAlertEmailConfig = {

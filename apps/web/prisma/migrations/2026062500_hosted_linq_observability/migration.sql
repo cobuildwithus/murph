@@ -14,6 +14,8 @@ CREATE TABLE "hosted_linq_line" (
   "last_outbound_at" TIMESTAMP(3),
   "last_delivered_at" TIMESTAMP(3),
   "last_failed_at" TIMESTAMP(3),
+  "last_receipt_at" TIMESTAMP(3),
+  "last_receipt_event_id" TEXT,
   "last_failure_code" TEXT,
   "last_failure_reason" TEXT,
   "last_inbound_at" TIMESTAMP(3),
@@ -38,6 +40,7 @@ CREATE UNIQUE INDEX "hosted_linq_line_phone_number_key" ON "hosted_linq_line"("p
 CREATE INDEX "hosted_linq_line_health_status_egress_policy_idx" ON "hosted_linq_line"("health_status", "egress_policy");
 CREATE INDEX "hosted_linq_line_provider_status_idx" ON "hosted_linq_line"("provider_status");
 CREATE INDEX "hosted_linq_line_last_failed_at_idx" ON "hosted_linq_line"("last_failed_at");
+CREATE INDEX "hosted_linq_line_last_receipt_at_idx" ON "hosted_linq_line"("last_receipt_at");
 
 CREATE TABLE "hosted_linq_provider_event" (
   "event_id" TEXT NOT NULL,
@@ -93,10 +96,12 @@ CREATE TABLE "hosted_linq_delivery" (
   "accepted_at" TIMESTAMP(3),
   "delivered_at" TIMESTAMP(3),
   "failed_at" TIMESTAMP(3),
+  "skipped_at" TIMESTAMP(3),
   "last_receipt_at" TIMESTAMP(3),
   "last_provider_event_id" TEXT,
   "failure_code" TEXT,
   "failure_reason" TEXT,
+  "skip_reason" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "hosted_linq_delivery_pkey" PRIMARY KEY ("id")

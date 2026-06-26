@@ -218,19 +218,6 @@ export async function updateHostedLinqContactCard(input: {
   return requireHostedLinqContactCard(payload, "update");
 }
 
-export async function shareHostedLinqContactCard(input: {
-  chatId: string;
-  signal?: AbortSignal;
-}): Promise<void> {
-  await fetchHostedLinqNoContent({
-    method: "POST",
-    operation: "contact card share",
-    path: `chats/${encodeURIComponent(requireNonEmptyText(input.chatId, "chat id"))}/share_contact_card`,
-    signal: input.signal,
-    timeoutMessage: "Linq contact card share timed out.",
-  });
-}
-
 type HostedLinqContactCardOutcome =
   | "activeCards"
   | "createdCards"
@@ -367,16 +354,6 @@ async function fetchHostedLinqJson<T>(input: {
   }
 
   return JSON.parse(text) as T;
-}
-
-async function fetchHostedLinqNoContent(input: {
-  method: "POST";
-  operation: string;
-  path: string;
-  signal?: AbortSignal;
-  timeoutMessage: string;
-}): Promise<void> {
-  await fetchHostedLinqResponse(input);
 }
 
 async function fetchHostedLinqResponse(input: {

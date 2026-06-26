@@ -151,13 +151,21 @@ async function projectMessageDelivered(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Promise<boolean> {
+  await prisma.hostedLinqLine.update({
+    where: { phoneNumberLookupKey },
+    data: {
+      totalDeliveredCount: { increment: 1 },
+    },
+  });
+
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event.providerCreatedAt),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
     data: {
       consecutiveFailures: 0,
       healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
-      totalDeliveredCount: { increment: 1 },
+      lastReceiptAt: event.providerCreatedAt,
+      lastReceiptEventId: event.eventId,
     },
   });
   return updated.count === 1;
@@ -168,15 +176,23 @@ async function projectMessageFailed(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Promise<boolean> {
+  await prisma.hostedLinqLine.update({
+    where: { phoneNumberLookupKey },
+    data: {
+      totalFailedCount: { increment: 1 },
+    },
+  });
+
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event.providerCreatedAt),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
     data: {
       consecutiveFailures: { increment: 1 },
       healthStatus: "warning",
       lastFailedAt: event.providerCreatedAt,
       lastFailureCode: event.failureCode,
       lastFailureReason: event.failureReason,
-      totalFailedCount: { increment: 1 },
+      lastReceiptAt: event.providerCreatedAt,
+      lastReceiptEventId: event.eventId,
     },
   });
   return updated.count === 1;
@@ -227,26 +243,28 @@ async function projectPhoneNumberStatusUpdated(
 
 function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
-  providerCreatedAt: Date,
+  event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
   return {
     phoneNumberLookupKey,
     OR: [
       {
-        lastDeliveredAt: null,
-        lastFailedAt: null,
+        lastReceiptAt: null,
       },
       {
-        lastDeliveredAt: null,
-        lastFailedAt: { lt: providerCreatedAt },
+        lastReceiptAt: {
+          lt: event.providerCreatedAt,
+        },
       },
       {
-        lastDeliveredAt: { lt: providerCreatedAt },
-        lastFailedAt: null,
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: null,
       },
       {
-        lastDeliveredAt: { lt: providerCreatedAt },
-        lastFailedAt: { lt: providerCreatedAt },
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: {
+          lt: event.eventId,
+        },
       },
     ],
   };

@@ -190,6 +190,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       await drainHostedLinqSideEffectsDirect({
         currentInboundReply,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });

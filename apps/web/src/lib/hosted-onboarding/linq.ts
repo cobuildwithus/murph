@@ -29,7 +29,6 @@ export {
   listHostedLinqPhoneNumbers,
   reconcileHostedLinqContactCards,
   setupHostedLinqContactCard,
-  shareHostedLinqContactCard,
   updateHostedLinqContactCard,
 } from "./linq-contact-card";
 export type {
